@@ -1,0 +1,106 @@
+name: バグ報告
+description: u18 Identityの不具合を報告する
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ご報告ありがとうございます。
+
+        > [!WARNING]
+        > 認証バイパス、トークン漏洩、権限昇格など**セキュリティ上の脆弱性**は、`security` ラベルを付けて報告してください。
+        > 本リポジトリは現在privateですが、将来の公開に備えて動作する攻撃コードや実データは貼らないでください。
+
+        また、報告にSecret、アクセストークン、ID Token、OTPコード、Cookieの値、他ユーザーのメールアドレス等を含めないでください。
+        ログを貼る場合は必ずマスクしてください。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が起きたかを簡潔に記述してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 再現できる最小の手順を記述してください。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する挙動
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の挙動
+      description: エラーメッセージやスタックトレースがあれば（マスクした上で）貼ってください。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: 対象コンポーネント
+      options:
+        - apps/auth-worker
+        - apps/dashboard-worker
+        - packages/contracts
+        - packages/domain
+        - packages/db
+        - packages/config
+        - packages/testing
+        - CI / デプロイ
+        - ドキュメント
+        - 不明 / その他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 機能領域
+      options:
+        - OIDC / OAuth（authorize, token, discovery, JWKS, UserInfo）
+        - 認証（Passkey / Email OTP）
+        - セッション・Cookie
+        - RPC / Service Bindings
+        - データベース（D1 / Drizzle）
+        - ダッシュボードUI
+        - その他
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 環境
+      description: ローカル（wrangler dev）/ プレビュー / 本番、OS、ブラウザ、Node/pnpmのバージョンなど。
+      placeholder: "例: wrangler dev (local), macOS 15, Chrome 141, Node 22.x, pnpm 12.15.0"
+    validations:
+      required: true
+
+  - type: input
+    id: spec
+    attributes:
+      label: 仕様書の該当セクション
+      description: docs/u18-identity-spec.md の該当箇所があれば記入してください。
+      placeholder: "例: 5.3 Token / Session"
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足
+      description: 回避策、関連Issue、スクリーンショットなど。

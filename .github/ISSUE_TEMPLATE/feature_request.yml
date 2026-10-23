@@ -1,0 +1,101 @@
+name: 機能要望・改善提案
+description: 新機能や改善を提案する
+title: "[feat] "
+labels: ["needs-decision"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提案ありがとうございます。
+        まず `docs/u18-identity-spec.md` の「1.2 非目標（MVP）」と「14. 未決定事項」を確認してください。
+        すでに非目標とされている項目の場合は、その前提を変更すべき理由を書いてください。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい課題
+      description: 何に困っているか、なぜ必要かを記述してください。解決策ではなく課題を書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する解決策
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 検討した代替案
+      description: 他の選択肢と、それを採用しない理由。
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: 想定する実装フェーズ
+      description: 仕様書「12. 実装フェーズ」を参照してください。
+      options:
+        - Phase 1 — Monorepo / Identity Core
+        - Phase 2 — OIDC Provider / RPC
+        - Phase 3 — Hardening / Public Launch
+        - Phase 4 — NFC
+        - 未定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: 影響するコンポーネント
+      multiple: true
+      options:
+        - apps/auth-worker
+        - apps/dashboard-worker
+        - packages/contracts
+        - packages/domain
+        - packages/db
+        - packages/config
+        - packages/testing
+        - CI / デプロイ
+        - ドキュメント
+    validations:
+      required: true
+
+  - type: input
+    id: spec
+    attributes:
+      label: 仕様書の該当セクション
+      description: 仕様書の変更が必要な場合は、その箇所も記入してください。
+      placeholder: "例: 6.1 初期方式 / 新規セクションが必要"
+
+  - type: textarea
+    id: security
+    attributes:
+      label: セキュリティ・プライバシーへの影響
+      description: |
+        u18 Identityは未成年ユーザーの認証を扱います。
+        認証・セッション・トークン・暗号処理への影響、収集する個人情報の増減、新たな攻撃面があれば記述してください。
+        影響がないと考える場合はその理由を書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 何ができれば完了と言えるかを箇条書きで。
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 確認
+      options:
+        - label: 既存のIssueに同じ提案がないか検索した
+          required: true
+        - label: 仕様書の非目標（1.2）と未決定事項（14）を確認した
+          required: true

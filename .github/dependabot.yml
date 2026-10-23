@@ -1,0 +1,72 @@
+# Dependabot設定 — u18 Identity
+# pnpm workspaceのため、npmエコシステムはルート（"/"）の1エントリで
+# 全workspaceパッケージを対象にできる。apps/*やpackages/*を個別に列挙しない。
+version: 2
+
+updates:
+  # --- npm (pnpm workspace) ---
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    versioning-strategy: "increase"
+    labels:
+      - "infra"
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+      include: "scope"
+    groups:
+      # minor/patchはまとめてPRノイズを減らす
+      production-minor-patch:
+        applies-to: version-updates
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      development-minor-patch:
+        applies-to: version-updates
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      # セキュリティ更新は種類を問わずまとめて優先処理する
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+    ignore:
+      # typescript 5.9.3 固定。typescript-eslint 8.x が <6.1.0 を要求するため
+      # majorバンプ（6.x）のPRは作らせない。
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
+      # vitest 4.1.12 固定。@cloudflare/vitest-pool-workers 0.23.0 が
+      # peer で ^4.1.0 を要求するため majorバンプは不可。
+      - dependency-name: "vitest"
+        update-types:
+          - "version-update:semver-major"
+
+  # --- GitHub Actions ---
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci-cd"
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
