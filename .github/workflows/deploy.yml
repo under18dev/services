@@ -74,9 +74,13 @@ jobs:
       - name: Verify migrations are committed
         run: |
           pnpm db:generate
-          if ! git diff --quiet -- packages/db/drizzle; then
+          # 差分が無ければ drizzle-kit は何も書かない（"No schema changes"）。
+          # 新規マイグレーションは追跡外ファイルとして現れるので、git diff では
+          # 検出できない。untracked も見る git status を使う。
+          drift="$(git status --porcelain -- packages/db/drizzle)"
+          if [ -n "$drift" ]; then
             echo "::error::Drizzle schema and committed migrations are out of sync. Run 'pnpm db:generate' and commit packages/db/drizzle."
-            git --no-pager diff --stat -- packages/db/drizzle
+            echo "$drift"
             exit 1
           fi
 
