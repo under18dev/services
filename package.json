@@ -23,7 +23,7 @@
     "db:migrate:remote": "pnpm --filter @u18/auth-worker migrate:remote"
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.5",
     "eslint": "10.13.0",
     "prettier": "3.9.10",
     "typescript": "5.9.3",
