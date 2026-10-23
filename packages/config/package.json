@@ -1,0 +1,12 @@
+{
+  "name": "@u18/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint.layers": "./eslint.layers.js",
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.worker.json": "./tsconfig.worker.json",
+    "./tsconfig.lib.json": "./tsconfig.lib.json"
+  }
+}

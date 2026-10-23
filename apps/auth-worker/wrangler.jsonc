@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "u18-auth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Identity D1 の所有者は auth-worker だけ（仕様書 2.2）。
+  // 他の Worker にこの binding を付けないこと。
+  "d1_databases": [
+    {
+      "binding": "IDENTITY_DB",
+      "database_name": "u18-identity",
+      // `wrangler d1 create u18-identity` の出力で置き換える。
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "../../packages/db/drizzle"
+    }
+  ],
+
+  "vars": {
+    // 本番 Issuer は未決定（仕様書 14-1）。ローカル既定値として wrangler dev の URL を使う。
+    "ISSUER": "http://localhost:8787",
+    "RP_ID": "localhost",
+    "RP_NAME": "u18 Identity",
+    "WEBAUTHN_ORIGIN": "http://localhost:8787",
+    "ENVIRONMENT": "development"
+  }
+
+  // Secrets（`wrangler secret put` で設定。wrangler.jsonc には書かない）:
+  //   SIGNING_KEY_JWK   ID Token 署名用の秘密鍵 (JWK JSON)
+  //   SIGNING_KEY_KID   上記鍵の kid
+  //   IP_HASH_PEPPER    IP アドレスのハッシュ化に使う pepper
+  //   EMAIL_API_KEY     メール送信プロバイダのキー（仕様書 14-3 で選定）
+}

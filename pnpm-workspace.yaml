@@ -1,0 +1,11 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# ネイティブバイナリの取得に postinstall が要るパッケージだけビルドを許可する。
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-types@5.20261023.1"

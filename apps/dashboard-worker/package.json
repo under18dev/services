@@ -1,0 +1,24 @@
+{
+  "name": "@u18/dashboard-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@u18/contracts": "workspace:*",
+    "hono": "4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.23.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.152.0"
+  }
+}

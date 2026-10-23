@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "u18-dashboard",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // auth-worker の IdentityRPC だけを束縛する。
+  // D1 の binding は意図的に持たない —— 認証 DB の書き込み権限は
+  // auth-worker に集約する（仕様書 2.2）。
+  "services": [
+    {
+      "binding": "IDENTITY",
+      "service": "u18-auth",
+      "entrypoint": "IdentityRPC"
+    }
+  ],
+
+  "vars": {
+    "AUTH_ISSUER": "http://localhost:8787",
+    "ENVIRONMENT": "development"
+  }
+}

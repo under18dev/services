@@ -1,0 +1,19 @@
+{
+  "name": "@u18/testing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "echo \"no tests in @u18/testing\""
+  },
+  "dependencies": {
+    "@u18/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
