@@ -1,0 +1,44 @@
+# CODEOWNERS — u18 Identity
+#
+# 最後にマッチしたルールが優先される。下にあるほど強い。
+# 詳細: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# 既定のオーナー（上記で明示されていない全ファイル）
+*                                   @tanahiro2010
+
+# --- ドキュメント・仕様 ---
+# 仕様書の変更はアーキテクチャ上の合意が必要
+/docs/                              @tanahiro2010
+/docs/u18-identity-spec.md          @tanahiro2010
+
+# --- セキュリティ上重要なコード ---
+# 認証・認可の中核。Layered Architectureの依存方向と不変条件を守る必要がある
+/apps/auth-worker/src/domain/       @tanahiro2010
+/apps/auth-worker/src/application/  @tanahiro2010
+
+# OIDC / Passkey / OTP のエンドポイントとRPC Entrypoint
+/apps/auth-worker/src/presentation/ @tanahiro2010
+
+# 認証DBのスキーマ。マイグレーションは不可逆になりうる
+/packages/db/src/schema/            @tanahiro2010
+/packages/db/migrations/            @tanahiro2010
+
+# Worker間のRPC契約。破壊的変更は両Workerに波及する
+/packages/contracts/                @tanahiro2010
+
+# --- CI / デプロイ / リポジトリ設定 ---
+# Secretsとデプロイ権限に触れるため、変更には必ずレビューを要する
+/.github/                           @tanahiro2010
+/.github/workflows/                 @tanahiro2010
+/.github/CODEOWNERS                 @tanahiro2010
+
+# Worker設定（Bindings、Secrets、ルート）
+/apps/**/wrangler.jsonc             @tanahiro2010
+/apps/**/wrangler.toml              @tanahiro2010
+
+# --- 依存関係・ビルド設定 ---
+/package.json                       @tanahiro2010
+/pnpm-lock.yaml                     @tanahiro2010
+/pnpm-workspace.yaml                @tanahiro2010
+/tsconfig.base.json                 @tanahiro2010
+/eslint.config.js                   @tanahiro2010

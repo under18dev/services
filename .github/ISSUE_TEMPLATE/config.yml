@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: セキュリティ脆弱性の報告
+    url: https://github.com/under18dev/services/issues/new?labels=security&title=%5Bsecurity%5D+
+    about: 認証バイパス・トークン漏洩・権限昇格などは security ラベル付きで報告してください（本リポジトリはprivateです）。実トークンやSecretの値は貼らないでください。
+  - name: 仕様書を読む
+    url: https://github.com/under18dev/services/blob/main/docs/u18-identity-spec.md
+    about: アーキテクチャ、OIDC仕様、セキュリティ要求、実装フェーズはこちらに記載されています。
+  - name: 未決定事項の一覧
+    url: https://github.com/under18dev/services/issues?q=is%3Aissue+label%3Aneeds-decision
+    about: 仕様書「14. 未決定事項」に関する議論中のIssue。提案前に重複がないか確認してください。
