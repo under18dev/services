@@ -1,0 +1,28 @@
+name: Setup workspace
+description: pnpm と Node を用意し、lockfile 固定でワークスペースの依存を install する。
+
+inputs:
+  node-version:
+    description: 使用する Node のバージョン（package.json の engines は >=22）。
+    required: false
+    default: "22"
+
+runs:
+  using: composite
+  steps:
+    # pnpm のバージョンは package.json の packageManager フィールド
+    # （pnpm@12.15.0）から読ませる。ここで二重に固定しない。
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+
+    - name: Install Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    # pnpm-workspace.yaml の allowBuilds で esbuild / workerd の postinstall を
+    # 許可している。これが無いと ERR_PNPM_IGNORED_BUILDS で install が落ちる。
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

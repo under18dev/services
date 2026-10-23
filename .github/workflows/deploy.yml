@@ -1,0 +1,121 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/deploy.yml"
+      - ".github/actions/setup-workspace/action.yml"
+  workflow_dispatch:
+    inputs:
+      skip_migrations:
+        description: D1 マイグレーションの適用を飛ばす
+        type: boolean
+        default: false
+
+# デプロイは同時に走らせない。RPC 契約の変更時にデプロイ順が崩れると
+# dashboard-worker が存在しない entrypoint を呼ぶ（仕様書 4.4）。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Cloudflare 側の準備が終わるまで、main への push のたびに赤くするのではなく
+  # 理由を示して停止する。
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        name: Check deploy prerequisites
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          ready=true
+
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set. Skipping deploy."
+            ready=false
+          fi
+
+          # D1 を払い出す前にデプロイしても、別名の DB が作られるか失敗するだけ。
+          if grep -q "REPLACE_WITH_D1_DATABASE_ID" apps/auth-worker/wrangler.jsonc; then
+            echo "::warning::apps/auth-worker/wrangler.jsonc still holds the placeholder database_id. Run 'wrangler d1 create u18-identity' and commit the real id. Skipping deploy."
+            ready=false
+          fi
+
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+  migrate:
+    name: Apply D1 migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true' && !inputs.skip_migrations
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+
+      # スキーマから生成した SQL がコミットされているかを確かめる。
+      # 生成漏れのまま本番に当てると、コードと DB が食い違う。
+      - name: Verify migrations are committed
+        run: |
+          pnpm db:generate
+          if ! git diff --quiet -- packages/db/drizzle; then
+            echo "::error::Drizzle schema and committed migrations are out of sync. Run 'pnpm db:generate' and commit packages/db/drizzle."
+            git --no-pager diff --stat -- packages/db/drizzle
+            exit 1
+          fi
+
+      - name: wrangler d1 migrations apply
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm db:migrate:remote
+
+  # auth-worker が先。dashboard-worker は IdentityRPC entrypoint に依存するため、
+  # 新しい RPC メソッドを使う dashboard を先に出すと参照先が無い（仕様書 4.4）。
+  deploy-auth-worker:
+    name: Deploy auth-worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [preflight, migrate]
+    if: always() && needs.preflight.outputs.ready == 'true' && needs.migrate.result != 'failure' && needs.migrate.result != 'cancelled'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+      - name: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @u18/auth-worker deploy
+
+  deploy-dashboard-worker:
+    name: Deploy dashboard-worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [preflight, deploy-auth-worker]
+    if: needs.preflight.outputs.ready == 'true' && needs.deploy-auth-worker.result == 'success'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+      - name: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm --filter @u18/dashboard-worker deploy
