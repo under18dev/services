@@ -155,3 +155,105 @@ describe("SimpleWebAuthnService: 認証の検証", () => {
     expect(result.verified).toBe(false);
   });
 });
+
+/**
+ * 本番構成（#33）では RP ID が issuer のホストより広い。
+ *
+ * `RP_ID` は `under18.dev`（ゾーン）で、`WEBAUTHN_ORIGIN` は
+ * `https://auth.under18.dev`（ホスト）。RP ID を広く取ったのは、Credential に
+ * 焼き付く RP ID を後から変えられない以上、IdP のホスト名を動かす余地を
+ * 残すためだった。
+ *
+ * **その代償をここで払っている。** RP ID がゾーンなので、`*.under18.dev` の
+ * どのページでも `rpId=under18.dev` で assertion を取得できてしまう。
+ * RP ID の検査はそれを通す —— 通すのが正しい。止めているのは origin の
+ * 厳密一致だけで、つまり **origin 検証はこの構成では「念のため」ではなく、
+ * apex RP ID を安全にしている唯一の仕組み**である。
+ *
+ * 以下のテストはその 1 点を固定するために置いている。無関係なドメイン
+ * （evil.example）が落ちることは上の describe が既に確かめているが、
+ * それでは「兄弟サブドメインも落ちる」ことの証明にならない。RP ID が
+ * 一致したうえで origin だけが違う、という状況を作る必要がある。
+ *
+ * ここが落ちるようになったら、`expectedOrigin` が配列化されたか
+ * `endsWith` などの部分一致に緩められた可能性が高い。直す対象はこの
+ * テストではなく、緩めた側である。
+ */
+describe("本番構成: apex RP ID を origin 検証が支えている (#33)", () => {
+  const PROD_RP_ID = "under18.dev";
+  const PROD_ORIGIN = "https://auth.under18.dev";
+  /** RP ID の配下だが、IdP ではないホスト。 */
+  const SIBLING_ORIGIN = "https://evil.under18.dev";
+
+  const prodService = new SimpleWebAuthnService({
+    rpId: PROD_RP_ID,
+    rpName: RP_NAME,
+    origin: PROD_ORIGIN,
+  });
+
+  it("兄弟サブドメインで取得した登録を拒否する", async () => {
+    const response = await authenticator.attest({
+      challenge: CHALLENGE,
+      // RP ID はゾーンのまま。認証器から見れば完全に正当な値で、
+      // rpIdHash の検査は通過する。
+      rpId: PROD_RP_ID,
+      origin: SIBLING_ORIGIN,
+    });
+
+    const result = await prodService.verifyRegistration({
+      response: response as WebAuthnResponseJson,
+      expectedChallenge: CHALLENGE,
+    });
+
+    expect(result.verified).toBe(false);
+  });
+
+  it("兄弟サブドメインで取得した認証を拒否する", async () => {
+    const registration = await prodService.verifyRegistration({
+      response: (await authenticator.attest({
+        challenge: CHALLENGE,
+        rpId: PROD_RP_ID,
+        origin: PROD_ORIGIN,
+      })) as WebAuthnResponseJson,
+      expectedChallenge: CHALLENGE,
+    });
+    if (!registration.verified) throw new Error("registration fixture failed");
+
+    const response = await authenticator.assert({
+      challenge: CHALLENGE,
+      rpId: PROD_RP_ID,
+      origin: SIBLING_ORIGIN,
+      counter: 1,
+    });
+
+    const result = await prodService.verifyAuthentication({
+      response: response as WebAuthnResponseJson,
+      expectedChallenge: CHALLENGE,
+      credential: {
+        credentialId: registration.value.credentialId,
+        publicKey: registration.value.publicKey,
+        counter: registration.value.counter,
+        transports: registration.value.transports,
+      },
+    });
+
+    expect(result.verified).toBe(false);
+  });
+
+  it("正規の issuer ホストからなら通る（上の 2 件が origin 以外の理由で落ちていないこと）", async () => {
+    // 対照群。これが落ちていると、上の 2 件は「origin を見ているから」
+    // ではなく別の理由で失敗していることになり、テストの意味が消える。
+    const response = await authenticator.attest({
+      challenge: CHALLENGE,
+      rpId: PROD_RP_ID,
+      origin: PROD_ORIGIN,
+    });
+
+    const result = await prodService.verifyRegistration({
+      response: response as WebAuthnResponseJson,
+      expectedChallenge: CHALLENGE,
+    });
+
+    expect(result.verified).toBe(true);
+  });
+});
