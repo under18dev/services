@@ -1,8 +1,9 @@
-import { type IdentityDatabase, oauthGrants } from "@u18/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { type IdentityDatabase, oauthClients, oauthGrants } from "@u18/db";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type {
   OAuthGrantRepository,
   RecordOAuthGrantInput,
+  UserGrantSummary,
 } from "../../application/ports/oauth-grant.repository";
 import { OAuthGrant } from "../../domain/entities/oauth-grant";
 import { formatScope, parseScope } from "../../domain/services/scope";
@@ -31,6 +32,39 @@ export class DrizzleOAuthGrantRepository implements OAuthGrantRepository {
       .where(and(eq(oauthGrants.userId, userId), eq(oauthGrants.clientId, clientId)))
       .get();
     return row === undefined ? null : toDomain(row);
+  }
+
+  /**
+   * ユーザーの同意を、相手クライアントの表示情報ごと引く（#18）。
+   *
+   * `innerJoin` にしているのは、`oauth_grants.client_id` が
+   * `ON DELETE CASCADE` の外部キーだから。クライアントが消えれば同意の行も
+   * 消えるので、「クライアントの無い同意」は原理的に存在しない。
+   * `leftJoin` にして NULL を扱う分岐を書くと、起こらない状態への
+   * 対処コードが残り、読む側に「起こりうる」と誤解させる。
+   *
+   * 失効済みクライアント（`disabled_at`）の同意も返す。利用者から見れば
+   * 「許可した覚えのあるアプリ」であることに変わりはなく、一覧から消すと
+   * 取り消す手段ごと消える。
+   */
+  async listByUser(userId: string): Promise<readonly UserGrantSummary[]> {
+    const rows = await this.db
+      .select({ grant: oauthGrants, client: oauthClients })
+      .from(oauthGrants)
+      .innerJoin(oauthClients, eq(oauthGrants.clientId, oauthClients.id))
+      .where(eq(oauthGrants.userId, userId))
+      // 新しく同意したものから並べる。UI 側で並べ替えると、取り消し直後の
+      // 再描画で順序が揺れる。
+      .orderBy(desc(oauthGrants.grantedAt))
+      .all();
+
+    return rows.map(({ grant, client }) => ({
+      grant: toDomain(grant),
+      // 外へ出すのは公開 client_id。内部 ID（`cli_...`）は漏らさない。
+      clientId: client.clientId,
+      clientName: client.name,
+      logoUrl: client.logoUrl,
+    }));
   }
 
   /**

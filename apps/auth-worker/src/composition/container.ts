@@ -37,6 +37,7 @@ import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-
 import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { StartEmailOtpUseCase } from "../application/use-cases/start-email-otp.use-case";
 import { VerifyEmailOtpUseCase } from "../application/use-cases/verify-email-otp.use-case";
+import { ListGrantsUseCase } from "../application/use-cases/list-grants.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -46,6 +47,7 @@ import { PasskeyRegisterVerifyUseCase } from "../application/use-cases/passkey-r
 import { PurgeExpiredRecordsUseCase } from "../application/use-cases/purge-expired-records.use-case";
 import { ResolveOAuthClientUseCase } from "../application/use-cases/resolve-oauth-client.use-case";
 import { RevokeAccessTokenUseCase } from "../application/use-cases/revoke-access-token.use-case";
+import { RevokeGrantUseCase } from "../application/use-cases/revoke-grant.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import { UpdateProfileUseCase } from "../application/use-cases/update-profile.use-case";
 import { JoseIdTokenIssuer } from "../infrastructure/crypto/jose-id-token-signer";
@@ -138,6 +140,8 @@ export type Container = {
     readonly exchangeAuthorizationCode: ExchangeAuthorizationCodeUseCase;
     readonly getUserInfo: GetUserInfoUseCase;
     readonly revokeAccessToken: RevokeAccessTokenUseCase;
+    readonly listGrants: ListGrantsUseCase;
+    readonly revokeGrant: RevokeGrantUseCase;
   };
 };
 
@@ -376,6 +380,17 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       revokeAccessToken: new RevokeAccessTokenUseCase({
         tokens: oauthTokens,
         hasher,
+        clock,
+        audit,
+      }),
+      // #18: 同意管理。dashboard-worker から RPC 越しに呼ばれる。
+      listGrants: new ListGrantsUseCase({ getSession, grants: oauthGrants }),
+      revokeGrant: new RevokeGrantUseCase({
+        getSession,
+        clients: oauthClients,
+        grants: oauthGrants,
+        tokens: oauthTokens,
+        codes: authorizationCodes,
         clock,
         audit,
       }),

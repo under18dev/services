@@ -12,6 +12,24 @@ export interface RecordOAuthGrantInput {
 }
 
 /**
+ * 同意と、その相手のクライアント表示情報。
+ *
+ * ダッシュボードの「許可したアプリ」一覧（#18）は、同意だけでは描けない。
+ * 名前もロゴも `oauth_clients` 側にあり、`oauth_grants.client_id` が持つのは
+ * 内部 ID だけだからである。**1 回のクエリで JOIN して返す**のは、
+ * 同意を引いてからクライアントを N 回引く形にすると、その間にクライアントが
+ * 無効化された状態を跨いで一覧を組み立てる余地ができるため。
+ *
+ * `clientId` は公開 `client_id`。内部 ID は外へ出さない。
+ */
+export type UserGrantSummary = {
+  readonly grant: OAuthGrant;
+  readonly clientId: string;
+  readonly clientName: string;
+  readonly logoUrl: string | null;
+};
+
+/**
  * ユーザーの同意の永続化 Port（仕様書 1.1 / 7.1）。
  */
 export interface OAuthGrantRepository {
@@ -22,6 +40,17 @@ export interface OAuthGrantRepository {
    * 事実を返し「使ってよいか」は Domain（`OAuthGrant.covers`）が決める。
    */
   find(userId: string, clientId: string): Promise<OAuthGrant | null>;
+
+  /**
+   * ユーザーの同意をすべて引く（#18 の `listGrants`）。
+   *
+   * **取り消し済みも返す。** `find` と同じく Repository は行の事実を返し、
+   * 「一覧に出すか」は `OAuthGrant.isRevoked` を見て Application が決める。
+   * ここで `revoked_at IS NULL` を WHERE に埋めると、取り消し済みの同意を
+   * 履歴として見せたくなったときに Repository から書き換えることになり、
+   * 「誰がその判断をしているか」が SQL の中に隠れる。
+   */
+  listByUser(userId: string): Promise<readonly UserGrantSummary[]>;
 
   /**
    * 同意を記録する。既にあれば scope を広げ、取り消し済みなら復活させる。

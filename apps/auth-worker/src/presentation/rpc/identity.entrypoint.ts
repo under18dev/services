@@ -1,7 +1,9 @@
 import {
   getSessionInputSchema,
   getUserProfileInputSchema,
+  listGrantsInputSchema,
   listSessionsInputSchema,
+  revokeGrantInputSchema,
   revokeSessionInputSchema,
   rpcErr,
   rpcOk,
@@ -10,8 +12,13 @@ import {
   type GetUserProfileInput,
   type GetUserProfileResult,
   type IdentityRpcContract,
+  type ListGrantsInput,
+  type ListGrantsResult,
   type ListSessionsInput,
   type ListSessionsResult,
+  type PingResult,
+  type RevokeGrantInput,
+  type RevokeGrantResult,
   type RevokeSessionInput,
   type RevokeSessionResult,
 } from "@u18/contracts";
@@ -111,5 +118,86 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       return rpcErr(code, result.error.message);
     }
     return rpcOk({ revoked: result.value.revoked, self: result.value.self });
+  }
+
+  /**
+   * 同意済みアプリの一覧（#18）。
+   *
+   * `listSessions` と同じ形。`userId` は受け取らず、セッションから導く。
+   * 返すのは公開 `client_id` だけで、`oauth_clients.id`（内部 ID）は
+   * `UserGrantSummary` の時点で既に落としてある。
+   */
+  async listGrants(input: ListGrantsInput): Promise<ListGrantsResult> {
+    const parsed = listGrantsInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "sessionToken is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.listGrants.execute({
+      sessionToken: parsed.data.sessionToken,
+    });
+    if (!result.ok) return rpcErr("internal", "failed to list grants");
+    if (result.value === null) return rpcErr("unauthenticated", "session is not valid");
+
+    return rpcOk(
+      result.value.map(({ grant, clientId, clientName, logoUrl }) => ({
+        clientId,
+        clientName,
+        logoUrl,
+        // Domain は `readonly string[]` を返す。DTO は構造化クローンで
+        // 運ばれるので、ここで配列として素直に渡せばよい。
+        scopes: [...grant.scopes],
+        grantedAt: grant.grantedAt.toISOString(),
+      })),
+    );
+  }
+
+  /**
+   * 同意を取り消す（#18）。
+   *
+   * **冪等ではない**。`RpcIdentityGateway` が自動リトライしないことに
+   * 依存している（docs/architecture.md §5.3）。とはいえ 2 度呼ばれても
+   * 壊れはしない——UseCase は取り消し済みの同意に対して
+   * `revoked: false` を返し、残っているトークンがあれば掃除する。
+   */
+  async revokeGrant(input: RevokeGrantInput): Promise<RevokeGrantResult> {
+    const parsed = revokeGrantInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.revokeGrant.execute({
+      sessionToken: parsed.data.sessionToken,
+      clientId: parsed.data.clientId,
+    });
+    if (!result.ok) {
+      // `revokeSession` と同じ翻訳。「同意していないクライアント」と
+      // 「存在しないクライアント」は UseCase 側で既に同一視されている。
+      const code = result.error.code === "unauthenticated" ? "unauthenticated" : "not_found";
+      return rpcErr(code, result.error.message);
+    }
+    return rpcOk({
+      revoked: result.value.revoked,
+      revokedTokenCount: result.value.revokedTokenCount,
+    });
+  }
+  /**
+   * 副作用の無い死活確認（#44）。
+   *
+   * **このメソッドだけは認証を要求しない。** dashboard-worker の `/health` は
+   * 認証されていない要求から呼ばれるためで、その代わりに返すのは
+   * 「自分が D1 まで到達できているか」という 1 ビットだけにしてある。
+   * 識別子も件数も載せない——載せた瞬間、認証なしで読める情報が増える。
+   *
+   * `getSession` を health に流用しないのも同じ理由。流用すると、
+   * 適当なトークンを投げて応答を見ることでセッションの実在が測れてしまう。
+   *
+   * 例外は投げない。到達できなければ `degraded` を**値として**返し、
+   * 呼び出し元が「Identity が落ちている」と「Binding が切れている」を
+   * 区別できるようにする（後者は RPC 自体が throw する）。
+   */
+  async ping(): Promise<PingResult> {
+    const container = createContainer(this.env);
+    const reachable = await container.services.databaseProbe.ping();
+
+    return rpcOk({ status: reachable ? "ok" : "degraded", service: "u18-auth" });
   }
 }
