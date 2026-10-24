@@ -479,6 +479,8 @@ Elevation of Privilege）を整理の枠として用いる。各脅威に ID を
 - [ ] RPC DTO（`packages/contracts/src/identity.ts`）にブラウザへ出してはならない項目が追加されていないことを、契約の差分レビューで確認した。dashboard-worker は DTO をそのまま中継するため、契約の広さがそのまま露出範囲になる（RR-13 / §4.3）
 - [ ] 状態変更系エンドポイントの `Origin` 検証がフェイルクローズドのままであることを `apps/auth-worker/test/security.test.ts` で確認した。本番 `ISSUER` と実際に配信される Origin が完全一致していることを実機で確認した（RR-14 / RR-7）
 - [ ] `tests/security/` にレート制限・列挙耐性・CSRF の回帰テストが置かれ、CI で実行されている
+- [ ] **リポジトリ変数 `PRODUCTION_URL` と `NFC_SHORT_URL` が設定されている**（Settings → Secrets and variables → Actions → Variables）。`deploy.yml` のスモークテストはこの 2 つを読み、**未設定だと warning を出して skip する**。デプロイは成功したように見えるので、設定し忘れると「デプロイ後に実際に叩いて確かめる」検査だけが静かに消える。3 つの Worker すべてが対象（`.github/workflows/README.md`）
+- [ ] **スモークテストが 3 つの Worker すべてで実際に成功した**ことを、本番デプロイのログで確認した。`wrangler deploy` の exit 0 はアップロードの成功しか示さず、起動を拒否する Worker でもデプロイは成功する。特に dashboard-worker と nfc-worker は外から叩けるパスが 1 つずつしか無い（#97 / #106）
 - [ ] `tests/oidc-conformance/` に適合性テストの実行手順と最新の結果が置かれている
 - [ ] 本書の §4.2 に残る RR-11 / RR-15〜RR-18 が、すべて「修正済み」か「受容するリスクとして記録済み」のどちらかになっている（RR-12〜RR-14 は §4.3 で修正済み）
 - [ ] `docs/runbook.md` §8「未決事項と、それが止めている運用判断」の各項目が解消済み、または公開を止めない旨の判断が記録されている
