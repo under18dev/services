@@ -1,6 +1,7 @@
 import type { AuditLogger } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { SessionRepository } from "../ports/session.repository";
+import { settleSideEffects } from "./side-effects";
 import { err, ok, type UseCaseResult } from "./types";
 import type { GetSessionUseCase } from "./get-session.use-case";
 
@@ -25,7 +26,9 @@ export type RevokeSessionDeps = {
 export class RevokeSessionUseCase {
   constructor(private readonly deps: RevokeSessionDeps) {}
 
-  async execute(command: RevokeSessionCommand): Promise<UseCaseResult<{ revoked: boolean }>> {
+  async execute(
+    command: RevokeSessionCommand,
+  ): Promise<UseCaseResult<{ revoked: boolean; self: boolean }>> {
     const auth = await this.deps.getSession.execute({ sessionToken: command.sessionToken });
     if (!auth.ok) return auth;
     if (auth.value === null) return err("unauthenticated", "session is not valid");
@@ -36,22 +39,32 @@ export class RevokeSessionUseCase {
     // 他人のセッションと存在しないセッションを同じ応答にする。
     // 区別して返すと、セッション ID の実在を確かめる手段になる。
     if (target === null || target.userId !== userId) {
-      await this.deps.audit.record({
-        event: "session.revoke",
-        userId,
-        outcome: "failure",
-        reason: "not_found_or_not_owned",
-      });
+      await settleSideEffects(
+        "session.revoke",
+        this.deps.audit.record({
+          event: "session.revoke",
+          userId,
+          outcome: "failure",
+          reason: "not_found_or_not_owned",
+        }),
+      );
       return err("not_found", "session not found");
     }
 
+    // 操作者自身のセッションを消したのかどうか。Presentation 側が
+    // 「Cookie も落とすべきか」を判断するのに要る。
+    const self = target.id === auth.value.session.id;
+
     const revoked = await this.deps.sessions.revoke(target.id, this.deps.clock.now());
-    await this.deps.audit.record({
-      event: "session.revoke",
-      userId,
-      outcome: "success",
-      metadata: { self: target.id === auth.value.session.id },
-    });
-    return ok({ revoked });
+    await settleSideEffects(
+      "session.revoke",
+      this.deps.audit.record({
+        event: "session.revoke",
+        userId,
+        outcome: "success",
+        metadata: { self },
+      }),
+    );
+    return ok({ revoked, self });
   }
 }

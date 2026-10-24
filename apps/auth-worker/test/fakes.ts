@@ -77,20 +77,33 @@ export class InMemoryUserRepository implements UserRepository {
 
 export class InMemorySessionRepository implements SessionRepository {
   private readonly store = new Map<string, SessionProps>();
+  /** sessionId -> tokenHash。本物と同じく、平文トークンは持たない。 */
+  private readonly tokenHashes = new Map<string, string>();
 
-  seed(props: SessionProps): Session {
+  /**
+   * セッションを直接流し込む。
+   *
+   * トークンを明示しない場合は `hash:<sessionId>` を既定とし、
+   * テストから「セッション ID をトークンとして」使えるようにする
+   * （FakeHasher と対になる約束）。`create()` 経由で発行したセッションは
+   * 本物と同じく、渡された tokenHash をそのまま覚える。
+   */
+  seed(props: SessionProps, tokenHash = this.hashOf(props.id)): Session {
     this.store.set(props.id, props);
+    this.tokenHashes.set(props.id, tokenHash);
     return Session.fromPersistence(props);
   }
 
   async findByTokenHash(tokenHash: string): Promise<Session | null> {
-    for (const props of this.store.values()) {
-      if (this.hashOf(props.id) === tokenHash) return Session.fromPersistence(props);
+    for (const [id, hash] of this.tokenHashes) {
+      if (hash !== tokenHash) continue;
+      const props = this.store.get(id);
+      if (props) return Session.fromPersistence(props);
     }
     return null;
   }
 
-  /** シードした ID からテスト用のハッシュを導く。FakeHasher と対になる。 */
+  /** セッション ID からテスト用のハッシュを導く。FakeHasher と対になる。 */
   hashOf(sessionId: string): string {
     return `hash:${sessionId}`;
   }
@@ -120,6 +133,7 @@ export class InMemorySessionRepository implements SessionRepository {
       createdAt: now,
     };
     this.store.set(props.id, props);
+    this.tokenHashes.set(props.id, input.tokenHash);
     return Session.fromPersistence(props);
   }
 

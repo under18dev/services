@@ -13,15 +13,20 @@ import type { DatabaseProbe } from "../application/ports/health.port";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { UserRepository } from "../application/ports/user.repository";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
+import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
+import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import {
   PepperedIpHasher,
+  UnconfiguredIpHasher,
   Sha256TokenHasher,
   TimingSafeComparator,
   WebCryptoTokenGenerator,
 } from "../infrastructure/crypto/web-crypto";
+import { CloudflareEmailSender } from "../infrastructure/email/cloudflare-email-sender";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
+import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
 import { DrizzleSessionRepository } from "../infrastructure/persistence/drizzle-session.repository";
@@ -51,6 +56,8 @@ export type Container = {
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
+    readonly issueSession: IssueSessionUseCase;
+    readonly logout: LogoutUseCase;
     readonly listSessions: ListSessionsUseCase;
     readonly revokeSession: RevokeSessionUseCase;
   };
@@ -81,25 +88,26 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
 
   const hasher = new Sha256TokenHasher();
-  // pepper が無いまま本番が起動すると、IPv4 空間は総当たり可能なので
-  // ハッシュが匿名化として機能しなくなる。静かに既定値へ落ちると
-  // 誰も気づけないため、development 以外では起動を止める（仕様書 9 Privacy）。
-  const ipHasher = new PepperedIpHasher(
-    env.IP_HASH_PEPPER ??
-      (env.ENVIRONMENT === "development"
-        ? "dev-pepper"
-        : throwUnconfigured("IP_HASH_PEPPER is not set outside development")),
-  );
+  // pepper が無いまま本番が動くと IPv4 空間は総当たり可能で、ハッシュが
+  // 匿名化として機能しない。静かに既定値へ落ちるのは防ぐ（仕様書 9 Privacy）。
+  //
+  // ただし失敗はハッシュ化の時点まで遅らせる。組み立てで throw すると
+  // メールと同様、無関係な /health まで 500 になる（#53）。
+  const ipHasher =
+    env.IP_HASH_PEPPER !== undefined
+      ? new PepperedIpHasher(env.IP_HASH_PEPPER)
+      : env.ENVIRONMENT === "development"
+        ? new PepperedIpHasher("dev-pepper")
+        : new UnconfiguredIpHasher("IP_HASH_PEPPER is not set outside development");
   const tokens = new WebCryptoTokenGenerator();
   const comparator = new TimingSafeComparator();
 
-  // 本番でメールプロバイダ未設定のまま ConsoleEmailSender が動くと OTP がログに出る。
-  // 選定（仕様書 14-3）が済むまでは、development 以外では明示的に落とす。
-  const email =
-    overrides.email ??
-    (env.ENVIRONMENT === "development"
-      ? new ConsoleEmailSender()
-      : throwUnconfigured("EMAIL_PROVIDER is not configured for non-development environments"));
+  // メール送信は Cloudflare Email Sending を使う（#35）。
+  //
+  // development でバインディングが無い場合だけ ConsoleEmailSender に落とす。
+  // それ以外の環境でバインディングが無いまま起動すると、OTP がログに出るか
+  // 送信自体が静かに失敗するので、起動を止める。
+  const email = overrides.email ?? createEmailSender(env);
 
   const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
 
@@ -110,12 +118,31 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
     services: { hasher, ipHasher, tokens, comparator, email, audit, databaseProbe },
     useCases: {
       getSession,
+      issueSession: new IssueSessionUseCase({
+        users,
+        sessions,
+        hasher,
+        ipHasher,
+        tokens,
+        clock,
+        audit,
+      }),
+      logout: new LogoutUseCase({ sessions, hasher, clock, audit }),
       listSessions: new ListSessionsUseCase({ getSession, sessions, clock }),
       revokeSession: new RevokeSessionUseCase({ getSession, sessions, clock, audit }),
     },
   };
 }
 
-function throwUnconfigured(message: string): never {
-  throw new Error(message);
+function createEmailSender(env: Env): EmailSender {
+  if (env.EMAIL !== undefined) {
+    return new CloudflareEmailSender(env.EMAIL, env.EMAIL_FROM);
+  }
+  if (env.ENVIRONMENT === "development") {
+    return new ConsoleEmailSender();
+  }
+  // ここで throw しない。コンテナはリクエストごとに組み立てられるので、
+  // 投げると /health や Discovery まで 500 になる（#53）。
+  // OTP を送ろうとした時点で失敗させる。
+  return new UnconfiguredEmailSender("EMAIL binding is missing outside development");
 }

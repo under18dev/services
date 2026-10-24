@@ -8,5 +8,5 @@ SIGNING_KEY_KID=dev-key-1
 # IP アドレスをハッシュ化するときの pepper（生 IP は保存しない）
 IP_HASH_PEPPER=change-me-in-every-environment
 
-# メール送信プロバイダ（仕様書 14-3 で選定するまでは未使用）
-EMAIL_API_KEY=
+# メール送信は Cloudflare Email Sending のバインディング経由のため、API キーは不要（#35）。
+

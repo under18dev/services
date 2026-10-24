@@ -11,7 +11,9 @@ export async function resetDatabase(): Promise<void> {
     "select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not like '_cf_%' and name not like 'd1_%'",
   ).all<{ name: string }>();
 
-  for (const { name } of tables.results) {
-    await env.IDENTITY_DB.exec(`delete from "${name}"`);
-  }
+  // テーブル間に依存は無いので同時に消す。FK は ON DELETE CASCADE なので
+  // 順序に意味が無く、直列にしても得られるものが無い。
+  await Promise.all(
+    tables.results.map(({ name }) => env.IDENTITY_DB.exec(`delete from "${name}"`)),
+  );
 }

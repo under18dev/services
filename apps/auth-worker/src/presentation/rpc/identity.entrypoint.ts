@@ -110,6 +110,6 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       const code = result.error.code === "unauthenticated" ? "unauthenticated" : "not_found";
       return rpcErr(code, result.error.message);
     }
-    return rpcOk({ revoked: result.value.revoked });
+    return rpcOk({ revoked: result.value.revoked, self: result.value.self });
   }
 }
