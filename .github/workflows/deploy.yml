@@ -151,6 +151,64 @@ jobs:
         working-directory: apps/auth-worker
         run: pnpm exec wrangler deploy --env production
 
+      # `wrangler deploy` の exit 0 はアップロードの成功しか示さない。
+      # 起動を拒否する Worker でもデプロイ自体は成功するため、実際に
+      # /health を叩いて中身まで確かめる。
+      #
+      # ステータスだけでなく body を検証するのが肝。`--env production` を
+      # 付け忘れたデプロイは ENVIRONMENT=development のまま 200 を返し、
+      # その 1 つの値で メール送信の実プロバイダ強制・IP_HASH_PEPPER の
+      # 強制・Cookie の __Host- と Secure が同時に無効になる。
+      # ステータスだけ見る検査はこれを素通りさせる。
+      #
+      # PRODUCTION_URL が未設定の間は skip する（#33 でドメイン確定後に設定）。
+      - name: Smoke test the deployed Worker
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the smoke test. Set it once the production issuer domain is decided (#33)."
+            exit 0
+          fi
+
+          url="${PRODUCTION_URL%/}/health"
+          echo "Probing $url"
+
+          # デプロイ直後は伝播に数秒かかることがあるので数回試す。
+          for attempt in 1 2 3 4 5; do
+            # `|| echo 000` だと curl が -w で出した値と連結して 000000 等に
+            # なりうる。失敗時は代入ごと置き換える。
+            code="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$url")" || code=000
+            [ "$code" = "200" ] && break
+            echo "attempt $attempt: HTTP $code, retrying..."
+            sleep 5
+          done
+
+          echo "--- response ---"
+          cat /tmp/health.json || true
+          echo
+
+          if [ "$code" != "200" ]; then
+            echo "::error::Health check returned HTTP $code (expected 200). The Worker deployed but is not serving."
+            exit 1
+          fi
+
+          fail=0
+          check() { # jq-path expected
+            actual="$(jq -r "$1 // \"<missing>\"" /tmp/health.json)"
+            if [ "$actual" != "$2" ]; then
+              echo "::error::$1 is \"$actual\", expected \"$2\"."
+              fail=1
+            fi
+          }
+          check '.status' 'ok'
+          check '.checks.database' 'ok'
+          # これが --env production の付け忘れを捕まえる唯一の検査。
+          check '.environment' 'production'
+
+          [ "$fail" = "0" ] || exit 1
+          echo "Smoke test passed."
+
   deploy-dashboard-worker:
     name: Deploy dashboard-worker
     runs-on: ubuntu-latest
