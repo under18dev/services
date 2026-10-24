@@ -6,7 +6,7 @@
 # 下の 2 行は**そのままでは動かない**。次のコマンドで鍵を作り、出力の
 # SIGNING_KEY_KID / SIGNING_KEY_JWK の 2 行で置き換えること。
 #
-#   pnpm --filter @u18/auth-worker key:generate -- --apply-local
+#   pnpm --filter @u18/auth-worker key:generate --apply-local
 #
 # --apply-local を付けると、同じ鍵の**公開鍵だけ**をローカル D1 の
 # signing_key_metadata へ入れる。これをやらないと /.well-known/jwks.json は

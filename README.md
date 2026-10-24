@@ -212,7 +212,7 @@ auth-worker を先に `pnpm dev` で起動しておくこと。
 ```bash
 pnpm db:migrate:local
 pnpm --filter @u18/auth-worker client:seed-dev   # 検証用クライアント 2 つ（runbook §9.4）
-pnpm --filter @u18/auth-worker key:generate -- --apply-local  # 署名鍵（runbook §9.5）
+pnpm --filter @u18/auth-worker key:generate --apply-local  # 署名鍵（runbook §9.5）
 pnpm dev
 ```
 
