@@ -44,8 +44,15 @@
           "entrypoint": "IdentityRPC",
         },
       ],
+      // auth-worker と同一ホストの /account/* だけを受け持つ（#33）。
+      // __Host- セッション Cookie は発行ホストにしか送られないため、
+      // dashboard を別ホストに置くとログイン状態を読めない。
+      // Cloudflare は route をより長い pattern 優先で解決するので、
+      // auth 側の auth.under18.dev/* より先にここが拾う。
+      "routes": [{ "pattern": "auth.under18.dev/account/*", "zone_name": "under18.dev" }],
+
       "vars": {
-        "AUTH_ISSUER": "https://REPLACE_WITH_PRODUCTION_ISSUER",
+        "AUTH_ISSUER": "https://auth.under18.dev",
         "ENVIRONMENT": "production",
       },
     },

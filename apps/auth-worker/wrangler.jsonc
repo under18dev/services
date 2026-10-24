@@ -57,14 +57,41 @@
         },
       ],
       "send_email": [{ "name": "EMAIL" }],
+
+      // auth と dashboard を**同一ホストに載せ、パスで分ける**（#33）。
+      //
+      // セッション Cookie は __Host- 接頭辞を使っており、Domain 属性を
+      // 付けられない。つまり発行したホストにしか送られないので、
+      // dashboard を別ホストに置くと dashboard からセッションを読めない
+      // （packages/contracts/src/session-cookie.ts の選択肢 1）。
+      // より狭い route を持つ dashboard 側が /account/* を先に拾う。
+      "routes": [{ "pattern": "auth.under18.dev/*", "zone_name": "under18.dev" }],
+
       "vars": {
-        // 仕様書 14-1 で決定するまでの placeholder。
-        // 実ドメインへ差し替えるまでデプロイしないこと。
-        "ISSUER": "https://REPLACE_WITH_PRODUCTION_ISSUER",
-        "RP_ID": "REPLACE_WITH_PRODUCTION_RP_ID",
+        // 仕様書 14-1 の決定（#33）。
+        //
+        // Issuer は OIDC の `iss` としてトークンに焼き込まれ、後から変えると
+        // 発行済み ID Token とクライアント設定が一斉に壊れる。ここを動かさない前提で選ぶ。
+        "ISSUER": "https://auth.under18.dev",
+
+        // RP ID は issuer のホストではなく登録可能ドメインにする。
+        //
+        // RP ID を "auth.under18.dev" に固定すると、将来 IdP のホスト名を
+        // 変えた瞬間に登録済み Passkey が全て使えなくなる（RP ID は
+        // Credential に焼き付くため移行できない）。ゾーンを RP ID にしておけば
+        // ホストの移動に耐える。
+        //
+        // 広げた分の安全性は WEBAUTHN_ORIGIN 側で担保する。*.under18.dev の
+        // 任意のページが rpId=under18.dev で assertion を取ること自体は防げないが、
+        // その assertion の origin は取得元ホストになるので、下の origin を
+        // 厳密一致で検証していれば auth-worker は受け付けない。
+        "RP_ID": "under18.dev",
         "RP_NAME": "u18 Identity",
-        "WEBAUTHN_ORIGIN": "https://REPLACE_WITH_PRODUCTION_ISSUER",
-        "EMAIL_FROM": "noreply@REPLACE_WITH_PRODUCTION_ISSUER",
+        // Passkey の検証で完全一致を要求する origin。RP ID と違いここは絞る。
+        "WEBAUTHN_ORIGIN": "https://auth.under18.dev",
+        // Cloudflare Email Sending の送信元。このドメインは Cloudflare 側で
+        // 検証済みでなければ送信が失敗する（#35）。
+        "EMAIL_FROM": "noreply@under18.dev",
         "ENVIRONMENT": "production",
       },
     },
