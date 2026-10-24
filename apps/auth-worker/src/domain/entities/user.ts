@@ -1,4 +1,5 @@
 import { UserNotActiveError } from "../errors/domain-error";
+import type { AuthMethod } from "./session";
 
 export type UserStatus = "active" | "suspended" | "deleted";
 
@@ -9,6 +10,14 @@ export type UserProps = {
   readonly email: string;
   readonly emailVerified: boolean;
   readonly status: UserStatus;
+  /**
+   * 管理権限を持つか（仕様書 §14.1 決定 8）。
+   *
+   * ロールの列挙ではなく 1 ビットなのは、この旗が決めることが 1 つしか
+   * 無いため —— 「この利用者に決定 8 を適用するか」。詳しい根拠は
+   * `packages/db/src/schema/users.ts` の `isAdmin` 側に書いた。
+   */
+  readonly isAdmin: boolean;
   /**
    * 論理削除の時刻。`status` とは独立に立ちうるので、認証可否の判定には
    * 両方を見る必要がある（status だけ見ると削除済みユーザーがログインできる）。
@@ -49,6 +58,9 @@ export class User {
   get status(): UserStatus {
     return this.props.status;
   }
+  get isAdmin(): boolean {
+    return this.props.isAdmin;
+  }
   get createdAt(): Date {
     return this.props.createdAt;
   }
@@ -67,7 +79,46 @@ export class User {
     }
   }
 
-  /** OIDC の `profile` / `email` scope に対応する claim。scope 判定は Application 側で行う。 */
+  /**
+   * この認証方式でログインを成立させてよいか（仕様書 §14.1 決定 8 / #40）。
+   *
+   * 管理者には Passkey しか認めない。メール OTP は**メールボックスの支配権が
+   * そのままアカウントの支配権になる**方式で、一般利用者にはその取引が妥当でも
+   * （決定 2 により OTP は常設のログイン経路として残る）、管理権限に対しては
+   * メールプロバイダ側の乗っ取り 1 件が IdP 全体の管理操作に直結する。
+   *
+   * 判定を Domain に置くのは `isActive` と同じ理由で、認証経路が増えるたびに
+   * 同じ条件を書き写させないため。**呼び出し元が「管理者かどうか」を見て
+   * 分岐するのではなく、必ずこの関数に訊くこと。**
+   */
+  permitsAuthMethod(method: AuthMethod): boolean {
+    return !this.props.isAdmin || method === "passkey";
+  }
+
+  /**
+   * 認証器をあと `remainingAfterRemoval` 本残す形で 1 本外してよいか（#75 / #83）。
+   *
+   * 一般利用者は 0 本まで外せる。決定 2 によりメール OTP が残るので締め出されず、
+   * 逆に「最後の 1 本は外せない」設計にすると、盗まれた端末の Credential が
+   * それ 1 本だけだった利用者が危険な認証器を外せなくなる（#75 が塞いだ穴）。
+   *
+   * **管理者だけは例外。** 決定 8 で OTP を塞いでいるため、最後の 1 本を外すと
+   * ログイン手段が 0 になる。そこで残るのは「締め出された管理者を運用者が
+   * 直接 DB で救う」か「決定 8 を緩めて OTP を開ける」かのどちらかで、
+   * 後者はこの決定そのものの無効化になる。外したいときは先に別の認証器を
+   * 登録させる —— 本数が 2 本以上あれば、危険な 1 本はいつでも外せる。
+   */
+  canRemovePasskey(remainingAfterRemoval: number): boolean {
+    return !this.props.isAdmin || remainingAfterRemoval >= 1;
+  }
+
+  /**
+   * OIDC の `profile` / `email` scope に対応する claim。scope 判定は Application 側で行う。
+   *
+   * **`isAdmin` はここに出さない。** RP に配るトークンへ載せると、u18 Identity の
+   * 内部の権限がそのまま各サービスの権限判断に使われ始める。組織・チーム権限管理は
+   * 仕様書 §1.2 の非目標であり、この旗が意味を持つのはこの IdP の中だけである。
+   */
   toClaims(): Record<string, unknown> {
     return {
       sub: this.props.id,

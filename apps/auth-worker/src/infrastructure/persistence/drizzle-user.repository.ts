@@ -24,6 +24,7 @@ function toDomain(row: UserRow): User {
     email: row.primaryEmail,
     emailVerified: row.emailVerified,
     status: row.status,
+    isAdmin: row.isAdmin,
     deletedAt: row.deletedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

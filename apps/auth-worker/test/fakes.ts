@@ -53,6 +53,9 @@ export class InMemoryUserRepository implements UserRepository {
     const props: UserProps = {
       ...input,
       status: "active",
+      // 新規作成されたユーザーは管理者ではない。本物の DB 側も
+      // `users.is_admin` の既定値が false で、付与は運用の CLI からしか通らない。
+      isAdmin: false,
       deletedAt: null,
       createdAt: now,
       updatedAt: now,
