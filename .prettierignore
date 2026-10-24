@@ -8,3 +8,6 @@ docs/u18-identity-spec.md
 # wrangler types の生成物。整形すると再生成のたびに差分が出る。
 apps/*/worker-configuration.d.ts
 .claude/worktrees
+
+# esbuild の出力を 1 行の文字列として抱えた生成物。整形対象にしない。
+apps/auth-worker/src/presentation/http/ui/generated

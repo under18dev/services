@@ -11,6 +11,8 @@ export default tseslint.config(
       "**/.wrangler/**",
       "**/worker-configuration.d.ts",
       "packages/db/drizzle/**",
+      // クライアントアイランドのバンドル（生成物）。
+      "apps/auth-worker/src/presentation/http/ui/generated/**",
     ],
   },
   ...tseslint.configs.recommended,

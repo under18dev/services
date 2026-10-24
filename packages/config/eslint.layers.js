@@ -10,7 +10,7 @@ const FRAMEWORKS = ["hono", "hono/*", "drizzle-orm", "drizzle-orm/*", "cloudflar
 /** @type {import("typescript-eslint").ConfigArray} */
 export default [
   {
-    files: ["apps/*/src/domain/**/*.ts", "packages/domain/src/**/*.ts"],
+    files: ["apps/*/src/domain/**/*.{ts,tsx}", "packages/domain/src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -28,7 +28,7 @@ export default [
     },
   },
   {
-    files: ["apps/*/src/application/**/*.ts"],
+    files: ["apps/*/src/application/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -44,7 +44,7 @@ export default [
     },
   },
   {
-    files: ["apps/*/src/presentation/**/*.ts"],
+    files: ["apps/*/src/presentation/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",

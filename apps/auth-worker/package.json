@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "node scripts/build-client.mjs && wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "build": "node scripts/build-client.mjs && wrangler deploy --dry-run --outdir dist",
+    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "test": "node scripts/build-client.mjs && vitest run",
+    "test:watch": "node scripts/build-client.mjs && vitest",
     "cf-typegen": "wrangler types",
     "client:create": "node scripts/oauth-client.mjs create",
     "client:disable": "node scripts/oauth-client.mjs disable",
@@ -17,7 +17,8 @@
     "client:seed-dev": "node scripts/oauth-client.mjs seed-dev",
     "key:generate": "node scripts/signing-key.mjs generate",
     "migrate:local": "wrangler d1 migrations apply u18-identity --local",
-    "migrate:remote": "wrangler d1 migrations apply u18-identity --remote"
+    "migrate:remote": "wrangler d1 migrations apply u18-identity --remote",
+    "build:client": "node scripts/build-client.mjs"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",
     "@u18/testing": "workspace:*",
+    "esbuild": "0.28.2",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
     "wrangler": "4.152.0"

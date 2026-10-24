@@ -1,0 +1,186 @@
+/** @jsxImportSource hono/jsx/dom */
+import { render, useState } from "hono/jsx/dom";
+
+/**
+ * ログイン画面の Passkey アイランド（仕様書 14-1 の決定 4）。
+ *
+ * **このファイルだけがブラウザで動く。** 残りのログイン画面はサーバーで
+ * レンダリングした HTML と通常の form POST だけで成立する（ui/login-page.tsx）。
+ * 認証基盤のログイン画面が JS の読み込み失敗で丸ごと使えなくなるのは避けたいので、
+ * JS が必要な範囲を「`navigator.credentials` を呼ぶところ」に閉じ込めている。
+ * WebAuthn はブラウザ API を呼ぶ以外に実装しようがないため、ここだけは例外になる。
+ *
+ * ビルドは scripts/build-client.mjs（esbuild）が行い、
+ * ui/generated/login-island.bundle.ts へ文字列として吐く。理由は README 参照。
+ *
+ * ## アカウント列挙をしない作りになっている理由（変更前に必ず読むこと）
+ *
+ * `POST /api/auth/passkeys/login/options` に**メールアドレスやユーザー識別子を
+ * 渡していない**。これは手抜きではなく、サーバー側の
+ * `PasskeyLoginOptionsUseCase` が入力を一切受け取らない設計と対になっている。
+ * 識別子を渡して `allowCredentials` を返してもらう作りにすると、応答の差が
+ * 「そのアカウントは存在する」という答えになる（仕様書 9 Privacy）。
+ * 未成年の利用者を想定している以上、在籍の推測自体を避けたい。
+ *
+ * そのため、
+ *  - どの Credential を使うかはブラウザ / OS の選択 UI に任せる
+ *    （`residentKey: "required"` の discoverable credential 前提）
+ *  - 失敗しても「このアドレスにはパスキーが登録されていません」とは言わない。
+ *    メール OTP へ誘導する中立的な文言だけを出す
+ *
+ * 「候補を出したほうが親切では」と思ったら、API を緩める側ではなく
+ * UX を変える側で解くこと。
+ */
+
+type Phase =
+  | { readonly kind: "ready" }
+  | { readonly kind: "running" }
+  /** 失敗の理由は持たない。表示を分岐させる材料をそもそも作らない。 */
+  | { readonly kind: "failed" };
+
+/** 認証器が使えない端末。ボタンを出しても押せないので最初から出さない。 */
+const supportsPasskey = (): boolean =>
+  typeof window.PublicKeyCredential === "function" && navigator.credentials !== undefined;
+
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/");
+  const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64Url(buffer: ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+type LoginOptionsResponse = {
+  readonly challengeId: string;
+  readonly options: Record<string, unknown>;
+};
+
+/**
+ * サーバーが返す JSON を `navigator.credentials.get()` の引数へ写す。
+ *
+ * `PublicKeyCredential.parseRequestOptionsFromJSON` があればそれを使う。
+ * まだ持たないブラウザのために手書きの変換も残している（base64url →
+ * ArrayBuffer は WebAuthn JSON と WebAuthn API の間の形式差でしかない）。
+ */
+function toRequestOptions(json: Record<string, unknown>): PublicKeyCredentialRequestOptions {
+  const parse = window.PublicKeyCredential.parseRequestOptionsFromJSON;
+  if (typeof parse === "function") {
+    return parse(json as unknown as PublicKeyCredentialRequestOptionsJSON);
+  }
+  const { challenge, ...rest } = json as { challenge: string };
+  return {
+    ...(rest as unknown as PublicKeyCredentialRequestOptions),
+    challenge: base64UrlToBytes(challenge),
+  };
+}
+
+/** 認証器の応答を WebAuthn JSON へ写す。`toJSON()` が無い環境向けの手書き版を併置する。 */
+function toResponseJson(credential: PublicKeyCredential): Record<string, unknown> {
+  if (typeof credential.toJSON === "function") {
+    return credential.toJSON() as unknown as Record<string, unknown>;
+  }
+  const response = credential.response as AuthenticatorAssertionResponse;
+  return {
+    id: credential.id,
+    rawId: bytesToBase64Url(credential.rawId),
+    type: credential.type,
+    clientExtensionResults: credential.getClientExtensionResults(),
+    response: {
+      clientDataJSON: bytesToBase64Url(response.clientDataJSON),
+      authenticatorData: bytesToBase64Url(response.authenticatorData),
+      signature: bytesToBase64Url(response.signature),
+      userHandle: response.userHandle === null ? null : bytesToBase64Url(response.userHandle),
+    },
+  };
+}
+
+/**
+ * 既存の認証 API をそのまま叩く。
+ *
+ * CSRF 対策は Origin 検証（`isAllowedOrigin`）で、同一オリジンの `fetch` には
+ * ブラウザが POST に Origin を自動で付ける。form 側の CSRF トークンは
+ * ここでは要らない（UI の form だけがトークン方式）。
+ */
+async function postJson(path: string, body: unknown): Promise<Response> {
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // Cookie を送る。既定は same-origin だが、意図を明示しておく。
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+}
+
+function PasskeyLogin() {
+  const [phase, setPhase] = useState<Phase>({ kind: "ready" });
+
+  const start = async (): Promise<void> => {
+    setPhase({ kind: "running" });
+    try {
+      const optionsResponse = await postJson("/api/auth/passkeys/login/options", {});
+      if (!optionsResponse.ok) {
+        setPhase({ kind: "failed" });
+        return;
+      }
+      const { challengeId, options } = (await optionsResponse.json()) as LoginOptionsResponse;
+
+      const credential = (await navigator.credentials.get({
+        publicKey: toRequestOptions(options),
+      })) as PublicKeyCredential | null;
+      if (credential === null) {
+        setPhase({ kind: "ready" });
+        return;
+      }
+
+      const verify = await postJson("/api/auth/passkeys/login/verify", {
+        challengeId,
+        response: toResponseJson(credential),
+      });
+      if (!verify.ok) {
+        setPhase({ kind: "failed" });
+        return;
+      }
+
+      // セッション Cookie は Set-Cookie で入っている。GET /login を取り直すと
+      // サーバーがログイン済みの画面を返す。遷移先をここで決めない
+      // （「次にどこへ戻すか」は同意画面 #15 が持つ責務）。
+      window.location.assign("/login");
+    } catch {
+      // 利用者が選択 UI を閉じた場合も例外になる。理由で分岐しない。
+      setPhase({ kind: "failed" });
+    }
+  };
+
+  return (
+    <div class="passkey">
+      <button
+        type="button"
+        class="button button-secondary"
+        disabled={phase.kind === "running"}
+        onClick={() => void start()}
+      >
+        {phase.kind === "running" ? "認証器を待っています…" : "パスキーでログイン"}
+      </button>
+      {phase.kind === "failed" ? (
+        // 「登録されていません」とは言わない。失敗の理由を問わず同じ文言にする。
+        <p class="notice" role="status">
+          パスキーでのログインを完了できませんでした。メールアドレスでのログインをお試しください。
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+const mount = document.getElementById("passkey-island");
+if (mount !== null && supportsPasskey()) {
+  // サーバーが入れておいた「この端末では使えないかもしれない」旨の代替表示を
+  // 置き換える。JS が落ちた場合はその代替表示が残る。
+  mount.textContent = "";
+  render(<PasskeyLogin />, mount);
+}

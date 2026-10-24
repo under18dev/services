@@ -2,13 +2,22 @@
   "extends": "../../packages/config/tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
+    // Auth UI は hono/jsx のサーバーレンダリング（仕様書 14-1 の決定 4）。
+    // ブラウザ側のアイランドだけ hono/jsx/dom を使うので、そちらは
+    // tsconfig.client.json で別に型検査する（DOM の型を Worker 側へ持ち込まないため）。
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"]
   },
   "include": [
     "src/**/*.ts",
+    "src/**/*.tsx",
     "test/**/*.ts",
     "worker-configuration.d.ts",
     "worker-env.d.ts",
     "vitest.config.ts"
-  ]
+  ],
+  // ブラウザでしか動かないアイランド。lib に DOM を足さない本体の設定で
+  // 型検査すると document / navigator が未定義になる。
+  "exclude": ["src/presentation/http/ui/client/**"]
 }

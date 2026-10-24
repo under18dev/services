@@ -16,3 +16,7 @@ coverage/
 # Claude Code がサブエージェント用に作る一時 worktree。
 # リポジトリ内に置かれるので、追跡・整形・lint の対象から外す。
 .claude/worktrees/
+
+# クライアントアイランドのバンドル（scripts/build-client.mjs の生成物）。
+# dev / build / typecheck / test が毎回作り直すのでコミットしない。
+apps/auth-worker/src/presentation/http/ui/generated/
