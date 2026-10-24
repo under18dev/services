@@ -389,3 +389,46 @@ export function explainUnusableSigningKeys(audit: SigningKeySecretAudit): string
   if (audit.issues.length === 1) return audit.issues[0]!.detail;
   return `no usable signing key (${audit.issues.map((issue) => issue.detail).join("; ")})`;
 }
+
+/**
+ * 外から見える署名鍵の状態（`/health` の `checks.signingKey`）。
+ *
+ * ## なぜ 3 値なのか
+ *
+ * 「署名できるか」と「RP が検証できるか」は別の軸で、**片方だけ壊れる**。
+ * 1 つの真偽値に畳むと、運用者は `/health` を見た後に結局
+ * `signing-key.mjs verify` を実行して原因を調べ直すことになる。
+ *
+ * - `unavailable` は**こちらが発行できない**。`/oauth/token` が ID Token を
+ *   出せず、新規ログインだけが止まる（既存セッションは生きる）。
+ * - `not_published` は**発行はできるが誰も検証できない**。症状は全 RP で
+ *   一斉に検証失敗で、auth-worker のログには何も出ない（署名自体は成功
+ *   しているため）。4.1 制約 3 が言っている、一番見つけにくい壊れ方である。
+ *
+ * ## この値で HTTP ステータスを動かさないこと
+ *
+ * 判断の経緯は docs/runbook.md 4.4。要点は、鍵を入れ替えている最中は
+ * 監視が鳴るのが一番困る瞬間であり、かつ署名鍵が未設定でも Worker 自体は
+ * 生きている、ということ。ボディのフィールドとしてだけ出す。
+ */
+export type SigningKeyHealth = "ok" | "unavailable" | "not_published";
+
+/**
+ * 突き合わせの結果を `/health` の語彙へ翻訳する。
+ *
+ * **判定そのものは `auditSigningKeySecret` が持っている。** ここは
+ * その結論を 3 つの文字列に写すだけで、新しい判断を足さない。足すと
+ * 「`/health` は緑なのに署名できない」が成立しうる（4.4 の表が前提に
+ * している「検査と実態がずれない」性質が崩れる）。
+ *
+ * @param publishedKids `getPublicJwks()` が実際に返す kid。行があることでは
+ *   なく**配られること**を見る。`public_jwk` が壊れている行は JWKS から
+ *   黙って飛ばされるので、行の有無だけでは `not_published` を捕まえられない。
+ */
+export function signingKeyHealth(
+  audit: SigningKeySecretAudit,
+  publishedKids: readonly string[],
+): SigningKeyHealth {
+  if (audit.signingKid === null) return "unavailable";
+  return publishedKids.includes(audit.signingKid) ? "ok" : "not_published";
+}

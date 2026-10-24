@@ -113,7 +113,10 @@
    > **以前ここには「`development` 以外では起動時に throw され全リクエストが 500 になる」と書いてあった。#53 で解消済みである。** 組み立てで throw すると `/health` も Discovery も巻き込まれて落ちるため、現在は**失敗を送信時点まで遅らせる**。設定漏れが無関係なエンドポイントまで止めることはもう無い。代わりに「OTP を送ろうとしたときだけ失敗する」ので、**設定漏れは `/health` では検知できない**点に注意する。
 
 2. **`IP_HASH_PEPPER` の未設定チェック**（同ファイル）
-   `development` では未設定なら `"dev-pepper"` にフォールバックする。`development` 以外では `IP_HASH_PEPPER is not set outside development` を投げてコンテナ生成が失敗する。つまり **pepper を設定せずに本番を名乗ると、全リクエストが 500 になる**。静かに既知の pepper へ落ちて匿名化が無言で壊れるより、起動を止める方を選んである。
+   `development` では未設定なら `"dev-pepper"` にフォールバックする。`development` 以外では `UnconfiguredIpHasher` が選ばれ、**ハッシュ化しようとした時点で** `IP_HASH_PEPPER is not set outside development` を投げる。静かに既知の pepper へ落ちて匿名化が無言で壊れるより、失敗させる方を選んである。
+
+   > **以前ここには「全リクエストが 500 になる」と書いてあった。メール送信と同じく #53 で解消済みである。** 現在落ちるのは **IP をハッシュ化する経路だけ**で、具体的には `IssueSessionUseCase`（セッション発行）とレート制限の鍵の算出である。**監査ログは落ちない** —— `RequestScopedAuditLogger` がハッシュ化の失敗を飲み込み、`ip_hash` を空にしてイベントだけ記録する（#122）。監査のためだけの計算が認証経路を道連れにしないため。設定漏れはログイン時に表面化し、`/health` では検知できない。
+
 3. **セッション Cookie**（`packages/contracts/src/session-cookie.ts` の `sessionCookieName()`）
    `development` では `u18_session`（`Secure` なし）、それ以外では `__Host-u18_session`（`Secure` 付き）になる。この名前は auth-worker と dashboard-worker が **契約パッケージ経由で共有**しており、どちらか片方だけが別名を見ることはない。
 4. **ヘルス応答**：`/health` のボディに `environment` をそのまま出す。
@@ -508,7 +511,9 @@ npx wrangler rollback --message "incident: revert to <version-id>"
 
 #### 3.3.1 auth-worker の `/health`
 
-実装は `apps/auth-worker/src/presentation/http/health.routes.ts` で、実際の疎通は `DatabaseProbe` Port（`apps/auth-worker/src/application/ports/health.port.ts`）の実装である `apps/auth-worker/src/infrastructure/persistence/drizzle-database-probe.ts` が行う。チェック内容は **D1 への `select 1` が成功するか、それだけ**である。
+実装は `apps/auth-worker/src/presentation/http/health.routes.ts` で、実際の疎通は `DatabaseProbe` Port（`apps/auth-worker/src/application/ports/health.port.ts`）の実装である `apps/auth-worker/src/infrastructure/persistence/drizzle-database-probe.ts` が行う。
+
+**HTTP ステータスを決めるのは `checks.database` だけである。** `checks` には署名鍵の状態も出るが（下記）、そちらは**値として読むだけ**で、200 / 503 の判断には一切入らない。理由は 4.4 にある。この分離は意図的なので、監視を増やすときにここを結び付け直さないこと。
 
 ```bash
 curl -i https://<auth-worker-の-URL>/health
@@ -531,6 +536,22 @@ curl -i https://<auth-worker-の-URL>/health
 3. Cloudflare D1 側の障害。
 
 1 と 2 は `wrangler d1 info u18-identity` で切り分けられる。
+
+##### `checks.signingKey`
+
+`signing_key_metadata` と `SIGNING_KEY_JWK` が食い違っていないかを外から見るための項目である（4.1 制約 3 / 4.4）。**この値がどうであれ HTTP ステータスは変わらない。**
+
+| 値              | 意味                                                     | 症状                                                                               | 対応                                         |
+| --------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------- |
+| `ok`            | 現役の kid が Secret にあり、JWKS にも出ている           | 正常                                                                               | —                                            |
+| `unavailable`   | 現役の kid が Secret に無い（署名できない）              | **`/oauth/token` が ID Token を出せない。** 新規ログインだけが止まる               | `pnpm key:verify` で理由を見る → 4.2         |
+| `not_published` | Secret にはあるが JWKS に出ていない（RP が検証できない） | **全 RP で一斉に検証失敗。auth-worker のログには何も出ない**（署名は成功している） | `signing_key_metadata.public_jwk` の行を直す |
+
+`not_published` は `unavailable` より見つけにくい。署名は通るので auth-worker 側は「成功した」としか記録せず、気づくのは RP からの問い合わせになる。**この 2 つを 1 つの真偽値に畳まないこと**（畳むと、`/health` を見た後に結局 `verify` を実行して原因を調べ直すことになる）。
+
+鍵をまだ一度も設定していない環境（Phase 1 相当の構成、プレビュー）では `unavailable` が正常な値である。OIDC を使っていないなら直す必要はない。
+
+応答に **kid は出ない。** 未認証で叩ける endpoint から鍵の識別子が見えて運用者が得るものが無いため。どの kid の話かは `pnpm key:list` / `pnpm key:verify` で見る。
 
 #### 3.3.2 dashboard-worker の `/health`
 
@@ -940,23 +961,46 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 
 ### 4.4 整合検査をどこに置いたか（#23 (c)）
 
-Secret と `signing_key_metadata` の突き合わせは、次の 3 箇所にある。**`/health` には無い。**
+Secret と `signing_key_metadata` の突き合わせは、次の 4 箇所にある。
 
 | 場所                                    | いつ走るか                      | 失敗したらどうなるか                            |
 | --------------------------------------- | ------------------------------- | ----------------------------------------------- |
 | `signing-key.mjs verify`                | 運用者が明示的に実行したとき    | 終了コード 1。本番は何も変わらない              |
 | `signing-key.mjs activate`              | 署名を切り替える直前（自動）    | 切り替えを中止する                              |
 | `JoseSigningKeyProvider`（Worker 本体） | ID Token に署名しようとした瞬間 | **その署名だけが失敗する**。JWKS は応答し続ける |
+| `/health` の `checks.signingKey`        | ヘルスチェックのたび            | **何も起きない。** 値が変わるだけ（3.3.1）      |
 
-**`/health` に足さなかった理由。** 足すと、署名鍵が未設定の環境で `/health` が落ちる。#53 で「設定不備が無関係なエンドポイントを巻き込む」構造を解消したばかりで、同じものを別の入口から再導入することになる。具体的には:
+どれも `domain/services/signing-key-rotation.ts` の **同じ関数**（`parseSigningKeySecret` → `auditSigningKeySecret`）を通る。検査を別コードで書くと「スクリプトは OK と言ったのに Worker は署名できない」が起こりうるので、ここは分けない。`/health` が「配られているか」まで見るのも同じ理由で、JWKS を組み立てる絞り込み（`collectPublicJwks`）を共有している —— 行の有無だけを見ると、`public_jwk` が壊れた行が JWKS から黙って飛ばされるのを見逃す。
+
+#### なぜ 4 つ目を足したのか
+
+3 つで足りていなかったのは、**「誰も `verify` を実行しなければ不一致に気付かない」**という点である。`activate` が自動で検査を挟んではいるが（不一致のまま切り替えるのが最も被害の大きい単一の操作のため）、**鍵を触っていないのに壊れる経路**——Time Travel による巻き戻し（12.4 (2)）、Secret の誤更新、`public_jwk` 行の手修正——はそこを通らない。
+
+#### ステータスには絶対に効かせない
+
+`/health` を避けていた当初の論拠は 3 つあった。**うち 2 つは「HTTP ステータスを動かす場合にだけ」当てはまる。**
 
 - 鍵を一度も設定していない環境（Phase 1 相当の構成、プレビュー環境）で `/health` が赤くなる。死活監視としては正しくない —— Worker は生きていて、OIDC 以外は全部動く。
 - **鍵を入れ替えている最中に `/health` が落ちうる。** 監視が鳴るのが一番困る瞬間に鳴る。
-- `/health` は未認証で叩ける唯一の D1 クエリ経路でもある（§8.5 の未決事項）。ここへ検査を足すと、外部から鍵の設定状態を観測できることにもなる。
 
-代わりに、`UnconfiguredEmailSender` / `UnconfiguredIpHasher` と同じ方針を採る —— **失敗は「使おうとした時点」に置く。** 署名鍵の整合が崩れていれば ID Token の発行だけが失敗し、JWKS・Discovery・セッション・アカウント API は動き続ける。鍵を入れ替えている最中に JWKS が落ちると、旧鍵で署名済みのトークンを検証している RP まで巻き込むため、この分離には積極的な意味がある。
+だから `checks.signingKey` は**ボディのフィールドとしてだけ**出し、200 / 503 は `checks.database` だけで決める。この分離が崩れた瞬間に上の 2 つがそのまま復活するので、`health.routes.ts` にも同じ注意を書いてある（回帰は `test/health.test.ts` の「署名鍵が未設定でも 200 のまま unavailable を返す」が見ている）。
 
-**その代償は「誰も `verify` を実行しなければ不一致に気付かない」ことである。** これを埋めるために `activate` が自動で検査を挟んでいる（不一致のまま切り替えるのが、最も被害の大きい単一の操作のため）。それでも「デプロイのたびに自動で検査する」経路は無い。CI に足す場合に必要なものは下記。
+3 つ目の論拠——`/health` は未認証で叩ける D1 クエリ経路である（8.5 の未決事項 7）——は**いまも当てはまる。** 引き受けた上で、代償を次の 2 点に抑えている。
+
+- **kid は返さない。** 外から鍵の識別子が見えて得られるものが無い。外部が観測できるのは「鍵が揃っているか」の 3 値だけで、これは `/oauth/token` を 1 回叩けば同じことが分かる。
+- **D1 のクエリは 1 回しか増やさない。** `listPublishable()` の結果を突き合わせと JWKS 判定の両方に使う（`checkHealth()`）。署名時の経路（Secret の kid ごとに `findByKid()`）をそのまま流用すると、未認証のリクエスト 1 本あたりのクエリ数が鍵の本数だけ増える。
+
+`/health` を認証必須にするか閉じるかを決めるときは（8.5 の未決事項 7）、この項目も一緒に見ること。
+
+#### Worker 本体の挙動は変えていない
+
+`UnconfiguredEmailSender` / `UnconfiguredIpHasher` と同じ方針は維持する —— **失敗は「使おうとした時点」に置く。** 署名鍵の整合が崩れていれば ID Token の発行だけが失敗し、JWKS・Discovery・セッション・アカウント API は動き続ける。鍵を入れ替えている最中に JWKS が落ちると、旧鍵で署名済みのトークンを検証している RP まで巻き込むため、この分離には積極的な意味がある。`checkHealth()` は**観測するだけ**で、何も止めない。
+
+#### デプロイ後のスモークテスト
+
+`.github/workflows/deploy.yml` の auth-worker のスモークテストが `checks.signingKey` が `ok` であることまで確かめる（`scripts/smoke-probe.sh`）。**鍵が未設定のまま本番 URL を設定すると、ここでデプロイが赤くなる。** 12.6 のチェックリストを先に済ませること。
+
+#### CI の投入前検査に足すなら
 
 #### CI に足すなら（`.github/**` は本 PR の対象外）
 
@@ -1902,7 +1946,7 @@ delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
 3. **`ip_hash` の保持期間**（§7.3）。
 4. **削除済みメールアドレスの再利用可否**（§7.1 手順 7）。`lower()` 式の UNIQUE インデックスにより、現状では再登録できない。
 5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。
-6. **`signing_key_metadata` と `SIGNING_KEY_JWK` の整合を検証する手段**（§4.1 制約 3）。DB と Secret が食い違っても誰も気づかない。`/health` のチェック項目に「現役 kid と `SIGNING_KEY_KID` の一致」を加えるのが安価な対策である。
+6. ~~**`signing_key_metadata` と `SIGNING_KEY_JWK` の整合を検証する手段**~~ — 対処済み。`/health` の `checks.signingKey` が、現役の kid が Secret にあり JWKS にも出ているかを返す（§3.3.1 / §4.4）。デプロイ後のスモークテストもこの値を見る。**残るのは「投入前に止める」経路**で、そちらは CI へ `SIGNING_KEY_JWK` を複製する判断が要る（§4.4）。なお、かつてここに書いてあった「現役 kid と `SIGNING_KEY_KID` の一致を見る」案は採れない —— `SIGNING_KEY_KID` は #23 で単一 JWK 形式の後方互換にしか使われなくなっており、JWK Set 形式では**どの鍵で署名するかを決めるのは `signing_key_metadata` の `active_from` / `active_until`** である。
 7. **`/health` を公開したままにするか**（§5.3）。認証なしで D1 にクエリを打つ唯一の公開 endpoint である。
 8. **`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**（§1.1）。現在はテストツールチェーンの制約で 2026-08-15 に据え置かれている。
 
@@ -2653,7 +2697,7 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 
 **`IP_HASH_PEPPER` を失っても認証は止まらない。** 確認した事実として、`ipHash` はコード中で**書き込みにしか使われていない** —— `IssueSessionUseCase` が `sessions.ip_hash` を書き、`AuditLogger` が `audit_logs.ip_hash` を書くだけで、**照合・比較に使っている箇所は無い**（`apps/auth-worker/src` 全体を確認）。新しい pepper を設定すれば、以後のログインは正常に動く。失われるのは過去との連続性だけである。
 
-**ただし新しい pepper を入れずに非 development 環境を起動すると、全リクエストが 500 になる**（`container.ts` のハードフェイル。§1.5）。Secret を失ったことに気づくのは、たいていこの形である。
+**ただし新しい pepper を入れずに非 development 環境を運用すると、ログインが失敗する**（`UnconfiguredIpHasher`。§1.5 の注記のとおり、`/health` や Discovery は巻き添えにならない）。Secret を失ったことに気づくのは、たいていこの形である。
 
 #### Secret の控えをどこに置くか
 
@@ -2680,6 +2724,7 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 - [ ] **#83（ロールの実装）が入るまで、アプリ上の管理者アカウントを作らない**ことを周知する（§10.5）。入った後に §10.5 へ管理者復旧の手順を追記する
 - [ ] 2 つの D1 の整合（`nfc_cards.owner_user_id` の宛先）を定期的に照合する仕組みを用意するか、照合しないことを受容するリスクとして記録する（§12.4 (5)）
 - [ ] `IP_HASH_PEPPER` の控えを持つかどうかを決める（§12.5）
+- [ ] **`PRODUCTION_URL` を設定する前に署名鍵を揃える。** デプロイ後のスモークテストが `/health` の `checks.signingKey == "ok"` を要求する（§4.4）。`SIGNING_KEY_JWK` と `signing_key_metadata` の片方でも欠けているとデプロイジョブが赤くなる。順序は §2.4.1 → §9.5 → `pnpm key:verify`
 
 ---
 

@@ -7,7 +7,10 @@
  * Time Travel のスナップショットが漏れても ID Token は偽造できない。
  */
 
-import type { SigningKeyLifecycle } from "../../domain/services/signing-key-rotation";
+import type {
+  SigningKeyHealth,
+  SigningKeyLifecycle,
+} from "../../domain/services/signing-key-rotation";
 
 /**
  * JWKS に出す公開鍵。
@@ -73,6 +76,23 @@ export interface SigningKeyProvider {
    * 鍵の設定漏れで JWKS まで落とさないための分離。
    */
   getPublicJwks(): Promise<readonly PublicSigningJwk[]>;
+
+  /**
+   * 署名鍵が「署名でき、かつ JWKS に出ている」かを見る（`/health`）。
+   *
+   * **例外を投げない。** `DatabaseProbe.ping()` と同じ契約で、設定不備も
+   * D1 の不調も値として返す。`/health` は設定不備の巻き添えにならない
+   * という #53 の性質を、ここで検査を足したせいで壊してはいけない。
+   *
+   * `getActiveSigningKey()` を流用しないのは、あちらが**失敗を例外で返す**
+   * から。健全性の問い合わせのために try/catch でメッセージを読み解くと、
+   * 文面を変えただけで検査の意味が変わる。判定は
+   * `auditSigningKeySecret` の構造化された結論から導く。
+   *
+   * kid は返さない。未認証で叩ける `/health` から鍵の識別子が見えても、
+   * 運用者が得るものが無い（docs/runbook.md 4.4）。
+   */
+  checkHealth(): Promise<SigningKeyHealth>;
 }
 
 /**

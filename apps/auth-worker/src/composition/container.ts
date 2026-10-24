@@ -67,6 +67,10 @@ import {
 } from "../infrastructure/rate-limit/cloudflare-rate-limiter";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
+import {
+  RequestScopedAuditLogger,
+  type RequestContext,
+} from "../infrastructure/audit/request-scoped-audit-logger";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleAuthorizationCodeRepository } from "../infrastructure/persistence/drizzle-authorization-code.repository";
 import { DrizzleEmailChallengeRepository } from "../infrastructure/persistence/drizzle-email-challenge.repository";
@@ -145,6 +149,8 @@ export type Container = {
   };
 };
 
+export type { RequestContext };
+
 export type ContainerOverrides = Partial<{
   clock: Clock;
   users: UserRepository;
@@ -165,8 +171,17 @@ export type ContainerOverrides = Partial<{
  *
  * Workers では `Env` がリクエスト単位で渡るため、モジュールスコープに
  * キャッシュしない。生成コストはオブジェクト確保のみで、D1 への接続は張らない。
+ *
+ * @param request HTTP 経由のときだけ渡す。発信元を監査ログに乗せるために使う
+ *   （#122）。`scheduled` と Service Binding 越しの RPC には発信元が無いので
+ *   `null` のまま呼ぶ —— RPC の入力に IP を足せば埋まるが、それは契約の変更で
+ *   あり、`CONTRACT_VERSION` の運用（docs/runbook.md 3.2.3）に乗る話になる。
  */
-export function createContainer(env: Env, overrides: ContainerOverrides = {}): Container {
+export function createContainer(
+  env: Env,
+  overrides: ContainerOverrides = {},
+  request: RequestContext | null = null,
+): Container {
   const db = createIdentityDatabase(env.IDENTITY_DB);
   const clock = overrides.clock ?? systemClock;
 
@@ -174,7 +189,6 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const sessions = overrides.sessions ?? new DrizzleSessionRepository(db);
   const passkeys = new DrizzlePasskeyRepository(db);
   const webauthnChallenges = new DrizzleWebAuthnChallengeRepository(db);
-  const audit = overrides.audit ?? new DrizzleAuditLogger(db);
   const emailChallenges = overrides.emailChallenges ?? new DrizzleEmailChallengeRepository(db);
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
   // 保持期限を過ぎた行の掃除（#43）。scheduled ハンドラからしか使わないが、
@@ -193,6 +207,14 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       : env.ENVIRONMENT === "development"
         ? new PepperedIpHasher("dev-pepper")
         : new UnconfiguredIpHasher("IP_HASH_PEPPER is not set outside development");
+
+  // 監査ログ（#12）。HTTP 経由なら発信元で包む（#122）。
+  //
+  // **包むのはここ 1 箇所だけ。** 下流は `audit` しか見ないので、
+  // 「この UseCase には ip_hash が付く / 付かない」という分岐が生まれない。
+  const sink = overrides.audit ?? new DrizzleAuditLogger(db);
+  const audit = request === null ? sink : new RequestScopedAuditLogger(sink, ipHasher, request);
+
   const tokens = new WebCryptoTokenGenerator();
   const comparator = new TimingSafeComparator();
   // PKCE の比較も定時間で行う（#16）。`TokenHasher` と分けているのは、

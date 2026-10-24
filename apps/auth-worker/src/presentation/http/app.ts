@@ -6,6 +6,7 @@ import { healthRoutes } from "./health.routes";
 import { meRoutes } from "./me.routes";
 import { oauthRoutes } from "./oauth.routes";
 import { problem } from "./problem";
+import { requestContext } from "./request-context";
 import type { AppBindings } from "./types";
 import { uiRoutes } from "./ui/login.routes";
 
@@ -18,8 +19,12 @@ export function createApp() {
 
   // コンテナの組み立てをミドルウェアに閉じ込め、各ルートは
   // `c.get("container")` だけを見る。ルートから Env を直接触らせない。
+  //
+  // 発信元もここで一度だけ読む（#122）。全ルートが同じミドルウェアを通るので、
+  // 監査ログの `ip_hash` / `user_agent` はルート側が何もしなくても乗る。
+  // ルートごとに渡す形にすると、足し忘れたルートだけが静かに欠ける。
   app.use("*", async (c, next) => {
-    c.set("container", createContainer(c.env));
+    c.set("container", createContainer(c.env, {}, requestContext(c)));
     await next();
   });
 

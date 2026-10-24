@@ -66,7 +66,8 @@ apps/auth-worker/src/
 │   ├── http/
 │   │   ├── app.ts               Hono アプリ組み立て、container ミドルウェア、404/500 ハンドラ
 │   │   ├── types.ts             AppBindings（Hono の型パラメータ）
-│   │   ├── health.routes.ts     GET /health（DatabaseProbe 越しに D1 疎通を確認）
+│   │   ├── health.routes.ts     GET /health（D1 疎通 + 署名鍵の整合。ステータスは D1 だけで決める）
+│   │   ├── request-context.ts   CF-Connecting-IP / User-Agent を 1 箇所で読む（#122）
 │   │   ├── oauth.routes.ts      Discovery / JWKS。authorize と token をマウントする
 │   │   ├── oauth.authorize.routes.tsx  GET /oauth/authorize, POST /oauth/consent
 │   │   ├── oauth.token.routes.ts       POST /oauth/token
@@ -90,6 +91,7 @@ apps/auth-worker/src/
 │   └── errors/                  domain-error.ts
 ├── infrastructure/
 │   ├── persistence/             Drizzle Repository 3 本 + DatabaseProbe
+│   ├── audit/                   RequestScopedAuditLogger（AuditLogger に発信元を足す装飾。#122）
 │   ├── crypto/web-crypto.ts     Web Crypto 実装 4 クラス
 │   └── email/console-email-sender.ts
 └── composition/container.ts     Env → 具象実装の組み立て
@@ -482,7 +484,7 @@ Authorization Code Flow + PKCE が端から端まで通る。残るのは
 
 | 入口                                                                              | 実体                                                                                            |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `GET /health`                                                                     | `health.routes.ts` → `DatabaseProbe.ping()`（D1 へ `select 1`）。失敗時は 503 + `degraded`      |
+| `GET /health`                                                                     | `health.routes.ts` → `DatabaseProbe.ping()` + `SigningKeyProvider.checkHealth()`                |
 | `GET /.well-known/openid-configuration`                                           | `oauth.routes.ts`。`ISSUER` から静的に組み立てる                                                |
 | `GET /oauth/authorize`                                                            | `oauth.authorize.routes.tsx` → `AuthorizeRequestUseCase` → `IssueAuthorizationCodeUseCase`      |
 | `POST /oauth/consent`                                                             | 同上。同意の送信先。CSRF はログイン画面と同じ double-submit + Origin 検証                       |
