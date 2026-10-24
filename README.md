@@ -5,9 +5,10 @@ Cloudflare Workers 上で動作し、認証情報の正本は Cloudflare D1（Dr
 pnpm workspaces の monorepo で、`auth-worker`（OIDC と認証 API、Identity D1 の所有者）と
 `dashboard-worker`（アカウント設定 UI / BFF）の 2 つの Worker を Service Bindings の RPC で
 つないでいる。各 Worker の内部は Presentation / Application / Domain / Infrastructure に
-分かれ、依存方向は ESLint で強制される。現在は仕様書 12 の Phase 1 の途中で、
-OIDC エンドポイントとログイン手段（Passkey / メール OTP）は未実装である
-（詳細は [docs/architecture.md](./docs/architecture.md) §6）。
+分かれ、依存方向は ESLint で強制される。仕様書 12 の Phase 1 は完了し、Phase 2 は
+**OIDC の Authorization Code Flow + PKCE が端から端まで通る**ところまで入っている
+（ログイン手段は Passkey とメール OTP の 2 つ）。未実装は `/oauth/userinfo` と
+`/oauth/revoke` の 2 本（詳細は [docs/architecture.md](./docs/architecture.md) §6）。
 
 ---
 
@@ -147,7 +148,7 @@ curl http://localhost:8787/login   # ログイン画面（HTML）
 
 pnpm lint       # クリーンに通る
 pnpm typecheck  # 6 パッケージすべて通る
-pnpm test       # 453 件（domain 25 / auth-worker 318 / dashboard-worker 21 / nfc-worker 89）
+pnpm test       # 617 件（domain 25 / auth-worker 477 / dashboard-worker 26 / nfc-worker 89）
 ```
 
 これが現在のグリーンな基準値。手元で落ちたら、自分の変更かセットアップ
@@ -166,6 +167,63 @@ pnpm test       # 453 件（domain 25 / auth-worker 318 / dashboard-worker 21 / 
 `pnpm dev:dashboard` 単体では RPC 先が存在しないため `/api/me` が
 503（`identity_unavailable`）になる。Service Binding をローカルで通すには
 auth-worker を先に `pnpm dev` で起動しておくこと。
+
+---
+
+## OIDC Code Flow を手元で 1 周する
+
+ブラウザは要らない。`curl` だけで認可からトークンまで通せる。
+
+```bash
+pnpm db:migrate:local
+pnpm --filter @u18/auth-worker client:seed-dev   # 検証用クライアント 2 つ（runbook §9.4）
+pnpm --filter @u18/auth-worker key:generate -- --apply-local  # 署名鍵（runbook §9.5）
+pnpm dev
+```
+
+**ポートが埋まっていたら `--port` で空きを指定する。** その場合は `ISSUER` も
+一緒に動かすこと。`ISSUER` は ID Token の `iss` であると同時に form POST の
+Origin 検証の基準でもあるので、ポートだけずらすとログインの form が 403 になる。
+
+```bash
+cd apps/auth-worker
+npx wrangler dev --port 8799 \
+  --var ISSUER:http://localhost:8799 \
+  --var WEBAUTHN_ORIGIN:http://localhost:8799
+```
+
+手順は次の通り。
+
+1. `users` へ検証用のアドレスを 1 行入れる（未登録のアドレスには OTP を
+   送らない設計のため。仕様書 9）。
+2. `GET /login` で CSRF トークンと Cookie を取り、`POST /login/start` →
+   dev ログに出るメール本文のパスから 6 桁を読む → `POST /login/verify` で
+   セッション Cookie を得る。form POST には `Origin` ヘッダが要る。
+3. `code_verifier` を作り、その SHA-256 の base64url を `code_challenge` として
+   `GET /oauth/authorize?...&code_challenge_method=S256` を叩く。
+   third-party クライアント（`u18-e2e-local`）なら同意画面の HTML が返り、
+   first-party（`u18-dashboard-local`）なら同意を飛ばして `302`/`303` で
+   `redirect_uri?code=...&state=...` へ返る。
+4. 同意画面から `POST /oauth/consent`（`decision=allow` と CSRF トークン）。
+5. `POST /oauth/token` に `grant_type=authorization_code` / `code` /
+   `redirect_uri` / `code_verifier` を渡す。confidential なら
+   `-u 'client_id:client_secret'`（`client_secret_basic`）でも
+   ボディの `client_secret`（`client_secret_post`）でもよいが、**両方を同時に
+   付けると 400 になる**（RFC 6749 §2.3.1）。
+6. 返ってきた `id_token` を `/.well-known/jwks.json` の公開鍵で検証する。
+
+つまずきやすいところ:
+
+- **`redirect_uri` は完全一致。** 末尾スラッシュが 1 つ違うだけで、authorize は
+  リダイレクトせずにエラー画面（400）を返す。これは仕様どおりの挙動で、
+  未検証の宛先へエラーを返さないため（RFC 6749 §4.1.2.1）。
+- **`code_challenge_method=S256` は省略できない。** 省略を `plain` とみなす
+  RFC 7636 の既定にも、黙って S256 と解釈する実装にも寄せていない。
+- **認可コードは 60 秒で、1 回しか使えない。** 2 回目は `invalid_grant` になり、
+  **1 回目に発行した Access Token も失効する**（RFC 9700 のリプレイ対応）。
+  試行錯誤中にこれを踏んだら、authorize からやり直すこと。
+- 署名鍵を入れ忘れると `/oauth/token` が 500 `server_error` を返す
+  （`/.well-known/jwks.json` のほうは 503）。手順の `key:generate` を飛ばしていないか確認する。
 
 ---
 
@@ -316,14 +374,26 @@ nfc-worker の侵害が `sessions` の露出になるため
 フロントエンドに出すと Cookie 境界と CSRF 境界が増えるため。
 実体は `apps/auth-worker/src/presentation/http/ui/`。
 
-| パス                      | 内容                                                       |
-| ------------------------- | ---------------------------------------------------------- |
-| `GET /login`              | ログイン画面。ログイン済みならその旨とログアウト導線を出す |
-| `POST /login/start`       | メール OTP の送信（form POST）                             |
-| `POST /login/verify`      | OTP の検証とセッション発行（form POST）                    |
-| `POST /login/logout`      | UI 用のログアウト。303 でログイン画面へ戻す                |
-| `GET /ui/u18.css`         | スタイルシート                                             |
-| `GET /ui/login-island.js` | Passkey のクライアントアイランド                           |
+| パス                      | 内容                                                            |
+| ------------------------- | --------------------------------------------------------------- |
+| `GET /login`              | ログイン画面。ログイン済みならその旨とログアウト導線を出す      |
+| `POST /login/start`       | メール OTP の送信（form POST）                                  |
+| `POST /login/verify`      | OTP の検証とセッション発行（form POST）                         |
+| `POST /login/logout`      | UI 用のログアウト。303 でログイン画面へ戻す                     |
+| `GET /ui/u18.css`         | スタイルシート                                                  |
+| `GET /ui/login-island.js` | Passkey のクライアントアイランド                                |
+| `POST /oauth/consent`     | 同意画面の送信先（form POST）。画面は `/oauth/authorize` が返す |
+
+同意画面（`ui/consent-page.tsx`）はログイン画面と `ui/layout.tsx`・
+スタイルシート・CSP（`ui/page-headers.ts`）・CSRF（`ui/csrf.ts`）を共有する。
+**JS は 1 行も使わない。** 認可の可否を決める画面が JS の読み込み失敗で
+操作不能になるのを避けるため。
+
+未ログインで `/oauth/authorize` に来ると `/login?return_to=...` へ送られ、
+ログイン後に元の認可要求へ戻る。`return_to` は **`/oauth/authorize` で始まる
+相対パスだけ**を通す許可制（`ui/return-to.ts`）。「同一オリジンなら」でも
+「相対パスなら」でもないのは、`//evil.test/` と `/\evil.test` がブラウザに
+よって別オリジンの絶対 URL として解釈されるため。
 
 HonoX は入れていない。ファイルベースルーティングと Vite 前提の構成が、
 この repo の Layered Architecture（ESLint が強制）と `wrangler.jsonc` に

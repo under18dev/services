@@ -22,10 +22,11 @@ describe("未定義のエンドポイント", () => {
 });
 
 describe("Phase 2 で実装するエンドポイント", () => {
-  // JWKS（#14）はここから外れて実装済み。応答は jwks.test.ts で検証する。
+  // 実装済みでここから外れたもの:
+  //   JWKS（#14） → jwks.test.ts
+  //   /oauth/authorize（#15） → oauth-authorize.test.ts
+  //   /oauth/token（#16） → oauth-token.test.ts
   it.each([
-    ["/oauth/authorize", "GET"],
-    ["/oauth/token", "POST"],
     ["/oauth/userinfo", "GET"],
     ["/oauth/revoke", "POST"],
   ])("%s は 501 を返す", async (path, method) => {

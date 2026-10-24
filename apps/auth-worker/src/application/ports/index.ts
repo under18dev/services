@@ -1,10 +1,14 @@
 export type * from "./audit-log.port";
+export type * from "./authorization-code.repository";
 export type * from "./clock.port";
 export type * from "./crypto.port";
 export type * from "./email-challenge.repository";
 export type * from "./email-sender.port";
 export type * from "./health.port";
+export type * from "./id-token.port";
 export type * from "./oauth-client.repository";
+export type * from "./oauth-grant.repository";
+export type * from "./oauth-token.repository";
 export type * from "./passkey.repository";
 export type * from "./retention.port";
 export type * from "./session.repository";

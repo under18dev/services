@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { secureHeaders } from "hono/secure-headers";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Context } from "hono";
 import {
@@ -11,6 +10,13 @@ import type { AppBindings } from "../types";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import { LoginPage, type LoginView } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
+import { pageSecurityHeaders } from "./page-headers";
+import {
+  loginUrlWithReturnTo,
+  RETURN_TO_FIELD,
+  RETURN_TO_PARAM,
+  sanitizeReturnTo,
+} from "./return-to";
 import { UI_STYLESHEET } from "./styles";
 
 /**
@@ -27,37 +33,6 @@ import { UI_STYLESHEET } from "./styles";
 export const uiRoutes = new Hono<AppBindings>();
 
 /**
- * ログイン画面に掛ける CSP。
- *
- * `app.ts` の `secureHeaders()` は既定では CSP を出さない。ここで**足して**いる
- * のであって、既存の設定を緩めてはいない。
- *
- * - `script-src 'self'`: `'unsafe-inline'` も nonce も使わない。そのため
- *   ページにインライン `<script>` を 1 つも置けない。アイランドを外部ファイル
- *   （/ui/login-island.js）として配信しているのはこの制約に合わせるため。
- * - `style-src 'self'`: 同じ理由で `<style>` もインライン `style` 属性も使わない。
- * - `form-action 'self'`: ログイン form の送信先を乗っ取られても外部へ飛ばせない。
- * - `frame-ancestors 'none'`: ログイン画面の clickjacking を禁じる
- *   （`secureHeaders()` の X-Frame-Options: SAMEORIGIN より強い）。
- * - `default-src 'none'` + `connect-src 'self'`: アイランドの fetch 先を
- *   自オリジンに限る。
- *
- * CSP に引っかかったら、ここを緩めるのではなく外部ファイルへ出すこと。
- */
-const pageSecurityHeaders = secureHeaders({
-  contentSecurityPolicy: {
-    defaultSrc: ["'none'"],
-    scriptSrc: ["'self'"],
-    styleSrc: ["'self'"],
-    imgSrc: ["'self'", "data:"],
-    connectSrc: ["'self'"],
-    formAction: ["'self'"],
-    frameAncestors: ["'none'"],
-    baseUri: ["'none'"],
-  },
-});
-
-/**
  * 画面を描く。
  *
  * CSRF トークンの用意をここに集約し、各ハンドラが忘れられないようにする。
@@ -65,9 +40,26 @@ const pageSecurityHeaders = secureHeaders({
 function renderLogin(
   c: Context<AppBindings>,
   view: LoginView,
+  returnTo: string | null,
   status: ContentfulStatusCode = 200,
 ): Response | Promise<Response> {
-  return c.html(<LoginPage view={view} csrfToken={ensureCsrfToken(c)} />, status);
+  return c.html(
+    <LoginPage view={view} csrfToken={ensureCsrfToken(c)} returnTo={returnTo} />,
+    status,
+  );
+}
+
+/**
+ * ログイン後の戻り先を読む。
+ *
+ * **必ず `sanitizeReturnTo` を通す。** クエリからも form からも、利用者（あるいは
+ * 利用者にリンクを踏ませた第三者）が任意の文字列を入れられる。素通しすると、
+ * u18 のログイン画面から外部サイトへ飛ばすオープンリダイレクトになる
+ * （ui/return-to.ts）。
+ */
+function readReturnTo(c: Context<AppBindings>, form?: FormData): string | null {
+  const raw = form === undefined ? c.req.query(RETURN_TO_PARAM) : field(form, RETURN_TO_FIELD);
+  return sanitizeReturnTo(raw);
 }
 
 /** 壊れた本文で 500 にしない。`formData()` は不正な本文で投げる。 */
@@ -90,15 +82,20 @@ function field(form: FormData, name: string): string {
  * 理由は書かない（トークンが古いのか Origin が違うのかを攻撃者に教えない）。
  * 新しいトークンを載せた入力画面へ戻し、正規の利用者はやり直せるようにする。
  */
-function rejectCsrf(c: Context<AppBindings>): Response | Promise<Response> {
+function rejectCsrf(
+  c: Context<AppBindings>,
+  returnTo: string | null,
+): Response | Promise<Response> {
   return renderLogin(
     c,
     { kind: "email", email: "", error: "操作を受け付けられませんでした。もう一度お試しください。" },
+    returnTo,
     403,
   );
 }
 
 uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
+  const returnTo = readReturnTo(c);
   const token = readSessionCookie(c);
   if (token !== null) {
     const container = c.get("container");
@@ -107,16 +104,23 @@ uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
       const user = await container.repositories.users.findById(result.value.userId);
       if (user !== null) {
         const props = user.snapshot();
-        return renderLogin(c, {
-          kind: "signed_in",
-          displayName: props.displayName,
-          username: props.username,
-        });
+        // ログイン済みでも自動で戻り先へ飛ばさない。黙って飛ばすと、
+        // 「どのアカウントで認可しようとしているか」が利用者に見えないまま
+        // 同意画面へ進む。切り替える手段を出したうえで本人に選ばせる。
+        return renderLogin(
+          c,
+          {
+            kind: "signed_in",
+            displayName: props.displayName,
+            username: props.username,
+          },
+          returnTo,
+        );
       }
     }
   }
 
-  return renderLogin(c, { kind: "email", email: "", error: null });
+  return renderLogin(c, { kind: "email", email: "", error: null }, returnTo);
 });
 
 /**
@@ -128,7 +132,8 @@ uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
  */
 uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c);
+  const returnTo = readReturnTo(c, form);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
 
   const email = field(form, "email").trim();
 
@@ -144,13 +149,13 @@ uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
       result.error.code === "invalid_input"
         ? "メールアドレスの形式をご確認ください。"
         : "ただいま混み合っています。しばらくしてからお試しください。";
-    return renderLogin(c, { kind: "email", email, error: message }, 400);
+    return renderLogin(c, { kind: "email", email, error: message }, returnTo, 400);
   }
 
   // 成功しても「送った」とは言わない。未登録のアドレスでも同じこの画面を返す。
   // ここで描画せずリダイレクトすると、メールアドレスをクエリに載せることになる
   // （アクセスログと Referer に残る）。POST の応答としてそのまま描く。
-  return renderLogin(c, { kind: "code", email, error: null });
+  return renderLogin(c, { kind: "code", email, error: null }, returnTo);
 });
 
 /**
@@ -162,7 +167,8 @@ uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
  */
 uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c);
+  const returnTo = readReturnTo(c, form);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
 
   const email = field(form, "email").trim();
   const code = field(form, "code").trim();
@@ -175,6 +181,7 @@ uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
         email,
         error: "確認コードを確認できませんでした。もう一度お試しください。",
       },
+      returnTo,
       400,
     );
 
@@ -202,8 +209,11 @@ uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
 
   // 303 でやり直し不能にする。POST の結果をそのまま描くと、再読み込みで
   // 使用済みの OTP が再送され、利用者には失敗としか見えない。
-  // 行き先は /login（＝ログイン済み画面）。戻り先の決定は同意画面 #15 の責務。
-  return c.redirect("/login", 303);
+  //
+  // 戻り先は `sanitizeReturnTo` を通した値だけ（`/oauth/authorize` で始まる
+  // 相対パス）。それ以外は null に落ちてログイン済み画面へ行くので、
+  // ここが外部サイトへのリダイレクタになることはない（ui/return-to.ts）。
+  return c.redirect(returnTo ?? "/login", 303);
 });
 
 /**
@@ -215,7 +225,8 @@ uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
  */
 uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c);
+  const returnTo = readReturnTo(c, form);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
 
   // どの経路でも Cookie は必ず落とす。サーバー側の失効に失敗しても、
   // ブラウザに使えないトークンを残さない（auth.routes.ts と同じ方針）。
@@ -227,7 +238,10 @@ uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
     await c.get("container").useCases.logout.execute({ sessionToken: token, allDevices: false });
   }
 
-  return c.redirect("/login", 303);
+  // 戻り先は保持したままログイン画面へ戻す。認可の途中で「別のアカウントで
+  // ログインし直す」を選んだ利用者が、ログイン後に元の認可要求へ戻れるように
+  // するため。ここで戻り先を捨てると、アプリ側からやり直すしかなくなる。
+  return c.redirect(loginUrlWithReturnTo(returnTo), 303);
 });
 
 /**

@@ -67,19 +67,26 @@ apps/auth-worker/src/
 │   │   ├── app.ts               Hono アプリ組み立て、container ミドルウェア、404/500 ハンドラ
 │   │   ├── types.ts             AppBindings（Hono の型パラメータ）
 │   │   ├── health.routes.ts     GET /health（DatabaseProbe 越しに D1 疎通を確認）
-│   │   ├── oauth.routes.ts      Discovery / JWKS / authorize / token / userinfo / revoke
+│   │   ├── oauth.routes.ts      Discovery / JWKS。authorize と token をマウントする
+│   │   ├── oauth.authorize.routes.tsx  GET /oauth/authorize, POST /oauth/consent
+│   │   ├── oauth.token.routes.ts       POST /oauth/token
 │   │   ├── auth.routes.ts       Email OTP / Passkey / logout
 │   │   ├── me.routes.ts         /api/me, /api/me/sessions
 │   │   ├── problem.ts           エラー応答の共通形 + UseCaseError → HTTP status 変換
-│   │   └── session-cookie.ts    __Host- Cookie の読み書き
+│   │   ├── session-cookie.ts    __Host- Cookie の読み書き
+│   │   └── ui/                  Auth UI（ログイン画面・同意画面・CSP・CSRF・戻り先）
 │   └── rpc/
 │       └── identity.entrypoint.ts   WorkerEntrypoint 実装
 ├── application/
 │   ├── ports/                   Port のインターフェース定義（§4 の表）
-│   └── use-cases/               GetSession / ListSessions / RevokeSession + types.ts
+│   └── use-cases/               GetSession / ListSessions / RevokeSession /
+│                                 AuthorizeRequest / IssueAuthorizationCode /
+│                                 ExchangeAuthorizationCode + types.ts
 ├── domain/
-│   ├── entities/                session.ts, user.ts
-│   ├── services/                scope.ts, token-lifetime.ts, retention-policy.ts
+│   ├── entities/                session.ts, user.ts, oauth-client.ts,
+│   │                            authorization-code.ts, oauth-grant.ts, access-token.ts
+│   ├── services/                scope.ts, token-lifetime.ts, retention-policy.ts,
+│   │                            redirect-uri.ts, pkce.ts
 │   └── errors/                  domain-error.ts
 ├── infrastructure/
 │   ├── persistence/             Drizzle Repository 3 本 + DatabaseProbe
@@ -276,6 +283,11 @@ Port は Application が「必要な操作」として定義し、Infrastructure
 | `WebAuthnService`                | `webauthn.port.ts`                                | `SimpleWebAuthnService` — `webauthn/simplewebauthn.service.ts`（`@simplewebauthn/server` をここに閉じ込める） |
 | `OAuthClientRepository`          | `oauth-client.repository.ts`                      | `DrizzleOAuthClientRepository` — `persistence/drizzle-oauth-client.repository.ts`                             |
 | `SigningKeyProvider`             | `signing-key.port.ts`                             | `JoseSigningKeyProvider` — `crypto/jose-signing-key.ts`（`jose` をここに閉じ込める）                          |
+| `AuthorizationCodeRepository`    | `authorization-code.repository.ts`                | `DrizzleAuthorizationCodeRepository` — `persistence/drizzle-authorization-code.repository.ts`                 |
+| `OAuthGrantRepository`           | `oauth-grant.repository.ts`                       | `DrizzleOAuthGrantRepository` — `persistence/drizzle-oauth-grant.repository.ts`                               |
+| `OAuthTokenRepository`           | `oauth-token.repository.ts`                       | `DrizzleOAuthTokenRepository` — `persistence/drizzle-oauth-token.repository.ts`                               |
+| `PkceVerifier`                   | `crypto.port.ts`                                  | `WebCryptoPkceVerifier` — `crypto/web-crypto.ts`                                                              |
+| `IdTokenIssuer`                  | `id-token.port.ts`                                | `JoseIdTokenIssuer` — `crypto/jose-id-token-signer.ts`（`alg` を ES256 に固定する関門）                       |
 
 テスト用の差し替えは `apps/auth-worker/test/fakes.ts`（`InMemoryUserRepository` 等）と
 `FixedClock`（`packages/domain/src/clock.ts`、`@u18/testing` からも再エクスポート）。
@@ -289,6 +301,17 @@ Port の設計上の含意をいくつか:
 - `AuditLogger.record()` は失敗しても例外を投げない契約（`DrizzleAuditLogger` は
   内部で catch して `console.error` に落とす）。ログが書けないことを理由に
   ログインを拒否すると、可用性の問題がそのまま認証停止になるため。
+- `AuthorizationCodeRepository` に `findByHash()` が**無い**のは設計である。
+  生やすと「引いて検証してから消費する」が書けてしまい、同時に届いた 2 本の
+  交換要求が両方とも検証を通りうる（仕様書 7.3）。消費は `consume()` の
+  条件付き UPDATE 1 文だけに閉じている。
+- `IdTokenIssuer` は `alg` を引数に取らない。`SigningKeyProvider` が
+  `CryptoKey` を返すので UseCase から直接 `jose` を呼べてしまうが、そうすると
+  署名アルゴリズムを選ぶコードが Application に散り、「ここだけ HS256 でも通る」
+  分岐が後から生えうる（仕様書 9 はアルゴリズムの固定を要求している）。
+- `PkceVerifier` を `TokenHasher` と分けているのは符号化が違うため。保存用の
+  ハッシュは 16 進、`code_challenge` は base64url で、共用すると呼び出し側が
+  毎回どちらの表現かを気にすることになる。
 - `EmailSender` は `createContainer` で環境を見て差し替える。
   `ENVIRONMENT !== "development"` の場合、`ConsoleEmailSender` を使わず
   **起動時に throw する**。本番で OTP が Workers のログに出る事故を、
@@ -427,22 +450,27 @@ export const CONTRACT_VERSION = "1.0.0" as const;
 ## 6. 実装済みと未実装
 
 仕様書 12 の **Phase 1（Monorepo / Identity Core）は完了**。Phase 2（OIDC Provider）は
-クライアント登録・署名鍵・JWKS・ログイン UI まで入り、認可フロー本体が残っている。
+**認可フロー本体まで入った**。`/oauth/authorize` と `/oauth/token` が動き、
+Authorization Code Flow + PKCE が端から端まで通る。残るのは
+`/oauth/userinfo` と `/oauth/revoke`（#17）。
 
 ### 6.1 動くもの
 
-| 入口                                                                                          | 実体                                                                                       |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `GET /health`                                                                                 | `health.routes.ts` → `DatabaseProbe.ping()`（D1 へ `select 1`）。失敗時は 503 + `degraded` |
-| `GET /.well-known/openid-configuration`                                                       | `oauth.routes.ts`。`ISSUER` から静的に組み立てる                                           |
-| `GET /api/me`                                                                                 | `me.routes.ts` → `GetSessionUseCase` → `UserRepository.findById`                           |
-| `GET /api/me/sessions`                                                                        | `me.routes.ts` → `ListSessionsUseCase`                                                     |
-| `DELETE /api/me/sessions/:id`                                                                 | `me.routes.ts` → `RevokeSessionUseCase`。Origin 検証つき                                   |
-| `PATCH /api/me`                                                                               | `me.routes.ts` → `UpdateProfileUseCase`。Origin 検証 + username 変更時の再認証             |
-| `GET /api/me/passkeys`                                                                        | `me.routes.ts` → `ListPasskeysUseCase`。公開鍵と Credential ID は返さない                  |
-| `DELETE /api/me/passkeys/:id`                                                                 | `me.routes.ts` → `DeletePasskeyUseCase`。Origin 検証 + 再認証 + 所有者チェック             |
-| RPC `getSession` / `getUserProfile` / `listSessions` / `revokeSession`                        | `identity.entrypoint.ts`                                                                   |
-| dashboard `GET /health`, `GET /api/me`, `GET /api/me/sessions`, `DELETE /api/me/sessions/:id` | `apps/dashboard-worker/src/index.ts`                                                       |
+| 入口                                                                                          | 実体                                                                                            |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `GET /health`                                                                                 | `health.routes.ts` → `DatabaseProbe.ping()`（D1 へ `select 1`）。失敗時は 503 + `degraded`      |
+| `GET /.well-known/openid-configuration`                                                       | `oauth.routes.ts`。`ISSUER` から静的に組み立てる                                                |
+| `GET /oauth/authorize`                                                                        | `oauth.authorize.routes.tsx` → `AuthorizeRequestUseCase` → `IssueAuthorizationCodeUseCase`      |
+| `POST /oauth/consent`                                                                         | 同上。同意の送信先。CSRF はログイン画面と同じ double-submit + Origin 検証                       |
+| `POST /oauth/token`                                                                           | `oauth.token.routes.ts` → `AuthenticateOAuthClientUseCase` → `ExchangeAuthorizationCodeUseCase` |
+| `GET /api/me`                                                                                 | `me.routes.ts` → `GetSessionUseCase` → `UserRepository.findById`                                |
+| `GET /api/me/sessions`                                                                        | `me.routes.ts` → `ListSessionsUseCase`                                                          |
+| `DELETE /api/me/sessions/:id`                                                                 | `me.routes.ts` → `RevokeSessionUseCase`。Origin 検証つき                                        |
+| `PATCH /api/me`                                                                               | `me.routes.ts` → `UpdateProfileUseCase`。Origin 検証 + username 変更時の再認証                  |
+| `GET /api/me/passkeys`                                                                        | `me.routes.ts` → `ListPasskeysUseCase`。公開鍵と Credential ID は返さない                       |
+| `DELETE /api/me/passkeys/:id`                                                                 | `me.routes.ts` → `DeletePasskeyUseCase`。Origin 検証 + 再認証 + 所有者チェック                  |
+| RPC `getSession` / `getUserProfile` / `listSessions` / `revokeSession`                        | `identity.entrypoint.ts`                                                                        |
+| dashboard `GET /health`, `GET /api/me`, `GET /api/me/sessions`, `DELETE /api/me/sessions/:id` | `apps/dashboard-worker/src/index.ts`                                                            |
 
 Repository は 3 本とも実装済み（`users`, `sessions`, `audit_logs`）。
 Drizzle スキーマは仕様書 7.1 の全テーブル分が `packages/db/src/schema/` に定義され、
@@ -453,15 +481,20 @@ Drizzle スキーマは仕様書 7.1 の全テーブル分が `packages/db/src/s
 
 ### 6.2 501 Not Implemented を返すもの
 
-`apps/auth-worker/src/presentation/http/oauth.routes.ts` の **4 本だけ**:
+`apps/auth-worker/src/presentation/http/oauth.routes.ts` の **2 本だけ**:
 
-- `GET /oauth/authorize`（#15）
-- `POST /oauth/token`（#16）
 - `GET|POST /oauth/userinfo`（#17）
 - `POST /oauth/revoke`（#17）
 
 これ以外に 501 を返す入口は無い。以前ここに並んでいたメール OTP・Passkey・
-ログアウト（#9 / #10）と JWKS（#14）はすべて実装済みで、上の 6.1 に移した。
+ログアウト（#9 / #10）、JWKS（#14）、authorize と token（#15 / #16）は
+すべて実装済みで、上の 6.1 に移した。
+
+#17 が必要とする土台は `OAuthTokenRepository`（§4.1）に揃っている。
+Access Token は不透明トークンなので（仕様書 14-1 の決定 5）、検証は必ず
+この Port を通る —— `findByTokenHash()` で引き、可否は
+`AccessToken.isUsableAt(now)` が決め、claim の絞り込みは `AccessToken.scopes` を
+`filterClaimsByScope()` へ渡す。失効は `revokeByTokenHash()` が冪等に行う。
 
 ### 6.3 この状態の帰結
 
@@ -482,15 +515,25 @@ Drizzle スキーマは仕様書 7.1 の全テーブル分が `packages/db/src/s
 
 `jose` と `@simplewebauthn/server` はどちらも実際に使われている。
 
-残っているのは認可フロー本体（§6.2 の 4 本）で、これが入ると仕様書 13 の
-MVP 受け入れ基準のうち OIDC に関わる項目が埋まる。
+**OIDC の Code Flow は端から端まで通る。** `/oauth/authorize` が認可コードを
+発行し、`/oauth/token` が ID Token（ES256・`kid` つき）と不透明な
+Access Token を返す。ID Token は `/.well-known/jwks.json` の公開鍵で検証できる。
+`curl` だけで 1 周する手順は README の「OIDC Code Flow を手元で 1 周する」にある。
+
+認可コードの単回交換は `oauth_authorization_codes` への条件付き UPDATE 1 文で
+保証している（仕様書 7.3）。これが効いていることは
+`apps/auth-worker/test/oauth-code-concurrency.test.ts` が実 D1 上の 10 並列で
+固定しており、実装を SELECT → 判定 → UPDATE に戻すと 10 件すべてが成功して
+テストが落ちることを確認してある。
+
+残っているのは `/oauth/userinfo` と `/oauth/revoke`（§6.2）。
 
 ---
 
 ## 7. テストの仕組み
 
-`pnpm test` は現在すべて通る（`packages/domain` 25 件、`apps/auth-worker` 318 件、
-`apps/dashboard-worker` 21 件、合計 364 件）。
+`pnpm test` は現在すべて通る（`packages/domain` 25 件、`apps/auth-worker` 477 件、
+`apps/dashboard-worker` 26 件、`apps/nfc-worker` 89 件、合計 617 件）。
 
 ### 7.1 Workers ランタイム上で走らせる
 
@@ -609,10 +652,13 @@ sequenceDiagram
    `tsconfig.client.json`）も同様で、ここだけ DOM 型を有効にしている。
 
 4. **`tests/e2e`, `tests/oidc-conformance`, `tests/security` は空ディレクトリのまま**。
-   現存するテストは `apps/auth-worker/test/`（24 本・318 件）、
-   `apps/dashboard-worker/test/`（21 件）、`packages/domain/test/`（25 件）。
-   仕様書 11.3 の E2E / 適合性テスト（#20 / #28）は、認可フロー（#15 / #16）が
-   入ってから着手する。
+   現存するテストは `apps/auth-worker/test/`（33 本・477 件）、
+   `apps/dashboard-worker/test/`（26 件）、`apps/nfc-worker/test/`（89 件）、
+   `packages/domain/test/`（25 件）。認可フロー（#15 / #16）が入ったので、
+   仕様書 11.3 の E2E / 適合性テスト（#20 / #28）に着手できる状態になった。
+   なお単回交換の競合（#19）は `tests/security/` ではなく
+   `apps/auth-worker/test/oauth-code-concurrency.test.ts` に置いた。実 D1 と
+   Worker 本体の両方が要り、auth-worker の vitest 設定の外では走らせられないため。
 
 5. **`compatibility_date` は `2026-08-15`** で、今日の日付ではない。
    `@cloudflare/vitest-pool-workers` が同梱する workerd のビルド日より後の日付を

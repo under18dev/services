@@ -117,7 +117,7 @@ async function postJson(path: string, body: unknown): Promise<Response> {
   });
 }
 
-function PasskeyLogin() {
+function PasskeyLogin({ returnTo }: { returnTo: string }) {
   const [phase, setPhase] = useState<Phase>({ kind: "ready" });
 
   const start = async (): Promise<void> => {
@@ -147,10 +147,14 @@ function PasskeyLogin() {
         return;
       }
 
-      // セッション Cookie は Set-Cookie で入っている。GET /login を取り直すと
-      // サーバーがログイン済みの画面を返す。遷移先をここで決めない
-      // （「次にどこへ戻すか」は同意画面 #15 が持つ責務）。
-      window.location.assign("/login");
+      // セッション Cookie は Set-Cookie で入っている。認可フローの途中なら
+      // 元の `/oauth/authorize` へ、そうでなければ `/login`（＝ログイン済み画面）へ。
+      //
+      // 戻り先は**サーバーが data 属性に入れた値だけ**を使い、ここでは
+      // `location.search` を読まない。クライアント側で URL を解釈すると、
+      // サーバーの `sanitizeReturnTo` を迂回してオープンリダイレクトになる
+      // （ui/return-to.ts）。属性に入っている時点で検証済み。
+      window.location.assign(returnTo);
     } catch {
       // 利用者が選択 UI を閉じた場合も例外になる。理由で分岐しない。
       setPhase({ kind: "failed" });
@@ -179,8 +183,13 @@ function PasskeyLogin() {
 
 const mount = document.getElementById("passkey-island");
 if (mount !== null && supportsPasskey()) {
+  // サーバーが検証済みの戻り先を置いていればそれを使う。無ければ /login。
+  const returnTo =
+    mount instanceof HTMLElement && typeof mount.dataset["returnTo"] === "string"
+      ? mount.dataset["returnTo"]
+      : "/login";
   // サーバーが入れておいた「この端末では使えないかもしれない」旨の代替表示を
   // 置き換える。JS が落ちた場合はその代替表示が残る。
   mount.textContent = "";
-  render(<PasskeyLogin />, mount);
+  render(<PasskeyLogin returnTo={returnTo} />, mount);
 }

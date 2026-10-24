@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
 import { Layout } from "./layout";
+import { loginUrlWithReturnTo, RETURN_TO_FIELD } from "./return-to";
 
 /**
  * ログイン画面（仕様書 6.1 / 8.1、決定 14-1 の 4）。
@@ -35,11 +36,30 @@ export type LoginView =
 export type LoginPageProps = {
   readonly view: LoginView;
   readonly csrfToken: string;
+  /**
+   * ログイン後の戻り先（`/oauth/authorize?...`）。無ければ null。
+   *
+   * **ここへ届く前に `sanitizeReturnTo` を通っていること。** この
+   * コンポーネントは検証せず、受け取った値を hidden と data 属性に
+   * そのまま載せる。検証を描画側にも置くと「どちらかが通したから大丈夫」
+   * という曖昧さが生まれるので、関門は 1 つに保つ（ui/return-to.ts）。
+   */
+  readonly returnTo: string | null;
 };
 
 const CsrfField: FC<{ token: string }> = ({ token }) => (
   <input type="hidden" name={CSRF_FIELD_NAME} value={token} />
 );
+
+/**
+ * 戻り先を form に載せる。
+ *
+ * クエリではなく hidden にするのは、2 段目の form（コード入力）が POST で
+ * あって、クエリを引き継ぐ経路が無いため。`null` なら要素自体を出さないので、
+ * 認可フロー以外のログインでは HTML が 1 バイトも変わらない。
+ */
+const ReturnToField: FC<{ returnTo: string | null }> = ({ returnTo }) =>
+  returnTo === null ? null : <input type="hidden" name={RETURN_TO_FIELD} value={returnTo} />;
 
 const ErrorMessage: FC<{ message: string | null }> = ({ message }) =>
   message === null ? null : (
@@ -52,6 +72,7 @@ const ErrorMessage: FC<{ message: string | null }> = ({ message }) =>
 const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" }> }> = ({
   view,
   csrfToken,
+  returnTo,
 }) => (
   <>
     <h2>ログイン</h2>
@@ -60,6 +81,7 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
 
     <form method="post" action="/login/start">
       <CsrfField token={csrfToken} />
+      <ReturnToField returnTo={returnTo} />
       <label class="field" for="email">
         <span>メールアドレス</span>
         <input
@@ -88,7 +110,13 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
       行き止まりにならないよう代替の案内を置いておく。
       「パスキーが登録されていません」とは書かない（列挙の材料になる）。
     */}
-    <div id="passkey-island">
+    {/*
+      戻り先はアイランドへ data 属性で渡す。インライン `<script>` で
+      グローバル変数に入れる手もあるが、`script-src 'self'` の CSP に
+      引っかかり `'unsafe-inline'` が要る。CSP を緩めるくらいなら属性で渡す
+      （ui/page-headers.ts）。
+    */}
+    <div id="passkey-island" data-return-to={returnTo ?? undefined}>
       <p class="notice">
         パスキーをお使いの場合は、この端末で JavaScript を有効にするとご利用いただけます。
         上のメールアドレスでのログインは JavaScript 無しでも行えます。
@@ -100,6 +128,7 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
 const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }> }> = ({
   view,
   csrfToken,
+  returnTo,
 }) => (
   <>
     <h2>確認コードの入力</h2>
@@ -115,6 +144,7 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
 
     <form method="post" action="/login/verify">
       <CsrfField token={csrfToken} />
+      <ReturnToField returnTo={returnTo} />
       {/*
         メールアドレスは hidden で持ち回す。クエリに載せるとアクセスログや
         Referer に残るため（OTP やトークンをクエリに載せないのと同じ理由）。
@@ -143,13 +173,16 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
     <div class="links">
       <form method="post" action="/login/start" class="inline-form">
         <CsrfField token={csrfToken} />
+        <ReturnToField returnTo={returnTo} />
         <input type="hidden" name="email" value={view.email} />
         <button type="submit" class="link-button">
           確認コードを再送する
         </button>
       </form>
       {" / "}
-      <a href="/login">別のメールアドレスを使う</a>
+      <a href={returnTo === null ? "/login" : loginUrlWithReturnTo(returnTo)}>
+        別のメールアドレスを使う
+      </a>
     </div>
   </>
 );
@@ -157,6 +190,7 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
 const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_in" }> }> = ({
   view,
   csrfToken,
+  returnTo,
 }) => (
   <>
     <h2>ログイン済みです</h2>
@@ -173,6 +207,7 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
     <p class="lead">別のアカウントでログインする場合は、いったんログアウトしてください。</p>
     <form method="post" action="/login/logout">
       <CsrfField token={csrfToken} />
+      <ReturnToField returnTo={returnTo} />
       <button type="submit" class="button button-secondary">
         ログアウトして別のアカウントでログイン
       </button>
