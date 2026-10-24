@@ -97,6 +97,30 @@ describe("DrizzlePasskeyRepository", () => {
     expect((await repo.findByCredentialId("credential-1"))?.counter).toBe(10);
   });
 
+  it("内部 ID で引ける", async () => {
+    // 管理画面は Credential ID ではなく内部 ID を扱う。
+    await repo.create(aNewPasskey());
+
+    expect((await repo.findById("pky_1"))?.credentialId).toBe("credential-1");
+    expect(await repo.findById("pky_missing")).toBeNull();
+  });
+
+  it("所有者の指定が違う削除は何もしない", async () => {
+    // DELETE の条件に userId を含める。id だけで消える実装だと、
+    // 呼び出し側の取り違えがそのまま他人の認証器の剥奪になる。
+    await repo.create(aNewPasskey());
+
+    expect(await repo.deleteOwned("pky_1", other.id)).toBe(false);
+    expect(await repo.findById("pky_1")).not.toBeNull();
+
+    expect(await repo.deleteOwned("pky_1", user.id)).toBe(true);
+    expect(await repo.findById("pky_1")).toBeNull();
+  });
+
+  it("消えた行をもう一度消しても false を返すだけ", async () => {
+    expect(await repo.deleteOwned("pky_1", user.id)).toBe(false);
+  });
+
   it("ユーザーを削除するとパスキーも消える", async () => {
     await repo.create(aNewPasskey());
 

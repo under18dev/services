@@ -41,6 +41,11 @@ export class InMemoryPasskeyRepository implements PasskeyRepository {
     return props ? Passkey.fromPersistence(props) : null;
   }
 
+  async findById(id: string): Promise<Passkey | null> {
+    const props = [...this.store.values()].find((candidate) => candidate.id === id);
+    return props ? Passkey.fromPersistence(props) : null;
+  }
+
   async listByUserId(userId: string): Promise<readonly Passkey[]> {
     return [...this.store.values()]
       .filter((props) => props.userId === userId)
@@ -61,6 +66,18 @@ export class InMemoryPasskeyRepository implements PasskeyRepository {
     if (!props || props.counter > counter) return false;
     this.store.set(credentialId, { ...props, counter, lastUsedAt: at });
     return true;
+  }
+
+  async deleteOwned(id: string, userId: string): Promise<boolean> {
+    // 実装と同じく、所有者が違えば何も消さない。id だけで消す実装にすると
+    // 「他人の認証器を外せる」バグをテストが見逃す。
+    for (const [credentialId, props] of this.store) {
+      if (props.id !== id) continue;
+      if (props.userId !== userId) return false;
+      this.store.delete(credentialId);
+      return true;
+    }
+    return false;
   }
 }
 
