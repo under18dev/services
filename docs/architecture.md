@@ -250,18 +250,24 @@ Port は Application が「必要な操作」として定義し、Infrastructure
 
 ### 4.1 auth-worker
 
-| Port（`src/application/ports/`） | 定義                                              | 実装（`src/infrastructure/`）                                            |
-| -------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ |
-| `UserRepository`                 | `user.repository.ts`                              | `DrizzleUserRepository` — `persistence/drizzle-user.repository.ts`       |
-| `SessionRepository`              | `session.repository.ts`                           | `DrizzleSessionRepository` — `persistence/drizzle-session.repository.ts` |
-| `AuditLogger`                    | `audit-log.port.ts`                               | `DrizzleAuditLogger` — `persistence/drizzle-audit-logger.ts`             |
-| `DatabaseProbe`                  | `health.port.ts`                                  | `DrizzleDatabaseProbe` — `persistence/drizzle-database-probe.ts`         |
-| `TokenHasher`                    | `crypto.port.ts`                                  | `Sha256TokenHasher` — `crypto/web-crypto.ts`                             |
-| `IpHasher`                       | `crypto.port.ts`                                  | `PepperedIpHasher` — `crypto/web-crypto.ts`                              |
-| `RandomTokenGenerator`           | `crypto.port.ts`                                  | `WebCryptoTokenGenerator` — `crypto/web-crypto.ts`                       |
-| `ConstantTimeComparator`         | `crypto.port.ts`                                  | `TimingSafeComparator` — `crypto/web-crypto.ts`                          |
-| `EmailSender`                    | `email-sender.port.ts`                            | `ConsoleEmailSender` — `email/console-email-sender.ts`（開発環境のみ）   |
-| `Clock`                          | `clock.port.ts`（`@u18/domain` の再エクスポート） | `systemClock` — `packages/domain/src/clock.ts`                           |
+| Port（`src/application/ports/`） | 定義                                              | 実装（`src/infrastructure/`）                                                                                 |
+| -------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `UserRepository`                 | `user.repository.ts`                              | `DrizzleUserRepository` — `persistence/drizzle-user.repository.ts`                                            |
+| `SessionRepository`              | `session.repository.ts`                           | `DrizzleSessionRepository` — `persistence/drizzle-session.repository.ts`                                      |
+| `AuditLogger`                    | `audit-log.port.ts`                               | `DrizzleAuditLogger` — `persistence/drizzle-audit-logger.ts`                                                  |
+| `DatabaseProbe`                  | `health.port.ts`                                  | `DrizzleDatabaseProbe` — `persistence/drizzle-database-probe.ts`                                              |
+| `TokenHasher`                    | `crypto.port.ts`                                  | `Sha256TokenHasher` — `crypto/web-crypto.ts`                                                                  |
+| `IpHasher`                       | `crypto.port.ts`                                  | `PepperedIpHasher` — `crypto/web-crypto.ts`                                                                   |
+| `RandomTokenGenerator`           | `crypto.port.ts`                                  | `WebCryptoTokenGenerator` — `crypto/web-crypto.ts`                                                            |
+| `ConstantTimeComparator`         | `crypto.port.ts`                                  | `TimingSafeComparator` — `crypto/web-crypto.ts`                                                               |
+| `EmailSender`                    | `email-sender.port.ts`                            | `ConsoleEmailSender` — `email/console-email-sender.ts`（開発環境のみ）                                        |
+| `Clock`                          | `clock.port.ts`（`@u18/domain` の再エクスポート） | `systemClock` — `packages/domain/src/clock.ts`                                                                |
+| `EmailChallengeRepository`       | `email-challenge.repository.ts`                   | `DrizzleEmailChallengeRepository` — `persistence/drizzle-email-challenge.repository.ts`                       |
+| `PasskeyRepository`              | `passkey.repository.ts`                           | `DrizzlePasskeyRepository` — `persistence/drizzle-passkey.repository.ts`                                      |
+| `WebAuthnChallengeRepository`    | `webauthn-challenge.repository.ts`                | `DrizzleWebAuthnChallengeRepository` — `persistence/drizzle-webauthn-challenge.repository.ts`                 |
+| `WebAuthnService`                | `webauthn.port.ts`                                | `SimpleWebAuthnService` — `webauthn/simplewebauthn.service.ts`（`@simplewebauthn/server` をここに閉じ込める） |
+| `OAuthClientRepository`          | `oauth-client.repository.ts`                      | `DrizzleOAuthClientRepository` — `persistence/drizzle-oauth-client.repository.ts`                             |
+| `SigningKeyProvider`             | `signing-key.port.ts`                             | `JoseSigningKeyProvider` — `crypto/jose-signing-key.ts`（`jose` をここに閉じ込める）                          |
 
 テスト用の差し替えは `apps/auth-worker/test/fakes.ts`（`InMemoryUserRepository` 等）と
 `FixedClock`（`packages/domain/src/clock.ts`、`@u18/testing` からも再エクスポート）。
@@ -285,9 +291,14 @@ Port の設計上の含意をいくつか:
   誰も気づけないため（仕様書 9 Privacy）。この挙動は
   `apps/auth-worker/test/security.test.ts` で検証されている。
 
-> `RandomTokenGenerator` / `ConstantTimeComparator` / `IpHasher` / `EmailSender` は
-> コンテナに組み込まれているが、現時点の 3 つの UseCase はこれらを使っていない。
-> ログイン系（Email OTP / Passkey）の実装で消費される予定の Port である。
+> 以前ここに「`RandomTokenGenerator` / `ConstantTimeComparator` / `IpHasher` /
+> `EmailSender` はコンテナに組み込まれているがどの UseCase も使っていない」と
+> 書いてあった。#9 / #10 でログイン系が入り、4 つとも実際に使われている。
+>
+> `SigningKeyProvider.getActiveSigningKey()` だけは `UseCaseResult` ではなく
+> **throw する**。鍵の未設定は「業務上の失敗」ではなくインフラの設定不備で、
+> 呼び出し側が分岐して回復できる類ではないため。ID Token を発行する側が
+> 捕まえて `err(...)` へ畳む。
 
 ### 4.2 dashboard-worker
 
@@ -407,7 +418,8 @@ export const CONTRACT_VERSION = "1.0.0" as const;
 
 ## 6. 実装済みと未実装
 
-仕様書 12 の Phase 1（Monorepo / Identity Core）の途中。Phase 2 は未着手。
+仕様書 12 の **Phase 1（Monorepo / Identity Core）は完了**。Phase 2（OIDC Provider）は
+クライアント登録・署名鍵・JWKS・ログイン UI まで入り、認可フロー本体が残っている。
 
 ### 6.1 動くもの
 
@@ -433,38 +445,44 @@ Drizzle スキーマは仕様書 7.1 の全テーブル分が `packages/db/src/s
 
 ### 6.2 501 Not Implemented を返すもの
 
-`apps/auth-worker/src/presentation/http/auth.routes.ts` — ルートは登録済みだが全件 501:
+`apps/auth-worker/src/presentation/http/oauth.routes.ts` の **4 本だけ**:
 
-- `POST /api/auth/email/start`, `POST /api/auth/email/verify`
-- `POST /api/auth/passkeys/register/options`, `.../register/verify`
-- `POST /api/auth/passkeys/login/options`, `.../login/verify`
-- `POST /api/auth/logout`
+- `GET /oauth/authorize`（#15）
+- `POST /oauth/token`（#16）
+- `GET|POST /oauth/userinfo`（#17）
+- `POST /oauth/revoke`（#17）
 
-`oauth.routes.ts` — Phase 2:
-
-- `GET /.well-known/jwks.json`
-- `GET /oauth/authorize`, `POST /oauth/token`
-- `GET|POST /oauth/userinfo`, `POST /oauth/revoke`
+これ以外に 501 を返す入口は無い。以前ここに並んでいたメール OTP・Passkey・
+ログアウト（#9 / #10）と JWKS（#14）はすべて実装済みで、上の 6.1 に移した。
 
 ### 6.3 この状態の帰結
 
-**ログイン手段が 1 つも実装されていないため、通常の経路でセッション Cookie を
-取得することはできない。** `/api/me` 系と RPC は「有効なセッションが既に存在する」
-前提でのみ動作する。動作確認するには `sessions` テーブルへ行を直接挿入し、
-トークンの SHA-256 hex を `token_hash` に入れる必要がある
-（`apps/auth-worker/test/session-repository.test.ts` と
-`packages/testing/src/fixtures.ts` の `aUser()` / `aSession()` が実際にこの方法を取っている）。
+**ブラウザから通常の手順でログインできる。** `GET /login` がログイン画面を返し、
+メール OTP なら JavaScript 無しでも、Passkey ならアイランド経由で
+セッション Cookie を取得できる。`curl` だけで最後まで通ることは
+`apps/auth-worker/test/login.ui.test.ts` と手動のスモークテストで確認している。
 
-`SIGNING_KEY_JWK` / `SIGNING_KEY_KID` は `.dev.vars.example` と `worker-env.d.ts` に
-項目があるが、JWKS と ID Token 発行が Phase 2 のため現時点ではコードから読まれていない。
-`jose` と `@simplewebauthn/server` も `package.json` に入っているが未使用。
+以前ここに書いてあった「`sessions` テーブルへ行を直接挿入する必要がある」は
+もう当てはまらない。テストの fixture（`packages/testing/src/fixtures.ts` の
+`aUser()` / `aSession()`）は引き続きその方法を使うが、それは
+「ログイン経路を通らずに任意の状態を作る」ためであって、唯一の手段だからではない。
+
+`SIGNING_KEY_JWK` / `SIGNING_KEY_KID` は `JoseSigningKeyProvider` が読む。
+未設定でも**起動は止まらず**、`getActiveSigningKey()` を呼んだ時点で失敗する
+（`UnconfiguredEmailSender` と同じ方針。§4.1 参照）。JWKS は秘密鍵が無くても
+`signing_key_metadata` の公開鍵を返せる。
+
+`jose` と `@simplewebauthn/server` はどちらも実際に使われている。
+
+残っているのは認可フロー本体（§6.2 の 4 本）で、これが入ると仕様書 13 の
+MVP 受け入れ基準のうち OIDC に関わる項目が埋まる。
 
 ---
 
 ## 7. テストの仕組み
 
-`pnpm test` は現在すべて通る（`packages/domain` 25 件、`apps/auth-worker` 37 件、
-合計 62 件。`apps/dashboard-worker` はテスト未作成）。
+`pnpm test` は現在すべて通る（`packages/domain` 25 件、`apps/auth-worker` 318 件、
+`apps/dashboard-worker` 21 件、合計 364 件）。
 
 ### 7.1 Workers ランタイム上で走らせる
 
@@ -576,15 +594,17 @@ sequenceDiagram
    **dashboard のルートハンドラはレイヤ lint の対象外**である点に注意。
    presentation/ を切るときに初めてルールが効き始める。
 
-3. **コンテナに配線済みだが、まだどの UseCase も使っていない Port がある** ——
-   `RandomTokenGenerator`, `ConstantTimeComparator`, `IpHasher`, `EmailSender`。
-   同様に `jose` と `@simplewebauthn/server` が `apps/auth-worker/package.json` に
-   入っているが、どこからも import されていない。いずれもログイン系の実装待ち。
+3. **仕様書 3 のツリーに Auth UI が無い。** `presentation/http/ui/` は
+   仕様書を書いた時点で想定されていなかったが、仕様書 14-4（#36）で
+   「auth-worker から配信する」と決まった結果として生えている。
+   クライアントアイランドのビルド工程（`scripts/build-client.mjs` と
+   `tsconfig.client.json`）も同様で、ここだけ DOM 型を有効にしている。
 
-4. **`tests/e2e`, `tests/oidc-conformance`, `tests/security` は空ディレクトリ**。
-   現存するテストは `apps/auth-worker/test/`（5 本・37 件。Origin 検証や
-   シークレット未設定時の挙動を見る `security.test.ts` を含む）と
-   `packages/domain/test/`（4 本・25 件）のみ。
+4. **`tests/e2e`, `tests/oidc-conformance`, `tests/security` は空ディレクトリのまま**。
+   現存するテストは `apps/auth-worker/test/`（24 本・318 件）、
+   `apps/dashboard-worker/test/`（21 件）、`packages/domain/test/`（25 件）。
+   仕様書 11.3 の E2E / 適合性テスト（#20 / #28）は、認可フロー（#15 / #16）が
+   入ってから着手する。
 
 5. **`compatibility_date` は `2026-08-15`** で、今日の日付ではない。
    `@cloudflare/vitest-pool-workers` が同梱する workerd のビルド日より後の日付を
