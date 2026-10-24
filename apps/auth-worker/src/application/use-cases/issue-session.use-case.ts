@@ -63,6 +63,26 @@ export class IssueSessionUseCase {
       return err("forbidden", "user cannot sign in");
     }
 
+    // 管理者はメール OTP ではセッションを得られない（仕様書 §14.1 決定 8 / #40）。
+    //
+    // **ここが決定 8 の強制点である。** 管理操作の入口を 1 つずつ守るのではなく、
+    // 「管理者の OTP セッションをそもそも存在させない」ことで守る。管理操作が
+    // 後から増えても、その入口が認可チェックを書き忘れることで穴が開くのを防ぐ。
+    //
+    // 呼び出し元（`VerifyEmailOtpUseCase`）はこの失敗を `invalid_code` に畳むので、
+    // 応答から「このアドレスは管理者のものだ」とは読めない。管理者の列挙は
+    // 攻撃対象を絞る材料になるため、区別を外へ出さない。
+    if (!user.permitsAuthMethod(command.authMethod)) {
+      await this.deps.audit.record({
+        event: "session.issue",
+        userId: user.id,
+        outcome: "failure",
+        reason: "admin_requires_passkey",
+        metadata: { authMethod: command.authMethod },
+      });
+      return err("forbidden", "administrators must sign in with a passkey");
+    }
+
     const now = this.deps.clock.now();
     const token = this.deps.tokens.generate();
 

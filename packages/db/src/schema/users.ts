@@ -36,6 +36,25 @@ export const users = sqliteTable(
       .notNull()
       .default("active"),
     /**
+     * 管理権限を持つか（仕様書 §14.1 決定 8 / #83 / #40）。
+     *
+     * **ロール列ではなく真偽値にした。** 仕様書 §1.2 で組織・チーム権限管理は
+     * 非目標であり、この列が答えるべき問いは 1 つしかない ——
+     * 「このアカウントに決定 8（管理者は Passkey 必須、メール OTP 単独では
+     * ログインできない）を適用するか」。text の enum にすると、まだ誰も
+     * 定義していない役割名を置ける箱ができ、「この役割は何ができるのか」を
+     * 決める表が無いまま値だけが増える。役割が本当に必要になったときは、
+     * 真偽値 1 本を読み替えるほうが、意味の決まっていない enum 値を
+     * 後から解釈するより安い。
+     *
+     * **この列を立てる前に Passkey が 1 本以上あることを確かめること。**
+     * 付与は `apps/auth-worker/scripts/admin-role.mjs` からのみ行い、その
+     * UPDATE は `exists (select 1 from passkeys ...)` を条件に持つ
+     * （`apps/auth-worker/src/infrastructure/persistence/admin-role.sql.ts`）。
+     * 条件を外すと「権限はあるがログインできない管理者」が作れてしまう。
+     */
+    isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
+    /**
      * 論理削除の時刻。削除済みユーザーの行は即時に物理削除せず、
      * 監査ログとの整合と誤削除からの復旧のために保持期間を置く（仕様書 7.3）。
      */

@@ -327,7 +327,7 @@ export function createContainer(
       }),
       updateProfile: new UpdateProfileUseCase({ getSession, users, clock, audit }),
       listPasskeys: new ListPasskeysUseCase({ getSession, passkeys }),
-      deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, clock, audit }),
+      deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, users, clock, audit }),
       passkeyRegisterOptions: new PasskeyRegisterOptionsUseCase({
         getSession,
         users,

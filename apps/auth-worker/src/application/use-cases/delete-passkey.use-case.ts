@@ -2,6 +2,7 @@ import { hasFreshAuthentication } from "../../domain/services/reauthentication";
 import type { AuditLogger } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { PasskeyRepository } from "../ports/passkey.repository";
+import type { UserRepository } from "../ports/user.repository";
 import type { GetSessionUseCase } from "./get-session.use-case";
 import { settleSideEffects } from "./side-effects";
 import { err, ok, type UseCaseResult } from "./types";
@@ -20,6 +21,8 @@ export type DeletePasskeyOutput = {
 export type DeletePasskeyDeps = {
   readonly getSession: GetSessionUseCase;
   readonly passkeys: PasskeyRepository;
+  /** 管理者かどうかを見るために要る（決定 8 / #83）。 */
+  readonly users: UserRepository;
   readonly clock: Clock;
   readonly audit: AuditLogger;
 };
@@ -29,12 +32,17 @@ export type DeletePasskeyDeps = {
  *
  * 守るものは 3 つ。所有者チェック、再認証、そして「外せること」そのもの。
  *
- * **最後の 1 本も消せる。** 仕様書 14.1-2 で「初回登録に Passkey を必須にしない」と
- * 決めており、メール OTP が常にログイン経路として残る。つまり全部外しても
- * 利用者が締め出されることはない。逆に最後の 1 本を残す設計にすると、
+ * **一般利用者は最後の 1 本も消せる。** 仕様書 14.1-2 で「初回登録に Passkey を
+ * 必須にしない」と決めており、メール OTP が常にログイン経路として残る。つまり
+ * 全部外しても利用者が締め出されることはない。逆に最後の 1 本を残す設計にすると、
  * 盗まれた・譲渡した端末の Credential がそれ 1 本だけだった利用者が、
  * 危険な認証器を外せないまま固定される。これは issue #75 が塞ごうとしている
  * 穴そのものなので、残本数では拒否しない。
+ *
+ * **管理者だけが例外。** 決定 8（#40 / #83）でメール OTP を塞いでいるので、
+ * 管理者にとって Passkey は「唯一のログイン手段」である。最後の 1 本を外せると、
+ * そこから先は OTP しか残らず決定 8 が無効化されるか、本人が自分を締め出すかの
+ * どちらかになる。判定そのものは `User.canRemovePasskey()` に置く。
  */
 export class DeletePasskeyUseCase {
   constructor(private readonly deps: DeletePasskeyDeps) {}
@@ -65,6 +73,18 @@ export class DeletePasskeyUseCase {
     if (target === null || target.userId !== userId) {
       await this.record(userId, "failure", { reason: "not_found_or_not_owned" });
       return err("not_found", "passkey not found");
+    }
+
+    // 管理者が最後の 1 本を外そうとしていないかを、削除の**前に**確かめる。
+    // 消してから数え直す形にすると、拒否するころには認証器が消えている。
+    const owned = await this.deps.passkeys.listByUserId(userId);
+    const user = await this.deps.users.findById(userId);
+    if (user !== null && !user.canRemovePasskey(owned.length - 1)) {
+      await this.record(userId, "failure", {
+        reason: "admin_last_passkey",
+        metadata: { passkeyId: target.id, remaining: owned.length },
+      });
+      return err("conflict", "administrators must keep at least one passkey");
     }
 
     // userId を条件に含めた DELETE（Port 側）。所有者チェックは上で済んでいるが、

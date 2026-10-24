@@ -14,6 +14,8 @@ export type UserFixture = {
   email: string;
   emailVerified: boolean;
   status: "active" | "suspended" | "deleted";
+  /** 既定は一般利用者。管理者を試すテストだけが明示的に立てる（#83）。 */
+  isAdmin: boolean;
   deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -30,6 +32,7 @@ export function aUser(overrides: Partial<UserFixture> = {}): UserFixture {
     email: `${id}@example.com`,
     emailVerified: true,
     status: "active",
+    isAdmin: false,
     deletedAt: null,
     createdAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
