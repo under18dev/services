@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
 
@@ -18,12 +20,21 @@ import { defineConfig } from "vitest/config";
  *
  * 本物の auth-worker を立てて RPC 越しに繋ぐのは、この Worker 単体の
  * テストではなく統合テスト (`tests/e2e/`) の仕事。
+ *
+ * `wrangler.jsonc` を**文字列のまま**テストへ渡しているのは、本番 route と
+ * `ACCOUNT_BASE_PATH` が一致していることを `test/route-config.test.ts` で
+ * 照合するため（#106）。テスト本体は workerd の中で動くので node:fs を
+ * 使えず、Node 側であるこのファイルから渡すしかない。JSONC なので
+ * `JSON.parse` は通らず、`@u18/testing` の `parseJsonc()` で読む。
  */
 export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
+        bindings: {
+          TEST_WRANGLER_JSONC: readFileSync(join(import.meta.dirname, "wrangler.jsonc"), "utf8"),
+        },
         workers: [
           {
             // 名前は既定 env の binding (`u18-auth`) に合わせてある。
