@@ -112,7 +112,17 @@
       // route をどう割っても「管理 API が go 側に出る」事故はありうるが、
       // その場合も Cookie が届かず 401 になる（fail-closed）。
       "routes": [
-        { "pattern": "go.under18.dev/c/*", "zone_name": "under18.dev" },
+        // **ホスト全体を受ける。`/c/*` だけに絞ってはいけない。**
+        //
+        // route に当たらないパスは Worker へ渡らず、Cloudflare が DNS
+        // レコードの指すオリジンへ繋ぎに行く。そのレコードは Workers route
+        // 用のダミー（AAAA 100::）なので到達できず、**利用者には 522 が出る**。
+        // 実際 `go.under18.dev/c/*` だけにしていたとき、`https://go.under18.dev/`
+        // が 522 を返した（`/c/<id>` は正常に 404 を返していた）。
+        //
+        // このホストは短縮 URL 専用で他に載せるものが無いので、Worker に
+        // 全部渡して未知のパスは Worker 自身に 404 を返させる。
+        { "pattern": "go.under18.dev/*", "zone_name": "under18.dev" },
         { "pattern": "auth.under18.dev/account/nfc/*", "zone_name": "under18.dev" },
       ],
 
