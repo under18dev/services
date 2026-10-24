@@ -359,3 +359,62 @@ describe("VerifyEmailOtpUseCase", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("凍結アカウントの状態を応答から読み取れない（#62）", () => {
+  /**
+   * `IssueSessionUseCase` は停止・論理削除されたユーザーに `forbidden` を返す。
+   * それをそのまま流すと「コードは正しかったが、このアカウントは凍結されている」
+   * が応答から分かってしまう。仕様書 §14.1 決定 7 により凍結アカウントの行は
+   * **残り続ける**ので、この区別を残すと恒久的な列挙の窓口になる。
+   *
+   * 到達経路は「start と verify の間に凍結された」場合に限られる
+   * （凍結済みアドレスには OTP がそもそも送られないため）。
+   * ただし `StartEmailOtpUseCase.shouldSend` の条件を変えた瞬間にここが開く
+   * ので、送信側の判断に依存させずに畳んでおく。
+   */
+  it("検証の直前に凍結されても、コード不一致と同じ応答になる", async () => {
+    const ctx = setup();
+    const user = aUser({ email: EMAIL });
+    ctx.users.seed(user);
+
+    await ctx.start.execute({ email: EMAIL, purpose: "login" });
+    const code = lastCode(ctx);
+
+    // ここで凍結される。コードは既に手元にある。
+    ctx.users.seed({ ...user, status: "suspended" });
+
+    const frozen = await ctx.verify.execute({
+      email: EMAIL,
+      purpose: "login",
+      code,
+      userAgent: null,
+      ip: null,
+    });
+
+    // 単なる不一致と比較する。1 ビットでも違えば在籍確認に使える。
+    const mismatch = await setup().verify.execute({
+      email: EMAIL,
+      purpose: "login",
+      code: "000000",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(frozen).toEqual(mismatch);
+    expect(frozen.ok).toBe(false);
+  });
+
+  it("凍結されたユーザーにはセッションが発行されない", async () => {
+    const ctx = setup();
+    const user = aUser({ email: EMAIL });
+    ctx.users.seed(user);
+    await ctx.start.execute({ email: EMAIL, purpose: "login" });
+    const code = lastCode(ctx);
+    ctx.users.seed({ ...user, status: "suspended" });
+
+    await ctx.verify.execute({ email: EMAIL, purpose: "login", code, userAgent: null, ip: null });
+
+    // 応答を畳んだだけで通してしまっては意味が無い。
+    expect(await ctx.sessions.listByUserId(user.id)).toHaveLength(0);
+  });
+});

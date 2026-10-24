@@ -83,7 +83,21 @@ export class VerifyEmailOtpUseCase {
       userAgent: command.userAgent,
       ip: command.ip,
     });
-    if (!issued.ok) return issued;
+    // 発行側のエラーコードをそのまま返さない。`IssueSessionUseCase` は
+    // 停止・論理削除されたユーザーに `forbidden` を返すので、そのまま流すと
+    // 「コードは正しかったが、このアカウントは凍結されている」が応答から
+    // 読み取れてしまう（仕様書 §14.1 決定 7 により、凍結アカウントの行は
+    // 残り続ける）。この経路の失敗は全て `invalid_code` に畳む。
+    //
+    // 現状、凍結アカウント宛には OTP がそもそも送られない（`StartEmailOtpUseCase`
+    // の `shouldSend`）ので、ここへ到達するのは start と verify の間で
+    // アカウントの状態が変わった場合に限られる。ただし **`shouldSend` の条件を
+    // 変えた瞬間にここが列挙の窓口になる**ため、送信側の判断に依存させない。
+    // `PasskeyLoginVerifyUseCase` が同じ理由で同じ畳み方をしている。
+    if (!issued.ok) {
+      await this.recordFailure(address.masked, `issue_session:${issued.error.code}`);
+      return err("invalid_code", "verification failed");
+    }
 
     // ログイン経路を通った時点でメールアドレスの到達性は確認できている。
     if (!user.emailVerified) {
