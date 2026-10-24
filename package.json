@@ -15,6 +15,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
+    "check:bindings": "node scripts/check-service-bindings.mjs",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "test": "pnpm -r test",
