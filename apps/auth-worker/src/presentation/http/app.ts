@@ -1,18 +1,14 @@
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
-import { createContainer, type Container } from "../../composition/container";
+import { createContainer } from "../../composition/container";
 import { authRoutes } from "./auth.routes";
 import { healthRoutes } from "./health.routes";
 import { meRoutes } from "./me.routes";
 import { oauthRoutes } from "./oauth.routes";
 import { problem } from "./problem";
+import type { AppBindings } from "./types";
 
-export type AppBindings = {
-  Bindings: Env;
-  Variables: {
-    container: Container;
-  };
-};
+export type { AppBindings } from "./types";
 
 export function createApp() {
   const app = new Hono<AppBindings>();

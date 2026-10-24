@@ -9,6 +9,11 @@ export type UserProps = {
   readonly email: string;
   readonly emailVerified: boolean;
   readonly status: UserStatus;
+  /**
+   * 論理削除の時刻。`status` とは独立に立ちうるので、認証可否の判定には
+   * 両方を見る必要がある（status だけ見ると削除済みユーザーがログインできる）。
+   */
+  readonly deletedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -52,12 +57,14 @@ export class User {
   }
 
   get isActive(): boolean {
-    return this.props.status === "active";
+    return this.props.status === "active" && this.props.deletedAt === null;
   }
 
   /** ログイン・トークン発行の前に必ず通す。停止・削除済みの利用を一箇所で止める。 */
   assertCanAuthenticate(): void {
-    if (!this.isActive) throw new UserNotActiveError(this.props.status);
+    if (!this.isActive) {
+      throw new UserNotActiveError(this.props.deletedAt !== null ? "deleted" : this.props.status);
+    }
   }
 
   /** OIDC の `profile` / `email` scope に対応する claim。scope 判定は Application 側で行う。 */

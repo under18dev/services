@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { SUPPORTED_SCOPES } from "../../domain/services/scope";
-import type { AppBindings } from "./app";
+import type { AppBindings } from "./types";
 import { problem } from "./problem";
 
 /**

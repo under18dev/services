@@ -2,18 +2,14 @@ import { env } from "cloudflare:test";
 import { aSession, aUser } from "@u18/testing";
 import { createIdentityDatabase, sessions, users } from "@u18/db";
 import { eq } from "drizzle-orm";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { DrizzleSessionRepository } from "../src/infrastructure/persistence/drizzle-session.repository";
-import { applyMigrations, resetDatabase } from "./helpers";
+import { resetDatabase } from "./helpers";
 
 describe("DrizzleSessionRepository", () => {
   let repo: DrizzleSessionRepository;
   let db: ReturnType<typeof createIdentityDatabase>;
   const user = aUser();
-
-  beforeAll(async () => {
-    await applyMigrations();
-  });
 
   beforeEach(async () => {
     await resetDatabase();

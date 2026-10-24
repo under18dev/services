@@ -10,8 +10,7 @@ export type UseCaseError = {
 };
 
 export type UseCaseResult<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: UseCaseError };
+  { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: UseCaseError };
 
 export const ok = <T>(value: T): UseCaseResult<T> => ({ ok: true, value });
 

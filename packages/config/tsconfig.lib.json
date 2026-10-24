@@ -2,6 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": []
+    // このリポジトリのパッケージはすべて workerd 上で動く。Web Crypto 等の
+    // ランタイム標準グローバルを型として認識させるために Workers の型を入れる。
+    // DOM lib を足すと window / document まで見えてしまい、Domain に
+    // ブラウザ前提のコードを書けてしまうため使わない。
+    "types": ["@cloudflare/workers-types"]
   }
 }

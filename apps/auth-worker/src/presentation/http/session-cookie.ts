@@ -1,23 +1,19 @@
+import { sessionCookieName } from "@u18/contracts";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
+import type { AppBindings } from "./types";
 
 /**
  * セッション Cookie の読み書き（仕様書 5.3 / 9）。
  *
- * `__Host-` 接頭辞は「Secure かつ Path=/ かつ Domain 指定なし」をブラウザに
- * 強制させる。サブドメインから Cookie を上書きされる経路を塞ぐため使う。
- * Cookie のドメイン境界は未決定（仕様書 14-1）だが、既定はホスト限定にしておく。
+ * 名前そのものは packages/contracts で dashboard-worker と共有する。
+ * `__Host-` 接頭辞がドメイン構成の選択肢を縛る点はそちらに書いてある。
  */
-export const SESSION_COOKIE_NAME = "__Host-u18_session";
-
-/** 開発時は http://localhost で Secure が付けられないため接頭辞なしを許す。 */
-export const DEV_SESSION_COOKIE_NAME = "u18_session";
-
 export function cookieNameFor(env: Env): string {
-  return env.ENVIRONMENT === "development" ? DEV_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
+  return sessionCookieName(env.ENVIRONMENT);
 }
 
-export function readSessionCookie(c: Context<{ Bindings: Env }>): string | null {
+export function readSessionCookie(c: Context<AppBindings>): string | null {
   const name = cookieNameFor(c.env);
   return getCookie(c, name) ?? null;
 }

@@ -14,6 +14,7 @@ export type UserFixture = {
   email: string;
   emailVerified: boolean;
   status: "active" | "suspended" | "deleted";
+  deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -29,6 +30,7 @@ export function aUser(overrides: Partial<UserFixture> = {}): UserFixture {
     email: `${id}@example.com`,
     emailVerified: true,
     status: "active",
+    deletedAt: null,
     createdAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
     ...overrides,
