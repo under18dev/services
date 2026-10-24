@@ -4,6 +4,7 @@ import type { WebAuthnResponseJson } from "../../application/ports/webauthn.port
 import type { UseCaseError } from "../../application/use-cases/types";
 import { isAllowedOrigin } from "./origin";
 import { problem, statusForUseCaseError } from "./problem";
+import { clientIp, enforceIpRateLimit } from "./rate-limit";
 import { buildSessionCookie, readSessionCookie } from "./session-cookie";
 import type { AppBindings } from "./types";
 
@@ -87,6 +88,10 @@ passkeyRoutes.post("/login/options", async (c) => {
 passkeyRoutes.post("/login/verify", async (c) => {
   if (!isAllowedOrigin(c)) return problem(c, 403, "forbidden", "origin not allowed");
 
+  // 署名検証は CPU を使うので、失敗を投げ続けられること自体が負荷になる（#21）。
+  const limited = await enforceIpRateLimit(c, "login_verify");
+  if (limited !== null) return limited;
+
   const body = await readJson(c.req.raw);
   const parsed = loginVerifySchema.safeParse(body);
   if (!parsed.success) return problem(c, 400, "invalid_input", "malformed authentication response");
@@ -96,7 +101,7 @@ passkeyRoutes.post("/login/verify", async (c) => {
     response: parsed.data.response as WebAuthnResponseJson,
     userAgent: c.req.header("User-Agent") ?? null,
     // 生 IP はここから先へ出さない。保存されるのはハッシュだけ（仕様書 9 Privacy）。
-    ip: c.req.header("CF-Connecting-IP") ?? null,
+    ip: clientIp(c),
   });
   if (!result.ok) return fromUseCaseError(c, result.error);
 

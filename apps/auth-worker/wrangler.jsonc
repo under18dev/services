@@ -27,6 +27,25 @@
   // 実送信したい場合だけ "remote": true を足す（実在の宛先に届くので注意）。
   "send_email": [{ "name": "EMAIL" }],
 
+  // レート制限（#21、仕様書 9 Abuse）。
+  //
+  // **`period` は 10 か 60 しか取れない。** つまりここで止められるのは
+  // 「短時間に大量」までで、「60 秒ごとに 1 通を延々と」は止まらない。
+  // 持続的な濫用はアドレス単位の長い窓（OtpPolicy.resendWindowMs、D1 の
+  // 行数で判定）が受け持つ。二層で 1 組であって、ここだけでは足りない。
+  //
+  // `limit` / `period` はコードから読めないので、`Retry-After` に載せる秒数は
+  // src/domain/services/rate-limit-policy.ts が持っている。ずれると利用者に
+  // 見える形で誤った秒数を返すため、test/rate-limit-config.test.ts で照合する。
+  //
+  // namespace_id はアカウント内で一意なら任意の値でよい（D1 のような
+  // 払い出しは不要）。**使い回すと別のエンドポイントとカウンタを共有する。**
+  "ratelimits": [
+    { "name": "RL_EMAIL_START", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_EMAIL_VERIFY", "namespace_id": "1002", "simple": { "limit": 15, "period": 60 } },
+    { "name": "RL_LOGIN_VERIFY", "namespace_id": "1003", "simple": { "limit": 20, "period": 60 } },
+  ],
+
   // 保持期限を過ぎた行の掃除（#43、仕様書 7.3）。src/index.ts の scheduled が受ける。
   //
   // **式は 1 本だけにする。** テーブルごとに Cron を分けると、片方だけ
@@ -69,6 +88,28 @@
         },
       ],
       "send_email": [{ "name": "EMAIL" }],
+
+      // ratelimits も継承されない（wrangler のスキーマに明記がある）。
+      // ここを書き忘れると**本番だけレート制限が無い**状態になり、しかも
+      // binding が無いので 429 ではなく 500 になる。/health は影響を受けない
+      // ので、#66 のデプロイ後スモークテストでは気づけない。
+      "ratelimits": [
+        {
+          "name": "RL_EMAIL_START",
+          "namespace_id": "1001",
+          "simple": { "limit": 10, "period": 60 },
+        },
+        {
+          "name": "RL_EMAIL_VERIFY",
+          "namespace_id": "1002",
+          "simple": { "limit": 15, "period": 60 },
+        },
+        {
+          "name": "RL_LOGIN_VERIFY",
+          "namespace_id": "1003",
+          "simple": { "limit": 20, "period": 60 },
+        },
+      ],
 
       // env ごとの設定は継承されないので、本番にも明示的に書く（#43）。
       // ここを書き忘れると、本番だけ掃除が走らないまま D1 が増え続け、

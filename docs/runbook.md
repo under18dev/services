@@ -1100,7 +1100,7 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 
 #### 重要な前提
 
-**レート制限は未実装である。** 仕様書 9（Abuse）と Phase 3 で予定されているが、現在のコードには Rate Limiting も Turnstile も存在しない。`email_challenges` の `max_attempts`（既定 5）と `resend_count` はスキーマにあるが、これを強制する UseCase がまだない（OTP 自体が 501）。
+**レート制限は入っているが、Turnstile は未実装である（#21）。** `/api/auth/email/start` / `/api/auth/email/verify` / `/api/auth/passkeys/login/verify` に IP 単位のバースト制限がかかり、アドレス単位の持続制限が `email_challenges` の行数で効いている（§13）。**`/oauth/token` と `/oauth/authorize` にはまだかかっていない** —— #15 / #16 の実装後に足す。`email_challenges` の `resend_count` 列は使っていない（#88）。
 
 したがって現時点で取りうるのは **Cloudflare のエッジ側の対策**と**観測**だけである。
 
@@ -2522,6 +2522,75 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 - [ ] `IP_HASH_PEPPER` の控えを持つかどうかを決める（§12.5）
 
 ---
+
+## 13. レート制限（#21）
+
+### 13.1 二層で 1 組である
+
+レート制限は**バースト**と**持続**の 2 層に分かれている。片方だけでは濫用を止められない。
+
+| 層       | 守るもの             | 鍵             | 実装                             | 窓     |
+| -------- | -------------------- | -------------- | -------------------------------- | ------ |
+| バースト | 短時間の大量アクセス | IP（ハッシュ） | Cloudflare Rate Limiting binding | 60 秒  |
+| 持続     | 長時間かけた濫用     | メールアドレス | D1（`email_challenges` の行数）  | 1 時間 |
+
+**Cloudflare の binding は `period` に 10 秒か 60 秒しか取れない。** つまりバースト層で止められるのは「1 分に大量」までで、「60 秒ごとに 1 通を延々と」は素通りする。これは #88 で実際に起きていた穴（再送上限が一度も発動せず、60 秒ごとに無制限にメールを送れた）と同じ形なので、持続層を別に持っている。
+
+逆に持続層はアドレス単位なので、**宛先を変えながらの攻撃には効かない**。そちらはバースト層が受け持つ。
+
+> **「レート制限は入っている」と片方だけ見て判断しないこと。** どちらが欠けても、残ったほうをすり抜ける攻撃が成立する。
+
+### 13.2 閾値と、その根拠
+
+いずれも IP 単位・60 秒窓。出典は `apps/auth-worker/src/domain/services/rate-limit-policy.ts`。
+
+| binding           | 対象                                   | 上限 | 根拠                                                                                                                       |
+| ----------------- | -------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| `RL_EMAIL_START`  | `POST /api/auth/email/start`           | 10   | 1 通送るのに 1 回。利用者側には 60 秒の再送クールダウンがあるので、正常利用で 1 分に 10 回へ届かない                       |
+| `RL_EMAIL_VERIFY` | `POST /api/auth/email/verify`          | 15   | challenge 単位の試行上限（5 回）はアドレスを変えると効かないので、IP 側で頭を押さえる。打ち間違いの入力は 1 分に数回が上限 |
+| `RL_LOGIN_VERIFY` | `POST /api/auth/passkeys/login/verify` | 20   | 署名検証は CPU を使うため、失敗を投げ続けられること自体が負荷。正常利用は 1 回で終わる                                     |
+
+**共有回線（学校・CGNAT）を想定して、「1 人分の必要回数」ではなく「同一 IP の後ろに何人いるか」で決めてある。** 1 人なら数回で済む操作に 10〜20 の枠を取っているのはそのため。弾かれた利用者からの報告が続くようなら、まずこの前提を疑うこと。
+
+**まだ適用していないエンドポイント**: `/oauth/token`（client 単位）と `/oauth/authorize`（IP 単位）。#15 / #16 の実装が入ってから足す。
+
+### 13.3 閾値を変えるときは 2 箇所を直す
+
+`limit` と `period` の実体は `wrangler.jsonc` の `ratelimits` にあり、**コードからは読めない**。一方で 429 に載せる `Retry-After` の秒数はコード側（`RateLimitPolicy`）から出る。片方だけ変えると「60 秒待て」と言いながら実際の窓は 10 秒、という食い違いになる。
+
+1. `apps/auth-worker/wrangler.jsonc` の `ratelimits`（**既定の env と `env.production` の両方**）
+2. `apps/auth-worker/src/domain/services/rate-limit-policy.ts` の `RateLimitPolicy`
+3. この節の表
+
+`apps/auth-worker/test/rate-limit-config.test.ts` が 1 と 2 を照合するので、片方だけ直すと CI で落ちる。
+
+### 13.4 本番だけ無防備になる経路
+
+**`ratelimits` は named environment へ継承されない**（wrangler のスキーマに明記がある。`triggers` と同じ罠）。`env.production` に書き忘れると:
+
+- 本番にだけ binding が無い
+- binding が無い scope を使うと `CloudflareRateLimiter` が throw する → **429 ではなく 500**
+- `/health` はレート制限を通らないので、#66 のデプロイ後スモークテストは**緑のまま**
+
+この組み合わせが一番危ない。設定漏れが「ログインだけ 500」という形で出て、スモークテストでは検知できない。`rate-limit-config.test.ts` が `env.production` 側も照合しているのはこのため。
+
+デプロイ後に疑うときは、本番へ 1 回だけ OTP 送信要求を投げて 500 が返らないことを見る。
+
+### 13.5 超過したときに何が起きるか
+
+- HTTP `429`、本文は `{ "error": "rate_limited", "message": "too many requests" }`
+- `Retry-After` ヘッダに**窓の長さそのもの**（残り時間ではない）。binding は窓がいつ空くかを返さないので、短く見積もってまだ閉じた窓を叩かせるより窓全体を返す
+- Workers のログ（observability）に `{"event":"rate_limit.exceeded","scope":...,"ipHash":...}` が 1 行出る。**生 IP は出ない**
+
+  **`audit_logs` には書いていない。** 弾いたリクエスト 1 本ごとに D1 へ 1 行書くと、攻撃者は「弾かれること」をそのまま D1 への書き込みに変換できてしまう。レート制限が防ぐはずの資源枯渇（脅威モデル D-2）を、レート制限自身が引き起こすことになる。保持は `audit_logs` の 180 日より短いが、レート制限の超過は「今まさに起きている」ことを見るための情報で、半年後に遡る種類のものではない。追跡するときは `ipHash` で Workers のログを引く
+
+- 判定は**本文を読む前**に行う。アドレスを見ていないので、429 の出方から「そのアドレスが登録済みか」は分からない（仕様書 9 Privacy）
+
+`CF-Connecting-IP` が無いリクエストは**素通しせず**、全員で 1 つの枠を共有する。本番で Cloudflare がこのヘッダを付けない状況は通常ありえないが、万一そうなった場合は「全体が詰まる」という目に見える形で壊れる。静かに無防備になるよりよい。
+
+### 13.6 namespace_id
+
+`namespace_id` はアカウント内で一意なら任意の値でよく、D1 のような事前の払い出しは要らない。**ただし使い回すと別のエンドポイントとカウンタを共有する** —— OTP 送信の枠を Passkey のログインが食う、という形になる。重複は `rate-limit-config.test.ts` が検出する。
 
 ## 付録 A. よく使うコマンド
 

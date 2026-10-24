@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { isAllowedOrigin } from "./origin";
 import { problem, statusForUseCaseError } from "./problem";
+import { clientIp, enforceIpRateLimit } from "./rate-limit";
 import { buildSessionCookie } from "./session-cookie";
 import type { AppBindings } from "./types";
 
@@ -27,12 +28,16 @@ const verifySchema = z.object({
   purpose: purposeSchema.default("login"),
 });
 
-/** 送信元 IP。Cloudflare が付ける CF-Connecting-IP を正とする。 */
-const clientIp = (c: { req: { header: (n: string) => string | undefined } }): string | null =>
-  c.req.header("CF-Connecting-IP") ?? null;
-
 otpRoutes.post("/start", async (c) => {
   if (!isAllowedOrigin(c)) return problem(c, 403, "forbidden", "origin not allowed");
+
+  // **本文を読む前に**かける。読んでから判定すると、429 の出方に
+  // アドレスの実在が混ざりうる（#21）。読んでいなければ混ざりようがない。
+  //
+  // アドレス単位の上限（OtpPolicy.resendWindowMs）はアドレスを変えれば
+  // 回避されるので、宛先を変えながらのメール爆撃はここでしか止まらない。
+  const limited = await enforceIpRateLimit(c, "email_start");
+  if (limited !== null) return limited;
 
   const parsed = startSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return problem(c, 400, "invalid_input", "invalid request body");
@@ -57,6 +62,11 @@ otpRoutes.post("/start", async (c) => {
 
 otpRoutes.post("/verify", async (c) => {
   if (!isAllowedOrigin(c)) return problem(c, 403, "forbidden", "origin not allowed");
+
+  // challenge 単位の試行上限（OtpPolicy.maxAttempts）は、アドレスを
+  // 変えながら総当たりされると効かない。IP 単位で頭を押さえる。
+  const limited = await enforceIpRateLimit(c, "email_verify");
+  if (limited !== null) return limited;
 
   const parsed = verifySchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return problem(c, 400, "invalid_input", "invalid request body");
