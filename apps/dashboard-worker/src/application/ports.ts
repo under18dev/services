@@ -19,5 +19,5 @@ export interface IdentityGateway {
   revokeSession(
     sessionToken: string,
     targetSessionId: string,
-  ): Promise<IdentityOutcome<{ revoked: boolean }>>;
+  ): Promise<IdentityOutcome<{ revoked: boolean; self: boolean }>>;
 }

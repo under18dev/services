@@ -1,4 +1,4 @@
-import { sessionCookieName } from "@u18/contracts";
+import { buildClearedSessionCookie as buildCleared, sessionCookieName } from "@u18/contracts";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppBindings } from "./types";
@@ -27,6 +27,7 @@ export function buildSessionCookie(env: Env, token: string, expiresAt: Date): st
 }
 
 export function buildClearedSessionCookie(env: Env): string {
-  const secure = env.ENVIRONMENT === "development" ? "" : "; Secure";
-  return `${cookieNameFor(env)}=; Path=/; Max-Age=0; HttpOnly${secure}; SameSite=Lax`;
+  // 生成は packages/contracts に 1 つだけ置く。dashboard-worker も同じ
+  // Cookie を落とすので、属性がずれると片方が消せなくなる。
+  return buildCleared(env.ENVIRONMENT);
 }
