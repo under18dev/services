@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { buildClearedSessionCookie, readSessionCookie } from "./session-cookie";
 import type { AppBindings } from "./types";
+import { isAllowedOrigin } from "./origin";
 import { problem, statusForUseCaseError } from "./problem";
 
 /**
@@ -80,10 +81,7 @@ meRoutes.delete("/me/sessions/:id", async (c) => {
   if (token === null) return problem(c, 401, "unauthenticated", "no session");
 
   // 状態を変える Cookie 認証 API なので Origin を確かめる（仕様書 8.1 / 9）。
-  // Origin が無い場合も拒否する。「無ければ通す」にすると、ヘッダを落とせる
-  // 経路があった時点で CSRF 対策が SameSite 頼みになる。
-  const origin = c.req.header("Origin");
-  if (origin !== c.env.ISSUER) {
+  if (!isAllowedOrigin(c)) {
     return problem(c, 403, "forbidden", "origin not allowed");
   }
 
@@ -101,9 +99,10 @@ meRoutes.delete("/me/sessions/:id", async (c) => {
     );
   }
 
-  // 自分自身のセッションを消した場合は Cookie も落とす。
-  if (result.value.revoked) {
+  // 自分自身のセッションを消した場合**だけ** Cookie を落とす。
+  // revoked だけで判断すると、別端末を失効させた操作で自分がログアウトされる。
+  if (result.value.revoked && result.value.self) {
     c.header("Set-Cookie", buildClearedSessionCookie(c.env), { append: true });
   }
-  return c.json({ revoked: result.value.revoked });
+  return c.json({ revoked: result.value.revoked, self: result.value.self });
 });

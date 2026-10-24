@@ -229,6 +229,34 @@ describe("LogoutUseCase", () => {
     if (result.ok) expect(result.value.revokedCount).toBe(3);
   });
 
+  it("失効済みトークンでは allDevices が効かない", async () => {
+    // 盗まれたトークンを利用者が失効させた後も、攻撃者が allDevices で
+    // 永久に蹴り出し続けられては失効機能の意味が無い。
+    // Origin 検証は防御にならない（ブラウザ外からは任意に付けられる）。
+    const { user, token, sessionId } = await signIn();
+    const other = aSession({ userId: user.id });
+    ctx.sessions.seed({ ...other, revokedAt: null });
+    await ctx.sessions.revoke(sessionId, NOW);
+
+    const result = await ctx.logout.execute({ sessionToken: token, allDevices: true });
+
+    expect(result).toEqual({ ok: true, value: { revokedCount: 0 } });
+    // 他のセッションは生きたまま。
+    expect((await ctx.sessions.findById(other.id))?.isRevoked).toBe(false);
+  });
+
+  it("期限切れトークンでも allDevices が効かない", async () => {
+    const { user, token } = await signIn();
+    const other = aSession({ userId: user.id });
+    ctx.sessions.seed({ ...other, revokedAt: null });
+    ctx.clock.advance(13 * 60 * 60 * 1000); // 12 時間の上限を超える
+
+    const result = await ctx.logout.execute({ sessionToken: token, allDevices: true });
+
+    expect(result).toEqual({ ok: true, value: { revokedCount: 0 } });
+    expect((await ctx.sessions.findById(other.id))?.isRevoked).toBe(false);
+  });
+
   it("allDevices でも他人のセッションは失効させない", async () => {
     const { token } = await signIn();
     const stranger = ctx.users.seed(aUser());

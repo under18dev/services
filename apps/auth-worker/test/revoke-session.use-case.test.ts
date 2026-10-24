@@ -56,8 +56,23 @@ describe("RevokeSessionUseCase", () => {
       targetSessionId: sessionId,
     });
 
-    expect(result).toEqual({ ok: true, value: { revoked: true } });
+    expect(result).toEqual({ ok: true, value: { revoked: true, self: true } });
     expect((await ctx.sessions.findById(sessionId))?.isRevoked).toBe(true);
+  });
+
+  it("別端末を失効させたときは self=false を返す", async () => {
+    // Presentation 側はこれを見て Cookie を落とすか決める。
+    // revoked だけで判断すると、他端末を切った操作で自分がログアウトされる。
+    const { token, user } = seedLoggedInUser(ctx);
+    const other = aSession({ userId: user.id });
+    ctx.sessions.seed({ ...other, revokedAt: null });
+
+    const result = await ctx.revokeSession.execute({
+      sessionToken: token,
+      targetSessionId: other.id,
+    });
+
+    expect(result).toEqual({ ok: true, value: { revoked: true, self: false } });
   });
 
   it("他人のセッションは失効させられない", async () => {

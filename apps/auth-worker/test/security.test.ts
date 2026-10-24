@@ -1,6 +1,5 @@
-import { SELF, env } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { createContainer } from "../src/composition/container";
 
 /**
  * 「失敗すること」を確かめるテスト。
@@ -56,44 +55,7 @@ describe("未認証アクセス", () => {
   });
 });
 
-/**
- * Env を上書きしたコピーを作る。
- *
- * `wrangler types` は wrangler.jsonc の vars をリテラル型で出すため
- * （ENVIRONMENT は "development" 固定）、別の値を入れるには一度型を外す。
- */
-function envWith(overrides: Record<string, unknown>): Env {
-  return { ...env, ...overrides } as unknown as Env;
-}
-
-describe("シークレット未設定時の挙動", () => {
-  it("development では IP_HASH_PEPPER が無くても起動する", () => {
-    expect(() =>
-      createContainer(envWith({ ENVIRONMENT: "development", IP_HASH_PEPPER: undefined })),
-    ).not.toThrow();
-  });
-
-  it("development 以外で IP_HASH_PEPPER が無ければ起動を止める", () => {
-    // 静かに既定の pepper へ落ちると、IPv4 のハッシュが総当たり可能になり
-    // 匿名化が機能しなくなる。気づけないまま本番が動く方が危険なので落とす。
-    expect(() =>
-      createContainer(envWith({ ENVIRONMENT: "production", IP_HASH_PEPPER: undefined })),
-    ).toThrow(/IP_HASH_PEPPER/);
-  });
-
-  it("development 以外で EMAIL バインディングが無ければ起動を止める", () => {
-    // バインディングが無いまま本番が動くと、ConsoleEmailSender に落ちて
-    // OTP がログに出るか、送信が静かに失敗する。
-    expect(() =>
-      createContainer(
-        envWith({ ENVIRONMENT: "production", IP_HASH_PEPPER: "set", EMAIL: undefined }),
-      ),
-    ).toThrow(/EMAIL binding/);
-  });
-
-  it("development では EMAIL バインディングが無くても起動する", () => {
-    expect(() =>
-      createContainer(envWith({ ENVIRONMENT: "development", EMAIL: undefined })),
-    ).not.toThrow();
-  });
-});
+// 設定不備（EMAIL バインディング / IP_HASH_PEPPER 未設定）の扱いは
+// config-resilience.test.ts を参照。起動時ではなく利用時に失敗させる方針なので、
+// 「createContainer が throw すること」ではなく
+// 「sendOtp / hash が reject し、/health は 200 のままであること」を検証している。

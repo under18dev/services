@@ -91,3 +91,18 @@ export class TimingSafeComparator implements ConstantTimeComparator {
     return diff === 0;
   }
 }
+
+/**
+ * pepper が設定されていない環境向けのダミー。
+ *
+ * メール送信と同じ理由で、起動時ではなく**ハッシュ化しようとした時点**で
+ * 失敗する。IP のハッシュ化はセッション発行でしか起きないので、
+ * 設定ミスはログイン時に表面化し、/health や Discovery は巻き添えにならない。
+ */
+export class UnconfiguredIpHasher implements IpHasher {
+  constructor(private readonly reason: string) {}
+
+  async hash(_ip: string): Promise<string> {
+    throw new Error(`ip hashing is not configured: ${this.reason}`);
+  }
+}

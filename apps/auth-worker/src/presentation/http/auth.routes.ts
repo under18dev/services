@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { buildClearedSessionCookie, readSessionCookie } from "./session-cookie";
 import type { AppBindings } from "./types";
+import { isAllowedOrigin } from "./origin";
 import { problem, statusForUseCaseError } from "./problem";
 
 /**
@@ -40,8 +41,7 @@ authRoutes.post("/passkeys/login/verify", (c) =>
  * 実在を探る手段になるうえ、利用者から見た結果は同じ。
  */
 authRoutes.post("/logout", async (c) => {
-  const origin = c.req.header("Origin");
-  if (origin !== c.env.ISSUER) {
+  if (!isAllowedOrigin(c)) {
     return problem(c, 403, "forbidden", "origin not allowed");
   }
 

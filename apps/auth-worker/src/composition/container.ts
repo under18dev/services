@@ -19,12 +19,14 @@ import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import {
   PepperedIpHasher,
+  UnconfiguredIpHasher,
   Sha256TokenHasher,
   TimingSafeComparator,
   WebCryptoTokenGenerator,
 } from "../infrastructure/crypto/web-crypto";
 import { CloudflareEmailSender } from "../infrastructure/email/cloudflare-email-sender";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
+import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
 import { DrizzleSessionRepository } from "../infrastructure/persistence/drizzle-session.repository";
@@ -86,15 +88,17 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
 
   const hasher = new Sha256TokenHasher();
-  // pepper が無いまま本番が起動すると、IPv4 空間は総当たり可能なので
-  // ハッシュが匿名化として機能しなくなる。静かに既定値へ落ちると
-  // 誰も気づけないため、development 以外では起動を止める（仕様書 9 Privacy）。
-  const ipHasher = new PepperedIpHasher(
-    env.IP_HASH_PEPPER ??
-      (env.ENVIRONMENT === "development"
-        ? "dev-pepper"
-        : throwUnconfigured("IP_HASH_PEPPER is not set outside development")),
-  );
+  // pepper が無いまま本番が動くと IPv4 空間は総当たり可能で、ハッシュが
+  // 匿名化として機能しない。静かに既定値へ落ちるのは防ぐ（仕様書 9 Privacy）。
+  //
+  // ただし失敗はハッシュ化の時点まで遅らせる。組み立てで throw すると
+  // メールと同様、無関係な /health まで 500 になる（#53）。
+  const ipHasher =
+    env.IP_HASH_PEPPER !== undefined
+      ? new PepperedIpHasher(env.IP_HASH_PEPPER)
+      : env.ENVIRONMENT === "development"
+        ? new PepperedIpHasher("dev-pepper")
+        : new UnconfiguredIpHasher("IP_HASH_PEPPER is not set outside development");
   const tokens = new WebCryptoTokenGenerator();
   const comparator = new TimingSafeComparator();
 
@@ -137,9 +141,8 @@ function createEmailSender(env: Env): EmailSender {
   if (env.ENVIRONMENT === "development") {
     return new ConsoleEmailSender();
   }
-  return throwUnconfigured("EMAIL binding is not configured outside development");
-}
-
-function throwUnconfigured(message: string): never {
-  throw new Error(message);
+  // ここで throw しない。コンテナはリクエストごとに組み立てられるので、
+  // 投げると /health や Discovery まで 500 になる（#53）。
+  // OTP を送ろうとした時点で失敗させる。
+  return new UnconfiguredEmailSender("EMAIL binding is missing outside development");
 }

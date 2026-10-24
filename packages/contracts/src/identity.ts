@@ -93,7 +93,16 @@ export const revokeSessionInputSchema = z.object({
 
 export type RevokeSessionInput = z.infer<typeof revokeSessionInputSchema>;
 
-export type RevokeSessionResult = RpcResult<{ readonly revoked: boolean }>;
+export type RevokeSessionResult = RpcResult<{
+  readonly revoked: boolean;
+  /**
+   * 操作者自身のセッションを失効させたか。
+   *
+   * 呼び出し元はこれを見て Cookie を落とすか決める。`revoked` だけで
+   * 判断すると、別端末を失効させたときに自分までログアウトされる。
+   */
+  readonly self: boolean;
+}>;
 
 // ----------------------------------------------------------------- Entrypoint
 
