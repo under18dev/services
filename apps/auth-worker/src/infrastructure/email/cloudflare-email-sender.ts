@@ -1,3 +1,4 @@
+import { EmailSendError } from "../../application/ports/email-sender.port";
 import type { EmailSender, OtpEmail } from "../../application/ports/email-sender.port";
 
 /**
@@ -26,25 +27,16 @@ export class CloudflareEmailSender implements EmailSender {
         html: htmlBody(email),
       });
     } catch (cause) {
-      // 送信失敗の理由を呼び出し元へ細かく返さない。
-      // 「このアドレスは抑制済み」などを利用者に区別させると、
-      // アカウント列挙の材料になる（仕様書 9）。
-      // 運用上の切り分けはログと Cloudflare 側の Activity log で行う。
-      console.error("otp email send failed", {
-        code: (cause as { code?: string } | null)?.code ?? "unknown",
-      });
-      throw new EmailSendError(cause);
+      // 送信失敗の理由を**利用者へは**返さない。「このアドレスは抑制済み」
+      // などを区別させると、アカウント列挙の材料になる（仕様書 9）。
+      //
+      // ただし呼び出し元には渡す。監査ログに残すのに要る（#141）。
+      // 本番で E_RECIPIENT_NOT_ALLOWED が出続けていたのに監査ログが
+      // success のままだった、というのが起票の理由である。
+      const code = (cause as { code?: string } | null)?.code ?? "unknown";
+      console.error("otp email send failed", { code });
+      throw new EmailSendError(code, cause);
     }
-  }
-}
-
-export class EmailSendError extends Error {
-  override readonly name = "EmailSendError";
-  constructor(cause: unknown) {
-    // Cloudflare 側のエラーコードは cause にだけ残す。
-    // message に載せると、そのまま応答へ漏れたときに
-    // 「抑制済みアドレス」などの内部状態を外へ出してしまう。
-    super("failed to send email", { cause });
   }
 }
 

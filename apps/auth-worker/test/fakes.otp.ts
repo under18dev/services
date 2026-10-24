@@ -5,6 +5,7 @@ import type {
   EmailChallengeRepository,
   OtpPurpose,
 } from "../src/application/ports/email-challenge.repository";
+import { EmailSendError } from "../src/application/ports/email-sender.port";
 import type { EmailSender, OtpEmail } from "../src/application/ports/email-sender.port";
 
 /**
@@ -136,7 +137,29 @@ export class RecordingEmailSender implements EmailSender {
 
 /** 送信が必ず失敗するプロバイダ。応答が変わらないことの検証に使う。 */
 export class FailingEmailSender implements EmailSender {
+  /**
+   * 既定のコードは本番で実際に出たもの（#141）。
+   *
+   * Cloudflare Email Sending のドメイン onboarding 前は、宛先の allowlist を
+   * 設定していなくてもこのコードが返る。調査のとっかかりになるので
+   * `reason` に載せている。
+   */
+  constructor(private readonly code = "E_RECIPIENT_NOT_ALLOWED") {}
+
   async sendOtp(_email: OtpEmail): Promise<void> {
-    throw new Error("provider is down");
+    throw new EmailSendError(this.code, new Error("provider is down"));
+  }
+}
+
+/**
+ * `EmailSendError` **以外**を投げるプロバイダ。
+ *
+ * ネットワーク層の例外など、Port の契約に従わない失敗でも応答が変わらない
+ * ことを確かめるために要る。ここを握り潰し損ねると、送信基盤の不調が
+ * そのまま 500 になり「送信を試みた＝アカウントがある」と分かる。
+ */
+export class ThrowingEmailSender implements EmailSender {
+  async sendOtp(_email: OtpEmail): Promise<void> {
+    throw new TypeError("fetch failed");
   }
 }

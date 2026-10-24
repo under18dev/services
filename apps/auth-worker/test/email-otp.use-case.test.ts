@@ -14,6 +14,7 @@ import {
 } from "./fakes";
 import {
   FailingEmailSender,
+  ThrowingEmailSender,
   InMemoryEmailChallengeRepository,
   RecordingEmailSender,
 } from "./fakes.otp";
@@ -127,14 +128,77 @@ describe("StartEmailOtpUseCase", () => {
     expect((ctx.emailSender as RecordingEmailSender).sent).toHaveLength(0);
   });
 
-  it("送信が失敗しても応答を変えない", async () => {
+  it("送信が失敗しても応答が成功時と 1 バイトも変わらない", async () => {
     // ここで 500 を返すと「送信を試みた＝アカウントがある」と分かる。
+    // `ok` を見るだけでは不十分で、**中身まで一致**していないと
+    // retryAfterSeconds の差などから推測されうる（仕様書 §9）。
+    const failing = setup(new FailingEmailSender());
+    failing.users.seed(aUser({ email: EMAIL }));
+    ctx.users.seed(aUser({ email: EMAIL }));
+
+    const failed = await failing.start.execute({ email: EMAIL, purpose: "login" });
+    const succeeded = await ctx.start.execute({ email: EMAIL, purpose: "login" });
+
+    expect(JSON.stringify(failed)).toBe(JSON.stringify(succeeded));
+  });
+
+  it("送信が失敗したら監査ログは failure になる", async () => {
+    // 本番でここが success のままだった（#141）。送信と監査記録を
+    // settleSideEffects に並べて渡していたので、allSettled が送信の失敗を
+    // 監査側へ伝えなかった。/health はメール送信を見ないので、
+    // 監査ログが success と書いたら気づく手段が他に無い。
     const failing = setup(new FailingEmailSender());
     failing.users.seed(aUser({ email: EMAIL }));
 
-    const result = await failing.start.execute({ email: EMAIL, purpose: "login" });
+    await failing.start.execute({ email: EMAIL, purpose: "login" });
 
-    expect(result.ok).toBe(true);
+    const records = failing.audit.events.filter((e) => e.event === "otp.start");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      outcome: "failure",
+      // プロバイダのエラーコードを残す。調査では「どのアドレスか」より
+      // 「何が起きているか」が先に要る。**応答には載せない。**
+      reason: "E_RECIPIENT_NOT_ALLOWED",
+    });
+  });
+
+  it("EmailSendError 以外の例外でも応答を変えず、unknown として記録する", async () => {
+    // Port の契約に従わない失敗（ネットワーク層の throw など）。
+    // ここを握り潰し損ねると 500 になり、列挙の窓口になる。
+    const throwing = setup(new ThrowingEmailSender());
+    throwing.users.seed(aUser({ email: EMAIL }));
+    ctx.users.seed(aUser({ email: EMAIL }));
+
+    const failed = await throwing.start.execute({ email: EMAIL, purpose: "login" });
+    const succeeded = await ctx.start.execute({ email: EMAIL, purpose: "login" });
+
+    expect(JSON.stringify(failed)).toBe(JSON.stringify(succeeded));
+    expect(throwing.audit.events.filter((e) => e.event === "otp.start")[0]).toMatchObject({
+      outcome: "failure",
+      reason: "unknown",
+    });
+  });
+
+  it("監査ログに平文のメールアドレスを入れない", async () => {
+    const failing = setup(new FailingEmailSender());
+    failing.users.seed(aUser({ email: EMAIL }));
+
+    await failing.start.execute({ email: EMAIL, purpose: "login" });
+
+    // 失敗の記録は「何が起きたか」を残すためのもので、
+    // 「誰に送ろうとしたか」を平文で残す場ではない（仕様書 §9 Privacy）。
+    expect(JSON.stringify(failing.audit.events)).not.toContain(EMAIL);
+  });
+
+  it("送信できたときは success で、reason を付けない", async () => {
+    ctx.users.seed(aUser({ email: EMAIL }));
+
+    await ctx.start.execute({ email: EMAIL, purpose: "login" });
+
+    const records = ctx.audit.events.filter((e) => e.event === "otp.start");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.outcome).toBe("success");
+    expect(records[0]?.reason).toBeUndefined();
   });
 
   it("クールダウン中は新しいコードを出さない", async () => {

@@ -4,6 +4,7 @@ import type { AuditLogger } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { RandomTokenGenerator, TokenHasher } from "../ports/crypto.port";
 import type { EmailChallengeRepository, OtpPurpose } from "../ports/email-challenge.repository";
+import { EmailSendError } from "../ports/email-sender.port";
 import type { EmailSender } from "../ports/email-sender.port";
 import type { UserRepository } from "../ports/user.repository";
 import { settleSideEffects } from "./side-effects";
@@ -119,20 +120,27 @@ export class StartEmailOtpUseCase {
         sentAt: now,
       });
 
-      // 送信失敗で応答を変えない。ここで 500 を返すと、
-      // 送信を試みた＝アカウントが存在する、と分かってしまう。
+      // **送信の結果を待ってから監査を書く。**
+      //
+      // 以前はここで送信と監査記録を settleSideEffects に**並べて**渡して
+      // いた。allSettled なので送信の失敗が監査側に伝わらず、本番で
+      // E_RECIPIENT_NOT_ALLOWED が出続けていたのに監査ログは success の
+      // ままだった（#141）。wrangler tail を張って初めて分かった。
+      //
+      // /health はメール送信を見ない（#53 の判断としてそれは正しい）ので、
+      // 監査ログが success と書いたら気づく手段が他に無い。
+      const failure = await this.send(address.value, code, command.purpose);
+
       await settleSideEffects(
-        "otp.send",
-        this.deps.email.sendOtp({
-          to: address.value,
-          code,
-          purpose: command.purpose,
-          expiresInMinutes: Math.round(TokenLifetime.emailOtpMs / 60_000),
-        }),
+        "otp.start",
         this.deps.audit.record({
           event: "otp.start",
           userId: user?.id,
-          outcome: "success",
+          // 送信できなかったものを「送った」と記録しない。
+          outcome: failure === null ? "success" : "failure",
+          // プロバイダのエラーコード。**外へは返さない**（仕様書 §9）。
+          // 調査では「どのアドレスか」より「何が起きているか」が先に要る。
+          reason: failure ?? undefined,
           metadata: { purpose: command.purpose },
         }),
       );
@@ -149,5 +157,28 @@ export class StartEmailOtpUseCase {
     }
 
     return ok({ retryAfterSeconds: cooldownSeconds });
+  }
+
+  /**
+   * OTP を送る。失敗したらプロバイダのエラーコードを返し、成功なら `null`。
+   *
+   * **例外をここで止めるのが肝。** 送信失敗で 500 を返すと「送信を試みた
+   * ＝そのアドレスにアカウントがある」と分かってしまう（仕様書 §9）。
+   * 応答は成功時とまったく同じにしたうえで、起きたことは監査ログへ残す。
+   */
+  private async send(to: string, code: string, purpose: OtpPurpose): Promise<string | null> {
+    try {
+      await this.deps.email.sendOtp({
+        to,
+        code,
+        purpose,
+        expiresInMinutes: Math.round(TokenLifetime.emailOtpMs / 60_000),
+      });
+      return null;
+    } catch (error) {
+      // Port の契約どおり EmailSendError が来る想定だが、別の例外（ネットワーク
+      // 層の throw など）でも握り潰す。ここから先へ投げると応答が変わる。
+      return error instanceof EmailSendError ? error.code : "unknown";
+    }
   }
 }
