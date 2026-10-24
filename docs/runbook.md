@@ -40,11 +40,15 @@
 | 公開入口            | OIDC HTTP + アカウント API        | 設定 UI / BFF API                      |
 | 内部入口            | `IdentityRPC`（named export）     | なし                                   |
 | D1                  | **所有者**（`IDENTITY_DB`）       | **持たない**                           |
-| compatibility_date  | 2026-08-15                        | 2026-08-15                             |
+| compatibility_date  | 2026-10-24                        | 2026-10-24                             |
 | compatibility_flags | `nodejs_compat`                   | `nodejs_compat`                        |
 | observability       | 有効                              | 有効                                   |
 
-`compatibility_date` が仕様書の日付（2026-10-24）ではなく 2026-08-15 なのは意図的である。テストが使う workerd が知らない日付を指定すると、テスト起動時に `ERR_FUTURE_COMPATIBILITY_DATE` で落ちる。**上限は workerd のビルド日ではない** —— 実測では `1.20261019.1`（2026-10-19 ビルド）が 2026-10-24 を受け付け、2026-11-15 で落ちる。進めるときは `pnpm test` が通ることを確認してからにする（#108）。
+`compatibility_date` は仕様書の日付（`2026-10-24`）に揃えてある（#108）。3 つの Worker で同じ値にすること —— ずれると「dev では動くが別の Worker では挙動が違う」が起きる。
+
+**上げるときは必ず `pnpm test` を通してから。** テストが使う workerd が知らない日付を指定すると、テストが 1 件も実行されず `ERR_FUTURE_COMPATIBILITY_DATE` で全滅する。`wrangler dev` と `wrangler deploy` は通ってしまうので気づきにくい。
+
+**上限は workerd のビルド日ではない。** 実測では `1.20261019.1`（2026-10-19 ビルド）が `2026-10-24` を受け付け、`2026-11-15` で落ちる。どこまで通るかは実際に走らせないと分からない。
 
 ### 1.2 Binding
 
@@ -696,7 +700,7 @@ Worker にバンドルされない経路であることが確認できた場合�
 
 現在、`pnpm audit`（dev 含む）の high はすべて `@cloudflare/vitest-plugin` 配下の推移的依存（`zod`）である。これらは informational 側なので **CI は落ちていない**。`vitest-plugin@1.4.7` が `zod@4.6.5` を固定しており、修正版は `>=4.6.6`。**プラグイン側が上げるまで消えない。**
 
-ここで「まとめて消そう」と `@cloudflare/vitest-plugin` を上げると、同梱される workerd が動き、`wrangler.jsonc` の `compatibility_date`（`2026-08-15` に固定）との整合が崩れうる。結果、テストが 1 件も実行されず起動時に全滅する。
+ここで「まとめて消そう」と `@cloudflare/vitest-plugin` を上げると、同梱される workerd が動き、`wrangler.jsonc` の `compatibility_date`（`2026-10-24`）との整合が崩れうる。結果、テストが 1 件も実行されず起動時に全滅する。
 
 ```
 MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE
@@ -2008,7 +2012,7 @@ delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
 5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。
 6. ~~**`signing_key_metadata` と `SIGNING_KEY_JWK` の整合を検証する手段**~~ — 対処済み。`/health` の `checks.signingKey` が、現役の kid が Secret にあり JWKS にも出ているかを返す（§3.3.1 / §4.4）。デプロイ後のスモークテストもこの値を見る。**残るのは「投入前に止める」経路**で、そちらは CI へ `SIGNING_KEY_JWK` を複製する判断が要る（§4.4）。なお、かつてここに書いてあった「現役 kid と `SIGNING_KEY_KID` の一致を見る」案は採れない —— `SIGNING_KEY_KID` は #23 で単一 JWK 形式の後方互換にしか使われなくなっており、JWK Set 形式では**どの鍵で署名するかを決めるのは `signing_key_metadata` の `active_from` / `active_until`** である。
 7. **`/health` を公開したままにするか**（§5.3）。認証なしで D1 にクエリを打つ唯一の公開 endpoint である。
-8. **`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**（§1.1）。現在はテストツールチェーンの制約で 2026-08-15 に据え置かれている。
+8. ~~**`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**~~ — 解決済み（#108）。`@cloudflare/vitest-plugin` への移行でテストと deploy の workerd が 1 本に揃い、据え置く理由が消えた。3 つの Worker とも `2026-10-24`。
 
 ---
 

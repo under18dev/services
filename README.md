@@ -64,10 +64,14 @@ peer は `vitest: "^4.1.0 || ^5.0.0"`。vitest 5 へ上げる余地はあるが�
 **移行時は 4.1.12 のまま据え置いた** —— 一度に 2 つ動かすと、落ちたときに
 どちらが原因か分からなくなる。
 
-### `compatibility_date` = `2026-08-15`
+### `compatibility_date` = `2026-10-24`
 
-`apps/*/wrangler.jsonc` の `compatibility_date` は**今日の日付ではない**。
-これはバージョン固定と同じ性質の制約なので、ここに書いておく。
+`apps/*/wrangler.jsonc` の `compatibility_date` は **3 つの Worker で同じ値**に
+する。仕様書の日付（`2026-10-24`）に揃えてある（#108）。ずれると
+「dev では動くが別の Worker では挙動が違う」が起きる。
+
+**今日の日付を自動で入れてはいけない。** これはバージョン固定と同じ性質の
+制約なので、ここに書いておく。
 
 テストが使う workerd が知らない `compatibility_date` を指定すると、
 テストが 1 件も実行されずに起動時点で `ERR_FUTURE_COMPATIBILITY_DATE` で落ちる。
@@ -84,9 +88,10 @@ peer は `vitest: "^4.1.0 || ^5.0.0"`。vitest 5 へ上げる余地はあるが�
 | `2026-11-15`         | `ERR_FUTURE_COMPATIBILITY_DATE` |
 
 つまりビルド日より少し先まで受け付ける。**どこまで通るかは実際に
-`pnpm test` を走らせて確かめるしかない。** 日付を進めるときは、
-`@cloudflare/vitest-plugin` を先に上げてから試すこと。
-3 つの Worker すべての `wrangler.jsonc` に同じ趣旨のコメントを置いてある。
+`pnpm test` を走らせて確かめるしかない。** いま入っている `2026-10-24` は
+この実測で決めた値である。さらに進めるときは `@cloudflare/vitest-plugin` を
+先に上げてから試すこと。3 つの Worker すべての `wrangler.jsonc` に
+同じ趣旨のコメントを置いてある。
 
 ### テストと deploy が同じ workerd で動くようになった（#108）
 
