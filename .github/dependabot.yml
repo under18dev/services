@@ -103,6 +103,25 @@ updates:
     commit-message:
       prefix: "chore(ci)"
     groups:
+      # init と analyze は同一リポジトリの同一バージョンでなければならない。
+      # major 更新はグループ化されないとパスごとに別 PR へ割れ、片方だけ
+      # マージすると init@v4 + analyze@v3 というサポートされない組み合わせが
+      # main に残る。
+      #
+      # しかも CodeQL ジョブは public リポジトリでのみ実行されるため（#26）、
+      # private の間は壊れた組み合わせでも CI は緑のままで誰も気づかない。
+      # 実際 #63 と #67 がこの形で割れ、レビューで気づいて連続マージした。
+      #
+      # 既存グループより上に置くこと。Dependabot は最初にマッチした
+      # グループへ割り当てるため、順序が逆だと効かない（#24 と同じ論点）。
+      codeql-action:
+        applies-to: version-updates
+        patterns:
+          - "github/codeql-action*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       actions-minor-patch:
         applies-to: version-updates
         update-types:
