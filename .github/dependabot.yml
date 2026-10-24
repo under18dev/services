@@ -46,6 +46,12 @@ updates:
         applies-to: version-updates
         patterns:
           - "@cloudflare/vitest-pool-workers"
+          # vitest-pool-workers の移行先。まだ依存に入っていないが、
+          # 移行した瞬間にグループから外れて単独バンプが復活し、しかも
+          # その時点では CI が緑のままなので、数週間後にテストが全滅して
+          # 初めて気づくことになる。存在しない名前へのマッチは無害なので
+          # 先に入れておく。
+          - "@cloudflare/vitest-plugin"
           - "@cloudflare/workers-types"
           - "miniflare"
           - "wrangler"
