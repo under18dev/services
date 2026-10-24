@@ -63,6 +63,14 @@ describe("管理権限の付与（admin-role.sql）", () => {
       .run();
   }
 
+  /**
+   * 生きたセッションを 1 本置く。
+   *
+   * **有効期限は固定時刻ではなく実時刻から取る。** 失効の SQL は SQLite の
+   * `unixepoch()`（＝実時刻）で期限を見るので、`aSession()` の既定値
+   * （FIXED_NOW から 12 時間）を使うと、実時刻がその先へ進んだ日には
+   * 「期限切れだから対象外」になってテストが時計次第で落ちる。
+   */
   async function insertSession(
     userId: string,
     id: string,
@@ -75,9 +83,9 @@ describe("管理権限の付与（admin-role.sql）", () => {
         id: session.id,
         userId: session.userId,
         tokenHash: session.tokenHash,
-        expiresAt: session.expiresAt,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
         authMethod: session.authMethod,
-        lastSeenAt: session.lastSeenAt,
+        lastSeenAt: new Date(),
       })
       .run();
   }
