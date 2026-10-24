@@ -1797,7 +1797,7 @@ pnpm --filter @u18/auth-worker client:create -- \
 ### 9.3 失効
 
 ```bash
-pnpm --filter @u18/auth-worker client:disable -- --client-id u18-dashboard --remote
+pnpm --filter @u18/auth-worker client:disable --client-id u18-dashboard --remote
 ```
 
 `disabled_at` が立つと、そのクライアントは即座に認可もトークン発行も拒否される（`ResolveOAuthClientUseCase` / `AuthenticateOAuthClientUseCase`）。`disabled_at is null` を条件に入れているので、二重に実行しても最初の失効時刻は上書きされない。
@@ -1807,7 +1807,7 @@ pnpm --filter @u18/auth-worker client:disable -- --client-id u18-dashboard --rem
 一覧は次で確認する。
 
 ```bash
-pnpm --filter @u18/auth-worker client:list -- --remote
+pnpm --filter @u18/auth-worker client:list --remote
 ```
 
 ### 9.4 ローカル開発・E2E 用のシード
@@ -1825,7 +1825,7 @@ pnpm --filter @u18/auth-worker client:seed-dev
 `.dev.vars.example` の `SIGNING_KEY_JWK` は placeholder で、そのままでは動かない。次で生成する（§2.4.1 の手順を、3 つの出力の取り違えが起きにくい形にまとめたもの）。
 
 ```bash
-pnpm --filter @u18/auth-worker key:generate -- --apply-local
+pnpm --filter @u18/auth-worker key:generate --apply-local
 ```
 
 秘密鍵（`d` 入り）は `.dev.vars` へ貼り、公開鍵だけが `signing_key_metadata` に入る。`--apply-local` はローカル D1 への投入まで行う。**本番用の `--apply-remote` は用意していない。** 本番の鍵投入は「先に JWKS へ公開してから署名を切り替える」という時間差のある手順（§4.2）であり、1 コマンドで済ませてよい操作ではないため。
