@@ -2,7 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "u18-auth",
   "main": "src/index.ts",
-  "compatibility_date": "2026-10-24",
+  // @cloudflare/vitest-pool-workers が抱える workerd のビルド日より後の日付を
+  // 指定すると、テスト起動時に ERR_FUTURE_COMPATIBILITY_DATE で落ちる。
+  // 上げるときは vitest-pool-workers / miniflare も一緒に上げること。
+  "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
@@ -14,8 +17,8 @@
       "database_name": "u18-identity",
       // `wrangler d1 create u18-identity` の出力で置き換える。
       "database_id": "REPLACE_WITH_D1_DATABASE_ID",
-      "migrations_dir": "../../packages/db/drizzle"
-    }
+      "migrations_dir": "../../packages/db/drizzle",
+    },
   ],
 
   "vars": {
@@ -24,8 +27,38 @@
     "RP_ID": "localhost",
     "RP_NAME": "u18 Identity",
     "WEBAUTHN_ORIGIN": "http://localhost:8787",
-    "ENVIRONMENT": "development"
-  }
+    "ENVIRONMENT": "development",
+  },
+
+  // 本番用の上書き。`wrangler deploy --env production` で使う。
+  // このとき Worker 名は "u18-auth-production" に派生する。
+  // dashboard-worker の env.production の Service Binding はこの名前を指している。
+  //
+  // この env を作らずに deploy すると ENVIRONMENT が "development" のまま乗り、
+  // ConsoleEmailSender が OTP をログへ出し、Cookie から __Host- と Secure が外れ、
+  // Discovery が localhost を広告する。既定値が安全側ではないので、
+  // 本番は必ずこの env 経由でデプロイすること。
+  "env": {
+    "production": {
+      "d1_databases": [
+        {
+          "binding": "IDENTITY_DB",
+          "database_name": "u18-identity",
+          "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+          "migrations_dir": "../../packages/db/drizzle",
+        },
+      ],
+      "vars": {
+        // 仕様書 14-1 で決定するまでの placeholder。
+        // 実ドメインへ差し替えるまでデプロイしないこと。
+        "ISSUER": "https://REPLACE_WITH_PRODUCTION_ISSUER",
+        "RP_ID": "REPLACE_WITH_PRODUCTION_RP_ID",
+        "RP_NAME": "u18 Identity",
+        "WEBAUTHN_ORIGIN": "https://REPLACE_WITH_PRODUCTION_ISSUER",
+        "ENVIRONMENT": "production",
+      },
+    },
+  },
 
   // Secrets（`wrangler secret put` で設定。wrangler.jsonc には書かない）:
   //   SIGNING_KEY_JWK   ID Token 署名用の秘密鍵 (JWK JSON)

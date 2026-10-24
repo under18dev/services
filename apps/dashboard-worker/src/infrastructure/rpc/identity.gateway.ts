@@ -2,6 +2,18 @@ import type { IdentityRpcContract, RpcError, RpcResult } from "@u18/contracts";
 import type { IdentityGateway, IdentityOutcome } from "../../application/ports";
 import type { IdentityFailure } from "../../domain/errors";
 
+/**
+ * Service Binding のスタブを契約インターフェースとして見る。
+ *
+ * `wrangler types` は別 Worker の Entrypoint を知らないため、binding は
+ * `Fetcher` としか型付けできない。実際の形の保証は呼ばれる側にあり、
+ * auth-worker の `IdentityRPC` が `implements IdentityRpcContract` で
+ * コンパイル時に検査されている。ここはその契約を信じる 1 箇所に絞る。
+ */
+export function asIdentityRpc(binding: Fetcher): IdentityRpcContract {
+  return binding as unknown as IdentityRpcContract;
+}
+
 /** RPC のエラー契約を、この Worker のドメイン語彙へ翻訳する。 */
 function toFailure(error: RpcError): IdentityFailure {
   switch (error.code) {
@@ -28,7 +40,7 @@ function toFailure(error: RpcError): IdentityFailure {
  * 冪等でない操作（revokeSession）を自動リトライしないこと。
  */
 export class RpcIdentityGateway implements IdentityGateway {
-  constructor(private readonly identity: Service<IdentityRpcContract>) {}
+  constructor(private readonly identity: IdentityRpcContract) {}
 
   getSession(sessionToken: string) {
     return this.call(() => this.identity.getSession({ sessionToken }));

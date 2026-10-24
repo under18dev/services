@@ -9,6 +9,7 @@ import type {
   TokenHasher,
 } from "../application/ports/crypto.port";
 import type { EmailSender } from "../application/ports/email-sender.port";
+import type { DatabaseProbe } from "../application/ports/health.port";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { UserRepository } from "../application/ports/user.repository";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
@@ -22,6 +23,7 @@ import {
 } from "../infrastructure/crypto/web-crypto";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
+import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
 import { DrizzleSessionRepository } from "../infrastructure/persistence/drizzle-session.repository";
 import { DrizzleUserRepository } from "../infrastructure/persistence/drizzle-user.repository";
 
@@ -45,6 +47,7 @@ export type Container = {
     readonly comparator: ConstantTimeComparator;
     readonly email: EmailSender;
     readonly audit: AuditLogger;
+    readonly databaseProbe: DatabaseProbe;
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
@@ -59,6 +62,7 @@ export type ContainerOverrides = Partial<{
   sessions: SessionRepository;
   audit: AuditLogger;
   email: EmailSender;
+  databaseProbe: DatabaseProbe;
 }>;
 
 /**
@@ -74,9 +78,18 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const users = overrides.users ?? new DrizzleUserRepository(db);
   const sessions = overrides.sessions ?? new DrizzleSessionRepository(db);
   const audit = overrides.audit ?? new DrizzleAuditLogger(db);
+  const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
 
   const hasher = new Sha256TokenHasher();
-  const ipHasher = new PepperedIpHasher(env.IP_HASH_PEPPER ?? "dev-pepper");
+  // pepper が無いまま本番が起動すると、IPv4 空間は総当たり可能なので
+  // ハッシュが匿名化として機能しなくなる。静かに既定値へ落ちると
+  // 誰も気づけないため、development 以外では起動を止める（仕様書 9 Privacy）。
+  const ipHasher = new PepperedIpHasher(
+    env.IP_HASH_PEPPER ??
+      (env.ENVIRONMENT === "development"
+        ? "dev-pepper"
+        : throwUnconfigured("IP_HASH_PEPPER is not set outside development")),
+  );
   const tokens = new WebCryptoTokenGenerator();
   const comparator = new TimingSafeComparator();
 
@@ -94,7 +107,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
     db,
     clock,
     repositories: { users, sessions },
-    services: { hasher, ipHasher, tokens, comparator, email, audit },
+    services: { hasher, ipHasher, tokens, comparator, email, audit, databaseProbe },
     useCases: {
       getSession,
       listSessions: new ListSessionsUseCase({ getSession, sessions, clock }),

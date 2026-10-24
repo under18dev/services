@@ -1,7 +1,8 @@
+import { sessionCookieName } from "@u18/contracts";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { secureHeaders } from "hono/secure-headers";
-import { RpcIdentityGateway } from "./infrastructure/rpc/identity.gateway";
+import { RpcIdentityGateway, asIdentityRpc } from "./infrastructure/rpc/identity.gateway";
 import type { IdentityGateway } from "./application/ports";
 import type { IdentityFailure } from "./domain/errors";
 
@@ -13,11 +14,9 @@ const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 app.use("*", secureHeaders());
 
 app.use("*", async (c, next) => {
-  c.set("identity", new RpcIdentityGateway(c.env.IDENTITY));
+  c.set("identity", new RpcIdentityGateway(asIdentityRpc(c.env.IDENTITY)));
   await next();
 });
-
-const COOKIE_NAME = "u18_session";
 
 function statusFor(failure: IdentityFailure): 401 | 403 | 404 | 503 {
   switch (failure.kind) {
@@ -43,7 +42,7 @@ app.get("/health", (c) =>
  * （仕様書 2.2 / 4.1）。
  */
 app.get("/api/me", async (c) => {
-  const token = getCookie(c, COOKIE_NAME);
+  const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
   if (token === undefined) return c.json({ error: "unauthenticated" }, 401);
 
   const result = await c.get("identity").getProfile(token);
@@ -54,7 +53,7 @@ app.get("/api/me", async (c) => {
 });
 
 app.get("/api/me/sessions", async (c) => {
-  const token = getCookie(c, COOKIE_NAME);
+  const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
   if (token === undefined) return c.json({ error: "unauthenticated" }, 401);
 
   const result = await c.get("identity").listSessions(token);
@@ -64,12 +63,13 @@ app.get("/api/me/sessions", async (c) => {
 });
 
 app.delete("/api/me/sessions/:id", async (c) => {
-  const token = getCookie(c, COOKIE_NAME);
+  const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
   if (token === undefined) return c.json({ error: "unauthenticated" }, 401);
 
   // 状態を変える操作なので Origin を確かめる（仕様書 9 CSRF）。
+  // Origin 欠如も拒否する（fail-closed）。
   const origin = c.req.header("Origin");
-  if (origin !== undefined && new URL(c.req.url).origin !== origin) {
+  if (origin !== new URL(c.req.url).origin) {
     return c.json({ error: "forbidden" }, 403);
   }
 

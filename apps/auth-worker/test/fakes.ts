@@ -46,7 +46,13 @@ export class InMemoryUserRepository implements UserRepository {
 
   async create(input: NewUser): Promise<User> {
     const now = new Date();
-    const props: UserProps = { ...input, status: "active", createdAt: now, updatedAt: now };
+    const props: UserProps = {
+      ...input,
+      status: "active",
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
     this.store.set(props.id, props);
     return User.fromPersistence(props);
   }

@@ -20,6 +20,7 @@ function toDomain(row: UserRow): User {
     email: row.primaryEmail,
     emailVerified: row.emailVerified,
     status: row.status,
+    deletedAt: row.deletedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

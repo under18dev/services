@@ -7,5 +7,10 @@ allowBuilds:
   esbuild: true
   workerd: true
 
+# pnpm 12 では .npmrc ではなくここに設定を書く。
+# ピア依存の不一致でインストールを止めない（Cloudflare 系の peer 宣言が広いため）。
+strictPeerDependencies: false
+autoInstallPeers: true
+
 minimumReleaseAgeExclude:
   - "@cloudflare/workers-types@5.20261023.1"

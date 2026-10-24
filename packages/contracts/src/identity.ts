@@ -75,7 +75,9 @@ export type SessionListItem = {
   /** 現在この RPC を呼ぶのに使われたセッションかどうか。UI で「このデバイス」を示す。 */
   readonly current: boolean;
   readonly userAgent: string | null;
-  readonly ipHash: string | null;
+  // ipHash は載せない。dashboard-worker はこの DTO をそのままブラウザへ返すため、
+  // ここに入れると IP のハッシュが利用者側へ漏れる。auth-worker 自身の
+  // /api/me/sessions も返していない。必要になったら専用の管理用 RPC を分ける。
 };
 
 export type ListSessionsResult = RpcResult<readonly SessionListItem[]>;
