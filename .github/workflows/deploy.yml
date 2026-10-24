@@ -208,11 +208,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
 
-      # auth-worker は development 以外で IP_HASH_PEPPER / SIGNING_KEY_JWK 等が
+      # auth-worker は development 以外で IP_HASH_PEPPER / SIGNING_KEY_JWK が
       # 無いと起動を拒否する。デプロイ自体は成功して実リクエストで初めて落ちる
       # ため、先に Workers Secret の「名前」だけを確認しておく（値は取得しない）。
       # 初回デプロイ時は Worker 自体が存在せず一覧を取れないので、ここでは
       # 落とさずに警告にとどめる。
+      #
+      # SIGNING_KEY_KID は必須に含めない。#23 で Secret が JWK Set 形式に
+      # なり、現役 kid は Set の中で示されるようになったため、新しく作る
+      # 環境ではこの Secret 自体が存在しない（runbook 2.4.4）。
+      # 必須のまま残すと「存在しなくてよいものが無い」と毎回警告することに
+      # なり、本物の Missing が出たときに読み飛ばされる。
+      #
+      # 旧形式（単一 JWK + SIGNING_KEY_KID）の環境もコードは受け付けるので、
+      # 在る場合は在ると表示するだけにして、無いことを異常としない。
       - name: Check required Worker secrets
         continue-on-error: true
         env:
@@ -224,14 +233,21 @@ jobs:
             echo "::warning::Could not list Worker secrets (the Worker may not exist yet on a first deploy). Skipping the check."
             exit 0
           fi
+
           missing=""
-          for name in SIGNING_KEY_JWK SIGNING_KEY_KID IP_HASH_PEPPER; do
+          for name in SIGNING_KEY_JWK IP_HASH_PEPPER; do
             echo "$secrets_json" | grep -q "\"$name\"" || missing="$missing $name"
           done
+
           if [ -n "$missing" ]; then
             echo "::warning::Missing Worker secrets:$missing. Set them with 'wrangler secret put <NAME> --env production'; auth-worker refuses to boot without them outside development."
           else
             echo "All required Worker secrets are present."
+          fi
+
+          # 旧形式の名残。無いのが正常なので、在るときだけ触れる。
+          if echo "$secrets_json" | grep -q '"SIGNING_KEY_KID"'; then
+            echo "Note: SIGNING_KEY_KID is set. It is only read for the pre-#23 single-JWK format and is ignored once SIGNING_KEY_JWK holds a JWK Set (runbook 2.4.4)."
           fi
 
       - name: wrangler deploy
