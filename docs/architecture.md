@@ -149,15 +149,25 @@ Domain へ漏らさず、各 Repository の `toDomain()` が明示的に写し�
 
 ```text
 apps/dashboard-worker/src/
-├── index.ts                        Hono アプリ（ルート定義もここ）
+├── index.ts                        既定 export 1 行だけの薄いエントリ
+├── composition/container.ts        createContainer（Env を知ってよいのはここだけ）
+├── presentation/http/app.ts        createApp（ルート定義）
+├── presentation/http/base-path.ts  ACCOUNT_BASE_PATH（本番 route と対になる接頭辞）
+├── presentation/http/types.ts      AppBindings
 ├── application/ports.ts            IdentityGateway（Identity への問い合わせ Port）
 ├── domain/errors.ts                IdentityFailure（この Worker のエラー語彙）
 └── infrastructure/rpc/identity.gateway.ts   RpcIdentityGateway（Service Binding adapter）
 ```
 
-規模が小さいため `presentation/` ディレクトリは作らず、ルートは `src/index.ts` に
-直接書かれている（仕様書 3 のツリーとの差分は §9-2 を参照）。層の意図自体は保たれており、
+auth-worker / nfc-worker と同じ形になっている（#119）。**ルートを `src/index.ts` に
+置くとレイヤ lint の対象外になる**ため、`presentation/http/` へ移した。
 ルートハンドラは `c.get("identity")` 越しに `IdentityGateway` だけを見る。
+
+`src/index.ts` に**既定 export 以外を置かないこと。** Worker のエントリ
+モジュールは既定ハンドラと Entrypoint クラス以外の名前付き export を持てず、
+置くと workerd が起動時に落ちる。**この失敗は vitest でも
+`wrangler deploy --dry-run` でも検出されない**（実測）。`ACCOUNT_BASE_PATH` を
+`presentation/http/app.ts` から再 export しているのはそのため。
 
 Service Binding の型付けにも 1 つ細工がある。`wrangler types` は
 相手 Worker の Entrypoint を知らないため、`env.IDENTITY` は `Fetcher` としか
@@ -216,15 +226,22 @@ Domain から外向きの矢印が 1 本も引けないようにしている。
 ### ブロック 3: Presentation
 
 - 対象: `apps/*/src/presentation/**/*.ts`
-- 禁止: `drizzle-orm`, `drizzle-orm/*`, `**/infrastructure/persistence/**`
+- 禁止: `drizzle-orm`, `drizzle-orm/*`, `@u18/db`, `**/infrastructure/**`
 
 ここだけ禁止が緩い。Presentation は Hono を使うのが仕事なので `hono` は許され、
 `cloudflare:workers`（`WorkerEntrypoint`）も許される。これは
 `presentation/rpc/identity.entrypoint.ts` が成立するために必要。
 `composition/` の import も許される（`app.ts` と entrypoint が `createContainer` を呼ぶ）。
 
-禁止されるのは**データアクセスの 2 経路**だけ、すなわち Drizzle を直接叩くことと、
-Repository の具象クラスを直接 new すること。ルートから SQL を書く近道を塞ぐのが目的。
+禁止されるのは **Infrastructure 全体**である。
+
+> **以前は `**/infrastructure/persistence/**` だけを禁じていた**（#119 で広げた）。
+> それだと**永続化以外の Infrastructure を Presentation が直接 `new` する**形が
+> 通る。実際 dashboard-worker が `RpcIdentityGateway`（`infrastructure/rpc/`）を
+> ルート定義の中で `new` していた。節の冒頭に書いてある依存方向
+> （Presentation → Application）を、規則が表現できていなかった。
+>
+> 組み立ては `composition/` の仕事で、Presentation が見てよいのは Port の型だけ。
 
 ### 強制されていない範囲
 
@@ -669,11 +686,14 @@ sequenceDiagram
    ログイン系（Phase 1）より先に Worker 間の境界を固めた形で、
    結果として「RPC は通るがログインできない」状態になっている（§6.3）。
 
-2. **dashboard-worker に `presentation/` ディレクトリがない**（仕様書 3 のツリー）。
-   ルート定義は `src/index.ts` に直接書かれている。現状の規模では妥当だが、
-   `eslint.layers.js` のブロック 3 は `apps/*/src/presentation/**` を対象にしているため、
-   **dashboard のルートハンドラはレイヤ lint の対象外**である点に注意。
-   presentation/ を切るときに初めてルールが効き始める。
+2. ~~**dashboard-worker に `presentation/` ディレクトリがない**~~ → **解消（#119）。**
+   `presentation/http/` と `composition/` を切り、3 つの Worker が同じ形になった。
+
+   このとき**規則のほうも直している**。ブロック 3 は `**/infrastructure/persistence/**`
+   だけを禁じていたので、dashboard の `RpcIdentityGateway`（`infrastructure/rpc/`）を
+   Presentation が直接 `new` する形は**ディレクトリを切っても通ってしまった**。
+   実測で確認している —— 旧規則のままファイルだけ移すと lint は素通りする。
+   **「ファイルを移す」と「規則を当てる」は別の作業で、両方やって初めて効く。**
 
 3. **仕様書 3 のツリーに Auth UI が無い。** `presentation/http/ui/` は
    仕様書を書いた時点で想定されていなかったが、仕様書 14-4（#36）で

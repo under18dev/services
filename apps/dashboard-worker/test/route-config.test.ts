@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { parseJsonc } from "@u18/testing";
 import { describe, expect, it } from "vitest";
-import { ACCOUNT_BASE_PATH } from "../src/base-path";
+import { ACCOUNT_BASE_PATH } from "../src/presentation/http/base-path";
 
 /**
  * 本番の route と `ACCOUNT_BASE_PATH` が噛み合っていることを確かめる（#106）。

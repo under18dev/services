@@ -49,7 +49,20 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          patterns: ["drizzle-orm", "drizzle-orm/*", "**/infrastructure/persistence/**"],
+          // **Infrastructure 全体**を禁じる（persistence だけではない）。
+          //
+          // 以前は `**/infrastructure/persistence/**` だけを禁じていたが、
+          // それだと dashboard-worker の `RpcIdentityGateway`（`infrastructure/rpc/`）
+          // のように**永続化以外の Infrastructure を Presentation が直接 new する**
+          // 形が通ってしまう。冒頭に書いてある依存方向（Presentation -> Application）
+          // を規則が表現できていなかった（#119）。
+          //
+          // 組み立ては `composition/` の仕事で、Presentation が見てよいのは
+          // Port の型だけ。3 つの Worker すべてがこの形になっている。
+          // `hono` と `cloudflare:*` は禁じない。Presentation はフレームワークを
+          // 使う層であり、RPC の entrypoint は `cloudflare:workers` の
+          // `WorkerEntrypoint` を継承する必要がある。
+          patterns: ["drizzle-orm", "drizzle-orm/*", "@u18/db", "**/infrastructure/**"],
         },
       ],
     },
