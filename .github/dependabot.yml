@@ -14,6 +14,26 @@ updates:
       timezone: "Asia/Tokyo"
     open-pull-requests-limit: 5
     versioning-strategy: "increase"
+    # 公開から 7 日経っていないバージョンの PR を開かせない。
+    #
+    # npm アカウントの乗っ取りで悪意ある版が publish された場合、発覚から
+    # yank までは数時間〜数日で収まることが多い。待つだけで大半を避けられる。
+    #
+    # このリポジトリではブランチ保護が使えず（Free プラン / #58）、実際に
+    # Dependabot の PR が CI 無しで main に入ったことがある。人間のレビューだけ
+    # が歯止めになっている以上、機械的な時間差の価値は相対的に大きい。
+    #
+    # この値は pnpm-workspace.yaml の minimumReleaseAge と対になる（#101）。
+    # minimumReleaseAge は「若すぎる版は install しない」という強制で、
+    # --frozen-lockfile の install も止まる。cooldown のほうが短いと、
+    # Dependabot が install できない PR を毎週開くことになり、赤い
+    # Dependabot PR が常態化して誰も見なくなる。
+    # **必ず cooldown >= minimumReleaseAge を保つこと。**
+    #
+    # security update には cooldown が適用されない（GitHub の仕様）。
+    # 緊急の脆弱性修正が遅れないので、その点は意図どおり。
+    cooldown:
+      default-days: 7
     labels:
       - "infra"
     commit-message:
