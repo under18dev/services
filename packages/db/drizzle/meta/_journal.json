@@ -15,6 +15,20 @@
       "when": 1792818125996,
       "tag": "0001_fantastic_joystick",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792836008203,
+      "tag": "0002_dizzy_whizzer",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792836828864,
+      "tag": "0003_backfill_user_emails",
+      "breakpoints": true
     }
   ]
 }

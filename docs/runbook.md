@@ -1956,9 +1956,9 @@ npx wrangler d1 execute u18-identity --remote --command "
 select id, status from users where lower(primary_email) = lower('<新アドレス>');
 "
 # 2. 差し替える。users.primary_email と user_emails の両方を直す。
-#    users.primary_email は非正規化されたコピーで、正本は user_emails 側である
-#    （packages/db/src/schema/users.ts）。片方だけ直すと、OTP は新アドレスへ飛ぶのに
-#    一覧や将来の実装は旧アドレスを見る、という食い違いが残る。
+#    一意性の正本は users.primary_email 側で、user_emails は確認状態の台帳である
+#    （仕様書 7.1、packages/db/src/schema/users.ts）。片方だけ直すと、OTP は新アドレスへ
+#    飛ぶのに「確認済みか」を台帳で見る処理は旧アドレスを見る、という食い違いが残る。
 npx wrangler d1 execute u18-identity --remote --command "
 update users set primary_email = '<新アドレス>', email_verified = 0, updated_at = unixepoch() * 1000
 where id = '<USER_ID>';

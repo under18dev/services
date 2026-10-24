@@ -89,39 +89,47 @@ describe("users_primary_email_unique は無条件", () => {
 });
 
 /**
- * `user_emails` は**まだどこからも書かれていない**。
+ * `user_emails` は**書かれるようになった**（#96）。
  *
- * スキーマのコメントは `user_emails` を「正本」と書いているが、実際に
- * 書き込む経路は存在しない（`DrizzleUserRepository.create()` も
- * `markEmailVerified()` も `users` しか触らない）。つまり #60 で入れた
- * partial 索引は**空のテーブルを守っている**状態で、現在のメール一意性は
- * すべて `users_primary_email_unique` が担っている。
+ * 以前ここには「まだ誰も書いていない」ことを固定するテストがあった。#60 の
+ * partial 索引が空のテーブルを守っている状態を記録し、書く経路を足した人が
+ * 必ず気づくようにするためのものだった。経路が入ったので、**書かれることを
+ * 確かめる形に置き換えている。**
  *
- * このテストは「書かれていないこと」を固定する。`user_emails` を書く経路を
- * 足した人はここで落ちるので、そのときに次を決め直すことになる:
+ * 決め直した結論は「一意性の正本は `users.primary_email` のまま、`user_emails`
+ * は確認状態の台帳」。2 つの索引は揃えず、役割を分けた。根拠と、batch が
+ * 巻き戻ることの実測は `test/user-emails-write-path.test.ts` にある。
  *
- *  - `users` 側は無条件、`user_emails` 側は確認済みのみ。**未確認の
- *    `primary_email` が他人の登録を妨げる**という非対称がそこで表に出る
- *  - 現在の signup 経路は `emailVerified: true` でユーザーを作るので
- *    その窓は開いていないが、「未確認のまま仮登録する」経路を足した瞬間に開く
+ * ここに残すのは、**その決定が `users` 側の占有を弱めていないこと**だけ。
+ * 上の describe が索引そのものを見ているのに対し、こちらは Repository を
+ * 通した経路で同じ結論になることを見る。
  */
-describe("user_emails を書く経路はまだ無い（#62 の前提）", () => {
+describe("user_emails を書き始めても users 側の占有は変わらない（#96）", () => {
+  let db: ReturnType<typeof createIdentityDatabase>;
+  let repo: DrizzleUserRepository;
+
+  const SHARED_FROZEN = "frozen-occupancy@example.com";
+
   beforeEach(async () => {
     await resetDatabase();
+    db = createIdentityDatabase(env.IDENTITY_DB);
+    repo = new DrizzleUserRepository(db);
   });
 
-  it("ユーザーを作っても user_emails に行は増えない", async () => {
-    const db = createIdentityDatabase(env.IDENTITY_DB);
-    const repo = new DrizzleUserRepository(db);
-    const fixture = aUser();
-
-    const created = await repo.create({
+  function create(fixture: UserFixture) {
+    return repo.create({
       id: fixture.id,
       username: fixture.username,
       displayName: fixture.displayName,
       email: fixture.email,
-      emailVerified: true,
+      emailVerified: fixture.emailVerified,
     });
+  }
+
+  it("ユーザーを作ると user_emails にも行ができる", async () => {
+    const fixture = aUser();
+
+    const created = await create(fixture);
     await repo.markEmailVerified(created.id, fixture.email);
 
     const row = await db
@@ -129,7 +137,30 @@ describe("user_emails を書く経路はまだ無い（#62 の前提）", () => 
       .from(userEmails)
       .get();
 
-    expect(row?.count, "user_emails を書く経路が入った。上の doc コメントの決め直しが要る").toBe(0);
+    expect(
+      row?.count,
+      "user_emails への書き込みが失われた。台帳が空だと user_emails_email_unique は何も守らない",
+    ).toBe(1);
+  });
+
+  it("凍結アカウントのアドレスは Repository 経由でも解放されない", async () => {
+    // 台帳を書き始めたことで BAN が回避できるようになっていないか。
+    // 凍結アカウントの user_emails 行は未確認でも構わない（確認済みに
+    // 限る partial 索引は占有を裁かない）ので、users 側だけが頼りになる。
+    const frozen = aUser({ email: SHARED_FROZEN, emailVerified: false, status: "suspended" });
+    await db
+      .insert(users)
+      .values({
+        id: frozen.id,
+        username: frozen.username,
+        displayName: frozen.displayName,
+        primaryEmail: frozen.email,
+        emailVerified: false,
+        status: "suspended",
+      })
+      .run();
+
+    await expectUniqueViolation(() => create(aUser({ email: SHARED_FROZEN })));
   });
 });
 

@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX `user_emails_user_email_unique` ON `user_emails` (`user_id`,lower("email"));--> statement-breakpoint
+CREATE UNIQUE INDEX `user_emails_user_primary_unique` ON `user_emails` (`user_id`) WHERE "user_emails"."is_primary" = 1;

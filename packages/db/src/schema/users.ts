@@ -15,14 +15,20 @@ export const users = sqliteTable(
     username: text("username").notNull(),
     displayName: text("display_name").notNull(),
     /**
-     * 連絡先として「現在有効な」メールアドレス。
+     * 連絡先として「現在有効な」メールアドレス。**一意性の正本はこの列である。**
      *
-     * **現時点ではこれが唯一の正本である。** 設計上は `user_emails` を正本に
-     * して複数アドレスを持たせる想定だが、`user_emails` に書き込む経路は
-     * まだ存在しない（`DrizzleUserRepository` は `users` しか触らない、#96）。
-     * メールでの引き当て（`findByEmail()`）も一意性の強制も、すべてこの列に
-     * 乗っている。`apps/auth-worker/test/primary-email-unique.test.ts` が
-     * この前提を固定している。
+     * 設計当初は `user_emails` を正本に据える想定だったが、仕様書 §14.1 決定 7
+     * （アカウントは物理削除せず凍結で表現する）と両立しない。正本であるなら
+     * 自分で占有を裁けなければならないのに、`user_emails_email_unique` は
+     * **確認済みの行だけ**に効く部分インデックスなので、未確認のまま凍結された
+     * アカウントのアドレスを解放してしまう。占有を無条件に裁けるのは
+     * `users_primary_email_unique` だけなので、一意性と `findByEmail()` の
+     * 引き当てはこの列に置いたままにする（#96 / #62 / #51、仕様書 7.1）。
+     *
+     * `user_emails` は「どのアドレスが、いつ確認されたか」の台帳として書かれる
+     * （書き込み経路は #96 で追加した）。第一アドレスについてはこの列の写しで
+     * あり、`DrizzleUserRepository` が D1 の batch で両方を同時に書く。写しが
+     * 欠けると下の部分インデックスが守るべき行を見失うので、片方だけ書かない。
      */
     primaryEmail: text("primary_email").notNull(),
     emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
@@ -57,19 +63,26 @@ export const users = sqliteTable(
     // emailVerified: true でユーザーを作るのでこの窓は開いていないが、
     // 将来「未確認のまま仮登録する」経路を足すと表面化する。
     //
-    // なお `user_emails` には書き込む経路がまだ無いため（#96）、メールの
-    // 一意性は**現状この索引だけが担っている**。下の部分インデックスは空の
-    // テーブルを守っている状態で、上の「代償」も今は users 側の制約として
-    // だけ現れる。
+    // #96 で `user_emails` に書き始めた後も、この非対称は解消していない。
+    // 解消する代わりに**役割を分けた**: 新規アカウントがそのアドレスを
+    // 取れるかを決めるのはこの索引だけで、user_emails 側の部分インデックスは
+    // 「同じアドレスを 2 人が確認済みとして持てない」ことだけを見る。
+    // create() の batch では users への INSERT が先に走るので、凍結アドレス
+    // での再登録は user_emails の判定に到達せずここで落ちる。
     uniqueIndex("users_primary_email_unique").on(sql`lower(${table.primaryEmail})`),
     index("users_status_idx").on(table.status),
   ],
 );
 
 /**
- * メールアドレスと確認状態。
+ * メールアドレスと確認状態の台帳。
  *
  * 将来の「メール変更」「複数登録」に対応するため users から分離する（仕様書 7.1）。
+ *
+ * **一意性の正本ではない**（`users.primary_email` 側のコメントを参照）。ここが
+ * 答えるのは「このユーザーのこのアドレスは、いつ確認されたか」であって、
+ * 「このアドレスで新規登録できるか」ではない。2 つの問いを 1 つの索引に
+ * 背負わせようとしたことが #62 のねじれの出所だった。
  */
 export const userEmails = sqliteTable(
   "user_emails",
@@ -92,15 +105,37 @@ export const userEmails = sqliteTable(
     // 持ち主が登録できなくなる（所有を誰も証明していない行との衝突）。
     // 未確認行は重複を許し、確認完了時に初めてこの索引で弾く。
     //
-    // **ただしこのテーブルを書く経路はまだ無く、索引は空のテーブルを守って
-    // いる**（#96）。書き始めるときは、`users_primary_email_unique` が無条件で
-    // あることとの非対称を決め直すこと —— あるアドレスが既存アカウントの
-    // `primary_email` になっていると、**それが未確認でも**別アカウントは
-    // signup できない。つまり `users` 側の無条件制約が、ここで得たはずの
-    // 保護を部分的に打ち消す。
+    // `users_primary_email_unique` が無条件であることとの非対称は、#96 で
+    // **意図して残すと決めた**。新規アカウントの占有判定はあちらが単独で担い、
+    // ここは「確認済みの重複」だけを見る。両方へ書く
+    // `DrizzleUserRepository.create()` では users 側の INSERT が先に走るので、
+    // 「部分インデックスだから凍結アドレスが解放される」ことは起きない。
+    //
+    // 逆に、将来 primary 以外のアドレスを登録する経路を足すと、users 側を
+    // 通さずにここへ行が入る。そのとき**他人の primary_email と同じアドレスを
+    // 確認済みにできるか**は、相手の user_emails 行が確認済みで在るかだけで
+    // 決まる。create() / markEmailVerified() が必ず写しを書くのはそのためで、
+    // 写しを省いた瞬間ここが素通りして二重の所有者ができる。
     uniqueIndex("user_emails_email_unique")
       .on(sql`lower(${table.email})`)
       .where(sql`${table.verifiedAt} is not null`),
+    // 同じユーザーが同じアドレスの行を複数持たないようにする。
+    //
+    // `markEmailVerified()` は「行があれば verified_at を立て、無ければ足す」
+    // を 1 文の upsert で行う。その衝突先がこの索引である。索引が無いと
+    // upsert を書けず「読んでから書く」2 文に分かれ、同時に走った確認が
+    // 同じアドレスの行を 2 本作る。判定がユーザー単位なので、他人を締め出す
+    // 事前登録ロックアウトは生まない。
+    uniqueIndex("user_emails_user_email_unique").on(table.userId, sql`lower(${table.email})`),
+    // 第一アドレスの写しはユーザーごとに 1 行だけ。
+    //
+    // `users.primary_email` が正本である以上、それを指す写しが 2 本あると
+    // どちらが現在の値なのか行からは決められない。アドレス変更では古い行の
+    // is_primary を落としてから新しい行を立てる（同じ batch 内で順に適用
+    // されるので、この索引に引っ掛からない）。
+    uniqueIndex("user_emails_user_primary_unique")
+      .on(table.userId)
+      .where(sql`${table.isPrimary} = 1`),
     index("user_emails_user_idx").on(table.userId),
   ],
 );
