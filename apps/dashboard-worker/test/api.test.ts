@@ -5,8 +5,9 @@ import {
   rpcErr,
   rpcOk,
 } from "@u18/contracts";
-import type { RpcErrorCode, SessionListItem, UserProfile } from "@u18/contracts";
+import type { GrantListItem, RpcErrorCode, SessionListItem, UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
+import { ACCOUNT_BASE_PATH } from "../src/base-path";
 import app from "../src/index";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
 
@@ -18,7 +19,20 @@ import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
  * ここではその 3 つだけを、fake の RPC を差して検証する。
  */
 
+/**
+ * `/account` 接頭辞を付けて叩く。
+ *
+ * 本番の Workers route（`auth.under18.dev/account/*`）は、一致した接頭辞を
+ * URL から**取り除かない**。Worker には `/account/api/me` がそのまま届くので、
+ * ハンドラ側もその形で登録してある（#106）。テストが接頭辞を省くと、
+ * 本番で 1 つも叩けない状態のまま緑になる。
+ */
 async function request(path: string, env: Env, init: RequestInit = {}): Promise<Response> {
+  return await rawRequest(`${ACCOUNT_BASE_PATH}${path}`, env, init);
+}
+
+/** 接頭辞を付けずに叩く。「付けないと届かない」ことを示すテストだけが使う。 */
+async function rawRequest(path: string, env: Env, init: RequestInit = {}): Promise<Response> {
   return await app.fetch(new Request(`${ORIGIN}${path}`, init), env, executionContext());
 }
 
@@ -285,19 +299,267 @@ describe("セッション一覧", () => {
   });
 });
 
-describe("/health", () => {
-  it("Identity に触れずに応答する", async () => {
-    // 死活確認が auth-worker の状態に引きずられると、
-    // どちらが落ちているのか切り分けられなくなる。
+describe("本番の route に合わせた /account 接頭辞（#106）", () => {
+  const identity = { getUserProfile: async () => rpcOk(PROFILE) };
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+
+  it("接頭辞付きなら届く", async () => {
+    const response = await rawRequest("/account/api/me", envWith(identity), {
+      headers: { Cookie: cookie },
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  // この 4 件が回帰の本体。接頭辞を外すと本番では 404 になるが、
+  // `wrangler dev` は dashboard を単独オリジンで起動するので手では気づけない。
+  // 「接頭辞なしは 404」を固定しておかないと、誰かが外しても緑のままになる。
+  it.each(["/health", "/api/me", "/api/me/sessions", "/api/me/grants"])(
+    "接頭辞なしの %s は 404",
+    async (path) => {
+      const response = await rawRequest(path, envWith(identity as never), {
+        headers: { Cookie: cookie },
+      });
+
+      expect(response.status).toBe(404);
+    },
+  );
+
+  it("接頭辞なしでは RPC を呼ばない", async () => {
+    // 404 になる前に Identity を叩いていたら、本番で無駄な RPC が出る。
+    const response = await rawRequest(
+      "/api/me",
+      envWith({
+        getUserProfile: () => neverCalled("getUserProfile"),
+      } as never),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(404);
+  });
+});
+
+describe("同意済みアプリの一覧", () => {
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+
+  const GRANTS: GrantListItem[] = [
+    {
+      clientId: "u18-first-party",
+      clientName: "u18 公式",
+      logoUrl: null,
+      scopes: ["openid", "profile"],
+      grantedAt: "2026-10-24T00:00:00.000Z",
+    },
+  ];
+
+  it("auth-worker から受けた配列をそのまま返す", async () => {
+    // この Worker は DTO を加工せずブラウザへ渡す。つまり GrantListItem に
+    // 項目を足すと、それはそのまま利用者へ届く。
+    const response = await request(
+      "/api/me/grants",
+      envWith({ listGrants: async () => rpcOk(GRANTS) }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ grants: GRANTS });
+  });
+
+  it("Cookie が無ければ RPC を呼ばずに 401", async () => {
+    const response = await request(
+      "/api/me/grants",
+      envWith({ listGrants: () => neverCalled("listGrants") } as never),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("GET には Origin 検証を課さない", async () => {
+    const response = await request(
+      "/api/me/grants",
+      envWith({ listGrants: async () => rpcOk(GRANTS) }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("RPC の失敗を HTTP ステータスへ翻訳する", async () => {
+    const response = await request(
+      "/api/me/grants",
+      envWith({ listGrants: async () => rpcErr("unauthenticated", "session is not valid") }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(401);
+  });
+});
+
+describe("同意の取り消し", () => {
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+
+  function revoke(env: Env, headers: Record<string, string>) {
+    return request("/api/me/grants/u18-first-party", env, { method: "DELETE", headers });
+  }
+
+  it("同一オリジンなら RPC まで到達する", async () => {
+    const response = await revoke(
+      envWith({ revokeGrant: async () => rpcOk({ revoked: true, revokedTokenCount: 2 }) }),
+      { Cookie: cookie, Origin: ORIGIN },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: true, revokedTokenCount: 2 });
+  });
+
+  it("Origin が無ければ拒否する", async () => {
+    // 状態を変える操作なので、セッション失効と同じ fail-closed にする。
+    const response = await revoke(
+      envWith({ revokeGrant: () => neverCalled("revokeGrant") } as never),
+      { Cookie: cookie },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("別オリジンからは拒否する", async () => {
+    const response = await revoke(
+      envWith({ revokeGrant: () => neverCalled("revokeGrant") } as never),
+      { Cookie: cookie, Origin: "https://evil.example" },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("Cookie が無ければ RPC を呼ばずに 401", async () => {
+    const response = await revoke(
+      envWith({ revokeGrant: () => neverCalled("revokeGrant") } as never),
+      { Origin: ORIGIN },
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("同意していないクライアントなら 404", async () => {
+    const response = await revoke(
+      envWith({ revokeGrant: async () => rpcErr("not_found", "grant not found") }),
+      { Cookie: cookie, Origin: ORIGIN },
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("Cookie を落とさない", async () => {
+    // 同意の取り消しはセッションを切らない。操作者は引き続きログインしたまま。
+    const response = await revoke(
+      envWith({ revokeGrant: async () => rpcOk({ revoked: true, revokedTokenCount: 1 }) }),
+      { Cookie: cookie, Origin: ORIGIN },
+    );
+
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("RPC が例外を投げても 503 に畳み込む", async () => {
+    const response = await revoke(
+      envWith({
+        revokeGrant: () => {
+          throw new Error("service binding is not available");
+        },
+      }),
+      { Cookie: cookie, Origin: ORIGIN },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("service binding");
+  });
+});
+
+describe("/health は Identity まで確かめる（#44）", () => {
+  it("Identity が ok なら 200", async () => {
     const response = await request(
       "/health",
-      envWith({ getSession: () => neverCalled("getSession") } as never),
+      envWith({ ping: async () => rpcOk({ status: "ok", service: "u18-auth" } as const) }),
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       status: "ok",
       service: "u18-dashboard",
+      checks: { identity: "ok" },
     });
+  });
+
+  it("Identity が degraded なら 503", async () => {
+    // auth-worker は生きているが D1 へ届いていない。認証は成立しない。
+    const response = await request(
+      "/health",
+      envWith({ ping: async () => rpcOk({ status: "degraded", service: "u18-auth" } as const) }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ checks: { identity: "degraded" } });
+  });
+
+  it("Identity へ届かなければ 503", async () => {
+    // 以前はここが 200 だった。dashboard は認証機能のすべてを RPC に
+    // 依存しているので、auth-worker が止まっていれば何も機能していない。
+    const response = await request(
+      "/health",
+      envWith({
+        ping: () => {
+          throw new Error("service binding is not available");
+        },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ checks: { identity: "unreachable" } });
+  });
+
+  it("RPC がエラーを返しても 503", async () => {
+    const response = await request(
+      "/health",
+      envWith({ ping: async () => rpcErr("internal", "sqlite: no such table: users") }),
+    );
+
+    expect(response.status).toBe(503);
+    // 内部の事情を監視エンドポイントから漏らさない。
+    expect(await response.text()).not.toContain("sqlite");
+  });
+
+  it("応答に機密情報を載せない", async () => {
+    const response = await request(
+      "/health",
+      envWith({ ping: async () => rpcOk({ status: "ok", service: "u18-auth" } as const) }),
+      { headers: { Cookie: `${DEV_SESSION_COOKIE_NAME}=token-value` } },
+    );
+    const body = await response.text();
+
+    // 認証されていない要求から叩かれる経路なので、識別子を 1 つも返さない。
+    expect(body).not.toContain("token-value");
+    expect(body).not.toContain("@");
+    expect(body).not.toContain("usr_");
+  });
+
+  it("Identity が応答しなければタイムアウトして 503", async () => {
+    // 待ち続けると、監視から見て「落ちている」と「遅い」の区別が消える。
+    // adapter 側の上限は 2 秒（identity.gateway.ts の PING_TIMEOUT_MS）。
+    const response = await request(
+      "/health",
+      envWith({ ping: () => new Promise(() => undefined) }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ checks: { identity: "unreachable" } });
+  }, 10_000);
+
+  it("Cookie が無くても叩ける", async () => {
+    // 監視は Cookie を持たない。
+    const response = await request(
+      "/health",
+      envWith({ ping: async () => rpcOk({ status: "ok", service: "u18-auth" } as const) }),
+    );
+
+    expect(response.status).toBe(200);
   });
 });
