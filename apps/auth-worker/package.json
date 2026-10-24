@@ -16,6 +16,11 @@
     "client:list": "node scripts/oauth-client.mjs list",
     "client:seed-dev": "node scripts/oauth-client.mjs seed-dev",
     "key:generate": "node scripts/signing-key.mjs generate",
+    "key:list": "node scripts/signing-key.mjs list",
+    "key:verify": "node scripts/signing-key.mjs verify",
+    "key:register": "node scripts/signing-key.mjs register",
+    "key:activate": "node scripts/signing-key.mjs activate",
+    "key:retire": "node scripts/signing-key.mjs retire",
     "migrate:local": "wrangler d1 migrations apply u18-identity --local",
     "migrate:remote": "wrangler d1 migrations apply u18-identity --remote",
     "build:client": "node scripts/build-client.mjs"
