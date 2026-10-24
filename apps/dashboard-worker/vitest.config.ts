@@ -26,10 +26,19 @@ export default defineConfig({
       miniflare: {
         workers: [
           {
+            // 名前は既定 env の binding (`u18-auth`) に合わせてある。
+            // `env.production` は `u18-auth-production` を指すので、production
+            // 設定でこのテストを走らせると同じ起動エラーになる。その場合は
+            // ここにもう 1 つスタブを足すこと。
             name: "u18-auth",
             modules: true,
             script:
-              "export default { fetch: () => new Response('stub', { status: 501 }) };" +
+              // 599 と明示的な本文にしてあるのは、テストが誤って fake ではなく
+              // 本物の binding を叩いたときに気づけるようにするため。501 だと
+              // 「未実装エンドポイント」と読めてしまい、配線ミスに見えない。
+              "export default { fetch: () => new Response(" +
+              "'stub worker - you meant to inject a fake IdentityRpcContract into app.fetch()'," +
+              " { status: 599 }) };" +
               // RPC entrypoint 名も wrangler.jsonc に書かれているので形だけ用意する。
               "export class IdentityRPC {}",
           },
