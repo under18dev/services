@@ -7,6 +7,8 @@
  * Time Travel のスナップショットが漏れても ID Token は偽造できない。
  */
 
+import type { SigningKeyLifecycle } from "../../domain/services/signing-key-rotation";
+
 /**
  * JWKS に出す公開鍵。
  *
@@ -44,8 +46,15 @@ export interface SigningKeyProvider {
   /**
    * 新規署名に使う鍵をちょうど 1 つ返す。
    *
-   * 秘密鍵が未設定、kid が `signing_key_metadata` に無い、あるいはその kid が
-   * 現在 active でない場合は **throw する**。`UnconfiguredEmailSender` /
+   * `SIGNING_KEY_JWK` は 1 本の JWK でも JWK Set でもよい。**どれで署名するかを
+   * 決めるのは Secret ではなく `signing_key_metadata` の `active_from` /
+   * `active_until`** で、Secret は「候補の束」でしかない（#23）。これにより
+   * 鍵の切り替えが Secret の置き換えではなく DB の UPDATE 1 回になり、
+   * 切り替えの瞬間に kid と鍵がちぐはぐになる窓が消える。
+   *
+   * 秘密鍵が未設定、どの kid も `signing_key_metadata` に無い、現在 active な
+   * 鍵が 1 本も無い、あるいは Secret の鍵が行の `public_jwk` と別物だった場合は
+   * **throw する**。`UnconfiguredEmailSender` /
    * `UnconfiguredIpHasher` と同じ方針で、失敗はコンテナの組み立て時ではなく
    * 「署名しようとした時点」に置く。組み立てで投げると `/health` や
    * Discovery まで 500 になる（#53）。
@@ -66,16 +75,15 @@ export interface SigningKeyProvider {
   getPublicJwks(): Promise<readonly PublicSigningJwk[]>;
 }
 
-/** `signing_key_metadata` の 1 行。 */
-export type SigningKeyMetadata = {
-  readonly kid: string;
-  readonly algorithm: string;
-  /** JWKS に載せる公開鍵（JWK の JSON 文字列）。 */
-  readonly publicJwk: string;
-  readonly activeFrom: Date;
-  readonly activeUntil: Date | null;
-  readonly retiresAt: Date | null;
-};
+/**
+ * `signing_key_metadata` の 1 行。
+ *
+ * 実体は Domain の `SigningKeyLifecycle` そのもの。別に定義し直さないのは、
+ * 鍵の寿命判定（`auditSigningKeySecret`）が Domain 側にあり、そこへ渡す値と
+ * Repository が返す値がずれた瞬間に「DB から読めるのに判定に渡せない」が
+ * 起きるため。名前だけ Port の語彙に合わせている。
+ */
+export type SigningKeyMetadata = SigningKeyLifecycle;
 
 export interface SigningKeyMetadataRepository {
   /**
