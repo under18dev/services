@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
+import { parseJsonc } from "@u18/testing";
 import { describe, expect, it } from "vitest";
 import { RateLimitPolicy, type RateLimitScope } from "../src/domain/services/rate-limit-policy";
-import { parseJsonc } from "./jsonc";
 
 /**
  * `wrangler.jsonc` の `ratelimits` と `RateLimitPolicy` が一致していることを確かめる。
