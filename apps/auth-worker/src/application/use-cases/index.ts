@@ -1,7 +1,9 @@
 export * from "./authenticate-oauth-client.use-case";
+export * from "./delete-passkey.use-case";
 export * from "./get-session.use-case";
 export * from "./issue-session.use-case";
 export * from "./logout.use-case";
+export * from "./list-passkeys.use-case";
 export * from "./list-sessions.use-case";
 export * from "./passkey-login-options.use-case";
 export * from "./passkey-login-verify.use-case";
@@ -11,5 +13,6 @@ export * from "./resolve-oauth-client.use-case";
 export * from "./revoke-session.use-case";
 export * from "./side-effects";
 export * from "./start-email-otp.use-case";
+export * from "./update-profile.use-case";
 export * from "./verify-email-otp.use-case";
 export * from "./types";

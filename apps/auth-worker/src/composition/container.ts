@@ -19,11 +19,13 @@ import type { UserRepository } from "../application/ports/user.repository";
 import type { WebAuthnChallengeRepository } from "../application/ports/webauthn-challenge.repository";
 import type { WebAuthnService } from "../application/ports/webauthn.port";
 import { AuthenticateOAuthClientUseCase } from "../application/use-cases/authenticate-oauth-client.use-case";
+import { DeletePasskeyUseCase } from "../application/use-cases/delete-passkey.use-case";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
 import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
 import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { StartEmailOtpUseCase } from "../application/use-cases/start-email-otp.use-case";
 import { VerifyEmailOtpUseCase } from "../application/use-cases/verify-email-otp.use-case";
+import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
 import { PasskeyLoginVerifyUseCase } from "../application/use-cases/passkey-login-verify.use-case";
@@ -31,6 +33,7 @@ import { PasskeyRegisterOptionsUseCase } from "../application/use-cases/passkey-
 import { PasskeyRegisterVerifyUseCase } from "../application/use-cases/passkey-register-verify.use-case";
 import { ResolveOAuthClientUseCase } from "../application/use-cases/resolve-oauth-client.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
+import { UpdateProfileUseCase } from "../application/use-cases/update-profile.use-case";
 import { JoseSigningKeyProvider } from "../infrastructure/crypto/jose-signing-key";
 import {
   PepperedIpHasher,
@@ -89,6 +92,9 @@ export type Container = {
     readonly logout: LogoutUseCase;
     readonly listSessions: ListSessionsUseCase;
     readonly revokeSession: RevokeSessionUseCase;
+    readonly updateProfile: UpdateProfileUseCase;
+    readonly listPasskeys: ListPasskeysUseCase;
+    readonly deletePasskey: DeletePasskeyUseCase;
     readonly passkeyRegisterOptions: PasskeyRegisterOptionsUseCase;
     readonly passkeyRegisterVerify: PasskeyRegisterVerifyUseCase;
     readonly passkeyLoginOptions: PasskeyLoginOptionsUseCase;
@@ -215,6 +221,9 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       logout: new LogoutUseCase({ sessions, hasher, clock, audit }),
       listSessions: new ListSessionsUseCase({ getSession, sessions, clock }),
       revokeSession: new RevokeSessionUseCase({ getSession, sessions, clock, audit }),
+      updateProfile: new UpdateProfileUseCase({ getSession, users, clock, audit }),
+      listPasskeys: new ListPasskeysUseCase({ getSession, passkeys }),
+      deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, clock, audit }),
       passkeyRegisterOptions: new PasskeyRegisterOptionsUseCase({
         getSession,
         users,
