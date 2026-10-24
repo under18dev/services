@@ -32,6 +32,19 @@ jobs:
       - name: Prettier
         run: pnpm exec prettier --check .
 
+      # Service Binding の宛先が、同じ env でデプロイされる Worker の名前と
+      # 一致しているかを検査する（#57 の項目 2 / #42）。
+      #
+      # `wrangler deploy --dry-run` はリモートを参照しないので、存在しない
+      # Worker を指す Service Binding でも正常終了する。#42 の取り違えは
+      # レビューで見つかったのであって、CI では一度も捕まっていない。
+      #
+      # 実行ではなく静的な突き合わせにしているのは CodeQL の SHA 検査と
+      # 同じ理由で、デプロイしてみるまで待てないため。Cloudflare の
+      # 認証情報は要らない。
+      - name: Check service binding targets
+        run: pnpm check:bindings
+
       # github/codeql-action の init と analyze は同一バージョンでなければ
       # ならない。Dependabot 側は #71 でグループ化したので割れた PR は
       # 作られないが、手で編集してずらすことは依然できる。
