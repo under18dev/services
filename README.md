@@ -48,67 +48,76 @@ TypeScript 6.1 以降（TypeScript 7 を含む）へ上げると、型情報を�
 なお TypeScript は各 workspace の `devDependencies` にも `5.9.3` で入っているので、
 ルートだけ書き換えても揃わない。
 
-### vitest 4.1.12
+### vitest 4.1.12 と `@cloudflare/vitest-plugin`
 
-`@cloudflare/vitest-pool-workers@0.23.0` の peer が
-`vitest: "^4.1.0"` / `@vitest/runner: "^4.1.0"` / `@vitest/snapshot: "^4.1.0"`。
-vitest 5 系へ上げると内部 API が合わず、`apps/*/vitest.config.ts` が
-`cloudflareTest()` プラグインの読み込み時点で落ちる。
-Workers ランタイム上でテストを走らせている以上、vitest 側ではなく
-`@cloudflare/vitest-pool-workers` 側の対応バージョンに追従する。
+テストは `@cloudflare/vitest-plugin@1.4.7` が用意する Workers ランタイム上で走る。
 
-なお 0.23.0 で `defineWorkersConfig()` は廃止され、通常の `defineConfig()` に
-`plugins: [cloudflareTest({...})]` を渡す形に変わっている。古い記事や
-以前のこのリポジトリのコードを参考にして `defineWorkersConfig` へ戻さないこと。
-インストール時に「`@cloudflare/vitest-plugin` へ改称された」という警告が出るが、
-改称先への移行はまだ行っていない。
+**`@cloudflare/vitest-pool-workers` からの改称先である**（#108）。旧パッケージは
+0.23.0 が最後で、npm 上で deprecated —— 「`@cloudflare/vitest-plugin` へ改称、
+今後更新しない」。上げる選択肢が無いので移行した。
+
+`defineWorkersConfig()` は廃止されており、通常の `defineConfig()` に
+`plugins: [cloudflareTest({...})]` を渡す。古い記事や以前のこのリポジトリの
+コードを参考にして `defineWorkersConfig` へ戻さないこと。
+
+peer は `vitest: "^4.1.0 || ^5.0.0"`。vitest 5 へ上げる余地はあるが、
+**移行時は 4.1.12 のまま据え置いた** —— 一度に 2 つ動かすと、落ちたときに
+どちらが原因か分からなくなる。
 
 ### `compatibility_date` = `2026-08-15`
 
 `apps/*/wrangler.jsonc` の `compatibility_date` は**今日の日付ではない**。
 これはバージョン固定と同じ性質の制約なので、ここに書いておく。
 
-テストは `@cloudflare/vitest-pool-workers` が同梱する workerd 上で走る。
-その workerd のビルド日より後の `compatibility_date` を指定すると、
+テストが使う workerd が知らない `compatibility_date` を指定すると、
 テストが 1 件も実行されずに起動時点で `ERR_FUTURE_COMPATIBILITY_DATE` で落ちる。
 `wrangler dev` と `wrangler deploy` は新しい日付でも通ってしまうため、
 「ローカルの dev は動くのに `pnpm test` だけ全滅する」という形で現れる。
 
-日付を進めたいときは、`@cloudflare/vitest-pool-workers`（と間接依存の miniflare）を
-先に上げて、同梱 workerd がその日付を知っている状態にしてから上げる。
+**上限は workerd のビルド日ではない。** 以前ここには「ビルド日より後の日付で
+落ちる」と書いてあったが、実測すると違う。現在の workerd
+`1.20261019.1`（2026-10-19 ビルド）は:
+
+| `compatibility_date` | 結果                            |
+| -------------------- | ------------------------------- |
+| `2026-10-24`         | **通る**（ビルド日の 5 日後）   |
+| `2026-11-15`         | `ERR_FUTURE_COMPATIBILITY_DATE` |
+
+つまりビルド日より少し先まで受け付ける。**どこまで通るかは実際に
+`pnpm test` を走らせて確かめるしかない。** 日付を進めるときは、
+`@cloudflare/vitest-plugin` を先に上げてから試すこと。
 3 つの Worker すべての `wrangler.jsonc` に同じ趣旨のコメントを置いてある。
 
-### テストと deploy は別の workerd で動いている（#108）
+### テストと deploy が同じ workerd で動くようになった（#108）
 
-上の制約の出どころをもう一段たどると、**lockfile には wrangler・miniflare・
-workerd がそれぞれ 2 つずつ入っている**ことが分かる。
+**以前は lockfile に wrangler・miniflare・workerd がそれぞれ 2 つずつ
+入っていた。** テストは 2026-08-15 ビルドの workerd、`wrangler dev` と
+`wrangler deploy` は 2026-10-19 ビルドの workerd という状態で、
+`compatibility_date` を縛っていたのは古いほうだった。
+
+`@cloudflare/vitest-plugin@1.4.7` は **apps と同じ `wrangler@4.152.0` を
+抱えている**ので、移行で二重化が消えた。
 
 ```
-@cloudflare/vitest-pool-workers@0.23.0        ← テストが使う
-  ├─ miniflare@5.20260815.0-alpha             ← alpha
-  └─ wrangler@4.124.0 └─ workerd@1.20260815.1 ← 2026-08-15 ビルド
-
-apps/*/devDependencies
-  └─ wrangler@4.152.0                          ← dev / deploy が使う
-       ├─ miniflare@5.20261019.2-beta          ← beta
-       └─ workerd@1.20261019.1                 ← 2026-10-19 ビルド
+移行前                          移行後
+workerd   1.20260815.1 / 1.20261019.1   →  1.20261019.1 のみ
+miniflare 5.20260815.0-alpha / …-beta   →  5.20261019.2-beta のみ
+wrangler  4.124.0 / 4.152.0             →  4.152.0 のみ
 ```
 
-**`pnpm test` は 8/15 ビルドの workerd で走り、`wrangler dev` と
-`wrangler deploy` は 10/19 ビルドの workerd を使う。** `compatibility_date` を
-縛っているのは古いほう（pool-workers 側）なので、`wrangler` だけ上げても
-日付は進められない。
+**テストと deploy が同じランタイムで動く。** 「テストは通るのに本番だけ
+挙動が違う」の原因が 1 つ減った。
 
-あわせて 2 点:
+ただし**消えていないものもある**（期待しないこと）:
 
-- **どちらの miniflare も prerelease**（alpha / beta）である。安定版と違って
-  予告なく挙動が変わりうるので、テストが緑であることの意味がその分弱い。
-- `pnpm audit` が報告する dev-only の `zod` の脆弱性は、pool-workers 配下の
-  `zod@4.4.3` である。**pool-workers を上げない限り消えない。** `ci.yml` が
-  `--prod` を blocking、dev を informational に分けているのはこのため。
-
-この絡まりを解くには pool-workers 側を動かす必要があり、そこが
-`compatibility_date` の制約に当たる。調査は #108。
+- **miniflare は依然 prerelease**（beta）。alpha と beta の 2 つが beta 1 本に
+  なっただけで、安定版ではない。予告なく挙動が変わりうる。
+- **`pnpm audit` の dev-only な指摘は残る。** 移行で **6 件 → 2 件**にはなった
+  （`sharp` は旧 pool-workers 配下にしか無かったので消えた）が、`zod`
+  （`vitest-plugin@1.4.7` が `4.6.5` を固定、修正版は `>=4.6.6`）と `undici`
+  （miniflare 配下。wrangler 側からも入るので移行とは無関係）は残る。
+  `ci.yml` が `--prod` を blocking、dev を informational に分けている理由は
+  変わらない。
 
 ### その他
 

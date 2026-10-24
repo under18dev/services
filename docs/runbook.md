@@ -44,7 +44,7 @@
 | compatibility_flags | `nodejs_compat`                   | `nodejs_compat`                        |
 | observability       | 有効                              | 有効                                   |
 
-`compatibility_date` が仕様書の日付（2026-10-24）ではなく 2026-08-15 なのは意図的である。`@cloudflare/vitest-pool-workers` が同梱する workerd のビルド日より後の日付を指定すると、テスト起動時に `ERR_FUTURE_COMPATIBILITY_DATE` で落ちる。上げるときは `@cloudflare/vitest-pool-workers` / miniflare も同時に上げ、`pnpm test` が通ることを確認してからにする。
+`compatibility_date` が仕様書の日付（2026-10-24）ではなく 2026-08-15 なのは意図的である。テストが使う workerd が知らない日付を指定すると、テスト起動時に `ERR_FUTURE_COMPATIBILITY_DATE` で落ちる。**上限は workerd のビルド日ではない** —— 実測では `1.20261019.1`（2026-10-19 ビルド）が 2026-10-24 を受け付け、2026-11-15 で落ちる。進めるときは `pnpm test` が通ることを確認してからにする（#108）。
 
 ### 1.2 Binding
 
@@ -694,9 +694,9 @@ Worker にバンドルされない経路であることが確認できた場合�
 
 #### 既知の罠 — pool-workers を上げて黙らせない
 
-現在、`pnpm audit`（dev 含む）の high はすべて `@cloudflare/vitest-pool-workers` 配下の推移的依存（`sharp`、`zod`）である。これらは informational 側なので **CI は落ちていない**。
+現在、`pnpm audit`（dev 含む）の high はすべて `@cloudflare/vitest-plugin` 配下の推移的依存（`zod`）である。これらは informational 側なので **CI は落ちていない**。`vitest-plugin@1.4.7` が `zod@4.6.5` を固定しており、修正版は `>=4.6.6`。**プラグイン側が上げるまで消えない。**
 
-ここで「まとめて消そう」と `@cloudflare/vitest-pool-workers` を上げると、同梱される workerd のビルド日が動き、`wrangler.jsonc` の `compatibility_date`（`2026-08-15` に固定）との整合が崩れる。結果、テストが 1 件も実行されずプール起動時に全滅する。
+ここで「まとめて消そう」と `@cloudflare/vitest-plugin` を上げると、同梱される workerd が動き、`wrangler.jsonc` の `compatibility_date`（`2026-08-15` に固定）との整合が崩れうる。結果、テストが 1 件も実行されず起動時に全滅する。
 
 ```
 MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE

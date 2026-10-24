@@ -70,10 +70,13 @@ jobs:
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
 
-      # dev 依存は実行時に載らない。現状の high はすべて
-      # @cloudflare/vitest-pool-workers 配下の sharp / zod で、
-      # pool-workers を上げない限り解消できない（上げると workerd の
-      # compatibility_date 制約に当たる）。可視化だけして CI は落とさない。
+      # dev 依存は実行時に載らない。現状の high は 2 件:
+      #   zod    @cloudflare/vitest-plugin@1.4.7 が 4.6.5 を固定（修正版 >=4.6.6）
+      #   undici miniflare 配下。wrangler 側からも入るので移行では消えない
+      # どちらも上流が上げるまで解消できない。可視化だけして CI は落とさない。
+      #
+      # #108 の移行で sharp は消え、件数は 6 → 2 になった（sharp は
+      # 旧 vitest-pool-workers 配下にしか無かった）。
       - name: Audit dev dependencies (informational)
         continue-on-error: true
         run: pnpm audit --audit-level high

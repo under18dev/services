@@ -584,7 +584,7 @@ Access Token を返す。ID Token は `/.well-known/jwks.json` の公開鍵で�
 
 ### 7.1 Workers ランタイム上で走らせる
 
-`apps/auth-worker/vitest.config.ts` は `@cloudflare/vitest-pool-workers` の
+`apps/auth-worker/vitest.config.ts` は `@cloudflare/vitest-plugin` の
 `cloudflareTest()` Vite プラグインを使う。0.23 で `defineWorkersConfig()` が
 廃止されたため、通常の `defineConfig()` に `plugins: [cloudflareTest({...})]` を
 渡す形になっている。これによりテスト本体が workerd の中で実行され、
@@ -711,7 +711,7 @@ sequenceDiagram
    という判断を 2 度続けている。単回交換の競合（#19）は
    `apps/auth-worker/test/oauth-code-concurrency.test.ts`、2 クライアント間の
    SSO（#20・Phase 2 完了条件）は `apps/auth-worker/test/sso-two-clients.test.ts`。
-   どちらも auth-worker の vitest 設定（`@cloudflare/vitest-pool-workers` +
+   どちらも auth-worker の vitest 設定（`@cloudflare/vitest-plugin` +
    `TEST_MIGRATIONS`）の外では走らせられず、設定を 2 つ持てば
    `compatibility_date` やマイグレーションの受け渡しが片方だけ古くなる。
    CI で走らないテストは無いのと同じなので、実行される場所を優先する。
@@ -719,9 +719,11 @@ sequenceDiagram
    （`tests/e2e/README.md` に判断と実機手順を書いてある）。
 
 5. **`compatibility_date` は `2026-08-15`** で、今日の日付ではない。
-   `@cloudflare/vitest-pool-workers` が同梱する workerd のビルド日より後の日付を
-   指定すると、テストが起動時に `ERR_FUTURE_COMPATIBILITY_DATE` で全滅する。
-   上げるときは pool/miniflare も同時に上げること（README の固定バージョン節を参照）。
+   テストが使う workerd が知らない日付を指定すると、起動時に
+   `ERR_FUTURE_COMPATIBILITY_DATE` で全滅する。**上限は workerd のビルド日では
+   ない** —— 実測では `1.20261019.1`（2026-10-19 ビルド）が 2026-10-24 を
+   受け付け、2026-11-15 で落ちる。進めるときは実際に `pnpm test` を通して
+   確かめること（README の固定バージョン節、#108）。
 
 6. **`wrangler.jsonc` の `database_id` は `REPLACE_WITH_D1_DATABASE_ID` のまま**。
    各自が `wrangler d1 create` した ID で置き換える前提で、リポジトリには

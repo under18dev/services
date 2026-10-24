@@ -7,7 +7,7 @@
     // tsconfig.client.json で別に型検査する（DOM の型を Worker 側へ持ち込まないため）。
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
-    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"]
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
   },
   "include": [
     "src/**/*.ts",
