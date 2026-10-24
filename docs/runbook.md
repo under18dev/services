@@ -1975,6 +1975,9 @@ pnpm --filter @u18/auth-worker client:seed-dev
 
 ローカル D1 に独立した 2 つのクライアント（confidential/first-party と public/third-party）を入れる。**2 つ必要なのは SSO の検証のため**で、1 つのブラウザセッションから複数クライアントへ続けてログインできることを確かめるには独立した `client_id` が 2 つ要る。
 
+この 2 つを使った SSO の確認手順（自動テストの場所と、`wrangler dev` で手作業で
+1 周する手順）は `tests/e2e/README.md` にある。
+
 このシードの `client_secret` はスクリプト内に固定で書いてある。**`--remote` は受け付けない**ので本番には入らない。本番のクライアントは必ず §9.1 で登録し、生成された秘密を 1 度だけ受け取ること。
 
 ### 9.5 開発用の署名鍵
