@@ -15,8 +15,14 @@ export const users = sqliteTable(
     username: text("username").notNull(),
     displayName: text("display_name").notNull(),
     /**
-     * 連絡先として「現在有効な」メールアドレス。正本は user_emails 側で、
-     * ここは参照の利便のために非正規化して持つ。
+     * 連絡先として「現在有効な」メールアドレス。
+     *
+     * **現時点ではこれが唯一の正本である。** 設計上は `user_emails` を正本に
+     * して複数アドレスを持たせる想定だが、`user_emails` に書き込む経路は
+     * まだ存在しない（`DrizzleUserRepository` は `users` しか触らない、#96）。
+     * メールでの引き当て（`findByEmail()`）も一意性の強制も、すべてこの列に
+     * 乗っている。`apps/auth-worker/test/primary-email-unique.test.ts` が
+     * この前提を固定している。
      */
     primaryEmail: text("primary_email").notNull(),
     emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
@@ -50,6 +56,11 @@ export const users = sqliteTable(
     // （未確認であっても）別アカウントは作れない。現在の signup 経路は
     // emailVerified: true でユーザーを作るのでこの窓は開いていないが、
     // 将来「未確認のまま仮登録する」経路を足すと表面化する。
+    //
+    // なお `user_emails` には書き込む経路がまだ無いため（#96）、メールの
+    // 一意性は**現状この索引だけが担っている**。下の部分インデックスは空の
+    // テーブルを守っている状態で、上の「代償」も今は users 側の制約として
+    // だけ現れる。
     uniqueIndex("users_primary_email_unique").on(sql`lower(${table.primaryEmail})`),
     index("users_status_idx").on(table.status),
   ],
@@ -80,6 +91,13 @@ export const userEmails = sqliteTable(
     // 確認を完了しないサインアップが他人のアドレスを占有でき、本来の
     // 持ち主が登録できなくなる（所有を誰も証明していない行との衝突）。
     // 未確認行は重複を許し、確認完了時に初めてこの索引で弾く。
+    //
+    // **ただしこのテーブルを書く経路はまだ無く、索引は空のテーブルを守って
+    // いる**（#96）。書き始めるときは、`users_primary_email_unique` が無条件で
+    // あることとの非対称を決め直すこと —— あるアドレスが既存アカウントの
+    // `primary_email` になっていると、**それが未確認でも**別アカウントは
+    // signup できない。つまり `users` 側の無条件制約が、ここで得たはずの
+    // 保護を部分的に打ち消す。
     uniqueIndex("user_emails_email_unique")
       .on(sql`lower(${table.email})`)
       .where(sql`${table.verifiedAt} is not null`),

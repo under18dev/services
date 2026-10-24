@@ -4,7 +4,7 @@ import { newId } from "@u18/domain";
 import { aUser, type UserFixture } from "@u18/testing";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { resetDatabase } from "./helpers";
+import { expectUniqueViolation, resetDatabase } from "./helpers";
 
 /**
  * `user_emails_email_unique` が「確認済みの行だけ」に効くことを確かめる。
@@ -43,31 +43,6 @@ describe("user_emails_email_unique は確認済みの行にだけ効く", () => 
       .insert(userEmails)
       .values({ id: newId("uem"), userId, email, verifiedAt })
       .run();
-  }
-
-  /**
-   * 一意制約違反で落ちたことを確かめる。
-   *
-   * Drizzle は元の例外を「Failed query: ...」で包むので、SQLite の
-   * メッセージは `cause` 側にしか出てこない。単に throw したことだけを
-   * 見ると、別の理由（FK 違反など）で落ちていても通ってしまう。
-   */
-  async function expectUniqueViolation(run: () => Promise<unknown>): Promise<void> {
-    let thrown: unknown;
-    try {
-      await run();
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown, "クエリが成功してしまった").toBeDefined();
-
-    const messages: string[] = [];
-    let current: unknown = thrown;
-    while (current instanceof Error) {
-      messages.push(current.message);
-      current = current.cause;
-    }
-    expect(messages.join(" / ")).toMatch(/UNIQUE constraint failed/i);
   }
 
   beforeEach(async () => {

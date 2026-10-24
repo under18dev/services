@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { expect } from "vitest";
 
 /**
  * テーブルを空にする。
@@ -16,4 +17,29 @@ export async function resetDatabase(): Promise<void> {
   await Promise.all(
     tables.results.map(({ name }) => env.IDENTITY_DB.exec(`delete from "${name}"`)),
   );
+}
+
+/**
+ * 一意制約違反で落ちたことを確かめる。
+ *
+ * Drizzle は元の例外を「Failed query: ...」で包むので、SQLite の
+ * メッセージは `cause` 側にしか出てこない。単に throw したことだけを
+ * 見ると、別の理由（FK 違反など）で落ちていても通ってしまう。
+ */
+export async function expectUniqueViolation(run: () => Promise<unknown>): Promise<void> {
+  let thrown: unknown;
+  try {
+    await run();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown, "クエリが成功してしまった").toBeDefined();
+
+  const messages: string[] = [];
+  let current: unknown = thrown;
+  while (current instanceof Error) {
+    messages.push(current.message);
+    current = current.cause;
+  }
+  expect(messages.join(" / ")).toMatch(/UNIQUE constraint failed/i);
 }
