@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# PR では後から来た push で前の実行を打ち切る。main では打ち切らない
+# （デプロイ判断の根拠になる実行を消さないため）。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+
+      # packages/config/eslint.layers.js の no-restricted-imports が
+      # Presentation -> Application -> Domain の依存方向（仕様書 2.3）を守らせる。
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Prettier
+        run: pnpm exec prettier --check .
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+      - name: tsc
+        run: pnpm typecheck
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+
+      # auth-worker の統合テストは packages/db/drizzle/ の生成済み SQL を読んで
+      # miniflare の D1 にスキーマを作る。schema を変えてマイグレーション生成を
+      # 忘れた PR でも CI が通ってしまわないよう、テスト前に必ず生成しておく。
+      - name: Generate Drizzle migrations
+        run: pnpm db:generate
+
+      - name: Vitest
+        run: pnpm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-workspace
+
+      # 各 Worker の build は `wrangler deploy --dry-run`。Cloudflare への
+      # 認証は不要なので、PR からの実行でも secrets を渡さない。
+      - name: Build workers
+        run: pnpm build
+
+  # ブランチ保護で要求する単一のステータス。個別ジョブを足しても
+  # 保護設定を触らずに済むよう、ここで集約する。
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, build]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "typecheck=${{ needs.typecheck.result }}"
+          echo "test=${{ needs.test.result }}"
+          echo "build=${{ needs.build.result }}"
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::One or more CI jobs failed."
+            exit 1
+          fi
