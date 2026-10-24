@@ -16,6 +16,46 @@ export type RetentionTarget =
   | "audit_logs";
 
 /**
+ * `audit_logs` の保持区分（#22、ランブック §7.2）。
+ *
+ * ## なぜ 2 つに分けるのか
+ *
+ * 一律 180 日だと、**アカウントの支配権が変わった操作の記録が、
+ * 侵害が発覚するより先に消える。** 「攻撃者がいつ自分の認証器を
+ * 足したのか」は、半年以上経ってから訊かれる質問である。
+ *
+ * かといって全部 2 年残すのは割に合わない。`audit_logs` の行数を
+ * 押し上げているのは `oauth.userinfo` や `oauth.token.issued` のような
+ * **リクエストごとに 1 行出るイベント**で、これらは古くなるほど価値が
+ * 下がる（直近の異常を見るためのもので、2 年前の UserInfo 取得を
+ * 遡る理由が無い）。
+ *
+ * そこで **「支配権が変わる操作」だけ**を長期側に置く。量が少なく、
+ * 遅れて始まる調査でこそ要るものである。どのイベントがどちらかは
+ * `AUDIT_EVENT_RETENTION`（`application/ports/audit-log.port.ts`）が持つ。
+ * 登録簿の隣に置いてあるので、**イベントを足すと区分の判断を迫られる**。
+ */
+export type AuditRetentionTier = "standard" | "security";
+
+export const AuditRetention: Readonly<Record<AuditRetentionTier, number>> = {
+  /** 180 日。既定。 */
+  standard: 180 * 24 * 60 * 60 * 1000,
+  /**
+   * 2 年。
+   *
+   * 下限の根拠は「侵害の発覚が遅れる幅」。報告される侵害の滞留時間は
+   * 数か月規模になることがあり、180 日では**調査を始めた時点で
+   * 既に消えている**ことが起こりうる。2 年あれば、発覚が 1 年遅れても
+   * その前後を見られる。
+   *
+   * 上限側の歯止めは D1 の容量と、保持そのものがリスクである
+   * という点（消さないデータは漏れうる）。長期側に入れるイベントを
+   * **量の少ないものに限る**ことでこの 2 つを両立させている。
+   */
+  security: 2 * 365 * 24 * 60 * 60 * 1000,
+};
+
+/**
  * 「用済みになってから」この時間が経った行を消してよい。
  *
  * 起点は作成時刻ではなく **行が使えなくなった時刻**（期限切れ / 失効 / 消費、
@@ -72,13 +112,16 @@ export const RetentionPolicy: Readonly<Record<RetentionTarget, number>> = {
   webauthn_challenges: 24 * 60 * 60 * 1000,
 
   /**
-   * 180 日。
+   * 180 日（`AuditRetention.standard`）。
    *
    * ランブック §7.2 の推奨値。インシデントの発覚は遅れるので、直近半年を
-   * 遡れる必要がある。高リスクイベントだけ 2 年残す案（同§）は
-   * event 名での選別が要るため、ここでは一律 180 日にしてある（残件）。
+   * 遡れる必要がある。
+   *
+   * **ただしイベントによってはこれより長く残す（#22）。** 区分は
+   * `AuditRetention` と、`application/ports/audit-log.port.ts` の
+   * `AUDIT_EVENT_RETENTION` が決める。ここはその既定値である。
    */
-  audit_logs: 180 * 24 * 60 * 60 * 1000,
+  audit_logs: AuditRetention.standard,
 } as const;
 
 /**

@@ -4,7 +4,7 @@ import {
   type RetentionTarget,
   retentionCutoff,
 } from "../../domain/services/retention-policy";
-import type { AuditLogger } from "../ports/audit-log.port";
+import { auditEventDeadlines, type AuditLogger } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { ExpiredRecordPurger, PurgeResult } from "../ports/retention.port";
 import { settleSideEffects } from "./side-effects";
@@ -69,6 +69,10 @@ export class PurgeExpiredRecordsUseCase {
             target,
             deadBefore: retentionCutoff(now, target),
             limit,
+            // `audit_logs` だけイベントごとに保持期間が変わる（#22）。
+            // 他のテーブルには渡さない —— 渡しても無視されるが、
+            // 「このテーブルも区分がある」と読めてしまう。
+            eventDeadlines: target === "audit_logs" ? auditEventDeadlines(now) : undefined,
           }),
         );
       } catch (cause) {

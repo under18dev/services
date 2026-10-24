@@ -1800,20 +1800,35 @@ npx wrangler tail u18-auth-production --format pretty | grep "retention archive"
 
 #### 現状
 
-- 保持期間は **180 日**（§7.0、#43）。15 分おきの Cron が自動で削除する。
-- **アーカイブ（別ストレージへの退避）は存在しない。** 180 日を過ぎたログは退避されずに消える。長期保全が必要なイベントを分けるなら、削除前に §6.3 のエクスポートを定期実行する運用が要る（残件）。
+- 保持期間は **既定 180 日、一部のイベントは 2 年**（§7.0、#43 / #22）。15 分おきの Cron が自動で削除する。区分は下記。
+- 削除の前に R2 へ退避される（上記）。**退避に失敗したら削除しない。**
 - `audit_logs` にはインデックスが 3 本（`event+created_at`、`user_id+created_at`、`created_at`）あり、行数に比例してストレージを消費する。D1 のデータベースサイズには上限があるため、放置すれば最終的に書き込みが止まる。
 - 書き込み失敗は握り潰される（`drizzle-audit-logger.ts`）。つまり **DB が容量上限に達しても、認証は動き続け、監査ログだけが静かに欠落する。** ログに `audit log write failed` が出るので、これを監視対象に入れること。
 
-#### イベント区分ごとの保持（未適用）
+#### イベント区分ごとの保持（#22、適用済み）
 
-現在の実装は **一律 180 日**で、下の区分はまだ効いていない。高リスクイベントを 2 年残すには `event` 名での選別が要る（残件、#22 と合わせて扱う）。
+正本は `apps/auth-worker/src/application/ports/audit-log.port.ts` の **`AUDIT_EVENT_RETENTION`**。期間そのものは `domain/services/retention-policy.ts` の `AuditRetention` が持つ。
 
-| 区分                                                                                     | 推奨保持期間 | 理由                                                   |
-| ---------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------ |
-| セキュリティイベント全般（`session.created`、`session.rejected`、`session.revoke` など） | **180 日**   | インシデントの発覚は遅れる。直近半年を遡れる必要がある |
-| 認証失敗（`outcome = 'failure'`）                                                        | **180 日**   | 総当たりの長期的パターン分析に使う                     |
-| 高リスクイベント（鍵ローテーション、アカウント停止・削除、管理操作）                     | **2 年**     | 件数が少なく、保持コストに対して価値が高い             |
+| 区分       | 保持       | 入るイベント                                                                                                                                     |
+| ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `security` | **2 年**   | `passkey.register` / `passkey.deleted` / `profile.updated` / `oauth.grant.revoked` / `session.revoke` / `session.logout` / `oauth.code.replayed` |
+| `standard` | **180 日** | 上記以外のすべて                                                                                                                                 |
+
+**長期側に置く基準は「アカウントの支配権が変わる操作」。** 「攻撃者がいつ自分の認証器を足したのか」は半年以上経ってから訊かれる質問で、一律 180 日だと**侵害が発覚するより先に記録が消える**。これらは量が少ないので、2 年持っても行数に効かない。
+
+逆に `oauth.userinfo` や `oauth.token.issued` のような**リクエストごとに 1 行出るイベント**は `standard` に置く。行数を押し上げている本体であり、古くなるほど価値が下がる（2 年前の UserInfo 取得を遡る理由が無い）。
+
+##### 知っておくべき制約 2 つ
+
+1. **選別は `event` 名でしかできない。** `reason` で絞ると WHERE 句が `(event, created_at)` のインデックスから外れ、掃除自体が重くなる。結果として「失敗だけ長く残したい」イベントは**成功も一緒に残すコスト**と引き換えになる。
+   代表例が `passkey.login` で、`reason: counter_regression`（認証器の複製の兆候）だけは長く残す価値があるが、成功したログインすべてを 2 年持つ量には見合わない。**分けたいなら専用のイベント名**（`passkey.counter_regression`）を足すのが正しい。区分ではなく名前の問題。
+2. **`rate_limit.exceeded` は `audit_logs` に入らない**（#21）。Workers のログへ出している。区分表には型の都合で載っているが、掃除の対象にこの名前の行は現れない。
+
+##### 区分を変えるとき
+
+`AUDIT_EVENT_RETENTION` は `Record<AuditEventName, AuditRetentionTier>` なので、**イベントを足すとコンパイルエラーになる。** 区分を決めないと通らない。既定へ黙って落ちる形にしていないのは、新しい高リスクイベントが 180 日で消える状態が無言で生まれるのを防ぐため。
+
+回帰は `apps/auth-worker/test/retention.test.ts`（同じ日付の 2 行が区分で生死を分けること）と `test/audit-events.test.ts`（登録簿との過不足、`security` が `standard` より長いこと）が見ている。
 
 #### 手で削除する手順（Cron が止まっている / 緊急で容量を空ける場合）
 
@@ -1828,6 +1843,9 @@ npx wrangler d1 export u18-identity --remote --table audit_logs \
   --output "/secure/backups/u18-audit-$(date -u +%Y%m%d).sql"
 # 削除
 npx wrangler d1 execute u18-identity --remote --command "
+-- ⚠️ 区分を無視して消す。2 年残すはずのイベント（AUDIT_EVENT_RETENTION の
+--    security）まで落ちるので、容量が逼迫しているとき以外は使わないこと。
+--    区分を尊重するなら Cron を待つか、event not in (...) を足す。
 delete from audit_logs where created_at < (unixepoch() - 180 * 86400) * 1000;
 "
 ```

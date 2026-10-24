@@ -12,6 +12,18 @@ export type PurgeRequest = {
   readonly deadBefore: Date;
   /** 1 回で消す上限。D1 の実行時間上限に当てないための歯止め（#43）。 */
   readonly limit: number;
+  /**
+   * `deadBefore` より長く残すイベントと、その境界時刻（#22）。
+   *
+   * `audit_logs` だけが使う。ここに名前がある行は**こちらの境界**で、
+   * 無い行は `deadBefore` で判定される。
+   *
+   * **境界の計算は Application 側でやる。** Infrastructure に持たせると、
+   * 「どの列が用済みを意味するか」（Infrastructure の仕事）と
+   * 「いつまで残すか」（ポリシー）が同じ場所に混ざる。この Port が
+   * `deadBefore` を受け取る形にしてあるのと同じ理由。
+   */
+  readonly eventDeadlines?: ReadonlyMap<string, Date> | undefined;
 };
 
 export type PurgeResult = {
