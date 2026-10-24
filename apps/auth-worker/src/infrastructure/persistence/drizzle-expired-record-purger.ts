@@ -66,11 +66,14 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
         case "email_challenges":
           // **`last_sent_at` を必ず条件に入れること。**
           //
-          // `resend_count` / `last_sent_at` は再送のクールダウン判定
-          // （`OtpPolicy.resendCooldownMs`）に使われている。期限と消費だけを
-          // 見て消すと、「コードを受け取って消費 → 行が消える → 送信履歴が無い」
-          // という順序でクールダウンと再送上限を回り込めてしまう。
-          // 最終送信から保持期間（1 時間 = クールダウンの 60 倍）が経つまで残す。
+          // `last_sent_at` は再送のクールダウン判定（`OtpPolicy.resendCooldownMs`）
+          // に使われている。期限と消費だけを見て消すと、「コードを受け取って
+          // 消費 → 行が消える → 送信履歴が無い」という順序でクールダウンを
+          // 回り込めてしまう。最終送信から保持期間が経つまで残す。
+          //
+          // 再送上限のほうは行数そのものを数えるので（#88）、この `case` が
+          // 消す行は**すべて上限の勘定から外れる**。`RetentionPolicy.email_challenges`
+          // を `OtpPolicy.resendWindowMs` より短くしてはならないのはそのため。
           return this.deleteDead(
             emailChallenges,
             emailChallenges.id,

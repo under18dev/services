@@ -87,7 +87,18 @@ export const emailChallenges = sqliteTable(
     attemptCount: integer("attempt_count").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(5),
     consumedAt: timestampMs("consumed_at"),
-    /** 再送制限の判定に使う。 */
+    /**
+     * **使われていない。** 再送上限は「窓の中に作られた行数」で判定する
+     * （`OtpPolicy.resendWindowMs`、`StartEmailOtpUseCase`）。
+     *
+     * この列で数える設計だったが、送信のたびに `invalidateActive()` →`create()`
+     * で**新しい行を作る**ため、カウンタは常に新しい行の 0 に戻っていた。
+     * 2 つの設計が噛み合わず、上限が一度も発動しなかった（#88）。
+     *
+     * 列を残してあるのは、D1 での `DROP COLUMN` を #88 の修正と同じ変更に
+     * 入れたくなかったからに過ぎない。**読まない。書かない。**
+     * ここから再送回数を読もうとしているコードを見かけたら、それは bug。
+     */
     resendCount: integer("resend_count").notNull().default(0),
     lastSentAt: timestampMs("last_sent_at"),
     createdAt: createdAt(),

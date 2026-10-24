@@ -9,7 +9,6 @@ export type EmailChallenge = {
   readonly attemptCount: number;
   readonly maxAttempts: number;
   readonly consumedAt: Date | null;
-  readonly resendCount: number;
   readonly lastSentAt: Date | null;
   readonly createdAt: Date;
 };
@@ -55,8 +54,18 @@ export interface EmailChallengeRepository {
    */
   consume(email: string, purpose: OtpPurpose, codeHash: string, now: Date): Promise<ConsumeResult>;
 
-  /** 再送時に送信回数と最終送信時刻を進める。 */
-  recordResend(id: string, at: Date): Promise<void>;
+  /**
+   * `since` 以降にそのアドレス・用途で作られた行数を返す。再送上限の判定に使う。
+   *
+   * `StartEmailOtpUseCase` は送信のたびに新しい行を作るので、**行数がそのまま
+   * 送信回数**になる。`invalidateActive()` で `consumed_at` が立った行も、
+   * 期限切れの行も数える —— 除外すると、無効化した時点で送信履歴が消えて
+   * 上限を回り込めてしまう（これが #88 の原形）。
+   *
+   * `since` は `RetentionPolicy.email_challenges` より後でなければならない。
+   * それより前の行は掃除で消えており、数えられない。
+   */
+  countSentSince(email: string, purpose: OtpPurpose, since: Date): Promise<number>;
 
   /**
    * 同じメール・用途の未使用チャレンジを無効化する。

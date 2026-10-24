@@ -48,12 +48,17 @@ export const RetentionPolicy: Readonly<Record<RetentionTarget, number>> = {
    * ログインを試みただけのアドレス——登録すらしていないアドレスを含む——が
    * 溜まり続けるので、未成年利用者を想定する以上ここは短くする（仕様書 9 Privacy）。
    *
-   * ただし **0 にはできない。** `resend_count` / `last_sent_at` は再送の
-   * クールダウン判定（`OtpPolicy.resendCooldownMs` = 60 秒、`StartEmailOtpUseCase`）に
-   * 使われており、消費済みの行を即座に消すと「コードを使う → 行が消える →
-   * 送信履歴が無くなる」でクールダウンと再送上限を回り込めてしまう。
-   * 1 時間はクールダウン窓の 60 倍、OTP の有効期限（5 分）の 12 倍で、
-   * どちらの窓も確実に跨ぐ。
+   * ただし **`OtpPolicy.resendWindowMs` より短くできない。** 再送上限は
+   * 「窓の中に何行作られたか」で判定するので（#88、`StartEmailOtpUseCase`）、
+   * 掃除で消えた行は数えられない。保持期間を窓より短くすると、待つだけで
+   * 上限を回り込める。現在はどちらも 1 時間で**余裕がゼロ**。短くするなら
+   * 窓を先に短くすること。`test/otp-resend-limit.test.ts` が両者の関係を
+   * 不変条件として固定している。
+   *
+   * クールダウン判定（`OtpPolicy.resendCooldownMs` = 60 秒）も `last_sent_at` を
+   * 読むので、消費済みの行を即座に消すと「コードを使う → 行が消える →
+   * 送信履歴が無くなる」で同じく回り込める。1 時間はクールダウン窓の 60 倍、
+   * OTP の有効期限（5 分）の 12 倍で、どちらの窓も確実に跨ぐ。
    */
   email_challenges: 60 * 60 * 1000,
 

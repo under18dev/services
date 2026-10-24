@@ -20,7 +20,6 @@ function toDomain(row: Row): EmailChallenge {
     attemptCount: row.attemptCount,
     maxAttempts: row.maxAttempts,
     consumedAt: row.consumedAt,
-    resendCount: row.resendCount,
     lastSentAt: row.lastSentAt,
     createdAt: row.createdAt,
   };
@@ -139,12 +138,22 @@ export class DrizzleEmailChallengeRepository implements EmailChallengeRepository
     return { outcome: "unusable" };
   }
 
-  async recordResend(id: string, at: Date): Promise<void> {
-    await this.db
-      .update(emailChallenges)
-      .set({ resendCount: sql`${emailChallenges.resendCount} + 1`, lastSentAt: at })
-      .where(eq(emailChallenges.id, id))
-      .run();
+  async countSentSince(email: string, purpose: OtpPurpose, since: Date): Promise<number> {
+    // 消費済み・期限切れも含めて数える。「送った事実」を数えているので、
+    // 行が使えるかどうかは関係ない。除外すると invalidateActive() が
+    // 送信履歴を消してしまい、上限が効かなくなる（#88）。
+    const row = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(emailChallenges)
+      .where(
+        and(
+          sql`lower(${emailChallenges.email}) = lower(${email})`,
+          eq(emailChallenges.purpose, purpose),
+          gt(emailChallenges.createdAt, since),
+        ),
+      )
+      .get();
+    return row?.count ?? 0;
   }
 
   async invalidateActive(email: string, purpose: OtpPurpose, at: Date): Promise<number> {

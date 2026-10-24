@@ -32,7 +32,6 @@ export class InMemoryEmailChallengeRepository implements EmailChallengeRepositor
       attemptCount: 0,
       maxAttempts: input.maxAttempts,
       consumedAt: null,
-      resendCount: 0,
       lastSentAt: input.sentAt,
       createdAt: input.sentAt,
     };
@@ -77,12 +76,29 @@ export class InMemoryEmailChallengeRepository implements EmailChallengeRepositor
     return { outcome: "consumed", challenge: row };
   }
 
-  async recordResend(id: string, at: Date): Promise<void> {
-    const row = this.store.find((r) => r.id === id);
-    if (row) {
-      row.resendCount += 1;
-      row.lastSentAt = at;
-    }
+  async countSentSince(email: string, purpose: OtpPurpose, since: Date): Promise<number> {
+    // 本物と同じく、消費済み・期限切れも数える。ここで除外すると
+    // invalidateActive() が送信履歴を消してしまい、fake だけが上限を
+    // 素通りする —— テストが本物の穴を見逃す形になる（#88）。
+    return this.store.filter(
+      (r) =>
+        r.email.toLowerCase() === email.toLowerCase() &&
+        r.purpose === purpose &&
+        r.createdAt.getTime() > since.getTime(),
+    ).length;
+  }
+
+  /**
+   * 保持期限による掃除を再現する。
+   *
+   * `since` より古い行が消えると上限を回り込めるか、をテストから確かめるために要る。
+   */
+  purgeCreatedBefore(cutoff: Date): number {
+    const before = this.store.length;
+    const kept = this.store.filter((r) => r.createdAt.getTime() >= cutoff.getTime());
+    this.store.length = 0;
+    this.store.push(...kept);
+    return before - this.store.length;
   }
 
   async invalidateActive(email: string, purpose: OtpPurpose, at: Date): Promise<number> {

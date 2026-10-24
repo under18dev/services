@@ -63,19 +63,36 @@ export class StartEmailOtpUseCase {
           retryAfterSeconds: Math.ceil((OtpPolicy.resendCooldownMs - elapsed) / 1000),
         });
       }
-      if (active.resendCount >= OtpPolicy.maxResends) {
-        // 上限に達しても応答は変えない。打ち止めであることを伝えると
-        // 「このアドレスは実在する」と分かってしまう。
-        await settleSideEffects(
-          "otp.start",
-          this.deps.audit.record({
-            event: "otp.start",
-            outcome: "failure",
-            reason: "resend_limit",
-          }),
-        );
-        return ok({ retryAfterSeconds: cooldownSeconds });
-      }
+    }
+
+    // 再送上限。**`active` の有無に依らず必ず確かめる。**
+    //
+    // 以前はこの判定がクールダウンと同じ `if (active != null)` の中にあり、
+    // しかも `active.resendCount` を見ていた。送信のたびに新しい行を作る以上
+    // カウンタは常に 0 で、判定は一度も真にならなかった。OTP の寿命は 5 分
+    // なので、5 分待てば `active` 自体が消えて上限判定ごと素通りもした。
+    // 結果、60 秒ごとに無制限にメールを送れた（#88）。
+    //
+    // 窓の中に作られた行数がそのまま送信回数になる。最初の 1 通は再送では
+    // ないので、`maxResends` を**超えた**ときに止める。
+    const sentInWindow = await this.deps.challenges.countSentSince(
+      address.value,
+      command.purpose,
+      new Date(now.getTime() - OtpPolicy.resendWindowMs),
+    );
+    if (sentInWindow > OtpPolicy.maxResends) {
+      // 上限に達しても応答は変えない。打ち止めであることを伝えると
+      // 「このアドレスは実在する」と分かってしまう。下の正常系と
+      // **同じ値**を返していることに注意（形も中身も変えないこと）。
+      await settleSideEffects(
+        "otp.start",
+        this.deps.audit.record({
+          event: "otp.start",
+          outcome: "failure",
+          reason: "resend_limit",
+        }),
+      );
+      return ok({ retryAfterSeconds: cooldownSeconds });
     }
 
     const user = await this.deps.users.findByEmail(address.value);
