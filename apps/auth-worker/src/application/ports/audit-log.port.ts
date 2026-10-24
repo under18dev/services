@@ -51,7 +51,18 @@ export const AUDIT_EVENTS = [
   /** Passkey の削除。 */
   "passkey.deleted",
 
-  // --- プロフィール ---
+  // --- アカウント ---
+  /**
+   * 利用者を新規作成した。
+   *
+   * `users.created_at` でも作成時刻は分かるが、**証跡として追えるのは
+   * `audit_logs` の側**である（保持期限・R2 への退避・調査手順がそちらに
+   * 乗っている）。OTP 検証の成功経路でユーザーが生まれるのに、
+   * 作成の記録がどこにも残らない状態だった（#151）。
+   *
+   * 既存ユーザーへのログインでは記録しない。
+   */
+  "user.created",
   /** displayName / username の変更。 */
   "profile.updated",
 
@@ -134,6 +145,14 @@ export type AuditEventName = (typeof AUDIT_EVENTS)[number];
  */
 export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetentionTier>> = {
   // --- 支配権が変わる操作（2 年） ---
+  /**
+   * アカウントの新規作成。**支配権が発生した瞬間**で、この系列の起点になる。
+   *
+   * 消えると「このアカウントはいつ誰が作ったか」を後から追えなくなり、
+   * 他のイベントを 2 年持つ意味も半減する。量は利用者数と同じで、
+   * リクエストごとに増えるものではない。
+   */
+  "user.created": "security",
   /** 認証器を足した。乗っ取りの最も典型的な足跡。 */
   "passkey.register": "security",
   /** 認証器を外した。締め出しの手口でもある。 */

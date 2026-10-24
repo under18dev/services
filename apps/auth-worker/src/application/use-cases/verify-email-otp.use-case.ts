@@ -107,6 +107,25 @@ export class VerifyEmailOtpUseCase {
       );
     }
 
+    // **成功も記録する。** ここが無いと `otp.verify` は失敗だけが残る
+    // 非対称な状態になり、「この試行は成功したのか」を監査ログ単体で
+    // 答えられない（#151）。隣接する `session.issue` から推測する形になる。
+    //
+    // 記録するのは `return` の直前で、**1 回の呼び出しにつき `otp.verify` は
+    // ちょうど 1 行**になる。`consume` の直後に書くと、その先の
+    // `user_missing` / `issue_session:*` で失敗したときに成功と失敗が
+    // 2 行並び、かえって読めなくなる。
+    await settleSideEffects(
+      "otp.verify",
+      this.deps.audit.record({
+        event: "otp.verify",
+        userId: user.id,
+        outcome: "success",
+        // 生のメールアドレスは監査ログに残さない（仕様書 4.4 / 9）。
+        metadata: { email: address.masked, purpose: command.purpose },
+      }),
+    );
+
     return ok({
       session: issued.value.session,
       token: issued.value.token,
@@ -123,13 +142,31 @@ export class VerifyEmailOtpUseCase {
 
     const id = newUserId();
     const username = Username.create(`u${id.slice(4, 14)}`);
-    return this.deps.users.create({
+    const created = await this.deps.users.create({
       id,
       username: username.value,
       displayName: username.value,
       email: address.value,
       emailVerified: true,
     });
+
+    // **作ったことを記録する。** `users.created_at` でも時刻は分かるが、
+    // 保持期限・R2 への退避・調査手順が乗っているのは `audit_logs` の側で、
+    // 証跡として追えるのはそちらである（#151）。
+    //
+    // 上の早期 return を通った場合（既存ユーザーへのログイン）は記録しない。
+    // 「新規作成」と「既存へのログイン」が区別できなくなる。
+    await settleSideEffects(
+      "user.created",
+      this.deps.audit.record({
+        event: "user.created",
+        userId: created.id,
+        outcome: "success",
+        metadata: { email: address.masked, via: "email_otp" },
+      }),
+    );
+
+    return created;
   }
 
   private async recordFailure(maskedEmail: string, reason: string): Promise<void> {
