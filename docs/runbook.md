@@ -551,6 +551,108 @@ npx wrangler tail u18-auth --search "audit log write failed"
 
 ---
 
+### 3.4 依存の脆弱性で CI が落ちたとき
+
+`.github/workflows/security.yml` の `audit` ジョブは 2 段構えになっている。
+
+| ステップ                               | コマンド                               | CI を落とすか                     |
+| -------------------------------------- | -------------------------------------- | --------------------------------- |
+| Audit production dependencies          | `pnpm audit --prod --audit-level high` | **落とす**                        |
+| Audit dev dependencies (informational) | `pnpm audit --audit-level high`        | 落とさない（`continue-on-error`） |
+
+Worker にバンドルされるのは production 依存だけなので、**本番に到達しうる high 以上はブロックする**。dev 依存は実行時に載らないため可視化にとどめる。
+
+このジョブは依存ツリーではなく**外部のアドバイザリ DB の状態で結果が変わる**。production 依存に新しい high が 1 件載った瞬間、開いているすべての PR と `main` への push、週次実行が同時に赤くなる。**赤くなった PR の作者から見ると、自分の変更と無関係なジョブが落ちている状態になる。** そのときの手順を以下に示す。
+
+#### ステップ 1 — どちらのステップが落ちたか切り分ける
+
+```sh
+# これが落ちていれば本番に到達しうる。対応が要る
+pnpm audit --prod --audit-level high
+
+# こちらだけが鳴っている場合、CI は落ちていない（informational）
+pnpm audit --audit-level high
+```
+
+`--prod` がクリーンなら、その PR は CI 的にはブロックされていない。
+
+#### ステップ 2 — その PR の変更が原因かを判定する
+
+ほぼの場合、原因は PR ではなくアドバイザリの新規公開である。判定は次で足りる。
+
+```sh
+# PR のブランチで落ちるか
+pnpm audit --prod --audit-level high
+
+# main でも落ちるか
+git stash && git checkout main && pnpm install --frozen-lockfile
+pnpm audit --prod --audit-level high
+```
+
+**`main` でも落ちるなら、その PR の責任ではない。** PR にその旨をコメントし、対応は下記の経路で別途行う。PR 側で無理に直さない。
+
+該当パッケージがどこから来ているかは次で辿る。
+
+```sh
+pnpm why <package-name>
+```
+
+#### ステップ 3 — 対処を選ぶ
+
+上から順に検討する。
+
+**(a) 依存をバンプする — 第一選択**
+
+直接依存なら `package.json` を更新する。Dependabot の PR が既に出ていることも多いので、先に確認する。
+
+**(b) 推移的依存なら `pnpm.overrides` でパッチ版へ固定する**
+
+直接依存していないパッケージは自分で上げられない。ワークスペースのルート `package.json` に書く。ルートに書けば全ワークスペースへ効く。
+
+```jsonc
+{
+  "pnpm": {
+    "overrides": {
+      "<package-name>": ">=<patched-version>",
+    },
+  },
+}
+```
+
+適用後は必ず `pnpm install` と `pnpm test` を通す。override は上流が正式対応したら**外す**。外し忘れると、将来の正規のバンプを黙って抑止する。
+
+**(c) 影響が無いと判断して一時的に除外する — 最後の手段**
+
+Worker にバンドルされない経路であることが確認できた場合に限る。**理由と見直し期限を必ず書き残す。無期限の除外を作らない。** 期限付きの issue を立て、`security` ラベルを付けて追跡する。
+
+#### やってはいけないこと
+
+次の変更は、production 依存の high を恒久的に見逃す設定になる。**認証基盤では受け入れない。**
+
+- `--audit-level` を `critical` へ引き上げる
+- production 側のステップから `--prod` を外す、またはステップごと削除する
+- production 側のステップに `continue-on-error: true` を足す
+
+いずれも「いま鳴っている音を止める」ことはできるが、一度外すと戻らない。鳴っているアラート 1 件より、鳴らなくなったゲートのほうが危険である。
+
+#### 既知の罠 — pool-workers を上げて黙らせない
+
+現在、`pnpm audit`（dev 含む）の high はすべて `@cloudflare/vitest-pool-workers` 配下の推移的依存（`sharp`、`zod`）である。これらは informational 側なので **CI は落ちていない**。
+
+ここで「まとめて消そう」と `@cloudflare/vitest-pool-workers` を上げると、同梱される workerd のビルド日が動き、`wrangler.jsonc` の `compatibility_date`（`2026-08-15` に固定）との整合が崩れる。結果、テストが 1 件も実行されずプール起動時に全滅する。
+
+```
+MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE
+```
+
+厄介なのは見え方で、`wrangler dev` は動き続けるためバンプと無関係な破損に見える。`compatibility_date` と同時に見直すこと。詳細は #24、Dependabot 側では `cloudflare-workers-runtime` グループで単独バンプを抑止している。
+
+#### 対応が長期化する場合
+
+上流にパッチが無く `pnpm.overrides` も当てられない場合、**ゲートを緩めるのではなく issue を立てて追跡する**。記録すべき内容は、アドバイザリ ID、影響する経路（`pnpm why` の出力）、本番バンドルに届くか、暫定の緩和策、再評価の期日。
+
+---
+
 ## 4. 署名鍵のローテーション
 
 ### 4.1 前提と現在の制約
