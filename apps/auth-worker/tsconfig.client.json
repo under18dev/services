@@ -1,0 +1,17 @@
+{
+  // ブラウザで動くクライアントアイランド（hono/jsx/dom）だけの型検査。
+  //
+  // 本体の tsconfig.json から分けているのは **DOM の型を Worker 側のコードへ
+  // 持ち込まないため**。本体に lib: ["DOM"] を足すと、workerd には存在しない
+  // `document` や `window` が Domain 層からも見えてしまい、動かないコードが
+  // 型検査を通る（README「固定しているバージョンとその理由」の最後の項目）。
+  "extends": "../../packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx/dom",
+    // Worker の binding 型（Env）はここでは要らない。ブラウザ側から Env は見えない。
+    "types": []
+  },
+  "include": ["src/presentation/http/ui/client/**/*.tsx"]
+}

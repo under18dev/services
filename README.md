@@ -135,19 +135,23 @@ pnpm dev:dashboard      # dashboard-worker（別ターミナル）
 ```bash
 curl http://localhost:8787/health
 curl http://localhost:8787/.well-known/openid-configuration
+curl http://localhost:8787/login   # ログイン画面（HTML）
 
 pnpm lint       # クリーンに通る
 pnpm typecheck  # 6 パッケージすべて通る
-pnpm test       # 62 件（packages/domain 25、apps/auth-worker 37）
+pnpm test       # 232 件（packages/domain 25、dashboard-worker 21、auth-worker 186）
 ```
 
 これが現在のグリーンな基準値。手元で落ちたら、自分の変更かセットアップ
 （手順 3・4）の漏れを先に疑うこと。
 
-> **現時点の制約**: ログイン手段（Passkey / メール OTP）が未実装のため、
-> セッション Cookie を正規の手順で取得することはできない。`/api/me` 系と
-> RPC を手で試す場合は `sessions` テーブルへ直接行を入れ、トークンの
-> SHA-256 hex を `token_hash` に入れる必要がある。やり方は
+> **セッション Cookie の取り方**: ブラウザで `http://localhost:8787/login` を開き、
+> メール OTP でログインする。`wrangler dev` では Cloudflare Email Sending が
+> シミュレートされ、実送信されない代わりにコードを含むメール本文のファイルパスが
+> dev のログへ出る。そこから 6 桁のコードを読んで入力する。
+> 事前に `users` テーブルへ対象のアドレスを持つ行が要る（未登録のアドレスには
+> コードを送らない設計のため。仕様書 9）。
+> テストから使う場合は `sessions` テーブルへ直接行を入れてもよい。やり方は
 > `apps/auth-worker/test/session-repository.test.ts` と
 > `packages/testing/src/fixtures.ts` を参照。
 
@@ -161,20 +165,21 @@ auth-worker を先に `pnpm dev` で起動しておくこと。
 
 ルートの `package.json` から実行する。
 
-| コマンド                 | 内容                                                                                            |
-| ------------------------ | ----------------------------------------------------------------------------------------------- |
-| `pnpm dev`               | auth-worker を `wrangler dev` で起動する（既定で :8787）                                        |
-| `pnpm dev:dashboard`     | dashboard-worker を `wrangler dev` で起動する                                                   |
-| `pnpm build`             | 全 workspace の `build`。Worker は `wrangler deploy --dry-run --outdir dist` でバンドル検証する |
-| `pnpm typecheck`         | 全 workspace で `tsc --noEmit`。`cf-typegen` 済みであることが前提                               |
-| `pnpm lint`              | ルートから `eslint .`。レイヤ依存ルール（`packages/config/eslint.layers.js`）を含む             |
-| `pnpm lint:fix`          | 上記を `--fix` 付きで実行する                                                                   |
-| `pnpm format`            | Prettier で全体を整形する                                                                       |
-| `pnpm test`              | 全 workspace のテスト。Worker 側は `cloudflareTest()` プラグインで workerd 上の vitest          |
-| `pnpm cf-typegen`        | `apps/*` で `wrangler types` を実行し `worker-configuration.d.ts` を再生成する                  |
-| `pnpm db:generate`       | Drizzle スキーマからマイグレーション SQL を `packages/db/drizzle/` に生成する                   |
-| `pnpm db:migrate:local`  | 生成済みマイグレーションをローカル D1 へ適用する                                                |
-| `pnpm db:migrate:remote` | 同じく Cloudflare 上の D1 へ適用する。本番に当たるため実行前に差分を確認すること                |
+| コマンド                                      | 内容                                                                                            |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `pnpm dev`                                    | auth-worker を `wrangler dev` で起動する（既定で :8787）。先に Auth UI の JS を作る             |
+| `pnpm dev:dashboard`                          | dashboard-worker を `wrangler dev` で起動する                                                   |
+| `pnpm build`                                  | 全 workspace の `build`。Worker は `wrangler deploy --dry-run --outdir dist` でバンドル検証する |
+| `pnpm typecheck`                              | 全 workspace で `tsc --noEmit`。`cf-typegen` 済みであることが前提                               |
+| `pnpm lint`                                   | ルートから `eslint .`。レイヤ依存ルール（`packages/config/eslint.layers.js`）を含む             |
+| `pnpm lint:fix`                               | 上記を `--fix` 付きで実行する                                                                   |
+| `pnpm format`                                 | Prettier で全体を整形する                                                                       |
+| `pnpm test`                                   | 全 workspace のテスト。Worker 側は `cloudflareTest()` プラグインで workerd 上の vitest          |
+| `pnpm cf-typegen`                             | `apps/*` で `wrangler types` を実行し `worker-configuration.d.ts` を再生成する                  |
+| `pnpm --filter @u18/auth-worker build:client` | Auth UI のクライアントアイランドだけを esbuild でバンドルする（通常は上記が自動で呼ぶ）         |
+| `pnpm db:generate`                            | Drizzle スキーマからマイグレーション SQL を `packages/db/drizzle/` に生成する                   |
+| `pnpm db:migrate:local`                       | 生成済みマイグレーションをローカル D1 へ適用する                                                |
+| `pnpm db:migrate:remote`                      | 同じく Cloudflare 上の D1 へ適用する。本番に当たるため実行前に差分を確認すること                |
 
 スキーマを変更したときは `pnpm db:generate` → `pnpm db:migrate:local` の順。
 生成物（`packages/db/drizzle/*.sql`）はコミットする。テストは wrangler ではなく
@@ -190,13 +195,16 @@ services/
 │   ├── auth-worker/              OIDC + 認証 API。Identity D1 の唯一の所有者
 │   │   ├── src/
 │   │   │   ├── presentation/http/    Hono ルート、Cookie、エラー応答
+│   │   │   ├── presentation/http/ui/ Auth UI（hono/jsx の SSR + クライアントアイランド）
 │   │   │   ├── presentation/rpc/     IdentityRPC（WorkerEntrypoint）
 │   │   │   ├── application/ports/    Port のインターフェース定義
 │   │   │   ├── application/use-cases/ ユースケースと認可判断
 │   │   │   ├── domain/               Entity / Domain Service / Domain Error
 │   │   │   ├── infrastructure/       Drizzle Repository、死活確認、Web Crypto、メール送信
 │   │   │   └── composition/          Env から具象実装を組み立てる唯一の場所
+│   │   ├── scripts/build-client.mjs  アイランドを esbuild でバンドルする（下の節）
 │   │   ├── test/                 workerd 上の単体 / 統合テスト（setup.ts で migration 適用）
+│   │   ├── tsconfig.client.json  アイランドだけを DOM の型つきで検査する
 │   │   ├── vitest.config.ts      cloudflareTest プラグイン + migration の Node 側読み込み
 │   │   ├── wrangler.jsonc        D1 binding、compatibility_date、vars、Secrets 一覧（コメント）
 │   │   ├── worker-env.d.ts       Workers Secret の型宣言（手書き。cf-typegen の対象外）
@@ -268,6 +276,107 @@ DTO に機密を増やすときは、dashboard-worker がそれをそのまま�
 **db**（`packages/db/`）
 テーブル定義のみ。クエリを書く実装はそのテーブルを所有する Worker の
 Infrastructure に置く。
+
+---
+
+## Auth UI（ログイン画面）
+
+ログイン画面は **auth-worker 自身から配信する**（仕様書 14-1 の決定 4 / #36）。
+セッション Cookie を発行するホストと同一オリジンでなければならず、別の
+フロントエンドに出すと Cookie 境界と CSRF 境界が増えるため。
+実体は `apps/auth-worker/src/presentation/http/ui/`。
+
+| パス                      | 内容                                                       |
+| ------------------------- | ---------------------------------------------------------- |
+| `GET /login`              | ログイン画面。ログイン済みならその旨とログアウト導線を出す |
+| `POST /login/start`       | メール OTP の送信（form POST）                             |
+| `POST /login/verify`      | OTP の検証とセッション発行（form POST）                    |
+| `POST /login/logout`      | UI 用のログアウト。303 でログイン画面へ戻す                |
+| `GET /ui/u18.css`         | スタイルシート                                             |
+| `GET /ui/login-island.js` | Passkey のクライアントアイランド                           |
+
+HonoX は入れていない。ファイルベースルーティングと Vite 前提の構成が、
+この repo の Layered Architecture（ESLint が強制）と `wrangler.jsonc` に
+噛み合わないため。HonoX が内部で使っているのと同じ `hono/jsx` +
+`hono/jsx/dom` を直接使っている。
+
+### JS 無しで成立する範囲
+
+**メール OTP でのログインは JavaScript を 1 行も必要としない。** 画面は
+`hono/jsx` のサーバーレンダリングで、2 段の form はどちらも通常の POST。
+JS が要るのは `navigator.credentials.get()` を呼ぶ Passkey のボタンだけで、
+そこだけを `hono/jsx/dom` のアイランドに切り出してある。認証基盤の
+ログイン画面が JS の読み込み失敗で丸ごと使えなくなるのを避けるため。
+
+form POST は **Origin 検証 + CSRF トークン**の二重で守る。JSON API は
+`isAllowedOrigin()` だけで足りる（`fetch` は必ず Origin を送る）が、
+HTML の form では Origin の付き方がブラウザ・設定に依存するため、
+fail-closed な Origin 検証だけに寄せると正規の利用者が締め出される側に倒れる。
+詳細は `ui/csrf.ts` のコメント。
+
+### CSP との関係
+
+`app.ts` の `secureHeaders()` は既定では CSP を出さない。ログイン画面には
+`ui/login.routes.tsx` で **CSP を足している**（既存の設定は緩めていない）:
+
+```
+default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+```
+
+`'unsafe-inline'` も nonce も使わない。その結果としてインライン `<script>` と
+インライン `<style>` を一切置けないので、アイランドもスタイルシートも外部
+ファイルとして配信している。CSP に引っかかったら、緩めるのではなく外部
+ファイルへ出すこと。`test/login.ui.test.ts` が `'unsafe-inline'` の混入と
+インライン `<script>` の出現を落として止める。
+
+### クライアント JS のビルド
+
+`apps/auth-worker/scripts/build-client.mjs`（esbuild）が
+`ui/client/login-island.tsx` をブラウザ向けにバンドルし、
+`ui/generated/login-island.bundle.ts` へ **TypeScript の文字列定数**として吐く。
+配信は通常の Hono ルート（`GET /ui/login-island.js`）。
+
+Workers Assets（`wrangler.jsonc` の `assets`）を使わなかったのは 2 つの理由から:
+
+1. 静的ファイルが Worker より先にリクエストを拾う経路が増える。ログイン画面の
+   ためだけにルーティングの優先順位を 1 段増やしたくない。
+2. `pnpm test` は workerd 上の vitest で走るので、アセットサーバーの挙動まで
+   含めて同じように再現できるとは限らない。
+
+文字列定数にしておけば、`pnpm dev` / `pnpm test` / `pnpm build` のどれでも
+「ただのモジュール」として同じように解決される。
+
+**生成物はコミットしない**（`.gitignore` 済み）。ログイン画面で動く JS が
+ソースと食い違っている状態を作りたくないため。代わりに auth-worker の
+`dev` / `build` / `typecheck` / `test` がすべてこのスクリプトを先に実行する
+ので、古いバンドルのまま検査が通ることは起こらない。手で作り直したいときは:
+
+```bash
+pnpm --filter @u18/auth-worker build:client
+```
+
+アイランドの型検査は `tsconfig.client.json` で別に行う。本体の
+`tsconfig.json` に `lib: ["DOM"]` を足すと、workerd には存在しない
+`document` / `window` が Domain 層からも見えてしまい、動かないコードが
+型検査を通ってしまうため（上の「その他」の最後の項目と同じ理由）。
+
+### アカウントの存在を漏らさない
+
+既存の `StartEmailOtpUseCase` は未登録のアドレスでも成功と同じ応答を返し、
+`PasskeyLoginOptionsUseCase` は入力を一切受け取らない（`allowCredentials` を
+返さない）。**UI 側でこれを台無しにしないこと**（仕様書 9 Privacy）。具体的には:
+
+- 「送信しました」と断定しない。常に「登録されている場合」と条件付きで書く
+- OTP 検証の失敗は、不一致・期限切れ・試行上限・形式不正をすべて同じ文言・
+  同じステータス（400）に畳む。上限だけ 429 にすると「そのアドレス宛に
+  コードを出した」＝登録済み、と分かる
+- Passkey ログインにメールアドレスやユーザー識別子を渡す口を作らない。
+  どの Credential を使うかはブラウザ / OS の選択 UI に任せる
+- 「パスキーが登録されていません」の類を表示しない
+
+`test/login.ui.test.ts` が、登録済みと未登録で応答が 1 バイトも変わらないこと
+（入力されたアドレス自身を除く）を固定している。
 
 ---
 

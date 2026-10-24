@@ -7,6 +7,7 @@ import { meRoutes } from "./me.routes";
 import { oauthRoutes } from "./oauth.routes";
 import { problem } from "./problem";
 import type { AppBindings } from "./types";
+import { uiRoutes } from "./ui/login.routes";
 
 export type { AppBindings } from "./types";
 
@@ -24,6 +25,9 @@ export function createApp() {
 
   app.route("/", healthRoutes);
   app.route("/", oauthRoutes);
+  // ログイン画面（仕様書 14-1 の決定 4）。セッション Cookie を発行するホストと
+  // 同一オリジンである必要があるので、auth-worker 自身が配信する。
+  app.route("/", uiRoutes);
   app.route("/api/auth", authRoutes);
   app.route("/api", meRoutes);
 
