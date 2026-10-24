@@ -2,13 +2,14 @@ import { env } from "cloudflare:test";
 import { createIdentityDatabase, signingKeyMetadata } from "@u18/db";
 import { FixedClock } from "@u18/domain";
 import { exportJWK, generateKeyPair, jwtVerify, SignJWT } from "jose";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SigningKeyMetadata } from "../src/application/ports/signing-key.port";
 import {
   auditSigningKeySecret,
   explainUnusableSigningKeys,
   isMisconfiguration,
   parseSigningKeySecret,
+  signingKeyHealth,
 } from "../src/domain/services/signing-key-rotation";
 import { JoseSigningKeyProvider } from "../src/infrastructure/crypto/jose-signing-key";
 import { DrizzleSigningKeyMetadataRepository } from "../src/infrastructure/persistence/drizzle-signing-key-metadata.repository";
@@ -571,5 +572,143 @@ describe("署名鍵の整合検査", () => {
     const message = explainUnusableSigningKeys(audit);
     expect(message).toContain("key-a");
     expect(message).toContain("key-b");
+  });
+});
+
+/**
+ * `/health` の `checks.signingKey`（#23 の残存リスク）。
+ *
+ * #23 は突き合わせを `signing-key.mjs verify` / `activate` / 署名の瞬間の
+ * 3 箇所に置いたが、**誰も `verify` を実行しなければ不一致に気付かない**
+ * という穴が残っていた（docs/runbook.md 4.4）。外形から見えるようにする。
+ *
+ * ここで確かめたいのは 3 値の意味の区別そのもの。とくに `not_published`
+ * ——「署名はできるが JWKS に出ていない」—— は、全 RP で一斉に検証失敗する
+ * のに auth-worker のログには何も出ない壊れ方で、`unavailable` と
+ * 混ぜてしまうと運用者がどちらを直せばよいか分からなくなる。
+ */
+describe("JoseSigningKeyProvider — checkHealth", () => {
+  function providerFor(
+    metadata: InMemorySigningKeyMetadataRepository,
+    secret: string | null,
+  ): JoseSigningKeyProvider {
+    return new JoseSigningKeyProvider(
+      metadata,
+      clock,
+      secret === null ? null : { jwk: secret, kid: null },
+      "secret is missing",
+    );
+  }
+
+  it("現役鍵が Secret にあり JWKS にも出ていれば ok", async () => {
+    const key = await generateSigningKey("u18-2026-10-24-1");
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    metadata.seed(aRow({ kid: key.kid, publicJwk: JSON.stringify(key.publicJwk) }));
+
+    const provider = providerFor(metadata, JSON.stringify({ keys: [key.privateJwk] }));
+
+    expect(await provider.checkHealth()).toBe("ok");
+    // 同じ入力で実際に署名できることも確かめる。検査と実態がずれないのが
+    // この設計の狙いなので、検査だけ緑になっても意味が無い。
+    expect((await provider.getActiveSigningKey()).kid).toBe(key.kid);
+  });
+
+  it("Secret が未設定なら unavailable", async () => {
+    expect(await providerFor(new InMemorySigningKeyMetadataRepository(), null).checkHealth()).toBe(
+      "unavailable",
+    );
+  });
+
+  it("Secret が壊れていても投げずに unavailable", async () => {
+    // `/health` が 500 を返したら死活監視として役に立たない。
+    const provider = providerFor(new InMemorySigningKeyMetadataRepository(), "{ not json");
+
+    expect(await provider.checkHealth()).toBe("unavailable");
+  });
+
+  it("現役の行が無ければ unavailable", async () => {
+    const key = await generateSigningKey("u18-2026-10-24-1");
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    // runbook 4.2 ステップ 2 の途中: 先行公開しただけで active_from が未来。
+    metadata.seed(
+      aRow({
+        kid: key.kid,
+        publicJwk: JSON.stringify(key.publicJwk),
+        activeFrom: new Date(NOW.getTime() + DAY),
+      }),
+    );
+
+    expect(
+      await providerFor(metadata, JSON.stringify({ keys: [key.privateJwk] })).checkHealth(),
+    ).toBe("unavailable");
+  });
+
+  it("Secret と行の公開鍵が別物なら unavailable", async () => {
+    // kid は合っているが中身が違う。署名は通ってしまうが JWKS の鍵では
+    // 検証できない（#23 (c) の核心）。
+    const [signing, other] = await Promise.all([
+      generateSigningKey("u18-2026-10-24-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    metadata.seed(aRow({ kid: signing.kid, publicJwk: JSON.stringify(other.publicJwk) }));
+
+    expect(
+      await providerFor(metadata, JSON.stringify({ keys: [signing.privateJwk] })).checkHealth(),
+    ).toBe("unavailable");
+  });
+
+  it("署名はできるが JWKS に出ない行は not_published", async () => {
+    // `public_jwk` の `kty` だけが壊れている行。`auditSigningKeySecret` は
+    // crv / x / y しか比べないので突き合わせは通るが、JWKS を組み立てる
+    // `toPublicJwk` は ES256 以外を弾くので配られない。
+    //
+    // 「行がある」ではなく「配られる」を見ていないと捕まらないケース。
+    const key = await generateSigningKey("u18-2026-10-24-1");
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    metadata.seed(
+      aRow({
+        kid: key.kid,
+        publicJwk: JSON.stringify({ ...key.publicJwk, kty: "RSA" }),
+      }),
+    );
+    const provider = providerFor(metadata, JSON.stringify({ keys: [key.privateJwk] }));
+
+    expect(await provider.getPublicJwks(), "前提: JWKS に出ていない").toEqual([]);
+    // 署名自体はできてしまう。だから「署名できるか」だけでは検知できない。
+    expect((await provider.getActiveSigningKey()).kid).toBe(key.kid);
+    expect(await provider.checkHealth()).toBe("not_published");
+  });
+
+  it("D1 が読めなくても投げない", async () => {
+    const key = await generateSigningKey("u18-2026-10-24-1");
+    const failing = {
+      listPublishable: () => Promise.reject(new Error("D1_ERROR: network")),
+      findByKid: () => Promise.reject(new Error("D1_ERROR: network")),
+    } as unknown as InMemorySigningKeyMetadataRepository;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(
+      await providerFor(failing, JSON.stringify({ keys: [key.privateJwk] })).checkHealth(),
+    ).toBe("unavailable");
+
+    errors.mockRestore();
+  });
+});
+
+describe("signingKeyHealth", () => {
+  const audit = (signingKid: string | null) => ({ secretKids: [], signingKid, issues: [] });
+
+  it.each([
+    ["署名できて配られている", "kid-a", ["kid-a", "kid-b"], "ok"],
+    ["署名できるが配られていない", "kid-a", ["kid-b"], "not_published"],
+    ["署名できない", null, ["kid-a"], "unavailable"],
+    // 署名できないほうが先。どちらも壊れているときに not_published と
+    // 言うと、運用者は JWKS を直しに行って空振りする。
+    ["両方壊れている", null, [], "unavailable"],
+  ])("%s", (_label, signingKid, published, expected) => {
+    expect(signingKeyHealth(audit(signingKid as string | null), published as string[])).toBe(
+      expected,
+    );
   });
 });

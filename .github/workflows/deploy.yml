@@ -251,6 +251,12 @@ jobs:
       # 強制・Cookie の __Host- と Secure が同時に無効になる。
       # ステータスだけ見る検査はこれを素通りさせる。
       #
+      # checks.signingKey は HTTP ステータスに影響しない（docs/runbook.md 4.4）。
+      # Secret と signing_key_metadata が食い違っていても /health は 200 を返す
+      # ので、ここで本文を突き合わせないと不整合がデプロイを通過する。
+      # 期待値は "ok" 固定で、"unavailable"（署名できない）と
+      # "not_published"（JWKS に出ていない）はどちらも赤にする。
+      #
       # curl とリトライの実体は scripts/smoke-probe.sh にある。3 つの Worker
       # すべてが同じものを使う。複数箇所に写すと片方だけ直す事故が起きる。
       #
@@ -266,6 +272,7 @@ jobs:
           scripts/smoke-probe.sh "${PRODUCTION_URL%/}/health" 200 \
             --jq .status ok \
             --jq .checks.database ok \
+            --jq .checks.signingKey ok \
             --jq .environment production
 
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。

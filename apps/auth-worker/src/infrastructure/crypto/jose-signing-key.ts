@@ -10,6 +10,9 @@ import {
   auditSigningKeySecret,
   explainUnusableSigningKeys,
   parseSigningKeySecret,
+  signingKeyHealth,
+  type SigningKeyHealth,
+  type SigningKeyLifecycle,
 } from "../../domain/services/signing-key-rotation";
 
 /**
@@ -157,8 +160,18 @@ export class JoseSigningKeyProvider implements SigningKeyProvider {
   }
 
   async getPublicJwks(): Promise<readonly PublicSigningJwk[]> {
-    const rows = await this.metadata.listPublishable(this.clock.now());
+    return this.collectPublicJwks(await this.metadata.listPublishable(this.clock.now()));
+  }
 
+  /**
+   * 行から JWKS に実際に載る鍵を取り出す。
+   *
+   * `getPublicJwks()` と `checkHealth()` の両方がここを通る。**配られる鍵の
+   * 集合を決めるコードを 1 つにしておくのが肝**で、健全性の検査が別の
+   * 絞り込みを持つと「`/health` は ok なのに JWKS にその kid が無い」が
+   * 成立する（domain/services/signing-key-rotation.ts の `signingKeyHealth`）。
+   */
+  private collectPublicJwks(rows: readonly SigningKeyLifecycle[]): PublicSigningJwk[] {
     const keys: PublicSigningJwk[] = [];
     for (const row of rows) {
       if (row.algorithm !== "ES256") {
@@ -178,5 +191,48 @@ export class JoseSigningKeyProvider implements SigningKeyProvider {
       keys.push(jwk);
     }
     return keys;
+  }
+
+  /**
+   * `/health` の `checks.signingKey`。
+   *
+   * ## D1 を 1 回しか読まない
+   *
+   * `listPublishable()` の結果を突き合わせにも JWKS の判定にも使う。
+   * `getActiveSigningKey()` のように Secret の kid ごとに `findByKid()` を
+   * 打つと、**未認証で叩ける `/health` が 1 リクエストあたり複数クエリ**に
+   * なる。公開エンドポイントの D1 クエリ数は増やさない（docs/runbook.md
+   * 8.5 の未決事項 7）。
+   *
+   * 全行を渡すので `missing-from-secret`（DB は現役と言うが Secret に鍵が
+   * 無い）もここで効く。`getActiveSigningKey()` が拾えない種類の不整合で、
+   * 署名の最中に気付いても直せないが、`/health` なら直せる。
+   *
+   * ## 投げない
+   *
+   * Port の契約（`SigningKeyProvider.checkHealth`）。D1 が落ちていれば
+   * `unavailable` を返すが、その場合は `checks.database` も同時に
+   * `unreachable` になるので、原因を取り違える余地は無い。
+   */
+  async checkHealth(): Promise<SigningKeyHealth> {
+    try {
+      const secret = this.secret;
+      if (secret === null) return "unavailable";
+
+      const parsed = parseSigningKeySecret(secret.jwk, secret.kid);
+      if (!parsed.ok) return "unavailable";
+
+      const now = this.clock.now();
+      const rows = await this.metadata.listPublishable(now);
+      const audit = auditSigningKeySecret(parsed.keys, rows, now);
+
+      return signingKeyHealth(
+        audit,
+        this.collectPublicJwks(rows).map((key) => key.kid),
+      );
+    } catch (cause) {
+      console.error("signing key health check failed", cause);
+      return "unavailable";
+    }
   }
 }

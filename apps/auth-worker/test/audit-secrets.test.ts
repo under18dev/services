@@ -48,8 +48,15 @@ const EMAIL = `${SECRETS.emailLocalPart}@example.com`;
 const user = aUser({ email: EMAIL });
 const SESSION_ID = "ses_leakprobe";
 
+const USER_AGENT = "u18-audit-probe/1.0";
+
 function headers(extra: Record<string, string> = {}): Record<string, string> {
-  return { Origin: ORIGIN, "CF-Connecting-IP": SECRETS.rawIp, ...extra };
+  return {
+    Origin: ORIGIN,
+    "CF-Connecting-IP": SECRETS.rawIp,
+    "User-Agent": USER_AGENT,
+    ...extra,
+  };
 }
 
 const cookie = `u18_session=${SECRETS.sessionToken}`;
@@ -187,14 +194,34 @@ describe("監査ログに秘密が残らない", () => {
   });
 
   it("IP はハッシュで記録され、生の値は残らない", () => {
-    // 現状 ipHash を持つのは session.issue の成功だけ（#122）。
-    // 「1 件も無い」になったら、上のログイン成功経路が壊れたか、
-    // issue-session.use-case.ts から ipHash が外れたかのどちらか。
-    const withIp = rows.filter((row) => (row as { ipHash: string | null }).ipHash !== null);
+    // **どの行にも付いていること。** #122 以前は session.issue の成功だけが
+    // ipHash を持っており、失敗したログイン試行の出どころが残らなかった
+    // （ランブック 5.2 / 5.3 が辿る前提にしている、まさにその情報）。
+    //
+    // 上の経路はすべて HTTP で、全リクエストに CF-Connecting-IP を付けている。
+    // 1 件でも欠けていたら、そのイベントだけ発信元を落としている。
+    const missing = rows.filter((row) => (row as { ipHash: string | null }).ipHash === null);
 
-    expect(withIp.length, "ipHash を持つ行が 1 件も無い").toBeGreaterThan(0);
-    for (const row of withIp) {
+    expect(
+      missing.map((row) => (row as { event: string }).event),
+      "ipHash の無い監査ログがある",
+    ).toEqual([]);
+    expect(rows.length, "走査対象が無い").toBeGreaterThan(0);
+
+    for (const row of rows) {
       expect((row as { ipHash: string }).ipHash).not.toBe(SECRETS.rawIp);
     }
+  });
+
+  it("User-Agent も全ての行に残る", () => {
+    // 「どこから」の片側。IP だけだと、同じ出口 IP の背後で別の端末が
+    // 動いていたのかが分からない。
+    const missing = rows.filter((row) => (row as { userAgent: string | null }).userAgent === null);
+
+    expect(
+      missing.map((row) => (row as { event: string }).event),
+      "userAgent の無い監査ログがある",
+    ).toEqual([]);
+    expect((rows[0] as { userAgent: string }).userAgent).toBe(USER_AGENT);
   });
 });
