@@ -1,6 +1,7 @@
 export * from "./drizzle-audit-logger";
 export * from "./drizzle-database-probe";
 export * from "./drizzle-email-challenge.repository";
+export * from "./drizzle-expired-record-purger";
 export * from "./drizzle-oauth-client.repository";
 export * from "./drizzle-passkey.repository";
 export * from "./drizzle-session.repository";

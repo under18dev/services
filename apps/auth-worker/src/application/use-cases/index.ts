@@ -9,6 +9,7 @@ export * from "./passkey-login-options.use-case";
 export * from "./passkey-login-verify.use-case";
 export * from "./passkey-register-options.use-case";
 export * from "./passkey-register-verify.use-case";
+export * from "./purge-expired-records.use-case";
 export * from "./resolve-oauth-client.use-case";
 export * from "./revoke-session.use-case";
 export * from "./side-effects";

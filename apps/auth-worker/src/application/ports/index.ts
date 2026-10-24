@@ -6,6 +6,7 @@ export type * from "./email-sender.port";
 export type * from "./health.port";
 export type * from "./oauth-client.repository";
 export type * from "./passkey.repository";
+export type * from "./retention.port";
 export type * from "./session.repository";
 export type * from "./signing-key.port";
 export type * from "./user.repository";

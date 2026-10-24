@@ -13,6 +13,7 @@ import type { EmailSender } from "../application/ports/email-sender.port";
 import type { DatabaseProbe } from "../application/ports/health.port";
 import type { OAuthClientRepository } from "../application/ports/oauth-client.repository";
 import type { PasskeyRepository } from "../application/ports/passkey.repository";
+import type { ExpiredRecordPurger } from "../application/ports/retention.port";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { SigningKeyProvider } from "../application/ports/signing-key.port";
 import type { UserRepository } from "../application/ports/user.repository";
@@ -31,6 +32,7 @@ import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-log
 import { PasskeyLoginVerifyUseCase } from "../application/use-cases/passkey-login-verify.use-case";
 import { PasskeyRegisterOptionsUseCase } from "../application/use-cases/passkey-register-options.use-case";
 import { PasskeyRegisterVerifyUseCase } from "../application/use-cases/passkey-register-verify.use-case";
+import { PurgeExpiredRecordsUseCase } from "../application/use-cases/purge-expired-records.use-case";
 import { ResolveOAuthClientUseCase } from "../application/use-cases/resolve-oauth-client.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import { UpdateProfileUseCase } from "../application/use-cases/update-profile.use-case";
@@ -47,6 +49,7 @@ import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleEmailChallengeRepository } from "../infrastructure/persistence/drizzle-email-challenge.repository";
+import { DrizzleExpiredRecordPurger } from "../infrastructure/persistence/drizzle-expired-record-purger";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
 import { DrizzleOAuthClientRepository } from "../infrastructure/persistence/drizzle-oauth-client.repository";
 import { DrizzlePasskeyRepository } from "../infrastructure/persistence/drizzle-passkey.repository";
@@ -83,6 +86,7 @@ export type Container = {
     readonly databaseProbe: DatabaseProbe;
     readonly webauthn: WebAuthnService;
     readonly signingKeys: SigningKeyProvider;
+    readonly purger: ExpiredRecordPurger;
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
@@ -101,6 +105,7 @@ export type Container = {
     readonly passkeyLoginVerify: PasskeyLoginVerifyUseCase;
     readonly resolveOAuthClient: ResolveOAuthClientUseCase;
     readonly authenticateOAuthClient: AuthenticateOAuthClientUseCase;
+    readonly purgeExpiredRecords: PurgeExpiredRecordsUseCase;
   };
 };
 
@@ -114,6 +119,7 @@ export type ContainerOverrides = Partial<{
   databaseProbe: DatabaseProbe;
   oauthClients: OAuthClientRepository;
   signingKeys: SigningKeyProvider;
+  purger: ExpiredRecordPurger;
 }>;
 
 /**
@@ -133,6 +139,9 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const audit = overrides.audit ?? new DrizzleAuditLogger(db);
   const emailChallenges = overrides.emailChallenges ?? new DrizzleEmailChallengeRepository(db);
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
+  // 保持期限を過ぎた行の掃除（#43）。scheduled ハンドラからしか使わないが、
+  // Port の配線先はここ 1 箇所に揃える。
+  const purger = overrides.purger ?? new DrizzleExpiredRecordPurger(db);
 
   const hasher = new Sha256TokenHasher();
   // pepper が無いまま本番が動くと IPv4 空間は総当たり可能で、ハッシュが
@@ -197,6 +206,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       databaseProbe,
       webauthn,
       signingKeys,
+      purger,
     },
     useCases: {
       getSession,
@@ -256,6 +266,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       }),
       resolveOAuthClient: new ResolveOAuthClientUseCase({ clients: oauthClients, audit }),
       authenticateOAuthClient: new AuthenticateOAuthClientUseCase({ clients: oauthClients, audit }),
+      purgeExpiredRecords: new PurgeExpiredRecordsUseCase({ purger, clock, audit }),
     },
   };
 }
