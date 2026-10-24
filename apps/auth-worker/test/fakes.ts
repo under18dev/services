@@ -4,7 +4,11 @@ import type {
   CreateSessionInput,
   SessionRepository,
 } from "../src/application/ports/session.repository";
-import type { NewUser, UserRepository } from "../src/application/ports/user.repository";
+import type {
+  NewUser,
+  UpdateProfileOutcome,
+  UserRepository,
+} from "../src/application/ports/user.repository";
 import { Session, type SessionProps } from "../src/domain/entities/session";
 import { User, type UserProps } from "../src/domain/entities/user";
 
@@ -60,12 +64,23 @@ export class InMemoryUserRepository implements UserRepository {
   async updateProfile(
     id: string,
     changes: { displayName?: string; username?: string },
-  ): Promise<User | null> {
+  ): Promise<UpdateProfileOutcome> {
     const existing = this.store.get(id);
-    if (!existing) return null;
+    if (!existing) return { kind: "not_found" };
+
+    // 一意索引（lower(username)）と同じ判定。ここを緩めると、UseCase の
+    // テストが「実際には 409 になる更新」を成功として通してしまう。
+    if (changes.username !== undefined) {
+      const taken = [...this.store.values()].some(
+        (other) =>
+          other.id !== id && other.username.toLowerCase() === changes.username?.toLowerCase(),
+      );
+      if (taken) return { kind: "username_taken" };
+    }
+
     const next: UserProps = { ...existing, ...changes, updatedAt: new Date() };
     this.store.set(id, next);
-    return User.fromPersistence(next);
+    return { kind: "updated", user: User.fromPersistence(next) };
   }
 
   async markEmailVerified(id: string, email: string): Promise<void> {

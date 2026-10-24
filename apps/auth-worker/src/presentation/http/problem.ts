@@ -23,6 +23,12 @@ const STATUS_BY_CODE: Record<string, ContentfulStatusCode> = {
   forbidden: 403,
   not_found: 404,
   invalid_input: 400,
+  // 409: username の一意性のように「入力は正しいが今は通せない」衝突。
+  conflict: 409,
+  // 403: 認証は済んでいるが、この操作には直近の本人確認が要る（仕様書 8.1）。
+  // 401 にしないのは、セッション自体は有効でログインし直す以外に
+  // やり直す手段が無いため。401 だと「Cookie が切れた」と区別できない。
+  reauthentication_required: 403,
   too_many_attempts: 429,
   invalid_code: 400,
   rate_limited: 429,

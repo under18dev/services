@@ -418,6 +418,9 @@ export const CONTRACT_VERSION = "1.0.0" as const;
 | `GET /api/me`                                                                                 | `me.routes.ts` → `GetSessionUseCase` → `UserRepository.findById`                           |
 | `GET /api/me/sessions`                                                                        | `me.routes.ts` → `ListSessionsUseCase`                                                     |
 | `DELETE /api/me/sessions/:id`                                                                 | `me.routes.ts` → `RevokeSessionUseCase`。Origin 検証つき                                   |
+| `PATCH /api/me`                                                                               | `me.routes.ts` → `UpdateProfileUseCase`。Origin 検証 + username 変更時の再認証             |
+| `GET /api/me/passkeys`                                                                        | `me.routes.ts` → `ListPasskeysUseCase`。公開鍵と Credential ID は返さない                  |
+| `DELETE /api/me/passkeys/:id`                                                                 | `me.routes.ts` → `DeletePasskeyUseCase`。Origin 検証 + 再認証 + 所有者チェック             |
 | RPC `getSession` / `getUserProfile` / `listSessions` / `revokeSession`                        | `identity.entrypoint.ts`                                                                   |
 | dashboard `GET /health`, `GET /api/me`, `GET /api/me/sessions`, `DELETE /api/me/sessions/:id` | `apps/dashboard-worker/src/index.ts`                                                       |
 
@@ -436,10 +439,6 @@ Drizzle スキーマは仕様書 7.1 の全テーブル分が `packages/db/src/s
 - `POST /api/auth/passkeys/register/options`, `.../register/verify`
 - `POST /api/auth/passkeys/login/options`, `.../login/verify`
 - `POST /api/auth/logout`
-
-`me.routes.ts`:
-
-- `PATCH /api/me`（Origin 検証 + CSRF トークン + username 変更時の再認証が未実装）
 
 `oauth.routes.ts` — Phase 2:
 

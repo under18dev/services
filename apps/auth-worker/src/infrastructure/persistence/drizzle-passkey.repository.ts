@@ -52,6 +52,11 @@ export class DrizzlePasskeyRepository implements PasskeyRepository {
     return row ? toDomain(row) : null;
   }
 
+  async findById(id: string): Promise<Passkey | null> {
+    const row = await this.db.select().from(passkeys).where(eq(passkeys.id, id)).get();
+    return row ? toDomain(row) : null;
+  }
+
   async listByUserId(userId: string): Promise<readonly Passkey[]> {
     const rows = await this.db.select().from(passkeys).where(eq(passkeys.userId, userId)).all();
     return rows.map(toDomain);
@@ -88,6 +93,17 @@ export class DrizzlePasskeyRepository implements PasskeyRepository {
       .update(passkeys)
       .set({ counter, lastUsedAt: at })
       .where(and(eq(passkeys.credentialId, credentialId), lte(passkeys.counter, counter)))
+      .returning({ id: passkeys.id })
+      .all();
+    return rows.length > 0;
+  }
+
+  async deleteOwned(id: string, userId: string): Promise<boolean> {
+    // 所有者の条件を DELETE 自身に持たせる。UseCase 側の判定と二重化して、
+    // この 1 文だけを見ても他人の行に当たらないことが分かる形にする。
+    const rows = await this.db
+      .delete(passkeys)
+      .where(and(eq(passkeys.id, id), eq(passkeys.userId, userId)))
       .returning({ id: passkeys.id })
       .all();
     return rows.length > 0;

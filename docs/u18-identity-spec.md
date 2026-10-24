@@ -367,8 +367,14 @@ Drizzleの`schema`と`migration`は `packages/db` に集約する。一方、Rep
 | PATCH | `/api/me` | 情報変更 |
 | GET | `/api/me/sessions` | セッション一覧 |
 | DELETE | `/api/me/sessions/:id` | セッション失効 |
+| GET | `/api/me/passkeys` | 登録済みPasskey一覧 |
+| DELETE | `/api/me/passkeys/:id` | Passkey削除 |
 
 上記のアカウントAPIはauth-worker上に配置する。dashboard-workerからの操作は必要に応じてRPC経由で呼び出す。Cookie認証の更新系APIではCSRF対策・Originチェック・再認証を実装する。
+
+`PATCH /api/me` で変更できるのは `displayName` と `username` のみ。`GET /api/me/passkeys` は認証器の識別に必要な項目（内部ID・ラベル・種別・登録/最終利用時刻）だけを返し、`credentialId` と公開鍵は返さない。
+
+再認証（CSRF対策・Originチェックと併せて要求するもの）は「最後に本人確認を通してからの経過時間」で判定する。`username` の変更と Passkey の削除は、`sessions.created_at` から5分以内のセッションでのみ許可し、外れている場合は `reauthentication_required`（403）を返す。利用者はログインし直すことで再認証する。Passkeyは最後の1本も削除できる（14.1-2によりメールOTPがログイン経路として常に残るため）。
 
 ## 9. セキュリティ要求
 
