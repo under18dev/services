@@ -37,6 +37,20 @@ describe("設定不備の影響範囲", () => {
     ).rejects.toThrow(/not configured/);
   });
 
+  it("署名鍵が未設定でも、失敗するのは署名しようとした時点（#14）", async () => {
+    const container = createContainer(
+      envWith({ ...brokenProd, SIGNING_KEY_JWK: undefined, SIGNING_KEY_KID: undefined }),
+    );
+
+    // 組み立てで throw しないのは他の Port と同じ理由（#53）。加えて JWKS は
+    // signing_key_metadata だけで応答できるので、秘密鍵の設定漏れで
+    // 公開鍵の配布まで止めない。
+    await expect(container.services.signingKeys.getPublicJwks()).resolves.toEqual([]);
+    await expect(container.services.signingKeys.getActiveSigningKey()).rejects.toThrow(
+      /not configured/,
+    );
+  });
+
   it("IP をハッシュ化しようとした時点で失敗する", async () => {
     const container = createContainer(envWith(brokenProd));
 

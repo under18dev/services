@@ -22,8 +22,8 @@ describe("未定義のエンドポイント", () => {
 });
 
 describe("Phase 2 で実装するエンドポイント", () => {
+  // JWKS（#14）はここから外れて実装済み。応答は jwks.test.ts で検証する。
   it.each([
-    ["/.well-known/jwks.json", "GET"],
     ["/oauth/authorize", "GET"],
     ["/oauth/token", "POST"],
     ["/oauth/userinfo", "GET"],

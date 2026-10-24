@@ -11,6 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cf-typegen": "wrangler types",
+    "client:create": "node scripts/oauth-client.mjs create",
+    "client:disable": "node scripts/oauth-client.mjs disable",
+    "client:list": "node scripts/oauth-client.mjs list",
+    "client:seed-dev": "node scripts/oauth-client.mjs seed-dev",
+    "key:generate": "node scripts/signing-key.mjs generate",
     "migrate:local": "wrangler d1 migrations apply u18-identity --local",
     "migrate:remote": "wrangler d1 migrations apply u18-identity --remote"
   },

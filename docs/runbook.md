@@ -12,15 +12,16 @@
 
 **現状は Phase 1（仕様書 12）のスケルトンである。** 以下は未実装であり、手順を最後まで書けない箇所はその都度「Phase N で実装」と明記する。
 
-| 機能                                                                         | 現状                                                      | 実装箇所                                                       |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
-| `/health`、`/api/me`、`/api/me/sessions`（GET / DELETE）                     | 実装済み                                                  | `apps/auth-worker/src/presentation/http/`                      |
-| `IdentityRPC`（getSession / getUserProfile / listSessions / revokeSession）  | 実装済み                                                  | `apps/auth-worker/src/presentation/rpc/identity.entrypoint.ts` |
-| `/.well-known/openid-configuration`                                          | 静的に応答する                                            | `apps/auth-worker/src/presentation/http/oauth.routes.ts`       |
-| JWKS、`/oauth/authorize`、`/oauth/token`、`/oauth/userinfo`、`/oauth/revoke` | **501 を返す**（Phase 2）                                 | 同上                                                           |
-| メール OTP、Passkey、ログアウト                                              | **501 を返す**（Phase 1 の残り）                          | `apps/auth-worker/src/presentation/http/auth.routes.ts`        |
-| `PATCH /api/me`                                                              | **501 を返す**                                            | `apps/auth-worker/src/presentation/http/me.routes.ts`          |
-| マイグレーション SQL                                                         | **1 本も生成されていない**（`packages/db/drizzle/` は空） | `packages/db/src/schema/`                                      |
+| 機能                                                                        | 現状                                                      | 実装箇所                                                       |
+| --------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
+| `/health`、`/api/me`、`/api/me/sessions`（GET / DELETE）                    | 実装済み                                                  | `apps/auth-worker/src/presentation/http/`                      |
+| `IdentityRPC`（getSession / getUserProfile / listSessions / revokeSession） | 実装済み                                                  | `apps/auth-worker/src/presentation/rpc/identity.entrypoint.ts` |
+| `/.well-known/openid-configuration`                                         | 静的に応答する                                            | `apps/auth-worker/src/presentation/http/oauth.routes.ts`       |
+| `/.well-known/jwks.json`                                                    | `signing_key_metadata` から公開鍵を返す（#14。§9.5）      | 同上                                                           |
+| `/oauth/authorize`、`/oauth/token`、`/oauth/userinfo`、`/oauth/revoke`      | **501 を返す**（Phase 2）                                 | 同上                                                           |
+| メール OTP、Passkey、ログアウト                                             | **501 を返す**（Phase 1 の残り）                          | `apps/auth-worker/src/presentation/http/auth.routes.ts`        |
+| `PATCH /api/me`                                                             | **501 を返す**                                            | `apps/auth-worker/src/presentation/http/me.routes.ts`          |
+| マイグレーション SQL                                                        | **1 本も生成されていない**（`packages/db/drizzle/` は空） | `packages/db/src/schema/`                                      |
 
 したがって、本番トラフィックを受けられる状態ではない。本書の「インシデント対応」は、現時点で実行可能な手段（DB への直接操作、Secret 差し替え、デプロイ巻き戻し）を中心に書いてある。
 
@@ -669,7 +670,7 @@ MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE
 
 **現時点の制約を正直に書く。**
 
-1. **JWKS endpoint（`/.well-known/jwks.json`）は未実装で 501 を返す。** したがって以下の手順は Phase 2 で JWKS が `signing_key_metadata` を読むようになって初めて最後まで実行できる。現時点では「テーブルに行を入れる」ところまでしか実行できず、公開鍵は配布されない。
+1. ~~**JWKS endpoint（`/.well-known/jwks.json`）は未実装で 501 を返す。**~~ #14 で実装済み。JWKS は `signing_key_metadata` を正本として読み、`retires_at` を迎えていない鍵を**すべて**返す（`active_until` が過去の鍵も含む）。以下の手順はそのまま実行できる。ただし ID Token を実際に発行できるのは `/oauth/token` の実装後なので、ステップ 6 の確認だけは Phase 2 の残りを待つ。
 2. **`SIGNING_KEY_JWK` は単一の Secret であり、秘密鍵は一度に 1 本しか持てない。** 「新旧 2 本を同時にロードして、どちらでも署名できる」構成にはなっていない。鍵の切り替えは Secret の置き換え 1 回で、全リクエストが瞬時に新鍵へ移る。段階的な比率移行はできない。
 3. **`signing_key_metadata` の行と Secret の中身が一致しているかを検証する仕組みがない。** DB が kid-A を「現役」と記録していても、Secret に入っているのが kid-B の鍵であれば、ID Token の `kid` ヘッダと JWKS が食い違い、全 RP で検証が失敗する。手順 4.2 のステップ 6 の確認を省略しないこと。
 
@@ -841,7 +842,7 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 "
 ```
 
-Phase 2 の JWKS 実装は `retires_at <= now` の行を自動的に除外すべきである。そうなっていれば、この DELETE は行の掃除にすぎず、公開状態には影響しない。実装がそうなっていない場合、この DELETE が JWKS から鍵を外す唯一の手段になる。どちらであるかを実装時に確定させ、本節に追記すること。
+**確定（#14）**: JWKS 実装は `retires_at <= now` の行を自動的に除外する（`DrizzleSigningKeyMetadataRepository.listPublishable`）。したがって**この DELETE は行の掃除にすぎず、公開状態には影響しない**。`retires_at` を過去にした時点で鍵は JWKS から消えている。逆に言えば、緊急時に鍵を即座に外す操作は DELETE ではなく `retires_at` の更新である（§5.1 はそちらを指示している）。
 
 #### ステップ 9 — 記録
 
@@ -1163,18 +1164,18 @@ Phase 2 の JWKS 実装は `retires_at <= now` の行を自動的に除外すべ
 
 #### 動くもの / 動かないもの
 
-| 機能                                             | D1 障害時           | 理由                                                                                                                    |
-| ------------------------------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `GET /.well-known/openid-configuration`          | **動く**            | `oauth.routes.ts` は `c.env.ISSUER` から静的に組み立てており、DB を読まない                                             |
-| `GET /health`                                    | **応答する（503）** | 診断が目的。503 を返すこと自体が正常動作                                                                                |
-| 501 を返す各 endpoint                            | 動く（501 のまま）  | DB に触れていない                                                                                                       |
-| `GET /api/me`、`GET /api/me/sessions`            | **動かない**        | セッション検証が `sessions` テーブルを引く                                                                              |
-| `DELETE /api/me/sessions/:id`                    | **動かない**        | 同上                                                                                                                    |
-| `IdentityRPC` の全メソッド                       | **動かない**        | すべて `createContainer` 経由で D1 を使う                                                                               |
-| dashboard-worker の `/api/me` 系                 | **動かない**        | RPC が失敗し、`identity_unavailable` → HTTP 503 に翻訳される                                                            |
-| ログイン（Phase 1 残り）、OIDC フロー（Phase 2） | **動かない**        | セッション・認可コード・OTP の正本はすべて D1                                                                           |
-| **既存セッションでの RP 側の継続利用**           | **RP の実装による** | RP が ID Token を検証済みで自前のセッションを持っていれば、u18 に問い合わせない限り動き続ける                           |
-| JWKS（Phase 2 実装後）                           | **動かない見込み**  | `signing_key_metadata` を読むため。実装時に、現役の鍵を Secret 側の値だけで応答できるフォールバックを検討する価値がある |
+| 機能                                             | D1 障害時           | 理由                                                                                                                                                                                                                             |
+| ------------------------------------------------ | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /.well-known/openid-configuration`          | **動く**            | `oauth.routes.ts` は `c.env.ISSUER` から静的に組み立てており、DB を読まない                                                                                                                                                      |
+| `GET /health`                                    | **応答する（503）** | 診断が目的。503 を返すこと自体が正常動作                                                                                                                                                                                         |
+| 501 を返す各 endpoint                            | 動く（501 のまま）  | DB に触れていない                                                                                                                                                                                                                |
+| `GET /api/me`、`GET /api/me/sessions`            | **動かない**        | セッション検証が `sessions` テーブルを引く                                                                                                                                                                                       |
+| `DELETE /api/me/sessions/:id`                    | **動かない**        | 同上                                                                                                                                                                                                                             |
+| `IdentityRPC` の全メソッド                       | **動かない**        | すべて `createContainer` 経由で D1 を使う                                                                                                                                                                                        |
+| dashboard-worker の `/api/me` 系                 | **動かない**        | RPC が失敗し、`identity_unavailable` → HTTP 503 に翻訳される                                                                                                                                                                     |
+| ログイン（Phase 1 残り）、OIDC フロー（Phase 2） | **動かない**        | セッション・認可コード・OTP の正本はすべて D1                                                                                                                                                                                    |
+| **既存セッションでの RP 側の継続利用**           | **RP の実装による** | RP が ID Token を検証済みで自前のセッションを持っていれば、u18 に問い合わせない限り動き続ける                                                                                                                                    |
+| JWKS（`/.well-known/jwks.json`）                 | **動かない**        | `signing_key_metadata` を読むため（#14 で実装済み）。この経路に秘密鍵を持ち込まない方針を優先し、Secret 側の値だけで応答するフォールバックは入れていない。入れると「テーブルに登録していない鍵が JWKS に出る」状態を作れてしまう |
 
 要するに、**D1 が落ちると u18 Identity は「新規の認証判断が一切できない」状態になる。** 読み取り専用で縮退する余地はない。セッションも認可コードも D1 が正本であり、KV をセッションの正本にしないことは仕様書 7.3 で明示的に決めてある。
 
@@ -1621,6 +1622,89 @@ union all select 'oauth_tokens',              count(*) from oauth_tokens        
 7. **dashboard-worker の `/health` に RPC 疎通チェックを入れるか**（§3.3.2）。現在は常に 200 を返すため、監視として機能しない。
 8. **`/health` を公開したままにするか**（§5.3）。認証なしで D1 にクエリを打つ唯一の公開 endpoint である。
 9. **`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**（§1.1）。現在はテストツールチェーンの制約で 2026-08-15 に据え置かれている。
+
+---
+
+## 9. OAuth クライアントの登録と失効（#13）
+
+MVP に公開 Developer Portal は無い（仕様書 1.2）。クライアントの登録・失効は、運用者の手元から `apps/auth-worker/scripts/oauth-client.mjs` を実行して行う。登録用の HTTP エンドポイントは**作らない**。作ると「任意の `redirect_uri` を持つクライアントを誰でも登録できる」状態になり、認可コードの宛先を攻撃者が自分で用意できてしまう。Redirect URI の完全一致検証（§9.2）が前提から崩れる。
+
+### 9.1 登録
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services
+pnpm --filter @u18/auth-worker client:create -- \
+  --client-id u18-dashboard \
+  --name "u18 Dashboard" \
+  --type confidential \
+  --first-party \
+  --redirect-uri https://auth.under18.dev/account/callback \
+  --remote
+```
+
+| オプション            | 意味                                                                   |
+| --------------------- | ---------------------------------------------------------------------- |
+| `--type confidential` | `client_secret` を持つ。生成した秘密は**実行時に 1 度だけ表示される**  |
+| `--type public`       | 秘密を持たず PKCE だけで認証する（仕様書 5.1）                         |
+| `--first-party`       | u18 公式サービス。同意画面を省略してよい                               |
+| `--redirect-uri`      | 複数回指定できる。完全一致で検証されるので、クエリまで含めて実物を書く |
+| `--scopes`            | 既定は `openid profile email`                                          |
+| `--remote`            | 本番 D1 に対して実行する。付けないとローカル D1（miniflare）に入る     |
+| `--dry-run`           | SQL を表示するだけで実行しない。レビューや記録に残したいときに使う     |
+
+**`client_secret` は DB にハッシュしか入らない**（仕様書 7.1）。平文は実行時の出力にしか存在せず、取り損ねたら再発行するしかない。これは不便ではなく、「後から誰でも読み出せる平文」を作らないための形である。出力は端末のスクロールバッファと履歴に残るので、クライアントへ渡したら §2.4.1 と同じ要領で消すこと。
+
+同じ `client_id` の二重登録は `oauth_clients_client_id_unique` が止める。スクリプト側では存在確認をしていない。「確認してから挿す」に分けると、同時に 2 本走ったときに両方が「無い」と判断しうるため。
+
+### 9.2 Redirect URI に関する制約
+
+登録時の検証は `apps/auth-worker/src/domain/services/redirect-uri.ts` が持ち、スクリプトはそれをそのまま読み込んでいる（ルールを 2 箇所に書くと、登録で通った URI が認可時に弾かれる形でずれる）。
+
+- **絶対 URI で `https:` のみ。** 認可コードは `Location` ヘッダと URL バーに載るので、平文 HTTP だと経路上の第三者が読める。
+- **フラグメント禁止。** 認可応答の組み立てと衝突する。
+- **正規形であること。** 大文字スキーム・既定ポートの明示（`:443`）・パス省略は拒否する。曖昧な入力を黙って正規化すると、登録した文字列とクライアントが送る文字列がずれ、認可時に完全一致で落ちる。原因は URL を目視しても分からない。
+- **`http://localhost` は `--allow-loopback-http` を明示したときだけ。** ループバック宛のパケットはマシンの外へ出ないので盗聴の前提が成り立たない（RFC 8252 §7.3 と同じ根拠）。ただし**既定では許さず、`--remote` との併用も禁止している**。本番 IdP に `http://localhost/...` の宛先が残っていると、その `client_id` を知る攻撃者が被害者のブラウザで認可を走らせ、自分の手元で待ち受けるアプリへコードを届けられる。
+- ポートのワイルドカード（RFC 8252 のループバック可変ポート）は**採用しない**。完全一致の例外を 1 つ作ると、それを認可時の比較へ持ち込むことになる。
+
+認可時の照合は**バイト単位の完全一致のみ**で、正規化も末尾スラッシュの吸収もしない。クエリが 1 文字違えば別の宛先として扱う。
+
+### 9.3 失効
+
+```bash
+pnpm --filter @u18/auth-worker client:disable -- --client-id u18-dashboard --remote
+```
+
+`disabled_at` が立つと、そのクライアントは即座に認可もトークン発行も拒否される（`ResolveOAuthClientUseCase` / `AuthenticateOAuthClientUseCase`）。`disabled_at is null` を条件に入れているので、二重に実行しても最初の失効時刻は上書きされない。
+
+**失効してもトークンは自動では消えない。** 発行済みの Access Token / 同意（`oauth_grants`）は残るので、漏洩対応では併せて失効させること（§5.2 と同じ考え方）。
+
+一覧は次で確認する。
+
+```bash
+pnpm --filter @u18/auth-worker client:list -- --remote
+```
+
+### 9.4 ローカル開発・E2E 用のシード
+
+```bash
+pnpm --filter @u18/auth-worker client:seed-dev
+```
+
+ローカル D1 に独立した 2 つのクライアント（confidential/first-party と public/third-party）を入れる。**2 つ必要なのは SSO の検証のため**で、1 つのブラウザセッションから複数クライアントへ続けてログインできることを確かめるには独立した `client_id` が 2 つ要る。
+
+このシードの `client_secret` はスクリプト内に固定で書いてある。**`--remote` は受け付けない**ので本番には入らない。本番のクライアントは必ず §9.1 で登録し、生成された秘密を 1 度だけ受け取ること。
+
+### 9.5 開発用の署名鍵
+
+`.dev.vars.example` の `SIGNING_KEY_JWK` は placeholder で、そのままでは動かない。次で生成する（§2.4.1 の手順を、3 つの出力の取り違えが起きにくい形にまとめたもの）。
+
+```bash
+pnpm --filter @u18/auth-worker key:generate -- --apply-local
+```
+
+秘密鍵（`d` 入り）は `.dev.vars` へ貼り、公開鍵だけが `signing_key_metadata` に入る。`--apply-local` はローカル D1 への投入まで行う。**本番用の `--apply-remote` は用意していない。** 本番の鍵投入は「先に JWKS へ公開してから署名を切り替える」という時間差のある手順（§4.2）であり、1 コマンドで済ませてよい操作ではないため。
+
+公開鍵の行を入れずに Worker を起動すると、`/.well-known/jwks.json` は **503**（`jwks_unavailable`）を返す。鍵が 1 本も無い状態で空の JWKS を 200 で返すと、RP がそれを正常な応答としてキャッシュし、鍵を入れ直してもキャッシュが切れるまで「鍵が無い」状態を信じ続けるため。
 
 ---
 

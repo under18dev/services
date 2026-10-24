@@ -1,12 +1,23 @@
 # ローカル開発用のシークレット。実値を入れた .dev.vars はコミットしない。
 # 本番は `wrangler secret put <NAME>` で設定する。
 
-# ID Token 署名鍵 (ES256 の秘密鍵を JWK JSON 形式で)
-SIGNING_KEY_JWK={"kty":"EC","crv":"P-256","d":"...","x":"...","y":"..."}
-SIGNING_KEY_KID=dev-key-1
+# ID Token 署名鍵 (ES256 の秘密鍵を JWK JSON 形式で)。
+#
+# 下の 2 行は**そのままでは動かない**。次のコマンドで鍵を作り、出力の
+# SIGNING_KEY_KID / SIGNING_KEY_JWK の 2 行で置き換えること。
+#
+#   pnpm --filter @u18/auth-worker key:generate -- --apply-local
+#
+# --apply-local を付けると、同じ鍵の**公開鍵だけ**をローカル D1 の
+# signing_key_metadata へ入れる。これをやらないと /.well-known/jwks.json は
+# 503 を返し（鍵が 1 本も公開されていない状態）、ID Token も発行できない。
+#
+# 開発用の鍵をこのファイルに直接書かないのは、リポジトリに入った鍵が
+# 「開発用のつもりで本番に流用される」経路を作らないため。各自の手元で生成する。
+SIGNING_KEY_JWK={"kty":"EC","crv":"P-256","d":"REPLACE_ME","x":"REPLACE_ME","y":"REPLACE_ME"}
+SIGNING_KEY_KID=REPLACE_ME
 
 # IP アドレスをハッシュ化するときの pepper（生 IP は保存しない）
 IP_HASH_PEPPER=change-me-in-every-environment
 
 # メール送信は Cloudflare Email Sending のバインディング経由のため、API キーは不要（#35）。
-
