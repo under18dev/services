@@ -3,10 +3,14 @@ import type { Clock } from "../../application/ports/clock.port";
 import type {
   ActiveSigningKey,
   PublicSigningJwk,
-  SigningKeyMetadata,
   SigningKeyMetadataRepository,
   SigningKeyProvider,
 } from "../../application/ports/signing-key.port";
+import {
+  auditSigningKeySecret,
+  explainUnusableSigningKeys,
+  parseSigningKeySecret,
+} from "../../domain/services/signing-key-rotation";
 
 /**
  * Workers Secret に置いた秘密鍵。
@@ -16,10 +20,21 @@ import type {
  * （`UnconfiguredEmailSender` と同じ方針。#53）。
  */
 export type SigningKeySecret = {
-  /** `SIGNING_KEY_JWK`。`d` を含む EC 秘密鍵の JWK JSON。 */
+  /**
+   * `SIGNING_KEY_JWK`。`d` を含む EC 秘密鍵の JWK、または JWK Set
+   * （`{"keys":[...]}`）。Set にすると新旧 2 鍵を同時に持てる（#23）。
+   */
   readonly jwk: string;
-  /** `SIGNING_KEY_KID`。`signing_key_metadata` の行と対応していること。 */
-  readonly kid: string;
+  /**
+   * `SIGNING_KEY_KID`。**単一 JWK 形式のときだけ**使う旧形式の名残で、
+   * JWK Set 形式では各鍵が自分の `kid` を持つため参照しない。
+   *
+   * Set 形式で古い `SIGNING_KEY_KID` が残っていても黙って無視するのは、
+   * それを尊重すると「Secret を JWK Set へ移行した瞬間に、消し忘れた
+   * 1 行が署名鍵を過去へ巻き戻す」から。鍵の選択は常に
+   * `signing_key_metadata` を正本にする。
+   */
+  readonly kid: string | null;
 };
 
 /**
@@ -69,6 +84,13 @@ function parseJwk(json: string): unknown {
  *   導出して JWKS に足すことはしない —— そうすると、テーブルに載せていない
  *   鍵が設定ミスで世界に配布されうる。「JWKS に出る鍵＝運用者が明示的に
  *   登録した鍵」という対応を崩さない。
+ * - **Secret は鍵を複数持てる（#23）。** どれで署名するかは
+ *   `signing_key_metadata` が決める。Secret を「現役の鍵 1 本」ではなく
+ *   「持っている鍵の束」にしたことで、鍵の追加と切り替えが別々の操作になり、
+ *   ローテーション中に「新 kid を名乗る旧鍵署名」のような中間状態が作れなくなる。
+ * - **署名の直前に Secret と行の公開鍵が同じものかを確かめる。** kid の存在だけ
+ *   見ても、中身が別の鍵なら全 RP で検証に失敗する（docs/runbook.md 4.1 制約 3）。
+ *   この検査は運用スクリプトと同じ関数（`auditSigningKeySecret`）を通る。
  */
 export class JoseSigningKeyProvider implements SigningKeyProvider {
   /**
@@ -98,42 +120,40 @@ export class JoseSigningKeyProvider implements SigningKeyProvider {
       throw new Error(`signing key is not configured: ${this.unavailableReason}`);
     }
 
-    const row = await this.metadata.findByKid(secret.kid);
-    if (row === null) {
-      // kid が未登録のまま署名すると、JWKS に載っていない kid を名乗る
-      // ID Token を配ることになり、RP 側では全件検証失敗になる。
+    const parsed = parseSigningKeySecret(secret.jwk, secret.kid);
+    if (!parsed.ok) {
+      throw new Error(`signing key is not configured: ${parsed.reason}`);
+    }
+
+    // 引くのは Secret に入っている kid の行だけ。全行を読むと、鍵を 1 本しか
+    // 持たない通常時にもクエリが増える。`missing-from-secret`（DB だけが知って
+    // いる現役鍵）の検出は運用スクリプト側に任せる —— リクエスト処理の途中で
+    // 気付いても、そこで直せるものではない。
+    const rows = (
+      await Promise.all(parsed.keys.map((key) => this.metadata.findByKid(key.kid)))
+    ).filter((row) => row !== null);
+
+    const audit = auditSigningKeySecret(parsed.keys, rows, this.clock.now());
+    if (audit.signingKid === null) {
       // 「誰にも検証できないトークンを黙って配る」より、発行を止めるほうがよい。
-      // 復旧手順は docs/runbook.md 4.2 ステップ 2（先に行を入れる）。
-      throw new Error(
-        `signing key is not configured: kid "${secret.kid}" has no row in signing_key_metadata`,
-      );
-    }
-    if (!isActiveAt(row, this.clock.now())) {
-      throw new Error(
-        `signing key is not configured: kid "${secret.kid}" is not active in signing_key_metadata`,
-      );
+      // 復旧手順は docs/runbook.md 4.2（先に行を入れてから Secret を足す）。
+      throw new Error(`signing key is not configured: ${explainUnusableSigningKeys(audit)}`);
     }
 
-    const jwk = parseJwk(secret.jwk);
-    if (typeof jwk !== "object" || jwk === null) {
-      throw new Error("signing key is not configured: SIGNING_KEY_JWK is not valid JSON");
-    }
-    // 公開鍵を SIGNING_KEY_JWK に貼る取り違えをここで止める（runbook 2.4.1）。
-    // `d` が無い JWK を import しても署名の瞬間まで気付けない。
-    if (typeof (jwk as Record<string, unknown>)["d"] !== "string") {
-      throw new Error(
-        "signing key is not configured: SIGNING_KEY_JWK has no private component (d)",
-      );
+    const chosen = parsed.keys.find((key) => key.kid === audit.signingKid);
+    if (chosen === undefined) {
+      // auditSigningKeySecret は渡した鍵の中からしか選ばない。
+      throw new Error(`signing key is not configured: kid "${audit.signingKid}" vanished`);
     }
 
-    const key = await importJWK(jwk as Parameters<typeof importJWK>[0], "ES256");
+    const key = await importJWK(chosen.jwk as Parameters<typeof importJWK>[0], "ES256");
     if (!(key instanceof CryptoKey)) {
       // 対称鍵（Uint8Array）が返るのは oct JWK のとき。ES256 では起きないが、
       // 型を絞るために確認する。
       throw new Error("signing key is not configured: SIGNING_KEY_JWK is not an EC private key");
     }
 
-    return { kid: secret.kid, alg: "ES256", privateKey: key };
+    return { kid: chosen.kid, alg: "ES256", privateKey: key };
   }
 
   async getPublicJwks(): Promise<readonly PublicSigningJwk[]> {
@@ -159,11 +179,4 @@ export class JoseSigningKeyProvider implements SigningKeyProvider {
     }
     return keys;
   }
-}
-
-/** 新規署名に使ってよい期間内か（仕様書 5.4）。 */
-function isActiveAt(row: SigningKeyMetadata, now: Date): boolean {
-  if (row.activeFrom.getTime() > now.getTime()) return false;
-  if (row.activeUntil !== null && row.activeUntil.getTime() <= now.getTime()) return false;
-  return true;
 }

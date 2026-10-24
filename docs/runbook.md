@@ -190,31 +190,30 @@ npx wrangler d1 info u18-identity
 
 #### 2.4.1 ES256 署名鍵（`SIGNING_KEY_JWK` / `SIGNING_KEY_KID`）
 
-独自の鍵生成コードを書かない（仕様書 5.4）。Node.js の `node:crypto` で P-256 鍵ペアを作り、JWK として書き出す。
+独自の鍵生成コードを書かない（仕様書 5.4）。Node.js の `node:crypto` で P-256 鍵ペアを作り、JWK として書き出す。この手順はスクリプトにまとめてある。
 
 ```bash
-node -e '
-const { generateKeyPairSync } = require("node:crypto");
-const kid = `u18-${new Date().toISOString().slice(0, 10)}-1`;
-const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-const meta = { alg: "ES256", use: "sig", kid };
-console.log("SIGNING_KEY_KID=" + kid);
-console.log("SIGNING_KEY_JWK=" + JSON.stringify({ ...privateKey.export({ format: "jwk" }), ...meta }));
-console.log("PUBLIC_JWK=" + JSON.stringify({ ...publicKey.export({ format: "jwk" }), ...meta }));
-'
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+node scripts/signing-key.mjs generate
 ```
 
 出力例:
 
 ```text
-SIGNING_KEY_KID=u18-2026-10-24-1
-SIGNING_KEY_JWK={"kty":"EC","x":"...","y":"...","crv":"P-256","d":"...","alg":"ES256","use":"sig","kid":"u18-2026-10-24-1"}
-PUBLIC_JWK={"kty":"EC","x":"...","y":"...","crv":"P-256","alg":"ES256","use":"sig","kid":"u18-2026-10-24-1"}
+# .dev.vars に貼る（本番は wrangler secret put SIGNING_KEY_JWK で入れる）
+SIGNING_KEY_JWK={"keys":[{"kty":"EC","x":"...","y":"...","crv":"P-256","d":"...","alg":"ES256","use":"sig","kid":"u18-2026-10-24-1"}]}
+
+# signing_key_metadata に入れる公開鍵（機密ではない）
+insert into signing_key_metadata ... values ('u18-2026-10-24-1', 'ES256', '{"kty":"EC","x":"...","y":"...","crv":"P-256","alg":"ES256","use":"sig","kid":"u18-2026-10-24-1"}', ...);
 ```
+
+**`SIGNING_KEY_JWK` は JWK Set（`{"keys":[...]}`）である（#23）。** 鍵を配列で持てるので、ローテーション中は新旧 2 本が 1 つの Secret に同居する。どの鍵で新規署名するかは Secret ではなく `signing_key_metadata` の `active_from` / `active_until` が決める。
+
+**単一 JWK（`{"kty":"EC",...}`）+ `SIGNING_KEY_KID` という #23 以前の形式も、そのまま動き続ける。** 既存環境は Secret を触らなくてよい。移行するのは次にローテーションするときで、`generate` が既存の鍵を取り込んだ JWK Set を出力する（4.2 ステップ 1）。Set へ移行したら `SIGNING_KEY_KID` は参照されなくなるので削除してよい。
 
 注意点:
 
-- `d` を含む方が秘密鍵である。`PUBLIC_JWK`（`d` を含まない方）は `signing_key_metadata.public_jwk` に入れる値であり、機密ではない。
+- `d` を含む方が秘密鍵である。`insert` 文に入っている JWK（`d` を含まない方）は `signing_key_metadata.public_jwk` に入れる値であり、機密ではない。
 - 3 つの出力を取り違えないこと。`SIGNING_KEY_JWK` に公開鍵を入れると署名時に落ちる。`public_jwk` に秘密鍵を入れると **JWKS 経由で秘密鍵を世界中に配布する**ことになる。
 - この出力は端末のスクロールバッファとシェル履歴に残る。設定後に `history -c`（zsh なら `fc -p`）と画面クリアを行い、スクリーンショットも残さない。
 
@@ -222,8 +221,14 @@ PUBLIC_JWK={"kty":"EC","x":"...","y":"...","crv":"P-256","alg":"ES256","use":"si
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
-npx wrangler secret put SIGNING_KEY_JWK   # 対話プロンプトに JWK JSON を貼り付ける
-npx wrangler secret put SIGNING_KEY_KID
+npx wrangler secret put SIGNING_KEY_JWK   # 対話プロンプトに JWK Set の JSON を貼り付ける
+```
+
+入れる**前**に、DB 側の行と食い違っていないかを確認できる（#23）。本番の Secret は書き込み専用で読み出せないため、検査は「これから入れる値」に対して行う。
+
+```bash
+# 投入予定の値をファイルに置いて突き合わせる（ファイルは確認後に消すこと）
+node scripts/signing-key.mjs verify --remote --secret-file ./new-secret.json
 ```
 
 #### 2.4.2 `IP_HASH_PEPPER`
@@ -272,7 +277,9 @@ cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
 npx wrangler secret list
 ```
 
-値は表示されない。名前の一覧だけを確認する。`SIGNING_KEY_JWK`・`SIGNING_KEY_KID`・`IP_HASH_PEPPER` の 3 つが揃っていること。
+値は表示されない。名前の一覧だけを確認する。`SIGNING_KEY_JWK` と `IP_HASH_PEPPER` が揃っていること（`SIGNING_KEY_KID` は JWK Set 形式では使われない。#23 以前から運用している環境にだけ残っている）。
+
+**`secret list` では中身が確認できない。** 「名前はあるが中身が DB と食い違っている」状態はこのコマンドでは見えないので、2.4.1 の `verify` を使うこと。
 
 #### 2.4.5 ローカル開発用
 
@@ -283,6 +290,8 @@ cp .dev.vars.example .dev.vars
 ```
 
 `.dev.vars` は `.gitignore` 済み（`!.dev.vars.example` の例外付き）。本番の値をここに書かない。
+
+**`.dev.vars` を書き換えたら `wrangler dev` を再起動する。** 起動時にしか読まれないため、編集しただけでは反映されない（4.5 を参照）。本番の `wrangler secret put` は再デプロイなしに反映されるので、この違いはローカルだけのものである。
 
 ### 2.5 マイグレーションの生成と適用
 
@@ -697,10 +706,22 @@ MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE
 **現時点の制約を正直に書く。**
 
 1. ~~**JWKS endpoint（`/.well-known/jwks.json`）は未実装で 501 を返す。**~~ #14 で実装済み。JWKS は `signing_key_metadata` を正本として読み、`retires_at` を迎えていない鍵を**すべて**返す（`active_until` が過去の鍵も含む）。以下の手順はそのまま実行できる。ただし ID Token を実際に発行できるのは `/oauth/token` の実装後なので、ステップ 6 の確認だけは Phase 2 の残りを待つ。
-2. **`SIGNING_KEY_JWK` は単一の Secret であり、秘密鍵は一度に 1 本しか持てない。** 「新旧 2 本を同時にロードして、どちらでも署名できる」構成にはなっていない。鍵の切り替えは Secret の置き換え 1 回で、全リクエストが瞬時に新鍵へ移る。段階的な比率移行はできない。
-3. **`signing_key_metadata` の行と Secret の中身が一致しているかを検証する仕組みがない。** DB が kid-A を「現役」と記録していても、Secret に入っているのが kid-B の鍵であれば、ID Token の `kid` ヘッダと JWKS が食い違い、全 RP で検証が失敗する。手順 4.2 のステップ 6 の確認を省略しないこと。
+2. ~~**`SIGNING_KEY_JWK` は単一の Secret であり、秘密鍵は一度に 1 本しか持てない。**~~ #23 で解消済み。`SIGNING_KEY_JWK` は **JWK Set（`{"keys":[...]}`）** を受け付け、新旧 2 本を同居させられる。
+3. ~~**`signing_key_metadata` の行と Secret の中身が一致しているかを検証する仕組みがない。**~~ #23 で解消済み。`node scripts/signing-key.mjs verify` が突き合わせる。
 
-将来、`SIGNING_KEY_JWK` を JWK Set（配列）として複数鍵を保持できる形に変え、署名鍵の選択を `signing_key_metadata` の `active_from` / `active_until` から行う実装にすべきである。本書はその改修前の前提で書いている。
+**この 2 つが解消されたことで、ローテーションの性質が変わっている。**
+
+鍵の切り替えは、もはや Secret の置き換えではない。**どの鍵で新規署名するかを決めるのは `signing_key_metadata` の `active_from` / `active_until` だけ**で、Secret は「手元に持っている鍵の束」でしかない（`apps/auth-worker/src/domain/services/signing-key-rotation.ts`）。したがって手順は次の形になる。
+
+| 操作                 | 何で行うか             | 可逆か                           |
+| -------------------- | ---------------------- | -------------------------------- |
+| 鍵を足す / 外す      | `wrangler secret put`  | いつでもよい。署名鍵は変わらない |
+| **署名を切り替える** | **D1 の UPDATE 1 回**  | UPDATE を戻せば戻る              |
+| JWKS から外す        | `retires_at` の UPDATE | 戻せる（DELETE するまで）        |
+
+旧実装では `SIGNING_KEY_JWK` と `SIGNING_KEY_KID` の 2 本を「数秒以内に」更新する必要があり、その間に発行された ID Token は「旧 kid を名乗る新鍵署名」になって全 RP で検証に失敗した。Secret を束にしたことで、**その窓が構造的に無くなった**。`SIGNING_KEY_KID` を足し忘れる・消し忘れる類の事故も起きない（Set 形式では参照されない）。
+
+**残っている前提**: Secret と DB は依然として別々に更新される。両者が食い違っていないかは `verify` で確認する。確認は自動では走らない —— `/health` には入れていない（理由は 4.4）。
 
 ### 4.2 定期ローテーション手順
 
@@ -710,56 +731,56 @@ MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE
 
 #### ステップ 1 — 新しい鍵ペアを生成する
 
-2.4.1 のコマンドを実行する。`kid` は日付入りにして、既存の kid と衝突しないようにする。
-
-```bash
-node -e '
-const { generateKeyPairSync } = require("node:crypto");
-const kid = `u18-${new Date().toISOString().slice(0, 10)}-1`;
-const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-const meta = { alg: "ES256", use: "sig", kid };
-console.log("SIGNING_KEY_KID=" + kid);
-console.log("SIGNING_KEY_JWK=" + JSON.stringify({ ...privateKey.export({ format: "jwk" }), ...meta }));
-console.log("PUBLIC_JWK=" + JSON.stringify({ ...publicKey.export({ format: "jwk" }), ...meta }));
-'
-```
-
-秘密鍵（`d` を含む方）は、この後 Secret に入れるまでの間、安全な場所に一時的に置く。
-
-#### ステップ 2 — 新しい公開鍵を JWKS に先行公開する
-
-`signing_key_metadata` に新しい kid の行を入れる。ただし **`active_from` を未来に置く** ことで、「JWKS には載るが、まだ署名には使わない」状態を作る。
+`kid` は日付入りにして、既存の kid と衝突しないようにする（既定でそうなる）。
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
-npx wrangler d1 execute u18-identity --remote --command "
-insert into signing_key_metadata (kid, algorithm, public_jwk, active_from, active_until, retires_at, created_at)
-values (
-  'u18-2026-10-24-1',
-  'ES256',
-  '<PUBLIC_JWK をそのまま貼る>',
-  (unixepoch() + 86400) * 1000,
-  null,
-  null,
-  unixepoch() * 1000
-);
-"
+node scripts/signing-key.mjs generate
 ```
 
-時刻列は **epoch ミリ秒の INTEGER** である（`packages/db/src/schema/_shared.ts` の `timestampMs`）。SQLite の `unixepoch()` は秒を返すので、必ず 1000 倍する。これを忘れると 1970 年として解釈され、鍵のライフサイクル判定が全部狂う。
+出力は 2 つに分かれる。
+
+- `SIGNING_KEY_JWK=` の行 —— 秘密鍵（`d` 入り）。ステップ 4 で Secret に入れる。
+- `insert into signing_key_metadata ...` —— 公開鍵。ステップ 2 で登録する。
+
+秘密鍵は、この後 Secret に入れるまでの間、安全な場所に一時的に置く。
+
+**この出力の JWK Set には新しい鍵しか入っていない。** 本番の現行 Secret は読み出せないため、スクリプトは現行の鍵を知らない。ステップ 4 で `wrangler secret put` するときは、**手元に控えてある現行の鍵と新しい鍵の 2 本**を並べた Set にすること。
+
+```json
+{ "keys": [ { "kid": "<旧 kid>", "d": "...", ... }, { "kid": "<新 kid>", "d": "...", ... } ] }
+```
+
+現行の鍵の控えが無い場合は、この時点でローテーションを止めない —— 旧鍵を Set に入れられなくても、`active_until` を過ぎた旧鍵は**署名にはもう使わない**ので実害は無い。失うのは「新鍵に問題が出たとき旧鍵へ戻す」選択肢だけである。ロールバックの余地を残したいなら、控えが無い時点で記録の運用（ステップ 9）を先に直すこと。
+
+#### ステップ 2 — 新しい公開鍵を JWKS に先行公開する
+
+`signing_key_metadata` に新しい kid の行を入れる。ただし **`active_from` を未来に置く** ことで、「JWKS には載るが、まだ署名には使わない」状態を作る。`register` の既定がこの先行公開（24 時間後）である。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+node scripts/signing-key.mjs register \
+  --kid u18-2026-10-24-1 \
+  --public-jwk '<generate が出した公開 JWK>' \
+  --remote
+```
+
+`--public-jwk @path.json` でファイルからも読める。`--active-in 48h` のように先行公開の長さを変えられる。`--dry-run` を付けると SQL を表示するだけで実行しない。
+
+**`register` が手書き SQL より安全な点**:
+
+- 時刻列は **epoch ミリ秒の INTEGER** である（`packages/db/src/schema/_shared.ts` の `timestampMs`）。SQLite の `unixepoch()` は秒を返すので 1000 倍が要る。これを忘れると 1970 年として解釈され、鍵のライフサイクル判定が全部狂う。スクリプトが常に 1000 倍する。
+- `--public-jwk` に `d` を含む JWK（＝秘密鍵）を渡すと**拒否する**。手書きの INSERT にはこの関門が無く、取り違えると JWKS 経由で秘密鍵を配ることになる。
+- 既に同じ kid の行があれば止まる。
 
 確認:
 
 ```bash
-npx wrangler d1 execute u18-identity --remote --command "
-select kid, algorithm,
-       datetime(active_from/1000,  'unixepoch') as active_from,
-       datetime(active_until/1000, 'unixepoch') as active_until,
-       datetime(retires_at/1000,   'unixepoch') as retires_at
-from signing_key_metadata order by active_from;
-"
+node scripts/signing-key.mjs list --remote
 curl -s https://<auth-worker-の-URL>/.well-known/jwks.json | jq '.keys[].kid'
 ```
+
+`list` は各鍵が「署名中 / 先行公開 / 署名停止 / 撤去済み」のどれかを、Worker と同じ判定（`signingKeyState`）で表示する。
 
 **この待ちが必要な理由**: RP（Relying Party）は JWKS をキャッシュする。キャッシュ期間中に未知の `kid` を持つ ID Token が届くと、RP の実装によっては JWKS を再取得せずそのまま検証失敗にする。新しい公開鍵を**先に**配っておくことで、署名を切り替えた瞬間に全 RP が既に新しい鍵を持っている状態を作る。
 
@@ -770,31 +791,46 @@ curl -s https://<auth-worker-の-URL>/.well-known/jwks.json | jq '.keys[].kid'
 - RP 側の JWKS キャッシュ TTL は u18 からは制御できない。一般的な OIDC ライブラリの既定値は 5 分から 24 時間まで幅がある。
 - この待ちは「最長の JWKS キャッシュ TTL」を見込んだものであり、トークンの寿命とは無関係である。
 - 緊急時（§5.1）はこの待ちを省略する。その代償は「JWKS を再取得しない RP で一時的に検証失敗が出る」ことである。
+- 待っている間、**本番は何も変わっていない**。`active_from` が未来なので新しい鍵は署名に使われず、JWKS に 1 本増えるだけである。ここで中止するなら、行を DELETE すれば元に戻る。
 
 #### ステップ 4 — 署名を新しい kid へ切り替える
 
-旧鍵の `active_until` を現在時刻に設定し、新鍵の `active_from` を現在時刻に引き下げる。
+**順序が逆になった（#23）。先に Secret、後で切り替えである。**
+
+まず Secret に新旧 2 本を入れる。この時点では**署名鍵は変わらない**（新鍵の `active_from` がまだ未来のため）。Secret の更新は Worker の再デプロイなしに反映される。
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
-npx wrangler d1 execute u18-identity --remote --command "
-update signing_key_metadata set active_until = unixepoch() * 1000 where kid = '<旧 kid>' and active_until is null;
-update signing_key_metadata set active_from  = unixepoch() * 1000 where kid = '<新 kid>';
-"
+npx wrangler secret put SIGNING_KEY_JWK   # ステップ 1 で作った「旧 + 新」の JWK Set
 ```
 
-続けて Secret を置き換える。**この 2 つの Secret は必ずセットで、かつ即座に続けて更新する。**
+**何も起きないことを確認してから進む。** 投入した値と DB の突き合わせはこれで行う。
 
 ```bash
-npx wrangler secret put SIGNING_KEY_JWK   # 新しい秘密鍵
-npx wrangler secret put SIGNING_KEY_KID   # 新しい kid
+node scripts/signing-key.mjs verify --remote --secret-file ./new-secret.json
 ```
 
-Secret の更新は Worker の再デプロイなしに反映される。`SIGNING_KEY_JWK` だけ更新して `SIGNING_KEY_KID` が古いままの瞬間があると、その間に発行された ID Token は「旧 kid を名乗る新鍵署名」になり、RP では検証に失敗する。ID Token の寿命は 5 分なので影響は短時間だが、更新の間隔は数秒に収めること。
+期待する出力は「新規署名に使われる kid: <旧 kid>」と、新鍵についての `情報: ... active_from is in the future`。ここで `NG:` が出たら切り替えてはいけない。
+
+次に署名を切り替える。**これが唯一の不可逆でない一点で、ここから新鍵で署名が始まる。**
+
+```bash
+node scripts/signing-key.mjs activate --kid <新 kid> --remote
+```
+
+`activate` は切り替える前に、**新 kid が Secret に入っていて、その公開鍵が `signing_key_metadata` の行と一致していること**を確かめる（本番 Secret は読めないので `--secret-file` か環境変数 `SIGNING_KEY_JWK` で渡す。渡さなければ警告だけ出て続行する）。一致しなければ中止する —— ここを素通りすると、UPDATE の直後から全 RP で ID Token の検証が一斉に失敗し、auth-worker 側のログには何も出ない。
+
+`activate` が行うのは次の 3 つで、すべて 1 回の実行にまとまっている。
+
+1. 現役の鍵（`active_until is null` かつ `active_from` が過去）の `active_until` を現在時刻にする。先行公開中の**別の**鍵は巻き込まない。
+2. 新 kid の `active_from` を現在時刻へ引き下げる。
+3. 監査ログ `signing_key.rotated` を `audit_logs` に記録する（どの kid へ、どの kid から切り替えたか）。
+
+**戻したくなったら**、旧 kid へ `activate` し直せばよい。旧鍵は Secret にも JWKS にも残っている（これがステップ 1 で 2 本を Set に入れる理由）。
 
 #### ステップ 5 — 発行済みトークンが自然に失効するのを待つ
 
-**15 分待つ。**
+**10 分待つ。**（#23 で 15 分から訂正。根拠は下記）
 
 内訳（仕様書 5.3 / `apps/auth-worker/src/domain/services/token-lifetime.ts`）:
 
@@ -806,7 +842,16 @@ Secret の更新は Worker の再デプロイなしに反映される。`SIGNING
 
 現在、署名鍵で保護されている最長の寿命は **ID Token の 5 分** である。#37 で **Access Token は不透明トークン**と決まった（仕様書 §14.1 決定 5）ので、Access Token は署名鍵と無関係になり、待つべき時間は ID Token の 5 分だけになった（以前は JWT の可能性を見込んで 10 分で見積もっていた）。Refresh Token は MVP では発行しない（仕様書 1.2）ので、これより長い寿命のトークンは存在しない。
 
-切り替え直前に発行されたトークンを考慮して 10 分、クロックスキューと余裕を見て **15 分** とする。
+**既定値の算出（#23）**:
+
+| 項目                                   | 値        | 根拠                                    |
+| -------------------------------------- | --------- | --------------------------------------- |
+| 切り替え時に発行された ID Token の寿命 | 5 分      | `TokenLifetime.idTokenMs`（仕様書 5.3） |
+| RP 側のクロックスキュー許容            | ~1 分     | 一般的な OIDC ライブラリの既定          |
+| 処理中リクエストと操作の余裕           | ~4 分     | 切り上げ                                |
+| **合計**                               | **10 分** | —                                       |
+
+**15 分は Access Token が JWT になりうる前提の数字で、決定 5 の時点で根拠を失っていた。** 10 分へ訂正する。なお 5 分でも理屈は通るが、この待ちの代償はゼロ（待っている間 JWKS も署名鍵も変わらない）なので、短く攻める理由がない。
 
 **この待ちが必要な理由**: 切り替えの瞬間に発行済みで、まだ有効期限内の ID Token / Access Token が存在する。これらは旧 kid で署名されている。旧鍵を JWKS から今すぐ外すと、これらのトークンを持つユーザーのリクエストが一斉に検証失敗する。ブラウザセッション（最大 12 時間）はサーバー側の DB で検証しており署名鍵を使わないため、この待ちには含めない。
 
@@ -827,46 +872,55 @@ echo "<ID Token>" | cut -d. -f1 | base64 -d 2>/dev/null | jq
 curl -s https://<auth-worker-の-URL>/.well-known/jwks.json | jq '.keys[] | {kid, alg, crv}'
 ```
 
-**DB と Secret の整合も確認する。** DB 上「現役」（`active_until is null`）の kid が 1 つだけで、それが `SIGNING_KEY_KID` と一致していること。
+**DB と Secret の整合も確認する（#23）。**
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
-npx wrangler d1 execute u18-identity --remote --command "
-select kid from signing_key_metadata where active_until is null;
-"
+node scripts/signing-key.mjs list --remote
+node scripts/signing-key.mjs verify --remote --secret-file ./new-secret.json
 ```
 
-この確認を飛ばすと、4.1 の制約 3 で述べた不一致が本番で表面化する。
+`verify` が「新規署名に使われる kid: <新 kid>」と「OK:」を出すこと。この確認は kid の一致だけでなく**公開鍵の中身まで**突き合わせる。kid が合っていても鍵が別物なら、署名は成功するのに全 RP で検証が失敗する —— auth-worker のログには何も出ないので、ここで見ないと RP からの問い合わせで気付くことになる。
+
+`verify` は Worker が署名直前に使うのと同じ判定関数を呼ぶ。「スクリプトは OK と言ったのに Worker は署名できない」は起こらない。
+
+確認が終わったら、ステップ 1 と 4 で作った `./new-secret.json` を**消す**こと。
 
 #### ステップ 7 — 旧鍵の `retires_at` を設定する
 
 ステップ 5 の待ちが終わってから、旧鍵の撤去予定時刻を記録する。
 
 ```bash
-npx wrangler d1 execute u18-identity --remote --command "
-update signing_key_metadata
-set retires_at = (unixepoch() + 7 * 86400) * 1000
-where kid = '<旧 kid>' and retires_at is null;
-"
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+node scripts/signing-key.mjs retire --kid <旧 kid> --remote      # 既定で 7 日後
 ```
 
-`retires_at` まで 7 日の猶予を置くのは、JWKS をディスク等に長期キャッシュしている RP や、障害時に旧鍵へ戻す必要が生じた場合への保険である。この期間中、旧鍵は **JWKS に載り続けるが新規署名には使われない**（`active_until` が過去なので）。
+**猶予期間の既定は 7 日。下限は 24 時間 5 分である。**
+
+| 要素                                  | 値               | 何を待っているか                                                 |
+| ------------------------------------- | ---------------- | ---------------------------------------------------------------- |
+| ID Token の最長寿命                   | 5 分             | 旧 kid で署名された発行済みトークンが自然失効するまで            |
+| RP の JWKS キャッシュ（最長の見込み） | 24 時間          | 旧 kid を知っている RP がキャッシュを捨て、新 kid を取得するまで |
+| **下限**                              | **24 時間 5 分** | これを下回ると、旧 kid のトークンを持つ RP が検証に失敗しうる    |
+| **既定**                              | **7 日**         | 下限 + ロールバックの余地と長期キャッシュへの保険                |
+
+`retire` は下限を下回る `--in` を**拒否する**（`--in 0 --force` で強行できる）。猶予を縮めるのは鍵漏洩への対応（§5.1）だけの判断で、事故で短くするのと意図して短くするのを区別するためにこの関門を置いている。
+
+この期間中、旧鍵は **JWKS に載り続けるが新規署名には使われない**（`active_until` が過去なので）。現役の鍵（`active_until is null`）に `retire` しようとすると止まる —— JWKS から消えた鍵で署名し続ける状態になるため。
 
 #### ステップ 8 — `retires_at` 到達後に JWKS から外す
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
-# 撤去対象の確認
-npx wrangler d1 execute u18-identity --remote --command "
-select kid, datetime(retires_at/1000, 'unixepoch') as retires_at
-from signing_key_metadata
-where retires_at is not null and retires_at <= unixepoch() * 1000;
-"
-# 削除
+# 撤去済みになっていることの確認（「撤去済み」と表示される）
+node scripts/signing-key.mjs list --remote
+# 行の削除
 npx wrangler d1 execute u18-identity --remote --command "
 delete from signing_key_metadata where kid = '<旧 kid>';
 "
 ```
+
+**このとき Secret からも旧鍵を外す。** JWK Set から該当の鍵を除いて `wrangler secret put SIGNING_KEY_JWK` し直す。残っていても署名には使われないが（行が無い、あるいは撤去済みなので Worker が拒否する）、不要になった秘密鍵を持ち続ける理由はない。`verify` は行の無い鍵が Secret に残っていることを `NG` として報告する。
 
 **確定（#14）**: JWKS 実装は `retires_at <= now` の行を自動的に除外する（`DrizzleSigningKeyMetadataRepository.listPublishable`）。したがって**この DELETE は行の掃除にすぎず、公開状態には影響しない**。`retires_at` を過去にした時点で鍵は JWKS から消えている。逆に言えば、緊急時に鍵を即座に外す操作は DELETE ではなく `retires_at` の更新である（§5.1 はそちらを指示している）。
 
@@ -876,11 +930,108 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 
 ### 4.3 待ち時間の要約
 
-| ステップ | 待ち    | 何を待っているか                                                               |
-| -------- | ------- | ------------------------------------------------------------------------------ |
-| 2 → 4    | 24 時間 | RP 側の JWKS キャッシュが更新されるのを待つ                                    |
-| 4 → 7    | 15 分   | 旧鍵で署名済みの ID Token（5 分）/ Access Token（10 分）が自然失効するのを待つ |
-| 7 → 8    | 7 日    | 長期キャッシュしている RP と、ロールバックのための保険                         |
+| ステップ | 待ち    | 何を待っているか                                                                |
+| -------- | ------- | ------------------------------------------------------------------------------- |
+| 2 → 4    | 24 時間 | RP 側の JWKS キャッシュが更新されるのを待つ                                     |
+| 4 → 7    | 10 分   | 旧鍵で署名済みの ID Token（5 分）が自然失効するのを待つ（#23 で 15 分から訂正） |
+| 7 → 8    | 7 日    | 長期キャッシュしている RP と、ロールバックのための保険                          |
+
+**所要の実質は待ち時間で、手を動かすのは 30 分程度。** ステップ 4 の `activate` 以外はすべて元に戻せる。
+
+### 4.4 整合検査をどこに置いたか（#23 (c)）
+
+Secret と `signing_key_metadata` の突き合わせは、次の 3 箇所にある。**`/health` には無い。**
+
+| 場所                                    | いつ走るか                      | 失敗したらどうなるか                            |
+| --------------------------------------- | ------------------------------- | ----------------------------------------------- |
+| `signing-key.mjs verify`                | 運用者が明示的に実行したとき    | 終了コード 1。本番は何も変わらない              |
+| `signing-key.mjs activate`              | 署名を切り替える直前（自動）    | 切り替えを中止する                              |
+| `JoseSigningKeyProvider`（Worker 本体） | ID Token に署名しようとした瞬間 | **その署名だけが失敗する**。JWKS は応答し続ける |
+
+**`/health` に足さなかった理由。** 足すと、署名鍵が未設定の環境で `/health` が落ちる。#53 で「設定不備が無関係なエンドポイントを巻き込む」構造を解消したばかりで、同じものを別の入口から再導入することになる。具体的には:
+
+- 鍵を一度も設定していない環境（Phase 1 相当の構成、プレビュー環境）で `/health` が赤くなる。死活監視としては正しくない —— Worker は生きていて、OIDC 以外は全部動く。
+- **鍵を入れ替えている最中に `/health` が落ちうる。** 監視が鳴るのが一番困る瞬間に鳴る。
+- `/health` は未認証で叩ける唯一の D1 クエリ経路でもある（§8.5 の未決事項）。ここへ検査を足すと、外部から鍵の設定状態を観測できることにもなる。
+
+代わりに、`UnconfiguredEmailSender` / `UnconfiguredIpHasher` と同じ方針を採る —— **失敗は「使おうとした時点」に置く。** 署名鍵の整合が崩れていれば ID Token の発行だけが失敗し、JWKS・Discovery・セッション・アカウント API は動き続ける。鍵を入れ替えている最中に JWKS が落ちると、旧鍵で署名済みのトークンを検証している RP まで巻き込むため、この分離には積極的な意味がある。
+
+**その代償は「誰も `verify` を実行しなければ不一致に気付かない」ことである。** これを埋めるために `activate` が自動で検査を挟んでいる（不一致のまま切り替えるのが、最も被害の大きい単一の操作のため）。それでも「デプロイのたびに自動で検査する」経路は無い。CI に足す場合に必要なものは下記。
+
+#### CI に足すなら（`.github/**` は本 PR の対象外）
+
+`.github/workflows/*.yml` のデプロイジョブに、`wrangler deploy` の**前**に次を足す。
+
+```yaml
+- name: 署名鍵の整合を確認する
+  run: node scripts/signing-key.mjs verify --remote
+  working-directory: apps/auth-worker
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    SIGNING_KEY_JWK: ${{ secrets.SIGNING_KEY_JWK }}
+```
+
+必要なもの:
+
+1. **GitHub Secrets に `SIGNING_KEY_JWK` を置くこと。** 本番の Secret は `wrangler secret` では読み出せないため、CI が突き合わせるには値の複製が要る。**これは秘密鍵の保管場所を 1 つ増やす判断であり、ローテーションのたびに 2 箇所を更新する運用が生まれる。** 自動検査の価値と引き換えにするかは、鍵の保管経路を増やさない方針（§5.1 の事後対応 3）と照らして決めること。本 PR では判断を保留し、手動の `verify` に留めている。
+2. D1 を読む権限を持つ `CLOUDFLARE_API_TOKEN`。
+3. `--remote` が本番 D1 を読むため、プレビュー環境では実行しないこと。
+
+複製を増やしたくない場合の代案は、**デプロイ後に `/.well-known/jwks.json` を取得し、`/oauth/token` で実際に ID Token を 1 本発行して `kid` が JWKS に含まれることを確認する**スモークテストである。秘密鍵を CI へ持ち込まずに、同じ不整合（kid の不一致・公開鍵の不一致）を外側から検出できる。ただし検出できるのは「既に壊れた後」で、`verify` のように投入前には止められない。
+
+### 4.5 ローカルで手順を通す
+
+**本番で初めて実行する手順にしない。** 4.2 はローカル D1 と `wrangler dev` でそのまま踏める。下記は #23 で実際に通した順序で、所要は数分（待ち時間を省くため `--active-in` を縮めている）。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services
+pnpm db:migrate:local
+cd apps/auth-worker
+cp .dev.vars.example .dev.vars
+
+# 1 本目の鍵を作り、公開鍵をローカル D1 へ入れる
+node scripts/signing-key.mjs generate --kid u18-old-1 --apply-local
+#   出力の SIGNING_KEY_JWK= 行を .dev.vars へ貼る
+node scripts/oauth-client.mjs seed-dev
+node scripts/signing-key.mjs verify         # OK になること
+
+npx wrangler dev --port 8791                # 8787 は他プロジェクトが使っていることがある
+```
+
+別端末で Code Flow を 1 周して ID Token を取り、`kid` が `u18-old-1` であることを確認する。そのうえで:
+
+```bash
+# ステップ 1-2: 新しい鍵を作り、1 時間後から有効として先行公開する
+node scripts/signing-key.mjs generate --kid u18-new-1 --apply-local --active-in 1h
+#   出力の SIGNING_KEY_JWK= 行（旧 + 新の 2 本が入っている）を .dev.vars へ貼る
+
+node scripts/signing-key.mjs list           # old=署名中 / new=先行公開
+node scripts/signing-key.mjs verify         # 署名は old のまま、new は「情報」として出る
+curl -s http://localhost:8791/.well-known/jwks.json | jq '.keys[].kid'   # 2 本出る
+
+# ステップ 4: 署名を切り替える
+node scripts/signing-key.mjs activate --kid u18-new-1
+
+# ステップ 7-8: 旧鍵を撤去する（本番では 10 分待ってから）
+node scripts/signing-key.mjs retire --kid u18-old-1            # 既定 7 日後。まだ JWKS に残る
+node scripts/signing-key.mjs retire --kid u18-old-1 --in 0 --force   # 即時撤去（§5.1 の形）
+```
+
+確認する点は 4 つ。
+
+1. 先行公開の間、JWKS には 2 本出るが署名は旧 kid のまま。
+2. `activate` の後、新しい ID Token の `kid` が新鍵になる。
+3. **切り替え前に取った ID Token が、まだ JWKS の旧鍵で検証できる。**（猶予期間の意味そのもの）
+4. `retires_at` を過ぎると旧鍵が JWKS から消え、同じトークンが `ERR_JWKS_NO_MATCHING_KEY` になる。
+
+**ローカル特有の注意 — `.dev.vars` は `wrangler dev` の再起動が要る。** 本番の `wrangler secret put` は再デプロイなしに反映されるが、`.dev.vars` は**起動時にしか読まれない**（起動ログの `Using secrets defined in .dev.vars` が 1 度しか出ない）。貼り替えただけで `activate` すると、Worker 側は旧 1 本しか持っていないため、`activate` の直後から ID Token の発行が次のエラーで止まる。
+
+```text
+id token signing failed Error: signing key is not configured:
+  kid "u18-old-1" is not active in signing_key_metadata (active_until has passed)
+```
+
+**これはローカルだけの制約で、本番には無い。** ただし「Secret を入れたつもりで入っていない状態で `activate` した」ときに本番で起きる症状とまったく同じなので、この表示を一度見ておく価値はある。`verify` は**ファイルの中身**を読むため、この状態でも OK と言ってしまう —— `verify` が答えるのは「この値を入れたらどうなるか」であって「いま Worker が何を持っているか」ではない。
 
 ---
 
@@ -912,35 +1063,33 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 
 1. **新しい鍵ペアを生成する。** 4.2 ステップ 1 と同じ。
 
-2. **新しい kid を即座に現役として登録する。** 4.2 ステップ 2 の「24 時間の先行公開」は**省略する**。
+2. **新しい kid を即座に現役として登録する。** 4.2 ステップ 2 の「24 時間の先行公開」は**省略する**（`--active-in 0`）。
 
    ```bash
    cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
-   npx wrangler d1 execute u18-identity --remote --command "
-   insert into signing_key_metadata (kid, algorithm, public_jwk, active_from, active_until, retires_at, created_at)
-   values ('<新 kid>', 'ES256', '<PUBLIC_JWK>', unixepoch() * 1000, null, null, unixepoch() * 1000);
-   "
+   node scripts/signing-key.mjs register --kid <新 kid> --public-jwk '<公開 JWK>' --active-in 0 --remote
    ```
 
-3. **漏洩した鍵を即座に無効化する。** `active_until` を過去にするだけでは不十分で、`retires_at` も過去にして JWKS から完全に外す。**猶予期間を置かない。** 猶予を置くと、その間ずっと偽造トークンが検証に通る。
+3. **先に Secret を差し替える。** 漏洩した鍵は Set から外し、新しい鍵だけを入れる。
 
    ```bash
-   npx wrangler d1 execute u18-identity --remote --command "
-   update signing_key_metadata
-   set active_until = unixepoch() * 1000, retires_at = unixepoch() * 1000
-   where kid = '<漏洩した kid>';
-   "
+   npx wrangler secret put SIGNING_KEY_JWK   # 新しい鍵 1 本だけの JWK Set
+   node scripts/signing-key.mjs activate --kid <新 kid> --remote --secret-file ./new-secret.json
+   ```
+
+   **通常時と違い、漏洩した鍵を Set に残さない。** 残す目的はロールバックだが、漏洩した鍵へ戻す選択肢は存在しない。
+
+4. **漏洩した鍵を即座に無効化する。** `active_until` を過去にするだけでは不十分で、`retires_at` も過去にして JWKS から完全に外す。**猶予期間を置かない。** 猶予を置くと、その間ずっと偽造トークンが検証に通る。
+
+   ```bash
+   # --force が無いと、下限（24 時間 5 分）を下回る猶予は拒否される
+   node scripts/signing-key.mjs retire --kid <漏洩した kid> --in 0 --force --remote
    npx wrangler d1 execute u18-identity --remote --command "
    delete from signing_key_metadata where kid = '<漏洩した kid>';
    "
    ```
 
-4. **Secret を差し替える。**
-
-   ```bash
-   npx wrangler secret put SIGNING_KEY_JWK
-   npx wrangler secret put SIGNING_KEY_KID
-   ```
+   `--force` を要求しているのは、猶予ゼロが**意図した判断であることを明示させる**ため。通常のローテーションで同じ操作を誤って実行すると、正規のトークンを持つ利用者が一斉に検証失敗する。
 
 5. **JWKS から旧 kid が消えたことを確認する。**
 
@@ -950,7 +1099,7 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 
 #### 何が壊れるか（事前に把握しておく）
 
-- **旧鍵で署名された、まだ有効期限内の正規の ID Token / Access Token が、すべて検証失敗になる。** 最大で ID Token 5 分 / Access Token 10 分ぶんのユーザーがエラーに遭遇する。これは意図した代償である。偽造トークンを止めることが優先される。
+- **旧鍵で署名された、まだ有効期限内の正規の ID Token が、すべて検証失敗になる。** 最大で 5 分ぶんのユーザーがエラーに遭遇する。これは意図した代償である。偽造トークンを止めることが優先される。Access Token は不透明トークンで署名鍵を使わないため（仕様書 §14.1 決定 5）、この影響を受けない。
 - **JWKS を長期キャッシュしている RP は、新しい kid を知らないため一時的にすべての ID Token 検証に失敗する。** RP 側に JWKS キャッシュの破棄を依頼する連絡経路を、事前に用意しておくこと。
 - **ブラウザセッションは壊れない。** セッションは `sessions` テーブルの `token_hash` で検証しており、署名鍵を使わない（`apps/auth-worker/src/application/use-cases/get-session.use-case.ts`）。ユーザーは再ログインを求められない。
 

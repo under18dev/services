@@ -449,9 +449,14 @@ function createEmailSender(env: Env): EmailSender {
  * 落ちると、旧鍵で署名済みのトークンを検証している RP を巻き込む。
  * 失敗させるのは署名しようとした時点（`getActiveSigningKey`）に限る。
  *
- * `SIGNING_KEY_JWK` と `SIGNING_KEY_KID` は必ず対で揃っていること。片方だけでは
- * 「どの kid の鍵か」が決まらず、JWKS と照合できない ID Token を発行することになる
- * （docs/runbook.md 4.2 ステップ 4 が両者を数秒以内に更新せよと書いているのはこのため）。
+ * `SIGNING_KEY_JWK` だけで「設定済み」と見なす（#23）。JWK Set 形式では各鍵が
+ * 自分の `kid` を持つので `SIGNING_KEY_KID` は要らない。単一 JWK 形式の既存環境は
+ * `SIGNING_KEY_KID` がそのまま効くので、設定を変えずに動き続ける。
+ *
+ * **揃っているかの判定をここでしない。** `SIGNING_KEY_KID` が要る形式かどうかは
+ * Secret の中身を読まないと決まらず、それを知っているのは
+ * `parseSigningKeySecret` だけである。ここで「2 つとも必要」と決め打ちすると、
+ * JWK Set へ移行した環境が「設定漏れ」に見えて JWKS ごと静かに止まる。
  */
 function createSigningKeyProvider(
   env: Env,
@@ -460,14 +465,9 @@ function createSigningKeyProvider(
 ): SigningKeyProvider {
   const metadata = new DrizzleSigningKeyMetadataRepository(db);
   const configured =
-    env.SIGNING_KEY_JWK !== undefined && env.SIGNING_KEY_KID !== undefined
-      ? { jwk: env.SIGNING_KEY_JWK, kid: env.SIGNING_KEY_KID }
+    env.SIGNING_KEY_JWK !== undefined
+      ? { jwk: env.SIGNING_KEY_JWK, kid: env.SIGNING_KEY_KID ?? null }
       : null;
 
-  return new JoseSigningKeyProvider(
-    metadata,
-    clock,
-    configured,
-    "SIGNING_KEY_JWK and SIGNING_KEY_KID must both be set",
-  );
+  return new JoseSigningKeyProvider(metadata, clock, configured, "SIGNING_KEY_JWK must be set");
 }

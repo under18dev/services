@@ -4,6 +4,12 @@ import { FixedClock } from "@u18/domain";
 import { exportJWK, generateKeyPair, jwtVerify, SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SigningKeyMetadata } from "../src/application/ports/signing-key.port";
+import {
+  auditSigningKeySecret,
+  explainUnusableSigningKeys,
+  isMisconfiguration,
+  parseSigningKeySecret,
+} from "../src/domain/services/signing-key-rotation";
 import { JoseSigningKeyProvider } from "../src/infrastructure/crypto/jose-signing-key";
 import { DrizzleSigningKeyMetadataRepository } from "../src/infrastructure/persistence/drizzle-signing-key-metadata.repository";
 import { InMemorySigningKeyMetadataRepository } from "./fakes.oauth";
@@ -250,5 +256,320 @@ describe("DrizzleSigningKeyMetadataRepository", () => {
     expect(row?.algorithm).toBe("ES256");
     expect(row?.activeUntil?.getTime()).toBe(NOW.getTime() + DAY);
     expect(await repo.findByKid("nope")).toBeNull();
+  });
+});
+
+/**
+ * #23 (b): Secret に新旧 2 鍵を同居させられること。
+ *
+ * ここで確かめたいのは「JWK Set が読める」ことではなく、**鍵の切り替えが
+ * Secret ではなく `signing_key_metadata` の UPDATE で起きる**こと。
+ * Secret を固定したまま行だけを動かして、署名する kid が変わるかを見る。
+ */
+describe("JoseSigningKeyProvider — 複数鍵の同居とローテーション", () => {
+  /** 2 本を 1 つの JWK Set にまとめた Secret。本番で `wrangler secret put` する値。 */
+  function jwkSet(...keys: { readonly privateJwk: Record<string, unknown> }[]): string {
+    return JSON.stringify({ keys: keys.map((key) => key.privateJwk) });
+  }
+
+  function providerAt(
+    metadata: InMemorySigningKeyMetadataRepository,
+    secret: string,
+    at: Date,
+  ): JoseSigningKeyProvider {
+    // コンテナはリクエストごとに作られるので、時刻を進めるのは新しい
+    // Provider を作ることに等しい。
+    return new JoseSigningKeyProvider(
+      metadata,
+      new FixedClock(at),
+      { jwk: secret, kid: null },
+      "unused",
+    );
+  }
+
+  it("先行公開中の新鍵が Secret に入っていても、署名は現役の旧鍵のまま", async () => {
+    const [current, next] = await Promise.all([
+      generateSigningKey("u18-2026-07-01-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    metadata.seed(aRow({ kid: current.kid, publicJwk: JSON.stringify(current.publicJwk) }));
+    // runbook 4.2 ステップ 2 の状態: JWKS には載るが active_from がまだ来ていない。
+    metadata.seed(
+      aRow({
+        kid: next.kid,
+        publicJwk: JSON.stringify(next.publicJwk),
+        activeFrom: new Date(NOW.getTime() + DAY),
+      }),
+    );
+
+    const provider = providerAt(metadata, jwkSet(current, next), NOW);
+
+    expect((await provider.getActiveSigningKey()).kid).toBe(current.kid);
+    // 両方 JWKS に出ている。これが無いと切り替えた瞬間に RP が新 kid を知らない。
+    expect((await provider.getPublicJwks()).map((k) => k.kid).sort()).toEqual(
+      [current.kid, next.kid].sort(),
+    );
+  });
+
+  it("Secret を一切触らずに、DB の更新だけで署名鍵が切り替わる", async () => {
+    const [previous, next] = await Promise.all([
+      generateSigningKey("u18-2026-07-01-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const secret = jwkSet(previous, next);
+
+    const before = new InMemorySigningKeyMetadataRepository();
+    before.seed(aRow({ kid: previous.kid, publicJwk: JSON.stringify(previous.publicJwk) }));
+    before.seed(
+      aRow({
+        kid: next.kid,
+        publicJwk: JSON.stringify(next.publicJwk),
+        activeFrom: new Date(NOW.getTime() + DAY),
+      }),
+    );
+    expect((await providerAt(before, secret, NOW).getActiveSigningKey()).kid).toBe(previous.kid);
+
+    // runbook 4.2 ステップ 4 の UPDATE 2 本だけを当てた状態。
+    const after = new InMemorySigningKeyMetadataRepository();
+    after.seed(
+      aRow({
+        kid: previous.kid,
+        publicJwk: JSON.stringify(previous.publicJwk),
+        activeUntil: NOW,
+      }),
+    );
+    after.seed(aRow({ kid: next.kid, publicJwk: JSON.stringify(next.publicJwk), activeFrom: NOW }));
+
+    expect((await providerAt(after, secret, NOW).getActiveSigningKey()).kid).toBe(next.kid);
+  });
+
+  it("切り替え前に出した ID Token が、切り替え後も JWKS の鍵で検証できる", async () => {
+    const [previous, next] = await Promise.all([
+      generateSigningKey("u18-2026-07-01-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const secret = jwkSet(previous, next);
+
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    metadata.seed(aRow({ kid: previous.kid, publicJwk: JSON.stringify(previous.publicJwk) }));
+    // 新鍵はまだ先行公開の段階（runbook 4.2 ステップ 3 で待っている状態）。
+    metadata.seed(
+      aRow({
+        kid: next.kid,
+        publicJwk: JSON.stringify(next.publicJwk),
+        activeFrom: new Date(NOW.getTime() + DAY),
+      }),
+    );
+
+    // 切り替え直前に発行された ID Token。
+    const old = await providerAt(metadata, secret, NOW).getActiveSigningKey();
+    const issued = await new SignJWT({ sub: "usr_test" })
+      .setProtectedHeader({ alg: "ES256", kid: old.kid })
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(old.privateKey);
+
+    // 旧鍵は active_until を過ぎたが retires_at はまだ先（= 猶予期間の中）。
+    const rotated = new InMemorySigningKeyMetadataRepository();
+    rotated.seed(
+      aRow({
+        kid: previous.kid,
+        publicJwk: JSON.stringify(previous.publicJwk),
+        activeUntil: NOW,
+        retiresAt: new Date(NOW.getTime() + 7 * DAY),
+      }),
+    );
+    rotated.seed(
+      aRow({ kid: next.kid, publicJwk: JSON.stringify(next.publicJwk), activeFrom: NOW }),
+    );
+    const after = providerAt(rotated, secret, new Date(NOW.getTime() + 60_000));
+
+    expect((await after.getActiveSigningKey()).kid).toBe(next.kid);
+
+    // 猶予期間の意味そのもの: 旧 kid のトークンがまだ検証できる。
+    const published = await after.getPublicJwks();
+    const oldJwk = published.find((key) => key.kid === previous.kid);
+    expect(oldJwk).toBeDefined();
+    const { payload } = await jwtVerify(issued, oldJwk!, { algorithms: ["ES256"] });
+    expect(payload["sub"]).toBe("usr_test");
+
+    // retires_at を過ぎれば JWKS から消える（= 猶予期間の終わり）。
+    const later = providerAt(rotated, secret, new Date(NOW.getTime() + 8 * DAY));
+    expect((await later.getPublicJwks()).map((k) => k.kid)).toEqual([next.kid]);
+  });
+
+  it("現役の鍵が 2 本あったら active_from が新しい方で署名する", async () => {
+    const [older, newer] = await Promise.all([
+      generateSigningKey("u18-2026-07-01-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    // 旧鍵の active_until を更新し忘れた状態。ここで throw すると、UPDATE が
+    // 1 つ遅れただけで認証が全面停止する。
+    metadata.seed(
+      aRow({
+        kid: older.kid,
+        publicJwk: JSON.stringify(older.publicJwk),
+        activeFrom: new Date(NOW.getTime() - 30 * DAY),
+      }),
+    );
+    metadata.seed(
+      aRow({
+        kid: newer.kid,
+        publicJwk: JSON.stringify(newer.publicJwk),
+        activeFrom: new Date(NOW.getTime() - DAY),
+      }),
+    );
+
+    const provider = providerAt(metadata, jwkSet(older, newer), NOW);
+    expect((await provider.getActiveSigningKey()).kid).toBe(newer.kid);
+  });
+
+  it("retires_at を過ぎた鍵では署名しない（JWKS に出ていないため）", async () => {
+    const key = await generateSigningKey("u18-2026-07-01-1");
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    // active_until は null のままだが、撤去済みなので JWKS には出ない。
+    metadata.seed(
+      aRow({
+        kid: key.kid,
+        publicJwk: JSON.stringify(key.publicJwk),
+        retiresAt: new Date(NOW.getTime() - 1),
+      }),
+    );
+
+    const provider = providerAt(metadata, jwkSet(key), NOW);
+    await expect(provider.getActiveSigningKey()).rejects.toThrow(/retires_at has passed/);
+  });
+
+  it.each([
+    [
+      "kid の無い鍵",
+      JSON.stringify({ keys: [{ kty: "EC", crv: "P-256", d: "x", x: "x", y: "y" }] }),
+      /has no "kid"/,
+    ],
+    [
+      "同じ kid が 2 本",
+      JSON.stringify({
+        keys: [
+          { kty: "EC", crv: "P-256", kid: "dup", d: "x", x: "x", y: "y" },
+          { kty: "EC", crv: "P-256", kid: "dup", d: "z", x: "z", y: "w" },
+        ],
+      }),
+      /two keys with kid/,
+    ],
+    ["空の JWK Set", JSON.stringify({ keys: [] }), /empty JWK Set/],
+  ])("壊れた Secret（%s）は 1 本だけ飛ばさず全体を失敗させる", async (_label, secret, expected) => {
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    metadata.seed(aRow({ kid: "dup" }));
+
+    const provider = providerAt(metadata, secret, NOW);
+    await expect(provider.getActiveSigningKey()).rejects.toThrow(expected);
+  });
+});
+
+/**
+ * #23 (c): Secret の中身と `signing_key_metadata` の突き合わせ。
+ *
+ * kid の存在確認だけでは「同じ名前の別の鍵」を捕まえられない。その状態は
+ * auth-worker 側では成功（署名はできる）に見え、症状は全 RP での一斉検証失敗
+ * として外側にだけ出る（docs/runbook.md 4.1 制約 3）。
+ */
+describe("署名鍵の整合検査", () => {
+  it("kid は合っているが中身が別の鍵なら署名しない", async () => {
+    const [registered, actual] = await Promise.all([
+      generateSigningKey("u18-2026-10-24-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const metadata = new InMemorySigningKeyMetadataRepository();
+    // DB には registered の公開鍵が入っているのに、Secret には別の秘密鍵がある。
+    metadata.seed(aRow({ kid: registered.kid, publicJwk: JSON.stringify(registered.publicJwk) }));
+
+    const provider = new JoseSigningKeyProvider(
+      metadata,
+      clock,
+      { jwk: JSON.stringify(actual.privateJwk), kid: actual.kid },
+      "unused",
+    );
+
+    await expect(provider.getActiveSigningKey()).rejects.toThrow(/does not match public_jwk/);
+  });
+
+  it("DB が現役と言っている kid が Secret に無いことを検出する", async () => {
+    const [held, missing] = await Promise.all([
+      generateSigningKey("u18-2026-07-01-1"),
+      generateSigningKey("u18-2026-10-24-1"),
+    ]);
+    const rows = [
+      aRow({ kid: held.kid, publicJwk: JSON.stringify(held.publicJwk) }),
+      aRow({ kid: missing.kid, publicJwk: JSON.stringify(missing.publicJwk) }),
+    ];
+
+    const parsed = parseSigningKeySecret(JSON.stringify({ keys: [held.privateJwk] }), null);
+    expect(parsed.ok).toBe(true);
+    const audit = auditSigningKeySecret(parsed.ok ? parsed.keys : [], rows, NOW);
+
+    // Secret を入れ忘れたまま active_from を引き下げた状態がこれ。
+    const issue = audit.issues.find((i) => i.problem === "missing-from-secret");
+    expect(issue?.kid).toBe(missing.kid);
+    expect(isMisconfiguration("missing-from-secret")).toBe(true);
+  });
+
+  it("ローテーション中に当然現れる状態は運用ミスと区別される", () => {
+    // 先行公開した新鍵と、Secret に残したままの旧鍵。どちらも手順どおり。
+    expect(isMisconfiguration("not-yet-active")).toBe(false);
+    expect(isMisconfiguration("no-longer-signing")).toBe(false);
+    // こちらは手順のどこにも現れない。
+    expect(isMisconfiguration("no-row")).toBe(true);
+    expect(isMisconfiguration("public-key-mismatch")).toBe(true);
+    expect(isMisconfiguration("retired")).toBe(true);
+  });
+
+  it("単一 JWK + SIGNING_KEY_KID（#23 以前の形式）がそのまま読める", () => {
+    const parsed = parseSigningKeySecret(
+      JSON.stringify({ kty: "EC", crv: "P-256", d: "d", x: "x", y: "y" }),
+      "legacy-kid",
+    );
+    expect(parsed.ok && parsed.keys.map((key) => key.kid)).toEqual(["legacy-kid"]);
+  });
+
+  it("単一 JWK では SIGNING_KEY_KID が JWK 内の kid より優先される", () => {
+    // 既存環境で 2 つが食い違っていた場合に、Secret を触っていないのに
+    // 署名する kid が変わってしまうことを避ける。
+    const parsed = parseSigningKeySecret(
+      JSON.stringify({ kty: "EC", crv: "P-256", kid: "embedded", d: "d", x: "x", y: "y" }),
+      "from-env",
+    );
+    expect(parsed.ok && parsed.keys.map((key) => key.kid)).toEqual(["from-env"]);
+  });
+
+  it("JWK Set では SIGNING_KEY_KID を無視する", () => {
+    // 消し忘れた 1 行が署名鍵を過去へ巻き戻さないようにするため。
+    const parsed = parseSigningKeySecret(
+      JSON.stringify({
+        keys: [{ kty: "EC", crv: "P-256", kid: "in-set", d: "d", x: "x", y: "y" }],
+      }),
+      "stale-kid",
+    );
+    expect(parsed.ok && parsed.keys.map((key) => key.kid)).toEqual(["in-set"]);
+  });
+
+  it("どの鍵も使えないときは理由を全部並べる", async () => {
+    const [a, b] = await Promise.all([generateSigningKey("key-a"), generateSigningKey("key-b")]);
+    const parsed = parseSigningKeySecret(
+      JSON.stringify({ keys: [a.privateJwk, b.privateJwk] }),
+      null,
+    );
+    const audit = auditSigningKeySecret(
+      parsed.ok ? parsed.keys : [],
+      [aRow({ kid: "key-a", activeFrom: new Date(NOW.getTime() + DAY) })],
+      NOW,
+    );
+
+    expect(audit.signingKid).toBeNull();
+    // 1 本ずつ理由が違うので、1 つだけ見せると直し終わらない。
+    const message = explainUnusableSigningKeys(audit);
+    expect(message).toContain("key-a");
+    expect(message).toContain("key-b");
   });
 });
