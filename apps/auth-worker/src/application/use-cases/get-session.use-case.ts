@@ -4,6 +4,7 @@ import type { Clock } from "../ports/clock.port";
 import type { TokenHasher } from "../ports/crypto.port";
 import type { SessionRepository } from "../ports/session.repository";
 import type { UserRepository } from "../ports/user.repository";
+import { settleSideEffects } from "./side-effects";
 import { ok, type UseCaseResult } from "./types";
 
 export type GetSessionCommand = {
@@ -50,6 +51,7 @@ export class GetSessionUseCase {
     }
 
     // 停止・削除されたユーザーのセッションは、期限内でも通さない。
+    // セッションを引いてからでないと userId が分からないので、ここは直列。
     const user = await this.deps.users.findById(session.userId);
     if (user === null || !user.isActive) {
       await this.deps.audit.record({
@@ -62,7 +64,7 @@ export class GetSessionUseCase {
     }
 
     // 最終アクセスの更新はセッション一覧の表示用。失敗しても認証は成立させる。
-    await this.deps.sessions.touch(session.id, now).catch(() => undefined);
+    await settleSideEffects("session.touch", this.deps.sessions.touch(session.id, now));
 
     return ok({ session, userId: session.userId });
   }

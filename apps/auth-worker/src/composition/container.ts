@@ -13,6 +13,8 @@ import type { DatabaseProbe } from "../application/ports/health.port";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { UserRepository } from "../application/ports/user.repository";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
+import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
+import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import {
@@ -21,6 +23,7 @@ import {
   TimingSafeComparator,
   WebCryptoTokenGenerator,
 } from "../infrastructure/crypto/web-crypto";
+import { CloudflareEmailSender } from "../infrastructure/email/cloudflare-email-sender";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
@@ -51,6 +54,8 @@ export type Container = {
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
+    readonly issueSession: IssueSessionUseCase;
+    readonly logout: LogoutUseCase;
     readonly listSessions: ListSessionsUseCase;
     readonly revokeSession: RevokeSessionUseCase;
   };
@@ -93,13 +98,12 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const tokens = new WebCryptoTokenGenerator();
   const comparator = new TimingSafeComparator();
 
-  // 本番でメールプロバイダ未設定のまま ConsoleEmailSender が動くと OTP がログに出る。
-  // 選定（仕様書 14-3）が済むまでは、development 以外では明示的に落とす。
-  const email =
-    overrides.email ??
-    (env.ENVIRONMENT === "development"
-      ? new ConsoleEmailSender()
-      : throwUnconfigured("EMAIL_PROVIDER is not configured for non-development environments"));
+  // メール送信は Cloudflare Email Sending を使う（#35）。
+  //
+  // development でバインディングが無い場合だけ ConsoleEmailSender に落とす。
+  // それ以外の環境でバインディングが無いまま起動すると、OTP がログに出るか
+  // 送信自体が静かに失敗するので、起動を止める。
+  const email = overrides.email ?? createEmailSender(env);
 
   const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
 
@@ -110,10 +114,30 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
     services: { hasher, ipHasher, tokens, comparator, email, audit, databaseProbe },
     useCases: {
       getSession,
+      issueSession: new IssueSessionUseCase({
+        users,
+        sessions,
+        hasher,
+        ipHasher,
+        tokens,
+        clock,
+        audit,
+      }),
+      logout: new LogoutUseCase({ sessions, hasher, clock, audit }),
       listSessions: new ListSessionsUseCase({ getSession, sessions, clock }),
       revokeSession: new RevokeSessionUseCase({ getSession, sessions, clock, audit }),
     },
   };
+}
+
+function createEmailSender(env: Env): EmailSender {
+  if (env.EMAIL !== undefined) {
+    return new CloudflareEmailSender(env.EMAIL, env.EMAIL_FROM);
+  }
+  if (env.ENVIRONMENT === "development") {
+    return new ConsoleEmailSender();
+  }
+  return throwUnconfigured("EMAIL binding is not configured outside development");
 }
 
 function throwUnconfigured(message: string): never {

@@ -21,12 +21,20 @@
     },
   ],
 
+  // Cloudflare Email Sending（仕様書 14-3 の決定 / #35）。
+  // Email Routing の同名バインディングとは別物で、任意の宛先へ送れる。
+  // `wrangler dev` では既定でシミュレートされ、ログ出力のみで実送信しない。
+  // 実送信したい場合だけ "remote": true を足す（実在の宛先に届くので注意）。
+  "send_email": [{ "name": "EMAIL" }],
+
   "vars": {
     // 本番 Issuer は未決定（仕様書 14-1）。ローカル既定値として wrangler dev の URL を使う。
     "ISSUER": "http://localhost:8787",
     "RP_ID": "localhost",
     "RP_NAME": "u18 Identity",
     "WEBAUTHN_ORIGIN": "http://localhost:8787",
+    // OTP の送信元。ドメインは Email Service 側で検証済みである必要がある（#33 待ち）。
+    "EMAIL_FROM": "noreply@localhost",
     "ENVIRONMENT": "development",
   },
 
@@ -48,6 +56,7 @@
           "migrations_dir": "../../packages/db/drizzle",
         },
       ],
+      "send_email": [{ "name": "EMAIL" }],
       "vars": {
         // 仕様書 14-1 で決定するまでの placeholder。
         // 実ドメインへ差し替えるまでデプロイしないこと。
@@ -55,6 +64,7 @@
         "RP_ID": "REPLACE_WITH_PRODUCTION_RP_ID",
         "RP_NAME": "u18 Identity",
         "WEBAUTHN_ORIGIN": "https://REPLACE_WITH_PRODUCTION_ISSUER",
+        "EMAIL_FROM": "noreply@REPLACE_WITH_PRODUCTION_ISSUER",
         "ENVIRONMENT": "production",
       },
     },
@@ -64,5 +74,7 @@
   //   SIGNING_KEY_JWK   ID Token 署名用の秘密鍵 (JWK JSON)
   //   SIGNING_KEY_KID   上記鍵の kid
   //   IP_HASH_PEPPER    IP アドレスのハッシュ化に使う pepper
-  //   EMAIL_API_KEY     メール送信プロバイダのキー（仕様書 14-3 で選定）
+  //
+  // メール送信は Cloudflare Email Sending のバインディング経由なので、
+  // API キーの Secret は持たない（#35）。
 }

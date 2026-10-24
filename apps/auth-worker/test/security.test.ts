@@ -81,10 +81,19 @@ describe("シークレット未設定時の挙動", () => {
     ).toThrow(/IP_HASH_PEPPER/);
   });
 
-  it("development 以外でメール送信プロバイダが無ければ起動を止める", () => {
-    // ConsoleEmailSender は OTP をログに出すので、本番で動いてはいけない。
+  it("development 以外で EMAIL バインディングが無ければ起動を止める", () => {
+    // バインディングが無いまま本番が動くと、ConsoleEmailSender に落ちて
+    // OTP がログに出るか、送信が静かに失敗する。
     expect(() =>
-      createContainer(envWith({ ENVIRONMENT: "production", IP_HASH_PEPPER: "set" })),
-    ).toThrow(/EMAIL_PROVIDER/);
+      createContainer(
+        envWith({ ENVIRONMENT: "production", IP_HASH_PEPPER: "set", EMAIL: undefined }),
+      ),
+    ).toThrow(/EMAIL binding/);
+  });
+
+  it("development では EMAIL バインディングが無くても起動する", () => {
+    expect(() =>
+      createContainer(envWith({ ENVIRONMENT: "development", EMAIL: undefined })),
+    ).not.toThrow();
   });
 });
