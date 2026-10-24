@@ -31,7 +31,16 @@
       "services": [
         {
           "binding": "IDENTITY",
-          "service": "u18-auth",
+          // `wrangler deploy --env production` は Worker 名を
+          // "<name>-<env>" に派生させるため、本番の auth-worker は
+          // "u18-auth-production" になる。ここを "u18-auth" のままにすると、
+          // 本番 dashboard が development 設定の auth-worker に黙って
+          // 繋がりうる（OTP がログに出る、Cookie から __Host-/Secure が外れる）。
+          //
+          // 逆に auth 側の env.production で "name": "u18-auth" と固定する手も
+          // あるが、それだと --env を付け忘れた deploy が本番を上書きできて
+          // しまうので採らない。
+          "service": "u18-auth-production",
           "entrypoint": "IdentityRPC",
         },
       ],

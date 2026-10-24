@@ -31,6 +31,8 @@
   },
 
   // 本番用の上書き。`wrangler deploy --env production` で使う。
+  // このとき Worker 名は "u18-auth-production" に派生する。
+  // dashboard-worker の env.production の Service Binding はこの名前を指している。
   //
   // この env を作らずに deploy すると ENVIRONMENT が "development" のまま乗り、
   // ConsoleEmailSender が OTP をログへ出し、Cookie から __Host- と Secure が外れ、
