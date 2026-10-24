@@ -8,6 +8,7 @@ import {
 } from "@u18/db";
 import { and, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { AnySQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { ArchiveSink } from "../../application/ports/archive.port";
 import type {
   ExpiredRecordPurger,
   PurgeRequest,
@@ -22,9 +23,15 @@ import type {
  *
  * **`users` は対象外。** アカウントは物理削除せず凍結で表現する
  * （仕様書 14.1 決定 7）。凍結アカウントの保持期間は #27 / #51 の範囲。
+ *
+ * `ARCHIVED_TARGETS` のテーブルは、消す前に `ArchiveSink` へ退避する
+ * （#43 の残件）。退避に失敗したらそのテーブルは消さない。
  */
 export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
-  constructor(private readonly db: IdentityDatabase) {}
+  constructor(
+    private readonly db: IdentityDatabase,
+    private readonly archive: ArchiveSink,
+  ) {}
 
   async purge(request: PurgeRequest): Promise<PurgeResult> {
     const { target, deadBefore: dead, limit } = request;
@@ -98,7 +105,8 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
 
         case "audit_logs":
           // 監査ログに「使えなくなる時刻」は無いので、記録時刻で切る。
-          return this.deleteDead(auditLogs, auditLogs.id, lt(auditLogs.createdAt, dead), limit);
+          // ここだけ退避してから消す（`ARCHIVED_TARGETS`）。
+          return this.archiveThenDelete(lt(auditLogs.createdAt, dead), limit);
       }
     })();
 
@@ -119,6 +127,58 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
    * 削除件数は `returning()` ではなく D1 の `meta.changes` から取る。
    * 1,000 件分の id を workerd 側へ運ぶ必要がないため。
    */
+  /**
+   * 監査ログを R2 へ退避してから消す（#43 の残件）。
+   *
+   * ## 順序が肝
+   *
+   * **退避 → 確認 → 削除。** 逆にすると、退避が壊れている間ずっと静かに
+   * ログが消え続け、気づくのは「半年前の行を見に行ったら無かった」時に
+   * なる。`ArchiveSink.put()` は失敗を例外で返す契約なので、ここで
+   * catch しない —— 例外は `PurgeExpiredRecordsUseCase` まで上がり、
+   * このテーブルだけが `failed` に入って他のテーブルの掃除は続く。
+   *
+   * ## 消すのは「退避した id」だけ
+   *
+   * `deleteDead` のように条件で消し直さない。選び直す瞬間に境界を跨いだ
+   * 行——**退避していない行**——まで巻き込むため。`limit` 件を読んで、
+   * その id をそのまま `in (...)` に入れる。
+   *
+   * 1,000 行を workerd 側へ運ぶことになるが、これは退避に本文が要る以上
+   * 避けられない。`RETENTION_SWEEP_LIMIT` の根拠（D1 の実行時間上限から
+   * 遠いままでいること）はここでも変わらない。
+   */
+  private async archiveThenDelete(dead: SQL | undefined, limit: number): Promise<number> {
+    const rows = await this.db.select().from(auditLogs).where(dead).limit(limit).all();
+    // 0 件のときに空オブジェクトを置かない。棚卸しのとき、中身の無い
+    // キーが日付ディレクトリを埋めると「その日は何も無かった」が読めなくなる。
+    if (rows.length === 0) return 0;
+
+    const receipt = await this.archive.put({ target: "audit_logs", rows });
+
+    const result = await this.db
+      .delete(auditLogs)
+      .where(
+        inArray(
+          auditLogs.id,
+          rows.map((row) => row.id),
+        ),
+      )
+      .run();
+
+    // 退避先を構造化ログに出す。これが無いと、消えた行がどのキーに
+    // 入っているかを後から特定できない（ランブック 7.2）。
+    console.info("retention archive", {
+      target: "audit_logs",
+      key: receipt.key,
+      rowCount: receipt.rowCount,
+      bytes: receipt.bytes,
+      deleted: result.meta.changes,
+    });
+
+    return result.meta.changes;
+  }
+
   private async deleteDead(
     table: SQLiteTable,
     id: AnySQLiteColumn,

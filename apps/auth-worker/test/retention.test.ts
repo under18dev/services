@@ -13,12 +13,18 @@ import { createExecutionContext, createScheduledController, env } from "cloudfla
 import { beforeEach, describe, expect, it } from "vitest";
 import { PurgeExpiredRecordsUseCase } from "../src/application/use-cases/purge-expired-records.use-case";
 import type {
+  ArchiveReceipt,
+  ArchiveRequest,
+  ArchiveSink,
+} from "../src/application/ports/archive.port";
+import type {
   ExpiredRecordPurger,
   PurgeRequest,
   PurgeResult,
 } from "../src/application/ports/retention.port";
 import { RetentionPolicy, type RetentionTarget } from "../src/domain/services/retention-policy";
 import { OtpPolicy, TokenLifetime } from "../src/domain/services/token-lifetime";
+import { UnconfiguredArchiveSink } from "../src/infrastructure/archive/r2-archive-sink";
 import { DrizzleExpiredRecordPurger } from "../src/infrastructure/persistence/drizzle-expired-record-purger";
 import worker from "../src/index";
 import { resetDatabase } from "./helpers";
@@ -30,19 +36,38 @@ const DAY = 24 * HOUR;
 const now = new Date("2026-10-24T12:00:00.000Z");
 const ago = (ms: number): Date => new Date(now.getTime() - ms);
 
+/** 退避先のフェイク。何を渡されたかを覚えるだけ。 */
+class RecordingArchiveSink implements ArchiveSink {
+  readonly requests: ArchiveRequest[] = [];
+  /** 立てると `put()` が投げる。退避が失敗したときの挙動を見るため。 */
+  failWith: Error | null = null;
+
+  async put(request: ArchiveRequest): Promise<ArchiveReceipt> {
+    if (this.failWith !== null) throw this.failWith;
+    this.requests.push(request);
+    return {
+      key: `fake/${request.target}/${this.requests.length}.ndjson`,
+      rowCount: request.rows.length,
+      bytes: 1,
+    };
+  }
+}
+
 /** 保持期限ちょうどの境界時刻。これより前の行だけが消える。 */
 const cutoff = (target: RetentionTarget): Date => new Date(now.getTime() - RetentionPolicy[target]);
 
 describe("DrizzleExpiredRecordPurger", () => {
   let db: ReturnType<typeof createIdentityDatabase>;
   let purger: DrizzleExpiredRecordPurger;
+  let archive: RecordingArchiveSink;
   const user = aUser();
   const clientRowId = "cli_retention";
 
   beforeEach(async () => {
     await resetDatabase();
     db = createIdentityDatabase(env.IDENTITY_DB);
-    purger = new DrizzleExpiredRecordPurger(db);
+    archive = new RecordingArchiveSink();
+    purger = new DrizzleExpiredRecordPurger(db, archive);
 
     await db
       .insert(users)
@@ -294,6 +319,101 @@ describe("DrizzleExpiredRecordPurger", () => {
     });
   });
 
+  /**
+   * 退避してから消す（#43 の残件）。
+   *
+   * 180 日を過ぎた監査ログは「消してよいから」ではなく「D1 に置き続ける
+   * コストが見合わないから」消している。侵害の発覚は 1 年遅れることが
+   * あるので、戻せる場所に置いてから消す。
+   */
+  describe("audit_logs の退避", () => {
+    const putLog = (id: string, createdAt: Date) =>
+      db
+        .insert(auditLogs)
+        .values({
+          id,
+          event: "session.issue",
+          outcome: "success",
+          userId: user.id,
+          ipHash: `hash_${id}`,
+          userAgent: "u18-test/1.0",
+          metadata: { authMethod: "passkey" },
+          createdAt,
+        })
+        .run();
+
+    const purgeAuditLogs = (limit = 100) =>
+      purger.purge({ target: "audit_logs", deadBefore: cutoff("audit_logs"), limit });
+
+    it("消す行を退避してから消す", async () => {
+      await putLog("aud_stale", ago(181 * DAY));
+      await putLog("aud_recent", ago(179 * DAY));
+
+      await purgeAuditLogs();
+
+      expect(archive.requests).toHaveLength(1);
+      const request = archive.requests[0]!;
+      expect(request.target).toBe("audit_logs");
+      // **保持期間の内側の行を退避しないこと。** 退避した行はこの後消える。
+      expect(request.rows.map((row) => row["id"])).toEqual(["aud_stale"]);
+      // 中身がそのまま入っていること。id だけ写しても復元に使えない。
+      expect(request.rows[0]).toMatchObject({
+        event: "session.issue",
+        ipHash: "hash_aud_stale",
+        userAgent: "u18-test/1.0",
+      });
+    });
+
+    it("退避に失敗したら 1 行も消さない", async () => {
+      // **#43 の残件で一番大事なところ。** 退避が静かに失敗したまま削除を
+      // 続けると、壊れていると分かるのは「半年前の行を見に行ったら
+      // 無かった」時、つまり侵害調査の最中になる。
+      await putLog("aud_stale", ago(181 * DAY));
+      archive.failWith = new Error("R2 is unreachable");
+
+      await expect(purgeAuditLogs()).rejects.toThrow(/R2 is unreachable/);
+
+      const rows = await db.select({ id: auditLogs.id }).from(auditLogs).all();
+      expect(
+        rows.map((r) => r.id),
+        "退避できていないのに消えている",
+      ).toEqual(["aud_stale"]);
+    });
+
+    it("消す行が無ければ空のオブジェクトを作らない", async () => {
+      // 15 分おきに空ファイルが積まれると、棚卸しで「その日は何も無かった」
+      // が読めなくなる。
+      await putLog("aud_recent", ago(179 * DAY));
+
+      expect((await purgeAuditLogs()).deleted).toBe(0);
+      expect(archive.requests).toEqual([]);
+    });
+
+    it("上限を超えた分は退避もしない", async () => {
+      // 退避と削除の対象が食い違うと、退避していない行が消える。
+      for (let i = 0; i < 3; i++) await putLog(`aud_stale_${i}`, ago(181 * DAY));
+
+      const first = await purgeAuditLogs(2);
+
+      expect(first).toEqual({ target: "audit_logs", deleted: 2, reachedLimit: true });
+      expect(archive.requests[0]?.rows).toHaveLength(2);
+      // 退避した id と消えた id が一致すること。
+      const archived = archive.requests[0]!.rows.map((row) => row["id"]);
+      const left = (await db.select({ id: auditLogs.id }).from(auditLogs).all()).map((r) => r.id);
+      expect(archived.filter((id) => left.includes(id as string))).toEqual([]);
+    });
+
+    it("audit_logs 以外は退避しない", async () => {
+      // 消してよいから消しているテーブルを退避すると、消したはずの
+      // 個人情報が別の場所に残る（retention-policy.ts の ARCHIVED_TARGETS）。
+      await putSession("ses_stale", ago(31 * DAY));
+
+      await purger.purge({ target: "sessions", deadBefore: cutoff("sessions"), limit: 100 });
+
+      expect(archive.requests).toEqual([]);
+    });
+  });
+
   describe("1 回の上限", () => {
     it("上限に達したら次回へ持ち越す", async () => {
       // D1 の実行時間上限に当てないため、1 回で消す行数には必ず上限がある。
@@ -384,6 +504,42 @@ describe("PurgeExpiredRecordsUseCase", () => {
 
     expect(result.ok && result.value.failed).toEqual(["sessions"]);
     expect(purger.requests).toHaveLength(5);
+  });
+
+  it("退避先が無いと audit_logs だけが止まり、他のテーブルは掃除される", async () => {
+    // **素通しして消し始めないこと。** 退避できないまま消すより、溜めて
+    // failed に出し続けるほうがよい（ARCHIVED_TARGETS のコメント）。
+    // 他のテーブルを巻き添えにしないのは「1 テーブルが落ちても残りを続ける」
+    // という既存の約束そのまま。
+    await resetDatabase();
+    const db = createIdentityDatabase(env.IDENTITY_DB);
+    // 消す対象が 1 行も無いと退避自体が起きないので、まず古い行を置く。
+    await db
+      .insert(auditLogs)
+      .values({
+        id: "aud_stale",
+        event: "session.issue",
+        outcome: "success",
+        createdAt: ago(181 * DAY),
+      })
+      .run();
+
+    const useCase = new PurgeExpiredRecordsUseCase({
+      purger: new DrizzleExpiredRecordPurger(
+        db,
+        new UnconfiguredArchiveSink("ARCHIVE bucket binding is missing"),
+      ),
+      clock: new FixedClock(now),
+      audit: silentAudit,
+    });
+
+    const result = await useCase.execute({ limit: 10 });
+
+    expect(result.ok && result.value.failed).toEqual(["audit_logs"]);
+    // 退避できていないので 1 行も消えていない。
+    expect((await db.select({ id: auditLogs.id }).from(auditLogs).all()).map((r) => r.id)).toEqual([
+      "aud_stale",
+    ]);
   });
 
   it("上限に達したテーブルを carriedOver で返す", async () => {

@@ -1783,6 +1783,21 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
 
 ### 7.2 `audit_logs` の保持
 
+#### 180 日を過ぎた行は消える前に R2 へ退避される（#43 の残件）
+
+削除の直前に NDJSON で `u18-identity-archive` バケットへ書き、**書けたことを確認してから**消す（`apps/auth-worker/src/infrastructure/archive/r2-archive-sink.ts`）。キーは `audit_logs/YYYY/MM/DD/<timestamp>-<rand>.ndjson`。
+
+**退避に失敗したら削除しない。** 退避が静かに失敗したまま削除を続けると、壊れていると分かるのは「半年前の行を見に行ったら無かった」時、つまり侵害調査の最中になる。失敗したときは `audit_logs` の掃除だけが止まり、行が溜まる（§12.7）。
+
+どのキーに入ったかは構造化ログに出る。消えた行を探すときの入口になる:
+
+```bash
+npx wrangler tail u18-auth-production --format pretty | grep "retention archive"
+# {"target":"audit_logs","key":"audit_logs/2026/04/27/…","rowCount":1000,…}
+```
+
+**他の 4 テーブルは退避しない。** 消してよいから消しているのではなく、消さなければならないから消しているため（`domain/services/retention-policy.ts` の `ARCHIVED_TARGETS`）。とくに `email_challenges` は 5 つの中で唯一メールアドレスを平文で持ち、保持期間を最短の 1 時間にしてある。R2 へ写すとその判断が無意味になる。
+
 #### 現状
 
 - 保持期間は **180 日**（§7.0、#43）。15 分おきの Cron が自動で削除する。
@@ -2772,8 +2787,112 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 - [ ] **メールアドレスへのアクセスを失った利用者の審査手順を決める**（§10.4 の 4 項目）。承認者の人数、本人確認の材料、記録の所在、待機期間
 - [ ] **管理者を作るなら Passkey を 2 本以上登録させてから `scripts/admin-role.mjs grant` を使う**（§10.5）。1 本しか無い管理者はその 1 本を外せず、失うと 2 名承認の人手の復旧しか残らない
 - [ ] 2 つの D1 の整合（`nfc_cards.owner_user_id` の宛先）を定期的に照合する仕組みを用意するか、照合しないことを受容するリスクとして記録する（§12.4 (5)）
+- [ ] **R2 を U18 Developers アカウントで有効化する**（§12.7）。有効化するまで `audit_logs` の掃除は止まったままで、D1 のバックアップも置き場所が無い
+- [ ] `wrangler r2 bucket create u18-identity-archive` でバケットを作り、**公開しない**ことを確認する（§12.7）
+- [ ] **バックアップから実際に復元を通す**（§12.8）。現状 R2 を経由した往復は未検証
 - [ ] `IP_HASH_PEPPER` の控えを持つかどうかを決める（§12.5）
 - [ ] **`PRODUCTION_URL` を設定する前に署名鍵を揃える。** デプロイ後のスモークテストが `/health` の `checks.signingKey == "ok"` を要求する（§4.4）。`SIGNING_KEY_JWK` と `signing_key_metadata` の片方でも欠けているとデプロイジョブが赤くなる。順序は §2.4.1 → §9.5 → `pnpm key:verify`
+
+### 12.7 R2 への退避（#43 の残件 / #27）
+
+D1 の外へ出す経路は 2 つある。**目的が違うので片方で代用できない。**
+
+| 経路                | 何を                   | いつ                              | 認証                        |
+| ------------------- | ---------------------- | --------------------------------- | --------------------------- |
+| `audit_logs` の退避 | 180 日を過ぎた監査ログ | Cron（15 分おき）の掃除の中で自動 | `r2_buckets` バインディング |
+| D1 のバックアップ   | DB 全体のダンプ        | 手動 / 定期（未設定）             | wrangler または S3 認証情報 |
+
+退避先はどちらも `u18-identity-archive` バケット。**公開しないこと** —— 監査ログには `ip_hash` と `user_agent` が、D1 ダンプには平文のメールアドレスが入っている。
+
+#### 現状: R2 が有効化されていない
+
+**U18 Developers アカウント（`a3801efd…`）で R2 が有効になっていない。** 確認した事実は次のとおり。
+
+```
+$ CLOUDFLARE_ACCOUNT_ID=a3801efd… npx wrangler r2 bucket list
+✘ [ERROR] A request to the Cloudflare API (/accounts/a3801efd…/r2/buckets) failed.
+  Please enable R2 through the Cloudflare Dashboard. [code: 10042]
+```
+
+**これは wrangler の OAuth スコープ不足ではない。** 同じログインで他の 2 アカウントは `r2 bucket list` が成功し、バケット一覧が返る。10042 を返すのはこのアカウントだけである。
+
+`<accountid>.r2.cloudflarestorage.com` への TLS が handshake failure になるのも同じ原因と見てよい。**ローカルの TLS スタックの問題ではない** —— `openssl s_client` は証明書を `Verify return code: 0 (ok)` で検証できており（サーバーが証明書の後で接続を打ち切る）、同じ curl で `api.cloudflare.com` は応答する。
+
+> 余談として、apex の `r2.cloudflarestorage.com` は **2026-09-09 に期限切れになった証明書**を返す。アカウントのエンドポイントとは別物なので実害は無いが、ここを叩いて切り分けようとすると誤解する。
+
+**有効化はダッシュボードでの操作（課金の同意を含む）で、スクリプトからは行えない。** 有効化後にバケットを作る:
+
+```bash
+cd apps/auth-worker
+CLOUDFLARE_ACCOUNT_ID=a3801efd45a491db87f5db3610ed104c npx wrangler r2 bucket create u18-identity-archive
+```
+
+#### 有効化されるまで何が起きるか
+
+**`audit_logs` の掃除だけが止まる。** `UnconfiguredArchiveSink` が退避の時点で投げ、`PurgeExpiredRecordsUseCase` が `failed: ["audit_logs"]` を記録して次のテーブルへ進む。他の 4 テーブルは従来どおり消える。認証・`/health`・OIDC は影響を受けない。
+
+**これは意図した挙動である。** 退避できないまま消すより、溜めて `retention sweep` のログに出し続けるほうがよい。素通しして削除を続ける実装にはしていない。溜まっていることは次で見る:
+
+```bash
+npx wrangler tail u18-auth-production --format pretty | grep retention
+# {"deleted":…,"failed":["audit_logs"],…}
+```
+
+### 12.8 バックアップの取得と復元（#27）
+
+```bash
+node scripts/backup-d1.mjs self-check          # 署名の自己検査
+node scripts/backup-d1.mjs export              # 2 つの D1 をローカルへ
+node scripts/backup-d1.mjs run                 # export + R2 へアップロード
+node scripts/backup-d1.mjs list
+node scripts/backup-d1.mjs restore --key K
+```
+
+**既定は `--remote`。** バックアップにローカル DB を取っても意味が無いので、他のスクリプトと既定が逆になっている。
+
+**2 つの DB を必ず揃えて取ること。** 既定の `--db all` がそうしている。片方だけ戻すと `nfc_cards.owner_user_id` が存在しないユーザーを指す（§12.4 (5)）。取得時刻は完全には揃わないので、`manifest.json` に両方の時刻を書き出している。
+
+#### 検証できたこと / できていないこと
+
+| 項目                                  | 状態                                                    |
+| ------------------------------------- | ------------------------------------------------------- |
+| `wrangler d1 export` でダンプが取れる | **確認済み**（ローカル D1、8.9 KB）                     |
+| ダンプに行が入っている                | **確認済み**（目印の行を入れて往復で確認）              |
+| SigV4 の鍵導出                        | **確認済み**（AWS 公開ベクタ 2 本と一致。`self-check`） |
+| 正規化リクエストの組み立て            | **未検証**（R2 が無効で往復できない）                   |
+| R2 へのアップロード / 取得            | **未検証**（同上）                                      |
+| ダンプからの復元                      | **部分的に確認**（下記）                                |
+
+#### 復元についてわかったこと —— 既存の DB には流せない
+
+**`wrangler d1 export` の出力は、中身の入った DB にそのままは流せない。** 実際に試すと最初の `INSERT` で止まる:
+
+```
+✘ [ERROR] UNIQUE constraint failed: d1_migrations.id: SQLITE_CONSTRAINT
+```
+
+ダンプは `CREATE TABLE IF NOT EXISTS` と素の `INSERT INTO` の列で、**`d1_migrations` の行まで含む**。つまり既存の行とぶつかる。「上書きで戻す」という操作は存在しない。
+
+**したがって復元先は空の DB でなければならない。** 現実的な手順は、
+
+1. `wrangler d1 create u18-identity-restored` で**新しい DB を作る**
+2. ダンプをそこへ流す
+3. 中身を確認してから、`wrangler.jsonc` の `database_id` を差し替えてデプロイする
+
+テーブルを消して同じ DB へ入れ直す手は**勧めない**。外部キーの依存順に引きずられて `DROP TABLE` が途中で `no such table` で落ちる（実際に落ちた）うえ、失敗した時点で本番 DB が半壊する。
+
+> `PRAGMA defer_foreign_keys=TRUE` では足りない。コミットまで遅延するだけで、`DROP` の最中の参照解決には効かない。
+
+**この手順自体はまだ本番で通していない。** 新しい D1 を作るところから往復するのは §12.6 のチェック項目として残っている。
+
+#### 定期実行（services-d5 へ渡す分）
+
+`.github/workflows/` への組み込みは未実装。必要なものは次のとおり。
+
+- **`CLOUDFLARE_API_TOKEN`**（既存。デプロイで使っているもの）に **D1 の読み取り**と **R2 の書き込み**権限があること。既存トークンの権限は未確認
+- `--s3` で動かす場合は `S3_ENDPOINT` / `ACCESS_KEY` / `SECRET_KEY` を GitHub Secrets へ置く。**ただし既定の wrangler 経路なら新しい Secret は要らない**（§12.5 の「保管場所を増やさない」方針）
+- 実行頻度と、R2 側の保持期間（ライフサイクルルール）。**どちらも未決**（§8.5 未決事項 1）
+- ランナーに落ちたダンプを消すこと。平文のメールアドレスが入っている
 
 ---
 

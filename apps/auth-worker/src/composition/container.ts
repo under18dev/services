@@ -1,6 +1,7 @@
 import { createIdentityDatabase, type IdentityDatabase } from "@u18/db";
 import { systemClock } from "@u18/domain";
 import { RateLimitPolicy, type RateLimitScope } from "../domain/services/rate-limit-policy";
+import type { ArchiveSink } from "../application/ports/archive.port";
 import type { AuditLogger } from "../application/ports/audit-log.port";
 import type { AuthorizationCodeRepository } from "../application/ports/authorization-code.repository";
 import type { Clock } from "../application/ports/clock.port";
@@ -67,6 +68,7 @@ import {
 } from "../infrastructure/rate-limit/cloudflare-rate-limiter";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
+import { R2ArchiveSink, UnconfiguredArchiveSink } from "../infrastructure/archive/r2-archive-sink";
 import {
   RequestScopedAuditLogger,
   type RequestContext,
@@ -118,6 +120,7 @@ export type Container = {
     readonly webauthn: WebAuthnService;
     readonly signingKeys: SigningKeyProvider;
     readonly purger: ExpiredRecordPurger;
+    readonly archive: ArchiveSink;
     readonly idTokens: IdTokenIssuer;
     readonly rateLimiter: RateLimiter;
   };
@@ -162,6 +165,7 @@ export type ContainerOverrides = Partial<{
   oauthClients: OAuthClientRepository;
   signingKeys: SigningKeyProvider;
   purger: ExpiredRecordPurger;
+  archive: ArchiveSink;
   idTokens: IdTokenIssuer;
   rateLimiter: RateLimiter;
 }>;
@@ -193,7 +197,12 @@ export function createContainer(
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
   // 保持期限を過ぎた行の掃除（#43）。scheduled ハンドラからしか使わないが、
   // Port の配線先はここ 1 箇所に揃える。
-  const purger = overrides.purger ?? new DrizzleExpiredRecordPurger(db);
+  //
+  // `audit_logs` は消す前に R2 へ退避する（#43 の残件）。バケットが無ければ
+  // 退避の時点で失敗し、**そのテーブルの掃除だけが止まる** ——
+  // 退避できないまま消すより、溜めて `failed` に出し続けるほうがよい。
+  const archive = overrides.archive ?? createArchiveSink(env, clock);
+  const purger = overrides.purger ?? new DrizzleExpiredRecordPurger(db, archive);
 
   const hasher = new Sha256TokenHasher();
   // pepper が無いまま本番が動くと IPv4 空間は総当たり可能で、ハッシュが
@@ -293,6 +302,7 @@ export function createContainer(
       webauthn,
       signingKeys,
       purger,
+      archive,
       idTokens,
       rateLimiter,
     },
@@ -446,6 +456,22 @@ function createRateLimiter(env: Env): RateLimiter {
   // 使ったときだけ失敗し、ある scope は正しく効く。まとめて無効化するより、
   // 壊れている範囲が狭いほうが良い。
   return new CloudflareRateLimiter(bindings);
+}
+
+/**
+ * 退避先を組み立てる（#43 の残件）。
+ *
+ * ここでも throw しない（#53）。バケットが無いまま起動しても `/health` や
+ * 認証は動き続け、失敗するのは掃除が退避しようとした時点だけにする。
+ */
+function createArchiveSink(env: Env, clock: Clock): ArchiveSink {
+  if (env.ARCHIVE !== undefined) {
+    return new R2ArchiveSink(env.ARCHIVE, clock);
+  }
+  // development でも素通しにはしない。バインディングは wrangler.jsonc に
+  // 書いてあり、ローカルでも miniflare が用意する。無いということは
+  // 設定が壊れているということで、黙って消し始めてよい理由にならない。
+  return new UnconfiguredArchiveSink("ARCHIVE bucket binding is missing");
 }
 
 function createEmailSender(env: Env): EmailSender {
