@@ -160,4 +160,8 @@ input:focus-visible,
 .identity { margin: 0 0 1.25rem; padding: 0.75rem; background: var(--bg); border-radius: 0.5rem; }
 .identity strong { display: block; }
 .identity span { color: var(--muted); font-size: 0.9rem; }
+
+/* 同意画面（#15）で要求 scope を並べる。 */
+.scopes { margin: 0 0 1.5rem; padding-left: 1.25rem; }
+.scopes li { margin-bottom: 0.4rem; }
 `;

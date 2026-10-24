@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { SUPPORTED_SCOPES } from "../../domain/services/scope";
+import { oauthAuthorizeRoutes } from "./oauth.authorize.routes";
+import { oauthTokenRoutes } from "./oauth.token.routes";
 import type { AppBindings } from "./types";
 import { problem } from "./problem";
 
@@ -7,7 +9,11 @@ import { problem } from "./problem";
  * OIDC の公開 HTTP エンドポイント（仕様書 5.2）。
  *
  * 外部クライアントは Service Binding ではなくここを使う（設計原則 4）。
- * Phase 2 で実装する。Discovery だけは静的に決まるため先に返せるようにしてある。
+ *
+ * Discovery / JWKS はここに直接置き、量のある `/oauth/authorize`（#15）と
+ * `/oauth/token`（#16）は別ファイルへ分けている。前者は「静的に決まる応答」、
+ * 後者は「検証の順序が security そのもの」で、1 つのファイルに混ぜると
+ * レビューの読み筋が変わる。
  */
 export const oauthRoutes = new Hono<AppBindings>();
 
@@ -25,12 +31,19 @@ oauthRoutes.get("/.well-known/openid-configuration", (c) => {
     // Authorization Code Flow のみ。Implicit / Password Grant は提供しない（仕様書 9）。
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
+    // 認可応答はクエリでのみ返す。フラグメントを使うのは Implicit / Hybrid で、
+    // どちらも提供しない。
+    response_modes_supported: ["query"],
     scopes_supported: SUPPORTED_SCOPES,
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["ES256"],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
     // PKCE は S256 必須。plain は公開しない。
     code_challenge_methods_supported: ["S256"],
+    // Request Object は受け付けない（#15）。黙って無視するのではなく
+    // `request_not_supported` で拒否するので、広告と挙動が一致している。
+    request_parameter_supported: false,
+    request_uri_parameter_supported: false,
     claims_supported: [
       "sub",
       "iss",
@@ -79,13 +92,8 @@ oauthRoutes.get("/.well-known/jwks.json", async (c) => {
   return c.json({ keys });
 });
 
-oauthRoutes.get("/oauth/authorize", (c) =>
-  problem(c, 501, "not_implemented", "authorization endpoint is implemented in Phase 2"),
-);
-
-oauthRoutes.post("/oauth/token", (c) =>
-  problem(c, 501, "not_implemented", "token endpoint is implemented in Phase 2"),
-);
+oauthRoutes.route("/", oauthAuthorizeRoutes);
+oauthRoutes.route("/", oauthTokenRoutes);
 
 oauthRoutes.on(["GET", "POST"], "/oauth/userinfo", (c) =>
   problem(c, 501, "not_implemented", "userinfo endpoint is implemented in Phase 2"),
