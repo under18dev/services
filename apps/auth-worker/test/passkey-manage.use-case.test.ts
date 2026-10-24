@@ -9,6 +9,7 @@ import {
   InMemorySessionRepository,
   InMemoryUserRepository,
   RecordingAuditLogger,
+  ImmediateSideEffectScheduler,
 } from "./fakes";
 import { InMemoryPasskeyRepository, aPasskey } from "./fakes.passkey";
 
@@ -24,7 +25,14 @@ function setup() {
   const clock = new FixedClock(NOW);
   const hasher = new FakeHasher();
 
-  const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const getSession = new GetSessionUseCase({
+    sessions,
+    users,
+    hasher,
+    clock,
+    audit,
+    sideEffects: new ImmediateSideEffectScheduler(),
+  });
   return {
     users,
     sessions,

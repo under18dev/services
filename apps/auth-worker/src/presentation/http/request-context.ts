@@ -15,5 +15,18 @@ export function requestContext(c: Context<AppBindings>): RequestContext {
   return {
     ip: clientIp(c),
     userAgent: c.req.header("User-Agent") ?? null,
+    // 応答後へ副作用を逃がすのに使う（#126）。`executionCtx` はテストの
+    // 一部の呼び出し方だと存在せず、触ると投げるので握る。無ければ
+    // 副作用は応答前に待つ側へ倒れる（消えるよりよい）。
+    waitUntil: waitUntilOf(c),
   };
+}
+
+function waitUntilOf(c: Context<AppBindings>): ((task: Promise<unknown>) => void) | undefined {
+  try {
+    const ctx = c.executionCtx;
+    return (task) => ctx.waitUntil(task);
+  } catch {
+    return undefined;
+  }
 }

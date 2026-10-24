@@ -14,6 +14,7 @@ import {
   InMemorySessionRepository,
   InMemoryUserRepository,
   RecordingAuditLogger,
+  ImmediateSideEffectScheduler,
 } from "./fakes";
 import {
   FakeWebAuthnService,
@@ -35,7 +36,14 @@ function setup() {
   const hasher = new FakeHasher();
   const webauthn = new FakeWebAuthnService();
 
-  const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const getSession = new GetSessionUseCase({
+    sessions,
+    users,
+    hasher,
+    clock,
+    audit,
+    sideEffects: new ImmediateSideEffectScheduler(),
+  });
   const issueSession = new IssueSessionUseCase({
     users,
     sessions,

@@ -2,15 +2,21 @@ import type { AuditEvent, AuditLogger } from "../../application/ports/audit-log.
 import type { IpHasher } from "../../application/ports/crypto.port";
 
 /**
- * 1 リクエストの発信元。Presentation がヘッダから組み立てる。
+ * 1 回の呼び出しについて、入口だけが知っていること。
  *
  * **生 IP がこの型に入る。** ここから先へ持ち出さないこと —— 保存も
  * ログ出力もハッシュ化してから行う（仕様書 9 Privacy）。
+ *
+ * `waitUntil` も同じ性質（`ExecutionContext` を持っているのは入口だけ）
+ * なのでここに置いている。無い経路——Cron の `scheduled`、一部のテスト——
+ * では省略してよく、そのとき副作用は応答前に待つ側へ倒れる（#126）。
  */
 export type RequestContext = {
   /** `CF-Connecting-IP`。取れなければ null。 */
   readonly ip: string | null;
   readonly userAgent: string | null;
+  /** `ExecutionContext.waitUntil`。応答後へ副作用を逃がすのに使う（#126）。 */
+  readonly waitUntil?: ((task: Promise<unknown>) => void) | undefined;
 };
 
 /**

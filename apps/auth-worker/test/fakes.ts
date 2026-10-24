@@ -1,4 +1,5 @@
 import type { AuditEvent, AuditLogger } from "../src/application/ports/audit-log.port";
+import type { SideEffectScheduler } from "../src/application/ports/side-effect-scheduler.port";
 import type { TokenHasher } from "../src/application/ports/crypto.port";
 import type {
   CreateSessionInput,
@@ -196,5 +197,23 @@ export class RecordingAuditLogger implements AuditLogger {
 
   eventNames(): string[] {
     return this.events.map((e) => e.event);
+  }
+}
+
+/**
+ * 副作用をその場で待つスケジューラ（#126）。
+ *
+ * **テストの既定はこちら。** 応答後へ逃がす実装を既定にすると、
+ * アサーションが副作用の完了前に走って不安定になる。
+ * 「応答経路に乗っていないこと」は時間ではなく**呼び出し回数**で見る
+ * （`test/session-timing.test.ts`）。
+ */
+export class ImmediateSideEffectScheduler implements SideEffectScheduler {
+  /** 受け取ったラベル。順序と回数を見たいときに使う。 */
+  readonly labels: string[] = [];
+
+  async schedule(label: string, ...tasks: readonly Promise<unknown>[]): Promise<void> {
+    this.labels.push(label);
+    await Promise.allSettled(tasks);
   }
 }

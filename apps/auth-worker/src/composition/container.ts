@@ -23,6 +23,7 @@ import type { PasskeyRepository } from "../application/ports/passkey.repository"
 import type { RateLimiter } from "../application/ports/rate-limiter.port";
 import type { ExpiredRecordPurger } from "../application/ports/retention.port";
 import type { SessionRepository } from "../application/ports/session.repository";
+import type { SideEffectScheduler } from "../application/ports/side-effect-scheduler.port";
 import type { SigningKeyProvider } from "../application/ports/signing-key.port";
 import type { UserRepository } from "../application/ports/user.repository";
 import type { WebAuthnChallengeRepository } from "../application/ports/webauthn-challenge.repository";
@@ -73,6 +74,10 @@ import {
   RequestScopedAuditLogger,
   type RequestContext,
 } from "../infrastructure/audit/request-scoped-audit-logger";
+import {
+  InlineSideEffectScheduler,
+  WaitUntilSideEffectScheduler,
+} from "../infrastructure/scheduling/side-effect-schedulers";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleAuthorizationCodeRepository } from "../infrastructure/persistence/drizzle-authorization-code.repository";
 import { DrizzleEmailChallengeRepository } from "../infrastructure/persistence/drizzle-email-challenge.repository";
@@ -117,6 +122,7 @@ export type Container = {
     readonly email: EmailSender;
     readonly audit: AuditLogger;
     readonly databaseProbe: DatabaseProbe;
+    readonly sideEffects: SideEffectScheduler;
     readonly webauthn: WebAuthnService;
     readonly signingKeys: SigningKeyProvider;
     readonly purger: ExpiredRecordPurger;
@@ -162,6 +168,7 @@ export type ContainerOverrides = Partial<{
   audit: AuditLogger;
   email: EmailSender;
   databaseProbe: DatabaseProbe;
+  sideEffects: SideEffectScheduler;
   oauthClients: OAuthClientRepository;
   signingKeys: SigningKeyProvider;
   purger: ExpiredRecordPurger;
@@ -221,6 +228,17 @@ export function createContainer(
   //
   // **包むのはここ 1 箇所だけ。** 下流は `audit` しか見ないので、
   // 「この UseCase には ip_hash が付く / 付かない」という分岐が生まれない。
+  // 副作用をいつ走らせるか（#126 / 脅威モデル RR-15）。
+  //
+  // `waitUntil` があれば応答後へ逃がす。無い経路（Cron、テストの一部）は
+  // その場で待つ —— **投げっぱなしにはしない。** 応答を返した時点で
+  // isolate が止まりうるので、待たない書き込みは黙って消える。
+  const sideEffects =
+    overrides.sideEffects ??
+    (request?.waitUntil !== undefined
+      ? new WaitUntilSideEffectScheduler(request.waitUntil)
+      : new InlineSideEffectScheduler());
+
   const sink = overrides.audit ?? new DrizzleAuditLogger(db);
   const audit = request === null ? sink : new RequestScopedAuditLogger(sink, ipHasher, request);
 
@@ -264,7 +282,14 @@ export function createContainer(
   // 出さない（application/ports/id-token.port.ts のコメント）。
   const idTokens = overrides.idTokens ?? new JoseIdTokenIssuer(signingKeys);
 
-  const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const getSession = new GetSessionUseCase({
+    sessions,
+    users,
+    hasher,
+    clock,
+    audit,
+    sideEffects,
+  });
   const resolveOAuthClient = new ResolveOAuthClientUseCase({ clients: oauthClients, audit });
   const issueSession = new IssueSessionUseCase({
     users,
@@ -299,6 +324,7 @@ export function createContainer(
       email,
       audit,
       databaseProbe,
+      sideEffects,
       webauthn,
       signingKeys,
       purger,
