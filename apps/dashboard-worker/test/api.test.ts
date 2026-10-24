@@ -7,8 +7,7 @@ import {
 } from "@u18/contracts";
 import type { GrantListItem, RpcErrorCode, SessionListItem, UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
-import { ACCOUNT_BASE_PATH } from "../src/base-path";
-import app from "../src/index";
+import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
 
 /**
@@ -33,7 +32,9 @@ async function request(path: string, env: Env, init: RequestInit = {}): Promise<
 
 /** 接頭辞を付けずに叩く。「付けないと届かない」ことを示すテストだけが使う。 */
 async function rawRequest(path: string, env: Env, init: RequestInit = {}): Promise<Response> {
-  return await app.fetch(new Request(`${ORIGIN}${path}`, init), env, executionContext());
+  // アプリはテストごとに組み立てる。モジュールスコープで 1 つを使い回すと、
+  // あるテストが登録したルートや状態が次のテストへ漏れる。
+  return await createApp().fetch(new Request(`${ORIGIN}${path}`, init), env, executionContext());
 }
 
 const PROFILE: UserProfile = {
