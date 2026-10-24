@@ -34,6 +34,22 @@ export const users = sqliteTable(
   (table) => [
     // username / email は大文字小文字を無視して一意にする。
     uniqueIndex("users_username_unique").on(sql`lower(${table.username})`),
+    // **この一意制約は無条件のまま維持すること（#62 / #51）。**
+    //
+    // 下の user_emails_email_unique は「確認済みの行だけ」に絞った部分
+    // インデックスで、他人が未確認で占有して本来の持ち主を締め出す
+    // 事前登録ロックアウトを防ぐためにそうなっている（#54 / #60）。
+    // 形が違うので「揃えるべき食い違い」に見えるが、揃えてはならない。
+    //
+    // 仕様書 §14.1 決定 7 により、アカウントは物理削除せず凍結で表現する。
+    // つまり凍結・BAN されたアカウントの行は残り続ける。ここを部分
+    // インデックスに変えると、**凍結したアカウントのアドレスで新規登録
+    // できてしまい、BAN が意味を失う。**
+    //
+    // 代償として、あるアドレスが既存アカウントの primary_email である限り
+    // （未確認であっても）別アカウントは作れない。現在の signup 経路は
+    // emailVerified: true でユーザーを作るのでこの窓は開いていないが、
+    // 将来「未確認のまま仮登録する」経路を足すと表面化する。
     uniqueIndex("users_primary_email_unique").on(sql`lower(${table.primaryEmail})`),
     index("users_status_idx").on(table.status),
   ],
