@@ -10,7 +10,7 @@
     "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "test": "node scripts/build-client.mjs && vitest run",
     "test:watch": "node scripts/build-client.mjs && vitest",
-    "cf-typegen": "wrangler types",
+    "cf-typegen": "wrangler types --env-file .dev.vars.example",
     "client:create": "node scripts/oauth-client.mjs create",
     "client:disable": "node scripts/oauth-client.mjs disable",
     "client:list": "node scripts/oauth-client.mjs list",
