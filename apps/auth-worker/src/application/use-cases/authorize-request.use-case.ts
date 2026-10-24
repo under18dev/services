@@ -81,11 +81,20 @@ export type AuthorizationDecision =
     }
   /** ログインが要る。Presentation は `/login` へ誘導し、戻り先を持ち回る。 */
   | { readonly kind: "login_required"; readonly request: ValidatedAuthorizationRequest }
-  /** 同意画面を出す。 */
+  /**
+   * 同意画面を出す。
+   *
+   * `authorized` と同じく `sessionId` / `authTime` を持たせてある。
+   * 同意の POST はこの判断のまま「許可」を受け取るので、Presentation が
+   * セッションを引き直さずにコードを発行できる必要がある。引き直すと、
+   * 同意の可否を決めた判断と発行に使う判断が別物になる。
+   */
   | {
       readonly kind: "consent_required";
       readonly request: ValidatedAuthorizationRequest;
       readonly user: User;
+      readonly sessionId: string;
+      readonly authTime: Date;
     }
   /** そのままコードを発行してよい。 */
   | {
@@ -267,7 +276,13 @@ export class AuthorizeRequestUseCase {
       if (prompts.includes("none")) {
         return reject("consent_required", "user consent is required");
       }
-      return { kind: "consent_required", request, user };
+      return {
+        kind: "consent_required",
+        request,
+        user,
+        sessionId: session.sessionId,
+        authTime: session.authTime,
+      };
     }
 
     await settleSideEffects(

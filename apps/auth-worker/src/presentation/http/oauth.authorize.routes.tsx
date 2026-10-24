@@ -124,6 +124,24 @@ function redirectToClient(
 }
 
 /**
+ * 利用者が同意画面で下した判断。GET の時点ではまだ無い。
+ */
+type ConsentChoice = "allow" | "deny" | null;
+
+/** 認可を拒否されたときの応答。宛先は検証済みなのでリダイレクトしてよい。 */
+function denyToClient(
+  c: Context<AppBindings>,
+  redirectUri: string,
+  state: string | null,
+): Response {
+  return redirectToClient(c, redirectUri, {
+    error: "access_denied",
+    error_description: "the user denied the authorization request",
+    state,
+  });
+}
+
+/**
  * `AuthorizationDecision` を HTTP 応答へ翻訳する。
  *
  * GET と同意の POST で共有する。片方だけ分岐を間違える余地を無くすため。
@@ -131,8 +149,8 @@ function redirectToClient(
 async function respond(
   c: Context<AppBindings>,
   decision: AuthorizationDecision,
-  /** 同意画面で「許可しない」が押されたか。GET では常に false。 */
-  denied = false,
+  /** 同意画面での選択。GET では null。 */
+  choice: ConsentChoice = null,
 ): Promise<Response> {
   switch (decision.kind) {
     case "error_page": {
@@ -165,14 +183,22 @@ async function respond(
     }
 
     case "consent_required": {
-      if (denied) {
-        // 利用者が拒否した。クライアントには `access_denied` を返す
-        // （RFC 6749 §4.1.2.1）。宛先は検証済みなのでリダイレクトしてよい。
-        return redirectToClient(c, decision.request.redirectUri, {
-          error: "access_denied",
-          error_description: "the user denied the authorization request",
-          state: decision.request.state,
-        });
+      // 利用者が拒否した。クライアントへ `access_denied` を返す（RFC 6749 §4.1.2.1）。
+      if (choice === "deny") {
+        return denyToClient(c, decision.request.redirectUri, decision.request.state);
+      }
+
+      // 「許可」が押された。ここで初めて同意が成立する。同意の記録は
+      // `IssueAuthorizationCodeUseCase` が行う（コードと同じ経路で残すことで、
+      // 「コードはあるが同意の記録が無い」状態を作らない）。
+      if (choice === "allow") {
+        return issueCode(
+          c,
+          decision.request,
+          decision.user.id,
+          decision.sessionId,
+          decision.authTime,
+        );
       }
 
       const { request, user } = decision;
@@ -200,39 +226,52 @@ async function respond(
     }
 
     case "authorized": {
-      if (denied) {
-        // 同意済みのクライアントでも「許可しない」は尊重する。既存の同意を
-        // 根拠に押し切ると、利用者が今この瞬間に下した判断を無視することになる。
-        return redirectToClient(c, decision.request.redirectUri, {
-          error: "access_denied",
-          error_description: "the user denied the authorization request",
-          state: decision.request.state,
-        });
+      // 同意済みのクライアントでも「許可しない」は尊重する。既存の同意を
+      // 根拠に押し切ると、利用者が今この瞬間に下した判断を無視することになる。
+      if (choice === "deny") {
+        return denyToClient(c, decision.request.redirectUri, decision.request.state);
       }
 
-      const issued = await c.get("container").useCases.issueAuthorizationCode.execute({
-        request: decision.request,
-        userId: decision.user.id,
-        sessionId: decision.sessionId,
-        authTime: decision.authTime,
-      });
-
-      if (!issued.ok) {
-        // コードを作れなかった。入力ではなくサーバー側の問題なので、
-        // `server_error` としてクライアントへ返す（RFC 6749 §4.1.2.1）。
-        return redirectToClient(c, decision.request.redirectUri, {
-          error: "server_error",
-          error_description: "failed to issue an authorization code",
-          state: decision.request.state,
-        });
-      }
-
-      return redirectToClient(c, issued.value.redirectUri, {
-        code: issued.value.code,
-        state: issued.value.state,
-      });
+      return issueCode(
+        c,
+        decision.request,
+        decision.user.id,
+        decision.sessionId,
+        decision.authTime,
+      );
     }
   }
+}
+
+/** 認可コードを発行して `redirect_uri` へ返す。 */
+async function issueCode(
+  c: Context<AppBindings>,
+  request: Extract<AuthorizationDecision, { kind: "authorized" }>["request"],
+  userId: string,
+  sessionId: string,
+  authTime: Date,
+): Promise<Response> {
+  const issued = await c.get("container").useCases.issueAuthorizationCode.execute({
+    request,
+    userId,
+    sessionId,
+    authTime,
+  });
+
+  if (!issued.ok) {
+    // コードを作れなかった。入力ではなくサーバー側の問題なので、
+    // `server_error` としてクライアントへ返す（RFC 6749 §4.1.2.1）。
+    return redirectToClient(c, request.redirectUri, {
+      error: "server_error",
+      error_description: "failed to issue an authorization code",
+      state: request.state,
+    });
+  }
+
+  return redirectToClient(c, issued.value.redirectUri, {
+    code: issued.value.code,
+    state: issued.value.state,
+  });
 }
 
 oauthAuthorizeRoutes.get("/oauth/authorize", pageSecurityHeaders, async (c) => {
@@ -257,12 +296,14 @@ oauthAuthorizeRoutes.post("/oauth/consent", pageSecurityHeaders, async (c) => {
     return c.html(<AuthorizeErrorPage reason="invalid_request" />, 403);
   }
 
-  const denied = form.get("decision") !== "allow";
+  // 「許可」以外はすべて拒否として扱う（fail-closed）。ボタンの name が
+  // 落ちた送信や、`decision` を細工した送信で黙って許可にならないようにする。
+  const choice = form.get("decision") === "allow" ? "allow" : "deny";
 
   // hidden field を信用せず、GET とまったく同じ検証を通し直す。
   const decision = await c
     .get("container")
     .useCases.authorizeRequest.execute(paramsFromForm(c, form));
 
-  return respond(c, decision, denied);
+  return respond(c, decision, choice);
 });
