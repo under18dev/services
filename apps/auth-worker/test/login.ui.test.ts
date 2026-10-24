@@ -1,0 +1,474 @@
+import { SELF, env } from "cloudflare:test";
+import { sessionCookieName } from "@u18/contracts";
+import { createIdentityDatabase, users } from "@u18/db";
+import { newId } from "@u18/domain";
+import { aUser } from "@u18/testing";
+import { beforeEach, describe, expect, it } from "vitest";
+import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
+import { DrizzleEmailChallengeRepository } from "../src/infrastructure/persistence/drizzle-email-challenge.repository";
+import { resetDatabase } from "./helpers";
+
+/**
+ * ログイン画面（仕様書 14-1 の決定 4 / #36）を HTTP 越しに通す。
+ *
+ * ここでしか確かめられないのは 3 つ:
+ *  1. JS 無し（ただの form POST）でメール OTP ログインが最後まで通ること
+ *  2. CSRF トークンと Origin の両方が無いと更新系を受け付けないこと
+ *  3. 応答から「そのアドレスが登録されているか」が分からないこと
+ */
+
+const BASE = "http://localhost";
+const ORIGIN = "http://localhost:8787";
+
+const REGISTERED = "taro@example.com";
+const UNREGISTERED = "nobody@example.com";
+
+const user = aUser({ email: REGISTERED, displayName: "山田 太郎", username: "taro" });
+
+async function seedRegisteredUser(): Promise<void> {
+  const db = createIdentityDatabase(env.IDENTITY_DB);
+  await db
+    .insert(users)
+    .values({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      primaryEmail: user.email,
+      emailVerified: user.emailVerified,
+    })
+    .run();
+}
+
+/**
+ * 既知のコードでチャレンジを 1 件作る。
+ *
+ * 本物の送信経路（Cloudflare Email Sending）からコードは取り出せないので、
+ * UseCase が作るのと同じ行を Repository 経由で直接入れる。
+ */
+async function seedOtpChallenge(email: string, code: string): Promise<void> {
+  const repository = new DrizzleEmailChallengeRepository(createIdentityDatabase(env.IDENTITY_DB));
+  await repository.create({
+    id: newId("emc"),
+    userId: null,
+    email,
+    codeHash: await new Sha256TokenHasher().hash(code),
+    purpose: "login",
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    maxAttempts: 5,
+    sentAt: new Date(),
+  });
+}
+
+/** Set-Cookie から `name=value` だけを取り出す。 */
+function cookiePairs(response: Response): string[] {
+  return response.headers.getSetCookie().map((raw) => raw.split(";")[0] ?? "");
+}
+
+function cookieHeader(pairs: string[]): string {
+  return pairs.join("; ");
+}
+
+function csrfTokenOf(html: string): string {
+  const match = /name="csrf_token" value="([^"]+)"/.exec(html);
+  if (match?.[1] === undefined) throw new Error("CSRF トークンが描画されていない");
+  return match[1];
+}
+
+type Session = { readonly cookie: string; readonly csrf: string; readonly html: string };
+
+/** ログイン画面を開いた直後の状態（Cookie と CSRF トークン）を作る。 */
+async function openLoginPage(cookie = ""): Promise<Session> {
+  const response = await SELF.fetch(`${BASE}/login`, {
+    headers: cookie === "" ? {} : { Cookie: cookie },
+  });
+  const html = await response.text();
+  const issued = cookiePairs(response);
+  const merged = cookie === "" ? issued : [cookie, ...issued];
+  return { cookie: cookieHeader(merged), csrf: csrfTokenOf(html), html };
+}
+
+function form(fields: Record<string, string>): string {
+  return new URLSearchParams(fields).toString();
+}
+
+function submit(
+  path: string,
+  fields: Record<string, string>,
+  options: { cookie?: string; origin?: string | null } = {},
+): Promise<Response> {
+  const { cookie, origin = ORIGIN } = options;
+  return SELF.fetch(`${BASE}${path}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(origin === null ? {} : { Origin: origin }),
+      ...(cookie === undefined ? {} : { Cookie: cookie }),
+    },
+    body: form(fields),
+  });
+}
+
+describe("GET /login の描画", () => {
+  beforeEach(resetDatabase);
+
+  it("HTML とメールアドレスの form を返す", async () => {
+    const response = await SELF.fetch(`${BASE}/login`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/html");
+
+    const html = await response.text();
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain('action="/login/start"');
+    expect(html).toContain('name="email"');
+    // Passkey のボタン自体はアイランドが描く。サーバーが返すのはマウント先と、
+    // JS が動かなかったときに残る代替表示だけ。
+    expect(html).toContain('id="passkey-island"');
+    expect(html).toContain('src="/ui/login-island.js"');
+  });
+
+  it("CSRF トークンを hidden と Cookie の両方に置く", async () => {
+    const response = await SELF.fetch(`${BASE}/login`);
+    const html = await response.text();
+    const token = csrfTokenOf(html);
+
+    const cookie = cookiePairs(response).find((pair) => pair.startsWith("u18_csrf="));
+    expect(cookie).toBe(`u18_csrf=${token}`);
+
+    // JS から読む必要がないので読めなくしておく。
+    const raw = response.headers.getSetCookie().find((c) => c.startsWith("u18_csrf="));
+    expect(raw).toContain("HttpOnly");
+    expect(raw).toContain("SameSite=Lax");
+  });
+
+  it("CSP を足し、インラインスクリプトを 1 つも置かない", async () => {
+    const response = await SELF.fetch(`${BASE}/login`);
+    const csp = response.headers.get("Content-Security-Policy");
+
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("form-action 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    // 緩めて解決しない。'unsafe-inline' が混ざったらこのテストが落ちる。
+    expect(csp).not.toContain("unsafe-inline");
+    expect(csp).not.toContain("unsafe-eval");
+
+    // CSP に合わせて、スクリプトは必ず外部ファイル参照になっている。
+    const html = await response.text();
+    for (const tag of html.match(/<script[^>]*>/g) ?? []) {
+      expect(tag).toContain("src=");
+    }
+  });
+
+  it("二度開いても CSRF トークンを作り直さない（タブを複数開いても壊れない）", async () => {
+    const first = await openLoginPage();
+    const second = await openLoginPage(first.cookie);
+    expect(second.csrf).toBe(first.csrf);
+  });
+});
+
+describe("Auth UI のアセット配信", () => {
+  it("スタイルシートを返す", async () => {
+    const response = await SELF.fetch(`${BASE}/ui/u18.css`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/css");
+    expect((await response.text()).length).toBeGreaterThan(100);
+  });
+
+  it("Passkey アイランドの JS を返す", async () => {
+    const response = await SELF.fetch(`${BASE}/ui/login-island.js`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/javascript");
+
+    const source = await response.text();
+    expect(source).toContain("/api/auth/passkeys/login/options");
+    // アカウント列挙を避けるため、ログインの Challenge 要求に識別子を渡さない
+    // 設計（PasskeyLoginOptionsUseCase）と対になっている。候補を絞る方向へ
+    // 変えたくなったら API ではなく UX を変えること。
+    expect(source).not.toContain("allowCredentials");
+  });
+});
+
+describe("CSRF: form POST は Origin とトークンの両方を要求する", () => {
+  const paths = ["/login/start", "/login/verify", "/login/logout"];
+
+  beforeEach(resetDatabase);
+
+  it.each(paths)("%s は Origin が無ければ 403", async (path) => {
+    const session = await openLoginPage();
+    const response = await submit(
+      path,
+      { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
+      { cookie: session.cookie, origin: null },
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it.each(paths)("%s は別オリジンを拒否する", async (path) => {
+    const session = await openLoginPage();
+    const response = await submit(
+      path,
+      { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
+      { cookie: session.cookie, origin: "https://evil.example" },
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it.each(paths)("%s は CSRF トークンが違えば 403", async (path) => {
+    const session = await openLoginPage();
+    const response = await submit(
+      path,
+      { csrf_token: "x".repeat(43), email: REGISTERED, code: "123456" },
+      { cookie: session.cookie },
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it.each(paths)("%s は Cookie が無ければ 403（トークンだけでは通らない）", async (path) => {
+    const session = await openLoginPage();
+    const response = await submit(path, {
+      csrf_token: session.csrf,
+      email: REGISTERED,
+      code: "123456",
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("拒否された場合もやり直せるよう、新しいトークンを載せた画面を返す", async () => {
+    const response = await submit("/login/start", { email: REGISTERED });
+    expect(response.status).toBe(403);
+
+    const html = await response.text();
+    expect(csrfTokenOf(html).length).toBeGreaterThan(0);
+    // 理由は書かない。トークンが古いのか Origin が違うのかを教えない。
+    expect(html).not.toContain("Origin");
+  });
+});
+
+describe("メール OTP ログイン（JavaScript 無し）", () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedRegisteredUser();
+  });
+
+  it("form POST だけでコード入力画面まで進む", async () => {
+    const session = await openLoginPage();
+    const response = await submit(
+      "/login/start",
+      { csrf_token: session.csrf, email: REGISTERED },
+      { cookie: session.cookie },
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('action="/login/verify"');
+    expect(html).toContain('name="code"');
+    // 次の画面へメールアドレスを運ぶのは hidden。クエリには載せない。
+    expect(html).toContain(`value="${REGISTERED}"`);
+  });
+
+  it("コードを正しく入れるとセッション Cookie が発行され、ログイン済み画面へ進む", async () => {
+    const session = await openLoginPage();
+    await seedOtpChallenge(REGISTERED, "123456");
+
+    const verified = await submit(
+      "/login/verify",
+      { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
+      { cookie: session.cookie },
+    );
+
+    // 再読み込みで使用済みコードを送り直さないよう 303 にする。
+    expect(verified.status).toBe(303);
+    expect(verified.headers.get("Location")).toBe("/login");
+
+    const issued = cookiePairs(verified);
+    const sessionCookie = issued.find((pair) =>
+      pair.startsWith(`${sessionCookieName(env.ENVIRONMENT)}=`),
+    );
+    expect(sessionCookie).toBeDefined();
+
+    const raw = verified.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`${sessionCookieName(env.ENVIRONMENT)}=`));
+    expect(raw).toContain("HttpOnly");
+    expect(raw).toContain("SameSite=Lax");
+
+    // 権限が変わったので CSRF トークンも入れ替わっている。
+    const rotated = issued.find((pair) => pair.startsWith("u18_csrf="));
+    expect(rotated).toBeDefined();
+    expect(rotated).not.toBe(`u18_csrf=${session.csrf}`);
+
+    // 発行された Cookie で既存の API も通る。
+    const me = await SELF.fetch(`${BASE}/api/me`, { headers: { Cookie: sessionCookie ?? "" } });
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({ id: user.id });
+  });
+
+  it("OTP やトークンを URL へ載せない", async () => {
+    const session = await openLoginPage();
+    await seedOtpChallenge(REGISTERED, "123456");
+
+    const verified = await submit(
+      "/login/verify",
+      { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
+      { cookie: session.cookie },
+    );
+
+    const location = verified.headers.get("Location") ?? "";
+    expect(location).not.toContain("?");
+    expect(location).not.toContain("123456");
+    expect(location).not.toContain(REGISTERED);
+  });
+});
+
+describe("ログイン済みの状態で GET /login", () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedRegisteredUser();
+  });
+
+  async function login(): Promise<string> {
+    const session = await openLoginPage();
+    await seedOtpChallenge(REGISTERED, "123456");
+    const verified = await submit(
+      "/login/verify",
+      { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
+      { cookie: session.cookie },
+    );
+    return cookieHeader(cookiePairs(verified));
+  }
+
+  it("ログイン済みであることを示し、ログイン form を出さない", async () => {
+    const cookie = await login();
+    const response = await SELF.fetch(`${BASE}/login`, { headers: { Cookie: cookie } });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("ログイン済み");
+    expect(html).toContain(user.displayName);
+    expect(html).not.toContain('action="/login/start"');
+    // ログイン済み画面に JS は要らない。読み込ませない。
+    expect(html).not.toContain("/ui/login-island.js");
+  });
+
+  it("ログアウトすると Cookie が落ち、ログイン画面へ戻る", async () => {
+    const cookie = await login();
+    const page = await openLoginPage(cookie);
+
+    const response = await submit(
+      "/login/logout",
+      { csrf_token: page.csrf },
+      { cookie: page.cookie },
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/login");
+
+    const cleared = response.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`${sessionCookieName(env.ENVIRONMENT)}=`));
+    expect(cleared).toContain("Max-Age=0");
+
+    // 落とした Cookie では /api/me が通らない。
+    const me = await SELF.fetch(`${BASE}/api/me`, {
+      headers: { Cookie: cookieHeader(cookiePairs(response)) },
+    });
+    expect(me.status).toBe(401);
+  });
+});
+
+describe("アカウントの存在を漏らさない", () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedRegisteredUser();
+  });
+
+  /** CSRF トークンだけが毎回変わるので、比較の前に伏せる。 */
+  function normalize(html: string): string {
+    return html.replace(/name="csrf_token" value="[^"]+"/g, 'name="csrf_token" value="TOKEN"');
+  }
+
+  async function start(email: string): Promise<{ status: number; html: string }> {
+    const session = await openLoginPage();
+    const response = await submit(
+      "/login/start",
+      { csrf_token: session.csrf, email },
+      { cookie: session.cookie },
+    );
+    return { status: response.status, html: normalize(await response.text()) };
+  }
+
+  it("登録済みと未登録で、コード送信の応答が完全に一致する", async () => {
+    const registered = await start(REGISTERED);
+    const unknown = await start(UNREGISTERED);
+
+    expect(registered.status).toBe(200);
+    expect(unknown.status).toBe(registered.status);
+    // 画面に残るのは入力されたアドレスだけ。それ以外の差を作らない。
+    expect(unknown.html.replaceAll(UNREGISTERED, "EMAIL")).toBe(
+      registered.html.replaceAll(REGISTERED, "EMAIL"),
+    );
+  });
+
+  it("送信画面に「登録されていません」の類を出さない", async () => {
+    const { html } = await start(UNREGISTERED);
+    for (const forbidden of ["登録されていません", "見つかりません", "存在しません"]) {
+      expect(html).not.toContain(forbidden);
+    }
+  });
+
+  async function verify(email: string, code: string): Promise<{ status: number; html: string }> {
+    const session = await openLoginPage();
+    const response = await submit(
+      "/login/verify",
+      { csrf_token: session.csrf, email, code },
+      { cookie: session.cookie },
+    );
+    return { status: response.status, html: normalize(await response.text()) };
+  }
+
+  it("チャレンジがある場合と無い場合で、誤ったコードの応答が一致する", async () => {
+    await seedOtpChallenge(REGISTERED, "123456");
+
+    const withChallenge = await verify(REGISTERED, "000000");
+    const withoutChallenge = await verify(UNREGISTERED, "000000");
+
+    expect(withChallenge.status).toBe(400);
+    expect(withoutChallenge.status).toBe(withChallenge.status);
+    expect(withoutChallenge.html.replaceAll(UNREGISTERED, "EMAIL")).toBe(
+      withChallenge.html.replaceAll(REGISTERED, "EMAIL"),
+    );
+  });
+
+  it("試行上限に達しても応答を変えない（429 にしない）", async () => {
+    await seedOtpChallenge(REGISTERED, "123456");
+
+    // 上限（OtpPolicy.maxAttempts = 5）を使い切る。
+    for (let i = 0; i < 5; i += 1) await verify(REGISTERED, "000000");
+
+    const exhausted = await verify(REGISTERED, "000000");
+    const unknown = await verify(UNREGISTERED, "000000");
+
+    // 上限だけ 429 にすると「そのアドレス宛にコードを出した」と分かる。
+    expect(exhausted.status).toBe(400);
+    expect(exhausted.status).toBe(unknown.status);
+    expect(exhausted.html.replaceAll(REGISTERED, "EMAIL")).toBe(
+      unknown.html.replaceAll(UNREGISTERED, "EMAIL"),
+    );
+  });
+
+  it("形式の違うコードも、誤ったコードと同じ応答にする", async () => {
+    await seedOtpChallenge(REGISTERED, "123456");
+
+    const malformed = await verify(REGISTERED, "abc");
+    const wrong = await verify(REGISTERED, "000000");
+
+    expect(malformed.status).toBe(wrong.status);
+    expect(malformed.html).toBe(wrong.html);
+  });
+
+  it("メールアドレスの形式不正だけは指摘してよい", async () => {
+    // 送信先として成立していないという話で、アカウントの有無とは無関係。
+    const { status, html } = await start("not-an-email");
+    expect(status).toBe(400);
+    expect(html).toContain("メールアドレスの形式");
+  });
+});
