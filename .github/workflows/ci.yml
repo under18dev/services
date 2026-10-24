@@ -146,11 +146,13 @@ jobs:
       # 入ったとき、その env.production は CI のどこからも評価されない
       # 状態になった。走査にしておけば次の Worker は黙って対象に入る。
       #
-      # このステップは直前の `pnpm build` に依存している。auth-worker は
-      # クライアント JS を scripts/build-client.mjs で生成していて、その
-      # 出力は .gitignore 済み。wrangler を直接呼ぶここだけでは生成されず、
-      # 単独で動かすと "Could not resolve ./generated/login-island.bundle"
-      # で落ちる。ステップの順序を入れ替えないこと。
+      # かつてこのステップは直前の `pnpm build` に暗黙に依存していた。
+      # auth-worker のクライアント JS は .gitignore 済みの生成物で、
+      # 生成が npm スクリプト側にしか無かったため、wrangler を直接呼ぶ
+      # 経路では作られなかった。#132 でその生成が wrangler.jsonc の
+      # `build.command` に移り、dev / deploy / dry-run のどこから入っても
+      # 走るようになったので、この依存は無くなっている。
+      # 生成物を消した状態でこのステップ単独が通ることを確認済み。
       #
       # 実測で捕まる誤りの種類（#57）:
       #   - JSON として壊れている場合はファイル全体のパースが失敗するため、
