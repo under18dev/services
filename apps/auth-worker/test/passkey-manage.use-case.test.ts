@@ -32,15 +32,15 @@ function setup() {
     audit,
     clock,
     listPasskeys: new ListPasskeysUseCase({ getSession, passkeys }),
-    deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, clock, audit }),
+    deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, users, clock, audit }),
   };
 }
 
 function seedLoggedInUser(
   ctx: ReturnType<typeof setup>,
-  overrides: { authenticatedAt?: Date } = {},
+  overrides: { authenticatedAt?: Date; isAdmin?: boolean } = {},
 ) {
-  const user = aUser();
+  const user = aUser({ isAdmin: overrides.isAdmin ?? false });
   ctx.users.seed(user);
   const session = aSession({ userId: user.id, createdAt: overrides.authenticatedAt ?? NOW });
   ctx.sessions.seed({ ...session, revokedAt: null });
@@ -118,6 +118,65 @@ describe("DeletePasskeyUseCase", () => {
 
     expect(result).toEqual({ ok: true, value: { deleted: true, remaining: 0 } });
     expect(await ctx.passkeys.listByUserId(me.user.id)).toEqual([]);
+  });
+
+  it("管理者は最後の 1 本を削除できない（仕様書 §14.1 決定 8 / #75）", async () => {
+    // 管理者はメール OTP でログインできない。最後の Passkey を外せると、
+    // 残るのは「締め出された管理者」か「決定 8 を緩めて OTP を開ける」かの
+    // どちらかで、後者は決定そのものの無効化になる。
+    const admin = seedLoggedInUser(ctx, { isAdmin: true });
+    seedPasskey(ctx, admin.user.id, "only");
+
+    const result = await ctx.deletePasskey.execute({
+      sessionToken: admin.token,
+      passkeyId: "pky_only",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("conflict");
+    // 拒否したなら残っていること。「消してから数え直す」実装だとここで落ちる。
+    expect(await ctx.passkeys.findById("pky_only")).not.toBeNull();
+    expect(
+      ctx.audit.events.some(
+        (e) => e.event === "passkey.deleted" && e.reason === "admin_last_passkey",
+      ),
+    ).toBe(true);
+  });
+
+  it("管理者でも 2 本目以降は削除できる", async () => {
+    // 盗まれた端末の認証器を外せないのでは #75 が塞いだ穴が戻る。
+    // 管理者に課しているのは「0 本にしないこと」だけである。
+    const admin = seedLoggedInUser(ctx, { isAdmin: true });
+    seedPasskey(ctx, admin.user.id, "keep");
+    seedPasskey(ctx, admin.user.id, "stolen");
+
+    const result = await ctx.deletePasskey.execute({
+      sessionToken: admin.token,
+      passkeyId: "pky_stolen",
+    });
+
+    expect(result).toEqual({ ok: true, value: { deleted: true, remaining: 1 } });
+  });
+
+  it("管理者の制限を他人の認証器の詮索に使えない", async () => {
+    // 管理者が他人の passkey ID を指したときだけ応答が変わると、
+    // その違いがそのまま「その ID は存在する」の確認になる。
+    const admin = seedLoggedInUser(ctx, { isAdmin: true });
+    seedPasskey(ctx, admin.user.id, "only");
+    const victim = seedLoggedInUser(ctx);
+    seedPasskey(ctx, victim.user.id, "victim");
+
+    const owned = await ctx.deletePasskey.execute({
+      sessionToken: admin.token,
+      passkeyId: "pky_victim",
+    });
+    const missing = await ctx.deletePasskey.execute({
+      sessionToken: admin.token,
+      passkeyId: "pky_does_not_exist",
+    });
+
+    expect(owned).toEqual(missing);
+    if (!owned.ok) expect(owned.error.code).toBe("not_found");
   });
 
   it("他人の認証器は削除できない", async () => {
