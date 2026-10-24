@@ -9,6 +9,7 @@ import {
   InMemorySessionRepository,
   InMemoryUserRepository,
   RecordingAuditLogger,
+  ImmediateSideEffectScheduler,
 } from "./fakes";
 import { InMemoryAuthorizationCodeRepository } from "./fakes.oauth";
 
@@ -38,7 +39,14 @@ function setup() {
       clock,
       audit,
     }),
-    getSession: new GetSessionUseCase({ sessions, users, hasher, clock, audit }),
+    getSession: new GetSessionUseCase({
+      sessions,
+      users,
+      hasher,
+      clock,
+      audit,
+      sideEffects: new ImmediateSideEffectScheduler(),
+    }),
     logout: new LogoutUseCase({ sessions, codes, hasher, clock, audit }),
   };
 }

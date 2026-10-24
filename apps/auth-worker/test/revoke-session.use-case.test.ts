@@ -8,6 +8,7 @@ import {
   InMemorySessionRepository,
   InMemoryUserRepository,
   RecordingAuditLogger,
+  ImmediateSideEffectScheduler,
 } from "./fakes";
 import { InMemoryAuthorizationCodeRepository } from "./fakes.oauth";
 
@@ -22,7 +23,14 @@ function setup() {
   // セッション失効は未交換の認可コードも落とす（#15）。
   const codes = new InMemoryAuthorizationCodeRepository();
 
-  const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const getSession = new GetSessionUseCase({
+    sessions,
+    users,
+    hasher,
+    clock,
+    audit,
+    sideEffects: new ImmediateSideEffectScheduler(),
+  });
   return {
     users,
     sessions,

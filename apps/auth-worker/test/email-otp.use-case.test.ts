@@ -10,6 +10,7 @@ import {
   InMemorySessionRepository,
   InMemoryUserRepository,
   RecordingAuditLogger,
+  ImmediateSideEffectScheduler,
 } from "./fakes";
 import {
   FailingEmailSender,
@@ -63,7 +64,14 @@ function setup(emailSender: EmailSender = new RecordingEmailSender()) {
       clock,
       audit,
     }),
-    getSession: new GetSessionUseCase({ sessions, users, hasher, clock, audit }),
+    getSession: new GetSessionUseCase({
+      sessions,
+      users,
+      hasher,
+      clock,
+      audit,
+      sideEffects: new ImmediateSideEffectScheduler(),
+    }),
   };
 }
 
