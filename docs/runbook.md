@@ -1496,11 +1496,15 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
 - `status`（`active` / `suspended` / `deleted`）
 - `deleted_at`（`timestamp_ms`、NULL 可）
 
-**重要 — 認証の遮断に効くのは `status` だけである。** `User.isActive`（`apps/auth-worker/src/domain/entities/user.ts`）は `status === "active"` しか見ておらず、`deleted_at` を参照していない。`deleted_at` だけを設定しても、そのユーザーは **引き続きログインできる。** 削除処理では必ず両方を設定する。
+> **訂正（#27）。** 以前ここには「**認証の遮断に効くのは `status` だけである**。`User.isActive` は `status === "active"` しか見ておらず `deleted_at` を参照しないので、`deleted_at` だけを設定したユーザーは引き続きログインできる」と書かれていた。**これは既に正しくない。** 現在の `User.isActive`（`apps/auth-worker/src/domain/entities/user.ts`）は `status === "active" && deletedAt === null` であり、**どちらか一方を立てれば認証は止まる。**
+>
+> 削除処理で両方を設定するという結論は変わらない。`deleted_at` は保持期間の起点として要り、`status` は状態の意味（削除依頼か BAN か）を表すためである（§11.1）。
 
 即時に物理削除しない理由は、監査ログとの整合、誤削除からの復旧、法的な照会への対応である（`packages/db/src/schema/users.ts` のコメント / 仕様書 7.3）。
 
 #### 削除手順
+
+> **本節は物理削除を前提にした流れで書かれており、仕様書 §14.1 決定 7（物理削除しない）より前の記述が残っている。** 利用者から「削除してほしい」と言われたときに実行するのは **§11「アカウント削除（＝凍結）」**である。本節の手順 8（物理削除）は、法的な照会などで完全消去が必要になった例外的な場合の参考として残してある。
 
 **セルフサービスのアカウント削除 API は未実装である。** `PATCH /api/me` すら 501 であり、削除の入口は存在しない。現時点では運用者が手動で実行する。
 
@@ -1827,6 +1831,695 @@ pnpm --filter @u18/auth-worker key:generate -- --apply-local
 秘密鍵（`d` 入り）は `.dev.vars` へ貼り、公開鍵だけが `signing_key_metadata` に入る。`--apply-local` はローカル D1 への投入まで行う。**本番用の `--apply-remote` は用意していない。** 本番の鍵投入は「先に JWKS へ公開してから署名を切り替える」という時間差のある手順（§4.2）であり、1 コマンドで済ませてよい操作ではないため。
 
 公開鍵の行を入れずに Worker を起動すると、`/.well-known/jwks.json` は **503**（`jwks_unavailable`）を返す。鍵が 1 本も無い状態で空の JWKS を 200 で返すと、RP がそれを正常な応答としてキャッシュし、鍵を入れ直してもキャッシュが切れるまで「鍵が無い」状態を信じ続けるため。
+
+---
+
+## 10. アカウント復旧
+
+仕様書 §6.1 の「Passkey を失ったユーザーの復旧手順を公開前に定義する」と、§13 の受け入れ基準「アカウント復旧・削除・鍵ローテーションの運用が定義される」に対応する（#27）。鍵ローテーションは §4、削除は §11 にある。
+
+### 10.1 最初に確定させるのは「メールを受け取れるか」
+
+「ログインできない」という申告を受けたとき、Passkey を何本失ったかは二次的な情報である。**決めるのはメールアドレスの受信ができるかどうかだけ**で、そこで対応が 3 つに分かれる。
+
+| 失ったもの                           | 自動で復旧できるか                   | 根拠                                                                |
+| ------------------------------------ | ------------------------------------ | ------------------------------------------------------------------- |
+| Passkey を全部（メールは受け取れる） | **できる。** 運用者の操作は要らない  | 仕様書 §14.1 決定 2（#34）。メール OTP が常にログイン経路として残る |
+| メールアドレスへのアクセス           | **できない。コードに救済経路が無い** | §10.4。人手の審査に落とすしかない                                   |
+| 管理者の Passkey                     | **自動化しない**（方針として）       | 仕様書 §14.1 決定 8（#40）。ただし §10.5 の警告を先に読むこと       |
+
+申告を受けたら、案内する前に状態を引く。**症状が同じでも原因が違う。**
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 execute u18-identity --remote --command "
+select u.id, u.username, u.status, u.email_verified,
+       datetime(u.deleted_at/1000, 'unixepoch') as deleted_at,
+       (select count(*) from passkeys p where p.user_id = u.id) as passkeys,
+       (select count(*) from sessions s where s.user_id = u.id and s.revoked_at is null
+          and s.expires_at > unixepoch() * 1000) as live_sessions
+from users u where lower(u.primary_email) = lower('<メールアドレス>');
+"
+```
+
+- `status` が `active` **かつ** `deleted_at` が NULL → 本節（§10）の復旧である。
+- どちらかが外れている → これは復旧ではなく**凍結の解除**である。§11.5 へ行く。
+- 行が返らない → そのアドレスのアカウントは存在しない。登録を案内する。**「アカウントが無い」と外部に伝えるのは、本人確認が取れた問い合わせ窓口の中だけにすること。** HTTP の応答は意図的にこの区別を隠してある（脅威モデル I-2）。
+
+### 10.2 一般利用者が Passkey を全部失った場合
+
+**これは障害ではない。設計どおりの経路が開いたままである。**
+
+仕様書 §14.1 決定 2（#34）で初回登録に Passkey を必須にしないと決めたため、メール OTP は補助ではなく**常設のログイン経路**である。`DeletePasskeyUseCase` が最後の 1 本の削除を拒まないのも同じ根拠に立っている（`apps/auth-worker/src/application/use-cases/delete-passkey.use-case.ts` のコメント）。したがって「Passkey を全部失った」は、仕様上は締め出しではない。
+
+手順:
+
+1. §10.1 の SQL で `status = 'active'` / `deleted_at is null` を確認する。
+2. **利用者自身にメール OTP でログインしてもらう。運用者が DB を触る必要は無い。**
+3. ログインできたら、**その場で**新しい Passkey を登録してもらう。あとで、と言うと戻ってこない。
+4. 残っている古い Passkey を棚卸しする。紛失・譲渡した端末のものは削除する（§5.2 手順 7 と同じ SQL）。
+
+#### 本人確認として何を求めるか
+
+**この経路では、運用者は追加の本人確認を行わない。** メールボックスの支配権がそのまま本人性の根拠になる。
+
+これは決定 2 が明示的に受け入れた取引である（仕様書 §14.1 決定 8 の根拠欄: 「メール OTP はメールボックスの支配権がそのままアカウントの支配権になる。一般利用者にはこの取引が妥当でも……」）。**運用者が善意でこの経路を強めることはできない**し、強めてはならない。本人確認の追加を運用側だけで足すと、メールは届くのに人間の審査で止まる利用者が生まれ、決定 2 が保証しているはずの「常に開いている経路」が実質的に閉じる。
+
+追加の確認が要るのは、**メール OTP が通らなかった場合**（§10.4）と**管理者**（§10.5）だけである。
+
+#### うまくいかないときの観測可能な症状
+
+**「送信しました」の表示は、送信された証拠にならない。** `StartEmailOtpUseCase` が実際にメールを出すのは `purpose = "login"` なら `user?.isActive === true` のときだけで、それ以外でも**応答を一切変えない**（アカウント列挙を塞ぐため。脅威モデル I-2）。凍結済みのアカウントでも、存在しないアドレスでも、画面は同じ `retryAfterSeconds` を返す。
+
+区別は `audit_logs` でしか付かない。
+
+```bash
+npx wrangler d1 execute u18-identity --remote --command "
+select datetime(created_at/1000, 'unixepoch') as at, outcome, reason, user_id, metadata
+from audit_logs where event = 'otp.start' order by created_at desc limit 20;
+"
+```
+
+| `outcome` / `reason`              | 意味                                                                | 次の行き先                      |
+| --------------------------------- | ------------------------------------------------------------------- | ------------------------------- |
+| `success`                         | 送信した。`user_id` が入る                                          | 届かないならメール到達性の問題  |
+| `failure` / `no_eligible_account` | **送らなかった。** 凍結済み、または該当アカウントが無い             | §10.1 の SQL で状態を確定させる |
+| `failure` / `resend_limit`        | 再送上限（直近 1 時間の行数）に当たった。§7.0 の `OtpPolicy` を参照 | 1 時間待つ。短縮する手段は無い  |
+
+> **`no_eligible_account` の行には `user_id` が入らない。** 送らないと決めた時点ではアカウントを特定した情報を監査ログに残さない設計なので、**利用者を指定してこの行を引くことはできない。** 申告の時刻で窓を切って探すしかない。問い合わせ対応では「何時何分ごろに試したか」を必ず聞くこと。
+
+Passkey が 1 本残っているのにログインできない場合は、`passkey.login.verify` の `reason` を見る。`user_not_active` なら凍結である（`passkey-login-verify.use-case.ts`。HTTP には 401 として出るので、利用者から見た症状は「Passkey が拒否された」になり、凍結だと分からない）。
+
+### 10.3 復旧後に既存のセッション・Passkey・grant をどう扱うか
+
+**自動では何も消えない。** メール OTP でのログインは新しいセッションを 1 本増やすだけで、既存のセッション・Passkey・OAuth の同意（`oauth_grants`）はそのまま残る。
+
+これは「認証器を失っただけ」なら正しい挙動だが、**「失った」と「盗られた」は申告の時点では区別できない。** 端末の紛失・盗難が疑われるなら、§5.2（アカウント侵害）の封じ込めを通すこと。判断は人間が行う。目安:
+
+- 端末を紛失・盗難した、譲渡した、修理に出した → §5.2 を通す（セッション・grant・トークンを失効させ、Passkey を棚卸しする）
+- 機種変更で古い端末を自分で初期化した → §10.2 だけでよい
+
+### 10.4 メールアドレスにアクセスできなくなった場合
+
+**現在のコードに救済経路は無い。** これは実装漏れではなく、まだ誰も設計していない領域である。
+
+確認した事実:
+
+- `PATCH /api/me` で変更できるのは `displayName` と `username` だけである（仕様書 §8.1）。**メールアドレスを変更する API は存在しない。**
+- `user_emails` は複数アドレスを持てるスキーマだが、アドレスを追加・切り替える UseCase もルートも実装されていない。
+- OTP の送信先は `users.primary_email` を引いた結果であり（`StartEmailOtpUseCase`）、別の宛先へ回す経路は無い。
+
+つまり**運用者が DB を直接書き換える以外に手段が無い。** そして DB を書き換えられるのは Cloudflare アカウントを持つインフラ管理者だけである（§8.4 の運用課題 1）。
+
+#### 何をもって本人と認めるか — 決める必要がある項目
+
+**ここは現時点で未決である。** 以下は「決めるべき項目の一覧」であって、決定ではない。公開前に埋めること（§12.6 のチェックリストに入れてある）。
+
+1. **本人確認の材料**。候補と、それぞれの弱点:
+   - 既存の有効なセッションからの操作 — 最も強い。ただし全端末からログアウト済みなら使えない。
+   - 残っている Passkey での署名 — 強い。ただし「Passkey もメールも失った」ケースには使えない。
+   - 登録日時・最終ログイン時刻・登録済み Passkey の本数など、本人しか知らないはずの情報 — **弱い。** 当人が覚えていないことも多く、攻撃者が総当たりで当てられる粒度でもある。これ単独で通してはならない。
+   - 対面確認（文化祭という運用形態では現実的な選択肢）。
+2. **誰が承認するか**。単独承認を許すか、2 名承認を必須にするか。**本書は 2 名を推す。** メールアドレスの差し替えは「そのアカウントを別人に渡す」操作そのもので、ここを単独で通せるなら、インフラ管理者 1 名の判断で任意のアカウントを乗っ取れることになる。
+3. **記録をどこに残すか**。§10.6 を参照。
+4. **待機期間を置くか**。差し替えを実行する前に N 日の猶予を置き、その間は旧アドレスへ通知を送る、という設計が一般的である。**現在、通知を送る経路も「保留中の変更」を表現する列も無い**ので、導入するならスキーマ変更が要る。
+
+#### 実行する場合の操作（承認が取れてから）
+
+**先に §6.3 のエクスポートを取る。** メールアドレスの UNIQUE インデックスに触る操作であり、失敗すると復旧が面倒になる。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+# 1. 新アドレスが他のアカウントに使われていないことを確認する。
+#    使われていれば UNIQUE 違反で UPDATE が落ちる（落ちるのは正しい挙動）。
+npx wrangler d1 execute u18-identity --remote --command "
+select id, status from users where lower(primary_email) = lower('<新アドレス>');
+"
+# 2. 差し替える。users.primary_email と user_emails の両方を直す。
+#    users.primary_email は非正規化されたコピーで、正本は user_emails 側である
+#    （packages/db/src/schema/users.ts）。片方だけ直すと、OTP は新アドレスへ飛ぶのに
+#    一覧や将来の実装は旧アドレスを見る、という食い違いが残る。
+npx wrangler d1 execute u18-identity --remote --command "
+update users set primary_email = '<新アドレス>', email_verified = 0, updated_at = unixepoch() * 1000
+where id = '<USER_ID>';
+update user_emails set email = '<新アドレス>', verified_at = null, updated_at = unixepoch() * 1000
+where user_id = '<USER_ID>' and is_primary = 1;
+"
+```
+
+**`email_verified` / `verified_at` を意図的に落としている。** 運用者が入力したアドレスは、まだ本人の到達性が確認されていない。落としておけば、本人が次にメール OTP でログインした時点で `VerifyEmailOtpUseCase` が `markEmailVerified` を呼んで立て直す。立てたまま渡すと、「誰も到達性を確かめていないアドレスが確認済みとして記録されている」状態が残る。
+
+**`user_emails` の UNIQUE は部分インデックスである**（`verified_at is not null` の行だけが対象。`packages/db/src/schema/users.ts`）。一方 `users_primary_email_unique` は**無条件**なので、衝突を実際に止めるのはこちらである。手順 1 の確認を飛ばすと、UPDATE が `UNIQUE constraint failed: users.primary_email` で落ちる。落ちた場合、**2 文のうち 1 文目だけが成功している可能性がある**（D1 の `--command` に複数文を渡しても単一トランザクションにはならない）。落ちたら必ず両方の値を読み直して整合を確かめること。
+
+3. **旧アドレスに紐づく未消費のチャレンジを潰す。** 旧メールボックスを握っている相手が、差し替え前に取ったコードを使えないようにする。
+
+```bash
+npx wrangler d1 execute u18-identity --remote --command "
+update email_challenges set consumed_at = unixepoch() * 1000
+where lower(email) = lower('<旧アドレス>') and consumed_at is null;
+"
+```
+
+4. **全セッションを失効させる**（§5.2 手順 3）。差し替えの理由が乗っ取りだった場合に、攻撃者のセッションを残さない。
+
+### 10.5 管理者の復旧 — 自動化しない
+
+**決定**（仕様書 §14.1 決定 8 / #40）: 管理者は Passkey 必須。メール OTP 単独ではログインも復旧もできない。全 Passkey を失った管理者の復旧は自動化しない。
+
+> **警告 — 現時点で管理者を作ると、メール OTP で入れてしまう。**
+>
+> **決定 8 を強制する仕組みはコードに存在しない。** `users` に管理者を示す列が無く、ロールの概念自体が実装されていない（#83、脅威モデル RR-5）。確認した事実として、`packages/db/src/schema/users.ts` の `users` テーブルにロール列は無く、認証経路（`StartEmailOtpUseCase` / `VerifyEmailOtpUseCase`）はユーザーの区別をしない。
+>
+> したがって **「管理者」と名付けたアカウントを今作ると、それはメール OTP で入れる普通のアカウントである。** そのメールボックスを取った相手がそのまま管理者になる。決定 8 が排除したはずの設計が、実装されていないという理由でそのまま成立する。
+>
+> **#83 が入るまで、アプリ上の管理者アカウントを作らないこと。** 併せて #75 との相互作用も未解決で、ロールを入れるときは「管理者だけは最後の Passkey を削除できない」制約を同時に入れる必要がある（§8.4 運用課題 3）。一般利用者が最後の 1 本を消せるのは決定 2 により OTP が残るからであって、OTP を塞いだ管理者に同じ設計を適用すると、本人の手で自分を締め出せてしまう。
+
+**現時点で「管理者」に相当するのはインフラ管理者（Cloudflare アカウントを持つ人）だけである**（§8.4 運用課題 1）。その復旧は u18 Identity の問題ではなく Cloudflare アカウントの問題なので、本書の対象外である。Cloudflare 側の 2 要素認証と復旧コードの管理は、u18 の全 Secret・全 D1 への唯一の鍵であることを踏まえて扱うこと（§1.4 の blast radius 表は Secret 単位での影響しか書いていないが、**Cloudflare アカウントを失うことはその全部を同時に失うことである**）。
+
+#83 が入った後の管理者復旧手順は、この節に追記すること。最低限、決めるべきことは §10.4 の 4 項目と同じで、加えて「メール OTP では通さない」をどう手順として担保するかが要る。
+
+### 10.6 復旧操作の監査証跡
+
+**`wrangler d1 execute` による操作は `audit_logs` に何も残さない。** 監査ログを書くのは Worker のコードであり、DB を直接触る経路はそれを通らない。したがって **§10.4 のような人手の復旧は、運用者が自分で行を足さない限り痕跡が残らない。**
+
+`audit_logs.event` は enum ではなく自由な `text` 列なので（`packages/db/src/schema/audit.ts`）、運用側のイベント名を足せる。復旧操作では必ず記録すること。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 execute u18-identity --remote --command "
+insert into audit_logs (id, event, user_id, actor, outcome, reason, metadata, created_at)
+values (
+  'aud_' || lower(hex(randomblob(16))),
+  'ops.account.recovered',
+  '<USER_ID>',
+  '<実行者の識別子>',
+  'success',
+  'email_access_lost',
+  json_object('approvedBy', '<承認者>', 'method', '<本人確認の方法>', 'ticket', '<記録の所在>'),
+  unixepoch() * 1000
+);
+"
+```
+
+**`id` と `created_at` には SQL レベルの DEFAULT が無い**（`packages/db/drizzle/0000_fat_thunderbird.sql`。既定値は Drizzle が JS 側で入れている）。省くと `NOT NULL constraint failed: audit_logs.id` もしくは `audit_logs.created_at` で落ちる。`created_at` は epoch **ミリ秒**なので `* 1000` を忘れないこと（付録 B）。
+
+記録するイベント名の候補（運用側の接頭辞を `ops.` で揃える。アプリが書くイベントと混ざらないようにするため）:
+
+| イベント                  | いつ                                               |
+| ------------------------- | -------------------------------------------------- |
+| `ops.account.recovered`   | メールアドレスの差し替えなど、人手の復旧を実行した |
+| `ops.account.disabled`    | 凍結した（§11）                                    |
+| `ops.account.reactivated` | 凍結を解除した（§11.5）                            |
+| `ops.passkeys.purged`     | 運用者が Passkey を削除した                        |
+
+**`metadata` に秘密を入れないこと。** トークン・OTP・生 IP・メールアドレスは入れない（`audit-log.port.ts`）。承認者やチケット番号は秘密ではないので入れてよい。**メールアドレスの差し替えでは、旧アドレスも新アドレスも `metadata` に書かない。** アドレスそのものはチケット側に置き、ここにはその所在だけを書く。
+
+**この記録は改竄を防がない。** 同じ権限で UPDATE も DELETE もできる（脅威モデル T-4）。目的は「後から辿れること」であって「否認できないこと」ではない。否認防止が要るなら、Cloudflare の外に追記専用の記録を置く必要がある —— これは未整備である。
+
+---
+
+## 11. アカウント削除（＝凍結）
+
+### 11.1 前提 — 物理削除はしない
+
+**決定**（仕様書 §14.1 決定 7）: アカウントは物理削除しない。利用者から見た「削除」は、行を残して `status` を変える**凍結 / BAN / 無効化**として実装する。結果として**メールアドレスは解放されず、同じアドレスでの再登録はできない。**
+
+根拠は監査ログとの整合、誤削除からの復旧、不正利用者の再登録防止である。
+
+**この決定は既に実装側が満たしている。** `User.isActive`（`apps/auth-worker/src/domain/entities/user.ts`）は
+
+```ts
+get isActive(): boolean {
+  return this.props.status === "active" && this.props.deletedAt === null;
+}
+```
+
+であり、`status` と `deleted_at` の**両方**を見る。どちらか一方を立てれば認証は止まる。
+
+> **§7.1「スキーマ上の前提」には「認証の遮断に効くのは `status` だけ」と書かれていた時期がある。** それは既に正しくない。§7.1 側も訂正してあるが、古い印刷物やコピーを持っている場合は本節の記述を優先すること。
+
+`status` の使い分けは次のとおり。**どちらも `isActive` を同じように倒すので認証への効果は変わらない**が、後の判断材料として区別する。
+
+| 状況                             | `status`    | `deleted_at` | なぜ区別するか                                                             |
+| -------------------------------- | ----------- | ------------ | -------------------------------------------------------------------------- |
+| 利用者本人からの「削除」依頼     | `deleted`   | 立てる       | §11.6 の保持期間の方針が決まったとき、対象になるのはこちらだけ             |
+| 侵害の疑いによる緊急停止（§5.2） | `suspended` | NULL のまま  | 本人に返す前提の一時停止。復帰が前提なので削除の対象に混ぜない             |
+| 規約違反による BAN               | `suspended` | NULL のまま  | 再登録を防ぐために行を残すのが目的。個人情報を落とす対象に混ぜてはならない |
+
+### 11.2 手順
+
+セルフサービスの削除 API は存在しない（`PATCH /api/me` も `displayName` / `username` しか受け付けない）。**現時点では運用者が手で実行する。**
+
+#### ステップ 1 — 本人確認を行う
+
+§5.2 手順 9 と同等。凍結は 1 行の UPDATE で取り消せるが（§11.5）、**なりすましによる凍結は、その間ずっと正規の利用者を締め出す。** 可用性への攻撃として成立する。
+
+#### ステップ 2 — ブックマークを取り、現在の状態を記録する
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 time-travel info u18-identity          # 出力を記録に残す（§12.2）
+npx wrangler d1 execute u18-identity --remote --command "
+select id, username, status, email_verified,
+       datetime(created_at/1000, 'unixepoch') as created_at,
+       datetime(deleted_at/1000, 'unixepoch') as deleted_at
+from users where lower(primary_email) = lower('<メールアドレス>');
+"
+```
+
+#### ステップ 3 — 凍結する
+
+```bash
+npx wrangler d1 execute u18-identity --remote --command "
+update users
+set status = 'deleted', deleted_at = unixepoch() * 1000, updated_at = unixepoch() * 1000
+where id = '<USER_ID>' and deleted_at is null;
+"
+```
+
+**`deleted_at is null` を条件に残す理由**: 二重実行で `deleted_at` が上書きされると、保持期間の起点が後ろへずれる。保持期間の方針が決まったとき（§11.6）、この列が起点になる。
+
+時刻は epoch **ミリ秒**。`unixepoch()` をそのまま入れると 1970 年になり、`deleted_at` が過去になるので保持期間の判定が即座に満了扱いになる（付録 B）。
+
+#### ステップ 4 — セッションを一括失効させる
+
+`status` を倒した時点で `GetSessionUseCase` が全セッションを拒否するようになるが（`user.isActive` を毎回確認している）、**行の状態も合わせておく。** 揃えておかないと、凍結を解除した瞬間に古いセッションが一斉に生き返る。
+
+```bash
+npx wrangler d1 execute u18-identity --remote --command "
+select count(*) from sessions where user_id = '<USER_ID>' and revoked_at is null;
+"
+npx wrangler d1 execute u18-identity --remote --command "
+update sessions set revoked_at = unixepoch() * 1000
+where user_id = '<USER_ID>' and revoked_at is null;
+"
+```
+
+**一括 UPDATE の前に同じ `where` で `count(*)` を取ること**（付録 B 規則 5）。件数が想定と桁違いなら `user_id` を取り違えている。
+
+#### ステップ 5 — 同意・トークン・未消費のコードを潰す
+
+§5.2 の手順 4・5・6 と同じ SQL をそのまま実行する。重複して書かない —— 同じ SQL が 2 箇所にあると、片方だけが直される。
+
+**`oauth_grants.revoked_at` を立てても `oauth_tokens` は自動失効しない。** 外部キーの `onDelete: cascade` は行の削除にしか効かず、`revoked_at` の更新には連動しない。両方を明示的に実行すること。
+
+#### ステップ 6 — NFC カードを止める
+
+> **これは #92 で NFC が入ってから必要になった手順で、§7.1 には書かれていない。**
+
+`nfc_cards.owner_user_id` には**外部キーが無い**（`u18-nfc` は別 D1 なので張れない。`packages/nfc-db/src/schema/cards.ts`）。そして `ResolveCardUseCase` は**所有者の生死を見ない** —— 1 タップごとに Identity へ RPC を飛ばすと NFC 側の負荷が Identity の障害になるため、意図的にそうしてある。
+
+**結果として、アカウントを凍結しても、その人の NFC カードはタップされ続け、遷移先へリダイレクトし続ける。** 止めるには NFC 側を明示的に倒すしかない。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 execute u18-nfc --remote --command "
+select id, status, target_url, datetime(claimed_at/1000, 'unixepoch') as claimed_at
+from nfc_cards where owner_user_id = '<USER_ID>';
+"
+npx wrangler d1 execute u18-nfc --remote --command "
+update nfc_cards
+set status = 'disabled', disabled_at = unixepoch() * 1000,
+    disabled_reason = 'ops', updated_at = unixepoch() * 1000
+where owner_user_id = '<USER_ID>' and status <> 'disabled';
+"
+```
+
+NFC 側の証跡は `audit_logs` ではなく `nfc_card_events` に入る（別 D1 なので当然だが、**インシデント調査で片方しか見ない事故が起きやすい**）。手で足す場合は ID 接頭辞が `nev_`、`created_at` はここでも DEFAULT 無しの NOT NULL である。
+
+```bash
+npx wrangler d1 execute u18-nfc --remote --command "
+insert into nfc_card_events (id, card_id, event, actor_user_id, metadata, created_at)
+select 'nev_' || lower(hex(randomblob(16))), id, 'card.disabled', null,
+       json_object('reason', 'owner_account_disabled'), unixepoch() * 1000
+from nfc_cards where owner_user_id = '<USER_ID>';
+"
+```
+
+**無効化は片道である。** `DisableCardUseCase` の設計上、所有者は自分で戻せない（紛失対策としての意味を保つため）。誤って止めた場合の復帰は §11.5 に含めてある。
+
+#### ステップ 7 — Passkey は、この時点では消さない
+
+> **§7.1 手順 6 は「論理削除の猶予期間を待たずに消してよい」としている。本節はそうしない。**
+>
+> §7.1 のその手順は**物理削除を前提にした流れの一部**として書かれたものである。決定 7 で物理削除をしないと決めた以上、「どうせ後で消える行だから先に消してよい」という前提が無くなっている。
+>
+> **凍結は 1 行の UPDATE で取り消せるが、`delete from passkeys` は取り消せない**（Time Travel の 30 日窓の中でしか戻せず、戻すと他の全テーブルも巻き戻る。§12.4）。誤凍結や撤回の申し出が現実に起きる以上、取り消せる操作と取り消せない操作を同時に実行する理由は無い。
+
+猶予は **30 日**とする。Time Travel の窓（§12.2）と揃えてあり、「戻せる期間」と「戻す手段がある期間」が一致する。
+
+30 日経過後:
+
+```bash
+npx wrangler d1 execute u18-identity --remote --command "
+select u.id, datetime(u.deleted_at/1000, 'unixepoch') as deleted_at,
+       (select count(*) from passkeys p where p.user_id = u.id) as passkeys
+from users u
+where u.status = 'deleted' and u.deleted_at is not null
+  and u.deleted_at < (unixepoch() - 30 * 86400) * 1000;
+"
+npx wrangler d1 execute u18-identity --remote --command "
+delete from passkeys where user_id = '<USER_ID>';
+delete from webauthn_challenges where user_id = '<USER_ID>';
+delete from email_challenges where user_id = '<USER_ID>';
+"
+```
+
+`status = 'deleted'` を条件に入れているのは、**`suspended`（BAN・緊急停止）を巻き込まないため**である。§11.1 の表のとおり、`deleted_at` が立つのは本人依頼の削除だけだが、将来この列を別の用途に使う実装が入ったときに備えて `status` も見ておく。
+
+#### ステップ 8 — 記録する
+
+§10.6 の形式で `ops.account.disabled` を 1 行入れる。**依頼者・確認方法・実行者・実行日時**を残す。
+
+### 11.3 凍結後に何が起きるか
+
+| 操作                         | 結果                                                                       | どこで止まるか                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 既存セッションでのアクセス   | 即座に拒否される                                                           | `GetSessionUseCase` が毎回 `user.isActive` を見る                                       |
+| メール OTP の送信要求        | **メールが届かない。画面は成功と区別が付かない**                           | `StartEmailOtpUseCase` の `shouldSend`（§10.2）                                         |
+| Passkey でのログイン         | 401。`audit_logs` に `passkey.login.verify` / `user_not_active`            | `PasskeyLoginVerifyUseCase`                                                             |
+| セッション発行（最後の砦）   | `forbidden`。`audit_logs` に `session.issue` / failure / `user_not_active` | `IssueSessionUseCase`                                                                   |
+| OAuth のトークン発行         | セッションが無いので認可フローに入れない                                   | 同上                                                                                    |
+| 同じメールアドレスでの再登録 | **できない**                                                               | `users_primary_email_unique`（`lower(primary_email)` の**無条件** UNIQUE インデックス） |
+| NFC カードのタップ           | **止まらない。明示的に倒すまでリダイレクトし続ける**                       | §11.2 ステップ 6                                                                        |
+
+**`IssueSessionUseCase` の `user_not_active` は多重防御であって、通常は手前で止まる。** 確認した事実として、メール OTP 経路（`VerifyEmailOtpUseCase`）も Passkey 経路（`PasskeyLoginVerifyUseCase`）も、`IssueSessionUseCase` を呼ぶ前に自分で `isActive` を見ている。`session.issue` / `user_not_active` の行が `audit_logs` に出たら、**どちらのチェックも通り抜けた呼び出し元がいる**ということなので、新しい認証経路の実装ミスを疑うこと。
+
+**メールアドレスが解放されないことは、利用者から必ず問い合わせが来る。** 「削除したのに同じメールで作り直せない」は決定 7 の意図した結果であり、不具合ではない。応対の文言を決めておくこと（§11.6）。
+
+### 11.4 凍結されたアカウントのデータは、どこまで残るか
+
+残る（凍結では消えない）もの:
+
+- `users` の行すべて —— `username`、`display_name`、`primary_email`
+- `user_emails` の行
+- `passkeys`（§11.2 ステップ 7 の 30 日猶予を過ぎるまで）
+- `audit_logs` の `user_id` / `ip_hash` / `user_agent` —— **180 日の保持期間（§7.0）に従って消えるが、`users` の凍結とは無関係に動く**
+- `nfc_cards.owner_user_id` —— 別 D1 なので Identity 側の操作では一切変化しない
+
+自動で消えるもの:
+
+- `sessions` —— 失効から 30 日後に Cron が消す（§7.0）
+- `email_challenges` —— 1 時間（**平文のメールアドレスを持つ唯一のテーブル**）
+- `webauthn_challenges` / `oauth_authorization_codes` —— 24 時間
+
+**`users` は §7.0 の自動削除の対象外である**（`RetentionPolicy` に `users` のエントリが無い）。これは意図的で、保持期間が決まっていないのに自動削除の経路を先に作ると、方針より先に実装が既成事実になるためである。
+
+### 11.5 誤って凍結した場合の復帰手順
+
+**凍結の取り消しは可逆である。** ステップ 7 の Passkey 削除を実行していない限り、元の状態に戻せる。Time Travel による巻き戻しは**使わない**（他の全テーブルを巻き込むため。§12.4）。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+# 1. 状態を戻す。deleted_at も必ず NULL に戻す。
+#    status だけ戻すと isActive は false のままで、症状が変わらない。
+npx wrangler d1 execute u18-identity --remote --command "
+update users
+set status = 'active', deleted_at = null, updated_at = unixepoch() * 1000
+where id = '<USER_ID>';
+"
+# 2. 戻ったことを確認する。
+npx wrangler d1 execute u18-identity --remote --command "
+select id, status, deleted_at from users where id = '<USER_ID>';
+"
+```
+
+**セッションは戻さない。** ステップ 4 で失効させたセッションは失効したままにする。「誤凍結だった」は「それらのセッションが安全だった」を意味しない（凍結の理由が侵害の疑いだった可能性がある）。利用者にはログインし直してもらう。
+
+**OAuth の同意（`oauth_grants`）も戻さない。** 同じ理由で、再同意してもらうほうが安全である。復帰直後に各アプリで同意画面が出ることを、利用者に先に伝えること。
+
+NFC カードを止めていた場合（ステップ 6 を実行済み）:
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 execute u18-nfc --remote --command "
+update nfc_cards
+set status = 'active', disabled_at = null, disabled_reason = null, updated_at = unixepoch() * 1000
+where owner_user_id = '<USER_ID>' and status = 'disabled'
+  and disabled_reason = 'ops' and owner_user_id is not null and target_url is not null;
+"
+```
+
+**`disabled_reason = 'ops'` を条件に入れること。** これを外すと、**利用者が自分で「紛失した」として止めたカード（`reason = 'lost'`）まで復活させてしまう。** 紛失報告を無効化する操作であり、拾った人間の手でリダイレクトが生きる。`target_url is not null` も必須で、未設定のカードを `active` にすると `isResolvable()` の前提が崩れる（解決時に `card_not_found` へ落ちるので実害は出ないが、状態として嘘になる）。
+
+**復帰させたら `ops.account.reactivated` を記録する**（§10.6）。凍結と復帰が対で残っていないと、あとで「この利用者は一度凍結されている」という事実だけが見えて理由が辿れない。
+
+### 11.6 未解決の論点 — 「削除しました」と言えるか
+
+**これは本節で解決していない。判断待ちとして記録する。**
+
+#### 問題
+
+仕様書 §9 Privacy は「情報公開範囲、削除・保持期間を明示」を要求している。一方、決定 7 により凍結アカウントは物理削除されず、**凍結アカウントの保持期間はまだ決まっていない**（仕様書 §14.2 未決定 2）。§7.0 の自動削除（#43）は `users` を意図的に対象外にしている。
+
+つまり現状は、**利用者に「削除しました」と伝えながら、氏名相当（`username` / `display_name`）とメールアドレスを無期限に保持する**状態である。この状態のまま公開することはできない。
+
+#### どちらかが要る
+
+**(a) 凍結から N 日後に個人情報を落とす経路を作る**
+
+行は残したまま、個人情報だけをトゥームストーン化する。再登録防止（決定 7 の根拠の 1 つ）はメールアドレスのハッシュを別列に持てば維持できるが、**その列は現在のスキーマに存在しない。** 実装を伴う。
+
+落とす対象: `users.username` / `users.display_name` / `users.primary_email` / `user_emails.email`、および `audit_logs` の `user_id` / `ip_hash` / `user_agent`。
+
+**最後の 1 つは監査証跡そのものを失う操作である。** `audit_logs.user_id` は外部キーではない `text` 列で、ユーザーを消しても証跡が残るよう意図的にそうしてある（`packages/db/src/schema/audit.ts`）。「削除要求への対応」と「セキュリティ証跡の保全」は正面から衝突しており、どちらを取るかは本書が決められる範囲を超えている。
+
+**(b) 利用者への表示を「削除」ではなく「無効化」と正確に伝える**
+
+UI と問い合わせ応対の文言を変える。実装は要らないが、**「アカウントを削除する」というボタンを置けなくなる。** 併せて、メールアドレスが解放されないこと（§11.3）も明示する必要がある。
+
+#### 現時点の運用
+
+**決まるまでは (b) に寄せて応対すること。** つまり、利用者には「アカウントを無効化し、ログインできない状態にした」と伝え、「データを消した」とは**言わない**。既に「削除」と伝えてしまった利用者がいる場合は、方針決定後に訂正の連絡が要る。記録を §10.6 の形で残しておくこと。
+
+この判断は #27 / #51 / #43 と仕様書 §14.2 の未決定 2 に紐づく。**公開前に決着させる必要がある**ので、§12.6 のチェックリストに入れてある。
+
+---
+
+## 12. バックアップと復旧の運用（#27）
+
+> **§6 を置き換えるものではない。** §6 は D1 の保護手段（Time Travel / エクスポート）と復旧リハーサルの手順を定めている。本節はそこに、**#92 で D1 が 2 つになったこと**、**Time Travel について実際に確認した事実と確認できなかった事実の区別**、**D1 以外に失うと困るもの**を足す。
+
+### 12.1 守る対象は 3 つある
+
+| 対象              | 保護手段                                     | 失ったときに起きること                                            |
+| ----------------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| D1 `u18-identity` | Time Travel（30 日）+ `wrangler d1 export`   | 全ユーザーのログイン不能。OIDC を利用する全サービスが同時に止まる |
+| D1 `u18-nfc`      | 同上（**別データベースなので別操作が要る**） | NFC カードが解決しなくなる。Identity は無事なのでログインは通る   |
+| Workers Secret    | **何も無い。読み出す手段が存在しない**       | §12.5                                                             |
+
+**D1 が 2 つになったのは #92 からである。** `u18-nfc` は `apps/nfc-worker/wrangler.jsonc` の `NFC_DB` バインディングが指す独立したデータベースで、`u18-identity` とは別のマイグレーションディレクトリ（`packages/nfc-db/drizzle`）を持つ。
+
+**§6.2 / §6.3 / §6.4 の手順は `u18-identity` しか対象にしていない。** そのまま実行すると NFC 側が保護されない。本節のコマンドは両方を回す形で書いてある。
+
+```bash
+# 両方のエクスポート（§6.3 の手順を 2 DB へ広げたもの）
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 export u18-identity --remote \
+  --output "/secure/backups/u18-identity-$(date -u +%Y%m%dT%H%M%SZ).sql"
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 export u18-nfc --remote \
+  --output "/secure/backups/u18-nfc-$(date -u +%Y%m%dT%H%M%SZ).sql"
+```
+
+**2 つのエクスポートは、できるだけ近い時刻に取ること。** 後述のとおり 2 つの DB の間に整合を保証する仕組みが無いため、取得時刻が離れるほど復元後のずれが大きくなる。
+
+> `u18-nfc` のダンプの機密性は `u18-identity` より低いが、**ゼロではない。** `nfc_cards.owner_user_id` は Identity の `sub` そのもので、`target_url` と組み合わせると「誰がどこへのリンクを配っているか」が分かる。§6.3「エクスポートファイルの取り扱い」の 5 項目は両方に適用する。
+
+### 12.2 D1 Time Travel — 確認した事実
+
+以下は **Cloudflare の公式ドキュメントと、リポジトリに入っている wrangler 4.152.0 の `--help` 出力**で確認した内容である。**実際の復元は実行していない**（§12.6）。
+
+#### 確認できた事実
+
+| 項目                      | 内容                                                                                                       | 確認方法                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| 保持期間                  | **Workers Paid で 30 日、Workers Free で 7 日**                                                            | Cloudflare docs（Time Travel / D1 limits）          |
+| 有効化                    | 自動。設定も追加費用も不要                                                                                 | Cloudflare docs                                     |
+| サブコマンド              | `info` と `restore` の **2 つだけ**                                                                        | `wrangler d1 time-travel --help`                    |
+| `info` のオプション       | `--timestamp`（Unix 秒 または RFC3339）、`--json`                                                          | `wrangler d1 time-travel info --help`               |
+| `restore` のオプション    | `--bookmark`、`--timestamp`（**直近 30 日以内**）、`--json`                                                | `wrangler d1 time-travel restore --help`            |
+| 対象                      | **リモート D1 のみ。** `--remote` / `--local` フラグが無く、ローカルの miniflare D1 には使えない           | 同上（"This command acts on remote D1 Databases."） |
+| 復元の性質                | **その場で上書きする（in-place）。** 新しい DB は作られない                                                | Cloudflare docs                                     |
+| 復元の取り消し            | 復元しても古いブックマークは消えない。復元の出力に**復元前の状態を指すブックマーク**が含まれ、それで戻せる | Cloudflare docs                                     |
+| 実行中のクエリ            | **復元時に進行中のクエリ・トランザクションはキャンセルされ、クライアントにはエラーが返る**                 | Cloudflare docs                                     |
+| 復元の回数制限            | **10 分あたり 10 回まで（DB ごと）**                                                                       | Cloudflare docs（D1 limits）                        |
+| 30 日より前のブックマーク | 復元ポイントとして無効                                                                                     | Cloudflare docs                                     |
+| 複製・fork                | **サポートされていない**（「予定」とされている）                                                           | Cloudflare docs                                     |
+| 旧 alpha DB               | Time Travel 非対応。`wrangler d1 info` の `version` が `production` であることが前提                       | Cloudflare docs                                     |
+
+> **`wrangler d1 time-travel --help` の説明文は "restore, **fork or copy** a database" と書いているが、`fork` / `copy` に相当するサブコマンドは存在しない**（`info` と `restore` だけ）。Cloudflare のドキュメントも複製・fork は未サポートとしている。**「本番を fork してリハーサル用 DB を作る」計画は立てられない。** §6.4 のリハーサルが「別の D1 を作ってエクスポートを流し込む」形になっているのはこのためである。
+
+#### 確認できなかったこと（未確認）
+
+- **復元の所要時間。** ドキュメントに記載が無く、実測もしていない。`u18-identity` / `u18-nfc` の実サイズでどれだけかかるかは不明である。RTO の見積もりはこの数字が出るまで立てられない。
+- **復元中にデータベースが読み書き可能かどうか。** 「進行中のクエリがキャンセルされる」ことは確認できたが、復元が完了するまでの間に新しいクエリが通るのか、エラーになるのかは**未確認**である。復元を本番で実行するなら、ダウンタイムが発生するものとして告知すること。
+- **削除済みデータベースに対して Time Travel が使えるかどうか。** ドキュメントに記載が無い。**`wrangler d1 delete` を「あとで戻せる」と考えないこと。**
+- **復元が `d1_migrations` テーブルをどう扱うか。** `d1_migrations`（wrangler が適用済みマイグレーションを記録する既定のテーブル名。本リポジトリは `migrations_table` を上書きしていない）は DB 内の通常のテーブルなので、復元すれば一緒に巻き戻るはずである。**ただし実際に確認していない。** 復元後は必ず `wrangler d1 migrations list` で状態を見ること（§12.4）。
+- **復元の出力に含まれるブックマークの正確な形式**。ドキュメントは例として `00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683` を挙げているが、これが保証された形式かどうかは記述が無い。**出力はパースせず、そのまま記録に貼ること。**
+
+### 12.3 復元の実行
+
+**ブックマークは危険な操作の直前に取る。** 取り忘れると時刻指定に頼ることになり、戻る先が「おおよそ」になる。
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 time-travel info u18-identity --json | tee -a /secure/ops/bookmarks.log
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 time-travel info u18-nfc --json | tee -a /secure/ops/bookmarks.log
+```
+
+復元:
+
+```bash
+# Identity
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 time-travel restore u18-identity --bookmark <BOOKMARK>
+# NFC
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 time-travel restore u18-nfc --bookmark <BOOKMARK>
+```
+
+**実行前に必ず現在時点のブックマークも取ること。** 復元を取り消したくなったときに要る（復元の出力にも復元前を指すブックマークが含まれるが、出力を取り損ねる事故が起きる。先に `info` を取っておけば二重に保険が効く）。
+
+**時刻指定で戻る場合、どちらの DB にも同じ時刻を渡すこと。** 2 つの DB の間にトランザクションは無く、ブックマークにも対応関係が無い。**同じ時刻を指定しても、2 つの DB が厳密に同じ瞬間へ揃う保証は無い**（ブックマークは DB ごとの書き込み履歴上の点であり、クロックの粒度も未確認である）。これは受け入れるしかないずれで、§12.4 の最後の項目がその帰結である。
+
+### 12.4 復元すると何が壊れるか
+
+§6.2 が「復元によって失われるもの」を列挙している。本節はそこに **#92 以降に増えたもの**と、**見落としやすい連鎖**を足す。
+
+#### (1) 失効させたはずのセッションが復活する
+
+§6.2 が既に指摘しているとおり、これが最も危険である。インシデント対応でセッションを失効させた後に巻き戻すと、**攻撃者のセッションが生き返る。** 復元後は必ず §5.2 の封じ込めをやり直す。
+
+同じことが §11 の凍結にも起きる。**復元時点より後に凍結したアカウントは `status = 'active'` に戻り、ログインできる状態に復活する。** 復元後、`ops.account.disabled` の記録（§10.6）と `users.status` を突き合わせて、凍結がすべて効いているかを確認すること。**その記録自体も `audit_logs` にあるので一緒に巻き戻っている** —— 手元の運用記録（チケット側）と突き合わせるしかない。
+
+#### (2) 署名鍵のメタデータが巻き戻り、全 ID Token の検証が失敗する
+
+**§6.2 に書かれていない、この系に固有の壊れ方である。**
+
+`signing_key_metadata` は D1 のテーブルだが、対になる秘密鍵は **Workers Secret の `SIGNING_KEY_JWK`** にある（§4.1）。Time Travel は D1 しか戻さないので、**鍵ローテーション（§4.2）より前へ巻き戻すと、DB は旧 kid の行しか持たないのに Secret は新しい秘密鍵のまま**になる。
+
+症状: ID Token のヘッダが新しい `kid` を名乗るのに、`/.well-known/jwks.json` にその kid が無い。**全 RP で ID Token の検証が失敗する。** §4.1 の制約 3 で挙げた「DB と Secret の不一致」が、ローテーションの操作ミスではなく復元によって起きる形である。
+
+復元後の確認（§4.2 ステップ 6 と同じ）:
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 execute u18-identity --remote --command "
+select kid, datetime(active_from/1000, 'unixepoch') as active_from,
+       datetime(active_until/1000, 'unixepoch') as active_until,
+       datetime(retires_at/1000, 'unixepoch') as retires_at
+from signing_key_metadata order by active_from;
+"
+npx wrangler secret list   # SIGNING_KEY_KID が設定されていることだけは分かる（値は見えない）
+curl -s https://<auth-worker-の-URL>/.well-known/jwks.json | jq '.keys[].kid'
+```
+
+**`wrangler secret list` では値が見えない**ので、一致の確認は「ID Token を 1 本発行してヘッダの `kid` を見る」か「現役の kid を確かめたうえで Secret を入れ直す」しかない。迷ったら**入れ直すほうが速い** —— §4.2 ステップ 4 の 2 コマンドで、鍵ペアを生成し直すところからやる。
+
+**逆方向（鍵漏洩対応の後に巻き戻す）はさらに悪い。** §5.1 で JWKS から外したはずの漏洩鍵が、`signing_key_metadata` に復活して再び公開される。偽造トークンがまた通るようになる。**鍵漏洩対応の後は、Time Travel でその時点より前へ戻さないこと。** どうしても戻す必要があるなら、復元の直後に §5.1 の手順 3（漏洩 kid の `retires_at` を過去にして DELETE）をもう一度実行する。
+
+#### (3) マイグレーション状態が巻き戻る
+
+`d1_migrations` は DB 内の通常のテーブルなので、復元すれば一緒に戻る**はずである（未確認、§12.2）**。マイグレーション適用より前へ戻すと、スキーマと `d1_migrations` が揃って巻き戻るので整合はするが、**デプロイ済みのコードは新しいスキーマを前提にしている。** 症状は `no such column` 系のエラーである。
+
+復元後に必ず確認する:
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 migrations list u18-identity --remote
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 migrations list u18-nfc --remote
+```
+
+未適用のものが出たら、コードを戻す（`wrangler rollback`）か、マイグレーションを再適用するかを選ぶ。**§3.1.3 の「マイグレーションはコードより先」は復元後にも効く。**
+
+#### (4) 監査ログが欠ける
+
+復元時点以降の `audit_logs` が消える。**インシデント対応の最中に復元すると、その対応自体の証跡が消える。** §5 の共通初動が「対応中の DB 操作はすべて実行文ごと記録に残す」としているのは、DB の外に記録を持つためである。復元を伴う対応では、この手元の記録が唯一の証跡になる。
+
+#### (5) 2 つの D1 がずれ、`nfc_cards.owner_user_id` が存在しないユーザーを指す
+
+**#92 以降に生じた壊れ方である。**
+
+`u18-identity` と `u18-nfc` は別のデータベースで、**外部キーで結べない**（`packages/nfc-db/src/schema/cards.ts` に理由が書いてある）。片方だけを巻き戻すと、次の 2 つが起きうる。
+
+| 巻き戻した側        | 起きること                                                                                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `u18-identity` だけ | `nfc_cards.owner_user_id` が、**巻き戻しで消えたユーザーを指す**。そのカードは誰にも管理できない。所有者がログインできない以上、変更操作にも到達できず、`release` も `disable` も通らない |
+| `u18-nfc` だけ      | 紐づけが巻き戻り、**既に手放した（`release` した）カードが元の所有者のものとして復活する**。あるいは claim 前に戻り、紐づけコードが再び有効になる                                         |
+
+**どちらも DB は正常に動き続ける。** 不整合を検出する制約が無いので、エラーも出ない。
+
+> **両方を同じ時刻へ戻しても、ずれは完全には消えない**（§12.3）。片方だけ戻すよりは遥かにましというだけである。
+
+復元後に不整合を洗い出す。**2 つの DB をまたぐ JOIN は書けない**ので、片方から ID を取り出してもう片方で照合する 2 段階になる。
+
+```bash
+# 1. NFC 側で、所有者が設定されているカードの owner_user_id を集める
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
+npx wrangler d1 execute u18-nfc --remote --json --command "
+select distinct owner_user_id from nfc_cards where owner_user_id is not null;
+" > /tmp/u18-nfc-owners.json
+
+# 2. Identity 側で、その ID が実在し active かを確認する
+#    （件数が多い場合は in (...) を分割する。付録 B 規則 5 と同じ考え方で、
+#     まず count(*) を取ってから本体を流す）
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+npx wrangler d1 execute u18-identity --remote --command "
+select id, status from users where id in ('<ID1>', '<ID2>', ...);
+"
+```
+
+返ってこなかった ID が「存在しないユーザーを指しているカード」である。**自動で直す経路は無い。** 対応は 2 つしかない。
+
+1. 該当カードを `status = 'disabled'`、`disabled_reason = 'ops'` にして止める（§11.2 ステップ 6 の SQL）。所有者を復帰させられる見込みが無い場合。
+2. `owner_user_id = null`、`status = 'issued'`、`target_url = null`、`claim_code_hash = null` に戻して未紐づけへ差し戻す。**カードを回収できている場合に限る。** 回収していないのに `issued` へ戻すと、そのカードを持っている人間が claim できる状態になる。
+
+**この照合を自動化する仕組みは無く、定期的に回す Cron も無い。** 復元を行ったときの手順として本節に書いてあるだけである。整合チェックの常設は残件とする（§12.6）。
+
+### 12.5 Workers Secret は Time Travel の対象外
+
+**Secret のバックアップ手段は存在しない。確認した事実として、`wrangler secret` のサブコマンドは `put` / `delete` / `list` / `bulk` の 4 つで、値を読み出す `get` に相当するものは無い**（`wrangler secret --help`、wrangler 4.152.0）。`wrangler secret list` が返すのは名前だけである。
+
+したがって **Secret の正本は Cloudflare の中にしか無く、そこから取り出せない。** 手元に控えが無ければ、失われた時点で復元不能である。
+
+| Secret            | 失うと何が起きるか                                                                                                                                                                                                                                                                               | 回復できるか                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `SIGNING_KEY_JWK` | ID Token に署名できなくなる。`SigningKeyProvider.getActiveSigningKey()` は `UseCaseResult` ではなく **throw する**ので、トークン発行経路が落ちる（§4 / `architecture.md` §4.1）。**既存のブラウザセッションは壊れない** —— セッション検証は `sessions.token_hash` だけを見ており署名鍵を使わない | **できる。** §4.2 の手順で新しい鍵へローテーションする。利用者の再ログインは不要。RP 側の JWKS キャッシュが切れるまで検証失敗が出る |
+| `SIGNING_KEY_KID` | `SIGNING_KEY_JWK` と不一致になり、全 ID Token が RP 側で検証不能になる                                                                                                                                                                                                                           | **できる。** 上と同じ手順で揃え直す                                                                                                 |
+| `IP_HASH_PEPPER`  | **過去の `ip_hash` と新しい `ip_hash` が永久に照合できなくなる。** 同じ IP からのアクセスかどうかが分からなくなり、§5.2 の侵害調査とセッション一覧 UI の継続性が失われる                                                                                                                         | **できない（過去分は）。** pepper を再現する手段が無く、hash から IP も戻せない                                                     |
+
+**`IP_HASH_PEPPER` を失っても認証は止まらない。** 確認した事実として、`ipHash` はコード中で**書き込みにしか使われていない** —— `IssueSessionUseCase` が `sessions.ip_hash` を書き、`AuditLogger` が `audit_logs.ip_hash` を書くだけで、**照合・比較に使っている箇所は無い**（`apps/auth-worker/src` 全体を確認）。新しい pepper を設定すれば、以後のログインは正常に動く。失われるのは過去との連続性だけである。
+
+**ただし新しい pepper を入れずに非 development 環境を起動すると、全リクエストが 500 になる**（`container.ts` のハードフェイル。§1.5）。Secret を失ったことに気づくのは、たいていこの形である。
+
+#### Secret の控えをどこに置くか
+
+**未決である。** 控えを持てば「D1 ダンプと pepper が同じ場所に揃う」というリスクが生まれ（§6.3 の取り扱い規則 3）、持たなければ `IP_HASH_PEPPER` の喪失が不可逆になる。現時点で言えるのは次のとおり。
+
+- **`SIGNING_KEY_JWK` / `SIGNING_KEY_KID` の控えは持たないほうがよい。** 失っても §4.2 でローテーションできるのに対し、控えの存在そのものが §5.1 の漏洩経路を 1 つ増やす。§1.4 の blast radius 表で**最大**とされている値である。
+- **`IP_HASH_PEPPER` は控えを持つ価値がある。** 失うと過去分が不可逆に失われ、再生成では取り戻せない。保管場所は **D1 のエクスポートとは物理的に別**であること（揃うと IPv4 空間の総当たりで IP が復元できる。§1.4）。
+- 控えを持つなら、**誰がアクセスできるかを Cloudflare アカウントのアクセス権と同じかそれ以下にする**こと。広げると、Cloudflare に入れない人間が本番の秘密を読める状態になる。
+
+### 12.6 公開前に済ませること
+
+§6.4 のリハーサルチェックリストに加えて、**本節の内容について実施していない項目**を挙げる。すべて未了である。
+
+- [ ] **Time Travel の復元を一度実行して検証する。** `u18-identity` と `u18-nfc` の**両方**で行う。本番 DB では行わない（§6.4 のリハーサル用 DB を使う）。少なくとも次を実測して §12.2 の「未確認」欄を埋める:
+  - [ ] 復元の所要時間
+  - [ ] 復元中にデータベースへ読み書きできるか
+  - [ ] 復元の出力に含まれるブックマークで、復元を取り消せるか
+  - [ ] 復元後に `d1_migrations` の内容が巻き戻っているか
+- [ ] **2 つの D1 を同じ時刻へ復元したときのずれを実測する。** §12.3 で「保証は無い」と書いた点を、実際にどの程度ずれるかの数字に置き換える
+- [ ] **§12.4 (2) の署名鍵の不整合を、リハーサル用 DB で一度再現する。** 鍵ローテーションより前へ巻き戻し、JWKS に kid が無くなることを確認する
+- [ ] `u18-nfc` を §6.3 のエクスポート運用と §6.4 のリハーサルの対象に加える（**現在 §6 は `u18-identity` しか見ていない**）
+- [ ] **凍結アカウントの保持期間を決める**（§11.6）。(a) 個人情報を落とす経路を作るか、(b) 表示を「無効化」に改めるか。仕様書 §14.2 未決定 2
+- [ ] **メールアドレスへのアクセスを失った利用者の審査手順を決める**（§10.4 の 4 項目）。承認者の人数、本人確認の材料、記録の所在、待機期間
+- [ ] **#83（ロールの実装）が入るまで、アプリ上の管理者アカウントを作らない**ことを周知する（§10.5）。入った後に §10.5 へ管理者復旧の手順を追記する
+- [ ] 2 つの D1 の整合（`nfc_cards.owner_user_id` の宛先）を定期的に照合する仕組みを用意するか、照合しないことを受容するリスクとして記録する（§12.4 (5)）
+- [ ] `IP_HASH_PEPPER` の控えを持つかどうかを決める（§12.5）
 
 ---
 
