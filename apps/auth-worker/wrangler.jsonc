@@ -44,6 +44,27 @@
   // Email Routing の同名バインディングとは別物で、任意の宛先へ送れる。
   // `wrangler dev` では既定でシミュレートされ、ログ出力のみで実送信しない。
   // 実送信したい場合だけ "remote": true を足す（実在の宛先に届くので注意）。
+  // 制限キー（`allowed_destination_addresses` 等）を**意図的に置かない**。
+  // 制限しないことが「任意の宛先へ送る」設定で、公式ドキュメントの最初の例もこの形。
+  //
+  // ## 任意の宛先へ送るには 2 つ前提がある
+  //
+  // 1. **送信ドメインの onboarding。** 済ませる前は「検証済み宛先」にしか送れない。
+  // 2. **Workers Paid プラン。** Free では outbound sending が "Not available"。
+  //    月 3,000 通まで込み、超過は $0.35 / 1,000 通。
+  //    検証済み宛先への送信はどのプランでも無料で quota にも乗らないため、
+  //    **Free のまま開発を続けると本番で初めて落ちる。**
+  //
+  // ## エラーコードの罠（実際に踏んだ）
+  //
+  // onboarding 前に送ると **`E_RECIPIENT_NOT_ALLOWED`** が返る。しかし公式ドキュメントは
+  // このコードを「宛先が `allowed_destination_addresses` に無い」と説明している。
+  // **我々はそのキーを設定していないので、文書どおりならこのコードは出ないはず**で、
+  // 「存在しない allowlist」を探して時間を溶かすことになる。
+  // 未 onboarding 専用の `E_SENDER_DOMAIN_NOT_AVAILABLE` が別にあるのに使い分けられていない。
+  //
+  // このコードを見たら、まず **Email Sending が有効化され、ドメインが
+  // onboarding 済みか**を疑うこと（ダッシュボードの Email Service → Sending）。
   "send_email": [{ "name": "EMAIL" }],
 
   // レート制限（#21、仕様書 9 Abuse）。
@@ -122,6 +143,7 @@
           "migrations_dir": "../../packages/db/drizzle",
         },
       ],
+      // 既定 env 側のコメントを参照（onboarding と Workers Paid が前提）。
       "send_email": [{ "name": "EMAIL" }],
 
       // ratelimits も継承されない（wrangler のスキーマに明記がある）。
