@@ -76,13 +76,48 @@ Workers ランタイム上でテストを走らせている以上、vitest 側�
 
 日付を進めたいときは、`@cloudflare/vitest-pool-workers`（と間接依存の miniflare）を
 先に上げて、同梱 workerd がその日付を知っている状態にしてから上げる。
-両 Worker の `wrangler.jsonc` に同じ趣旨のコメントを置いてある。
+3 つの Worker すべての `wrangler.jsonc` に同じ趣旨のコメントを置いてある。
+
+### テストと deploy は別の workerd で動いている（#108）
+
+上の制約の出どころをもう一段たどると、**lockfile には wrangler・miniflare・
+workerd がそれぞれ 2 つずつ入っている**ことが分かる。
+
+```
+@cloudflare/vitest-pool-workers@0.23.0        ← テストが使う
+  ├─ miniflare@5.20260815.0-alpha             ← alpha
+  └─ wrangler@4.124.0 └─ workerd@1.20260815.1 ← 2026-08-15 ビルド
+
+apps/*/devDependencies
+  └─ wrangler@4.152.0                          ← dev / deploy が使う
+       ├─ miniflare@5.20261019.2-beta          ← beta
+       └─ workerd@1.20261019.1                 ← 2026-10-19 ビルド
+```
+
+**`pnpm test` は 8/15 ビルドの workerd で走り、`wrangler dev` と
+`wrangler deploy` は 10/19 ビルドの workerd を使う。** `compatibility_date` を
+縛っているのは古いほう（pool-workers 側）なので、`wrangler` だけ上げても
+日付は進められない。
+
+あわせて 2 点:
+
+- **どちらの miniflare も prerelease**（alpha / beta）である。安定版と違って
+  予告なく挙動が変わりうるので、テストが緑であることの意味がその分弱い。
+- `pnpm audit` が報告する dev-only の `zod` の脆弱性は、pool-workers 配下の
+  `zod@4.4.3` である。**pool-workers を上げない限り消えない。** `ci.yml` が
+  `--prod` を blocking、dev を informational に分けているのはこのため。
+
+この絡まりを解くには pool-workers 側を動かす必要があり、そこが
+`compatibility_date` の制約に当たる。調査は #108。
 
 ### その他
 
-- `@cloudflare/workers-types@5.20261023.1` は `pnpm-workspace.yaml` の
+- `@cloudflare/workers-types` は `pnpm-workspace.yaml` の
   `minimumReleaseAgeExclude` に入れてある。Cloudflare のランタイム型は
-  `compatibility_date` に追従して頻繁に出るため、公開直後でも取得できるようにしている。
+  `compatibility_date` に追従して頻繁に出るため、公開直後でも取得できるようにする意図。
+  ただし **`minimumReleaseAge` 本体がまだ設定されていないので、現状この除外は
+  何も除外していない**（#101）。意図と実態がずれている状態で、
+  `minimumReleaseAge` を有効にするのは依存ツリーが成熟してから。
 - `allowBuilds` は `esbuild` と `workerd` のみ。ネイティブバイナリの取得に
   postinstall が必要なのはこの 2 つだけで、それ以外のビルドスクリプトは実行しない。
 - `packages/config/tsconfig.lib.json`（Worker ではないパッケージ用）は
