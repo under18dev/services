@@ -12,3 +12,7 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Claude Code がサブエージェント用に作る一時 worktree。
+# リポジトリ内に置かれるので、追跡・整形・lint の対象から外す。
+.claude/worktrees/

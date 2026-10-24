@@ -8,6 +8,7 @@ import type {
   RandomTokenGenerator,
   TokenHasher,
 } from "../application/ports/crypto.port";
+import type { EmailChallengeRepository } from "../application/ports/email-challenge.repository";
 import type { EmailSender } from "../application/ports/email-sender.port";
 import type { DatabaseProbe } from "../application/ports/health.port";
 import type { SessionRepository } from "../application/ports/session.repository";
@@ -15,6 +16,8 @@ import type { UserRepository } from "../application/ports/user.repository";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
 import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
 import { LogoutUseCase } from "../application/use-cases/logout.use-case";
+import { StartEmailOtpUseCase } from "../application/use-cases/start-email-otp.use-case";
+import { VerifyEmailOtpUseCase } from "../application/use-cases/verify-email-otp.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import {
@@ -28,6 +31,7 @@ import { CloudflareEmailSender } from "../infrastructure/email/cloudflare-email-
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
+import { DrizzleEmailChallengeRepository } from "../infrastructure/persistence/drizzle-email-challenge.repository";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
 import { DrizzleSessionRepository } from "../infrastructure/persistence/drizzle-session.repository";
 import { DrizzleUserRepository } from "../infrastructure/persistence/drizzle-user.repository";
@@ -44,6 +48,7 @@ export type Container = {
   readonly repositories: {
     readonly users: UserRepository;
     readonly sessions: SessionRepository;
+    readonly emailChallenges: EmailChallengeRepository;
   };
   readonly services: {
     readonly hasher: TokenHasher;
@@ -57,6 +62,8 @@ export type Container = {
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
     readonly issueSession: IssueSessionUseCase;
+    readonly startEmailOtp: StartEmailOtpUseCase;
+    readonly verifyEmailOtp: VerifyEmailOtpUseCase;
     readonly logout: LogoutUseCase;
     readonly listSessions: ListSessionsUseCase;
     readonly revokeSession: RevokeSessionUseCase;
@@ -67,6 +74,7 @@ export type ContainerOverrides = Partial<{
   clock: Clock;
   users: UserRepository;
   sessions: SessionRepository;
+  emailChallenges: EmailChallengeRepository;
   audit: AuditLogger;
   email: EmailSender;
   databaseProbe: DatabaseProbe;
@@ -85,6 +93,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const users = overrides.users ?? new DrizzleUserRepository(db);
   const sessions = overrides.sessions ?? new DrizzleSessionRepository(db);
   const audit = overrides.audit ?? new DrizzleAuditLogger(db);
+  const emailChallenges = overrides.emailChallenges ?? new DrizzleEmailChallengeRepository(db);
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
 
   const hasher = new Sha256TokenHasher();
@@ -110,20 +119,38 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   const email = overrides.email ?? createEmailSender(env);
 
   const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const issueSession = new IssueSessionUseCase({
+    users,
+    sessions,
+    hasher,
+    ipHasher,
+    tokens,
+    clock,
+    audit,
+  });
 
   return {
     db,
     clock,
-    repositories: { users, sessions },
+    repositories: { users, sessions, emailChallenges },
     services: { hasher, ipHasher, tokens, comparator, email, audit, databaseProbe },
     useCases: {
       getSession,
-      issueSession: new IssueSessionUseCase({
+      issueSession,
+      startEmailOtp: new StartEmailOtpUseCase({
         users,
-        sessions,
+        challenges: emailChallenges,
+        email,
         hasher,
-        ipHasher,
         tokens,
+        clock,
+        audit,
+      }),
+      verifyEmailOtp: new VerifyEmailOtpUseCase({
+        users,
+        challenges: emailChallenges,
+        issueSession,
+        hasher,
         clock,
         audit,
       }),

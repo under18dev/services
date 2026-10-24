@@ -24,6 +24,7 @@ const STATUS_BY_CODE: Record<string, ContentfulStatusCode> = {
   not_found: 404,
   invalid_input: 400,
   too_many_attempts: 429,
+  invalid_code: 400,
   rate_limited: 429,
 };
 

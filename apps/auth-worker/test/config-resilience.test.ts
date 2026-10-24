@@ -1,6 +1,7 @@
-import { SELF, env } from "cloudflare:test";
+import { SELF, createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createContainer } from "../src/composition/container";
+import { createApp } from "../src/presentation/http/app";
 
 function envWith(overrides: Record<string, unknown>): Env {
   return { ...env, ...overrides } as unknown as Env;
@@ -51,14 +52,26 @@ describe("設定不備の影響範囲", () => {
   });
 
   it("/health と Discovery は設定不備の巻き添えにならない", async () => {
-    // 実環境では env が壊れていても、この 2 つは応答し続ける必要がある。
-    const [health, discovery] = await Promise.all([
-      SELF.fetch("http://localhost/health"),
-      SELF.fetch("http://localhost/.well-known/openid-configuration"),
-    ]);
+    // SELF.fetch は vitest.config.ts の binding 固定の env を使うので、
+    // 壊れた env を注入できない（＝設定不備を再現できない）。
+    // createApp() を直接叩いて env を渡す。
+    const app = createApp();
+    const broken = envWith(brokenProd);
 
-    expect(health.status).toBe(200);
-    expect(discovery.status).toBe(200);
+    const responses = await Promise.all(
+      ["/health", "/.well-known/openid-configuration"].map(async (path) => {
+        const ctx = createExecutionContext();
+        const response = await app.fetch(new Request(`http://localhost${path}`), broken, ctx);
+        await waitOnExecutionContext(ctx);
+        return response;
+      }),
+    );
+
+    for (const response of responses) {
+      // 500 でないこと。/health は D1 に届けば 200、届かなければ 503 を返す。
+      expect(response.status).not.toBe(500);
+    }
+    expect(responses[1]?.status).toBe(200);
   });
 });
 

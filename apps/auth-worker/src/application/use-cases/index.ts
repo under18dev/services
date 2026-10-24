@@ -4,4 +4,6 @@ export * from "./logout.use-case";
 export * from "./list-sessions.use-case";
 export * from "./revoke-session.use-case";
 export * from "./side-effects";
+export * from "./start-email-otp.use-case";
+export * from "./verify-email-otp.use-case";
 export * from "./types";
