@@ -65,7 +65,7 @@
     "RP_NAME": "u18 Identity",
     "WEBAUTHN_ORIGIN": "http://localhost:8787",
     // OTP の送信元。ドメインは Email Service 側で検証済みである必要がある（#33 待ち）。
-    "EMAIL_FROM": "noreply@localhost",
+    "EMAIL_FROM": "no-reply@localhost",
     "ENVIRONMENT": "development",
   },
 
@@ -149,7 +149,7 @@
         "WEBAUTHN_ORIGIN": "https://auth.under18.dev",
         // Cloudflare Email Sending の送信元。このドメインは Cloudflare 側で
         // 検証済みでなければ送信が失敗する（#35）。
-        "EMAIL_FROM": "noreply@under18.dev",
+        "EMAIL_FROM": "no-reply@under18.dev",
         "ENVIRONMENT": "production",
       },
     },
