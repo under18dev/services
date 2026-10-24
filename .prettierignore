@@ -2,6 +2,8 @@ node_modules
 dist
 .wrangler
 packages/db/drizzle
+# drizzle-kit の生成物。整形すると再生成のたびに差分が出る。
+packages/nfc-db/drizzle
 pnpm-lock.yaml
 docs/u18-identity-spec.md
 
