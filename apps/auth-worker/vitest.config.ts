@@ -59,6 +59,8 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
         d1Databases: ["IDENTITY_DB"],
+        // 監査ログの退避先（#43 の残件）。miniflare がローカルの R2 を用意する。
+        r2Buckets: ["ARCHIVE"],
         bindings: {
           TEST_MIGRATIONS: migrations,
           TEST_WRANGLER_JSONC: wranglerSource,

@@ -100,3 +100,38 @@ export const RETENTION_SWEEP_LIMIT = 1_000;
 /** 保持期限を過ぎた行の境界時刻。これより前に用済みになった行が削除対象。 */
 export const retentionCutoff = (now: Date, target: RetentionTarget): Date =>
   new Date(now.getTime() - RetentionPolicy[target]);
+
+/**
+ * 消す前に別ストレージへ退避するテーブル（#43 の残件）。
+ *
+ * ## `audit_logs` だけを退避する
+ *
+ * 180 日を過ぎた監査ログは、消してよいから消しているのではなく、
+ * **D1 に置き続けるコストが見合わないから消している**。侵害の発覚が
+ * 1 年遅れることはあるので、戻せる場所に置いておく価値がある。
+ *
+ * ## 残り 4 つを退避しない理由
+ *
+ * **これらは「消してよいから消している」のではなく、「消さなければ
+ * ならないから消している」。** 退避すると、消したはずの個人情報が
+ * 別の場所に残る。
+ *
+ * - `email_challenges` —— **5 つの中で唯一メールアドレスを平文で持つ。**
+ *   登録すらしていないアドレスが溜まるので 1 時間という最短の保持期間に
+ *   してある（上記）。それを R2 へ写したら、保持期間を 1 時間にした判断が
+ *   丸ごと無意味になる。
+ * - `sessions` —— `ip_hash` と `user_agent` を持つ。pepper が同じうちは
+ *   ハッシュから同一人物を追跡できる。追跡に使える情報の保持期間を
+ *   延ばす判断は、#27 の `ip_hash` 保持期間の議論（ランブック 7.3）と
+ *   セットで決めるべきもので、掃除の実装で勝手に延ばしてよくない。
+ * - `oauth_authorization_codes` / `webauthn_challenges` —— どちらも
+ *   単回消費のランダム値で、期限を過ぎた行に情報価値が無い。
+ *   退避しても誰も読まない。
+ *
+ * **足すときは「なぜ残してよいか」を書くこと。** 「念のため」で足すと、
+ * 消す仕組みを作った意味が無くなる。
+ */
+export const ARCHIVED_TARGETS: readonly RetentionTarget[] = ["audit_logs"];
+
+export const isArchivedTarget = (target: RetentionTarget): boolean =>
+  ARCHIVED_TARGETS.includes(target);

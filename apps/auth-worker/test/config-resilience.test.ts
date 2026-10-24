@@ -51,6 +51,14 @@ describe("設定不備の影響範囲", () => {
     );
   });
 
+  it("退避先が無くても、失敗するのは退避しようとした時点（#43）", async () => {
+    const container = createContainer(envWith({ ...brokenProd, ARCHIVE: undefined }));
+
+    await expect(
+      container.services.archive.put({ target: "audit_logs", rows: [{ id: "aud_1" }] }),
+    ).rejects.toThrow(/not configured/);
+  });
+
   it("IP をハッシュ化しようとした時点で失敗する", async () => {
     const container = createContainer(envWith(brokenProd));
 
