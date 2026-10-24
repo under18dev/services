@@ -39,6 +39,29 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/setup-workspace
+      # worker-configuration.d.ts は `wrangler types` の出力をコミットしている。
+      # クリーンな checkout で codegen 無しに typecheck できる利点があるが、
+      # wrangler.jsonc を変えて再生成を忘れると、実際の binding と食い違った
+      # 型のまま typecheck が緑で通ってしまう。
+      #
+      # tsc より前に置くのは、これが「型が間違っている」失敗であって
+      # ツールの不調ではないため。先に出たほうが読み解きやすい。
+      #
+      # 生成直後の出力をそのまま比較すること。prettier を通すと整形差分が
+      # drift に見える（これらのファイルは .prettierignore に入っている）。
+      # 新規ファイルは untracked として現れるので git diff では検出できない。
+      - name: Check generated Worker types are up to date
+        run: |
+          pnpm cf-typegen >/dev/null
+          drift="$(git status --porcelain -- 'apps/*/worker-configuration.d.ts')"
+          if [ -n "$drift" ]; then
+            echo "::error::worker-configuration.d.ts is out of date. Run 'pnpm cf-typegen' and commit the result -- do not revert the change that caused it."
+            echo "$drift"
+            git --no-pager diff -- 'apps/*/worker-configuration.d.ts'
+            exit 1
+          fi
+          echo "Generated Worker types are up to date."
+
       - name: tsc
         run: pnpm typecheck
 
