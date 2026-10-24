@@ -68,12 +68,33 @@ jobs:
           #
           # 残り 1 件になっても「ほぼ緑」ではない。1 件でもデプロイは止まる。
           # 件数と残っている中身を必ず出し、読んだ人が推測しなくて済むようにする。
-          found="$(grep -c "REPLACE_WITH_" apps/auth-worker/wrangler.jsonc apps/dashboard-worker/wrangler.jsonc 2>/dev/null \
-            | awk -F: '{ total += $2 } END { print total + 0 }')"
+          #
+          # 対象ファイルを列挙しないのは、列挙だと Worker が増えたときに
+          # 足し忘れるから。#92 で nfc-worker が入ったとき、ここは 2 ファイル
+          # しか見ておらず、REPLACE_WITH_NFC_D1_DATABASE_ID が残ったままでも
+          # preflight は緑になる状態だった。走査なら次の Worker も自動で入る。
+          configs=""
+          for cfg in apps/*/wrangler.jsonc; do
+            [ -e "$cfg" ] || continue
+            configs="$configs $cfg"
+          done
+
+          if [ -z "$configs" ]; then
+            # glob が当たらないのは「placeholder が無い」ではなく
+            # 「検査できていない」。緑にせず blocker として扱う。
+            note "No apps/*/wrangler.jsonc found, so the placeholder check never ran. This is a workflow bug, not a clean tree."
+          fi
+
+          found=0
+          for f in $configs; do
+            n="$(grep -c "REPLACE_WITH_" "$f" || true)"
+            found=$((found + n))
+          done
+
           if [ "$found" != "0" ]; then
             note "$found REPLACE_WITH_ placeholder(s) remain in wrangler config:"
-            for f in apps/auth-worker/wrangler.jsonc apps/dashboard-worker/wrangler.jsonc; do
-              hits="$(grep -n "REPLACE_WITH_" "$f" 2>/dev/null || true)"
+            for f in $configs; do
+              hits="$(grep -n "REPLACE_WITH_" "$f" || true)"
               [ -z "$hits" ] && continue
               summary="${summary}
               $f:"
@@ -123,21 +144,56 @@ jobs:
           # 差分が無ければ drizzle-kit は何も書かない（"No schema changes"）。
           # 新規マイグレーションは追跡外ファイルとして現れるので、git diff では
           # 検出できない。untracked も見る git status を使う。
-          drift="$(git status --porcelain -- packages/db/drizzle)"
+          #
+          # packages/db だけでなく packages/*/ を見る。ルートの db:generate は
+          # Identity と NFC の両方を生成するのに、ここが packages/db しか
+          # 見ていないと NFC スキーマの生成漏れを素通しする（#92）。
+          #
+          # 末尾の /* は必須。git の pathspec はワイルドカードを含んだ時点で
+          # 「ディレクトリ前方一致」をやめてフルパスの glob 照合になるため、
+          # 'packages/*/drizzle' は packages/db/drizzle/0000_x.sql に
+          # 一致せず、drift を 1 件も出さないまま緑になる。
+          # 検査範囲を広げたつもりで全滅させうるので、下の自己検査を外さないこと。
+          pathspec='packages/*/drizzle/*'
+
+          tracked="$(git ls-files -- "$pathspec" | wc -l | tr -d ' ')"
+          if [ "$tracked" = "0" ]; then
+            echo "::error::The pathspec '$pathspec' matches no tracked migration files, so the drift check would pass without checking anything. Fix the pathspec, do not relax this guard."
+            exit 1
+          fi
+          echo "Drift pathspec '$pathspec' covers $tracked tracked file(s)."
+
+          drift="$(git status --porcelain -- "$pathspec")"
           if [ -n "$drift" ]; then
-            echo "::error::Drizzle schema and committed migrations are out of sync. Run 'pnpm db:generate' and commit packages/db/drizzle."
+            echo "::error::Drizzle schema and committed migrations are out of sync. Run 'pnpm db:generate' and commit the generated SQL."
             echo "$drift"
             exit 1
           fi
 
       # env.production は d1_databases を再定義するので、--env を付けないと
       # 開発側の binding にマイグレーションを当ててしまう。
-      - name: wrangler d1 migrations apply
+      - name: wrangler d1 migrations apply (Identity)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/auth-worker
         run: pnpm exec wrangler d1 migrations apply u18-identity --remote --env production
+
+      # NFC は Identity とは別の D1（仕様書 4.1 / apps/nfc-worker/wrangler.jsonc）。
+      # binding も migrations_dir も分かれているので、適用も別に実行する。
+      # ここを auth-worker の working-directory から打つと、
+      # migrations_dir が packages/db を指したまま Identity 用の SQL を
+      # NFC の DB に流し込むので、必ず apps/nfc-worker から実行すること。
+      #
+      # 2 つの DB は互いに独立なので順序に意味は無い。ただし Identity が
+      # 適用済みで NFC が失敗する中途半端な状態はありうる（別 DB なので
+      # 巻き戻さず、再実行で先へ進める）。
+      - name: wrangler d1 migrations apply (NFC)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/nfc-worker
+        run: pnpm exec wrangler d1 migrations apply u18-nfc --remote --env production
 
   # auth-worker が先。dashboard-worker は IdentityRPC entrypoint に依存するため、
   # 新しい RPC メソッドを使う dashboard を先に出すと参照先が無い（仕様書 4.4）。
@@ -242,6 +298,30 @@ jobs:
 
           [ "$fail" = "0" ] || exit 1
           echo "Smoke test passed."
+
+  # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
+  # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは
+  # 互いに依存しないため、並列で構わない。
+  #
+  # スモークテストは置いていない。nfc-worker の本番 route は
+  # go.under18.dev/c/* と auth.under18.dev/account/nfc/* の 2 つだけで、
+  # /health はどちらにも当たらず外から叩けないため（#97）。
+  deploy-nfc-worker:
+    name: Deploy nfc-worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [preflight, deploy-auth-worker]
+    if: needs.preflight.outputs.ready == 'true' && needs.deploy-auth-worker.result == 'success'
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+      - name: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/nfc-worker
+        run: pnpm exec wrangler deploy --env production
 
   deploy-dashboard-worker:
     name: Deploy dashboard-worker
