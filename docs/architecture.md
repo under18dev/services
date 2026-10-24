@@ -455,11 +455,17 @@ dashboard-worker が侵害された瞬間にそれが Identity の侵害にな�
 ### 5.3 `CONTRACT_VERSION` とデプロイ順
 
 ```ts
-export const CONTRACT_VERSION = "1.1.0" as const;
+export const CONTRACT_VERSION = "1.2.0" as const;
 ```
 
-直近の更新は #18 の `listGrants` / `revokeGrant` 追加で、既存 4 メソッドの
-署名・意味・DTO を変えていないため MINOR（1.0.0 → 1.1.0）。したがって
+直近の更新は #22 の `caller` 追加（1.1.0 → 1.2.0）。書き込みを伴う 6 メソッドの
+入力に **optional** なフィールドを足しただけなので MINOR で、既存の呼び出しは
+そのまま通る。**`caller` は監査ログの `actor` に入る帰属情報であって認証ではない**
+—— Service Binding は呼び出し元の身元を運ばないので自己申告である
+（`packages/contracts/src/identity.ts` の `RPC_CALLERS`）。
+
+その前は #18 の `listGrants` / `revokeGrant` 追加で、既存 4 メソッドの
+署名・意味・DTO を変えていないため MINOR（1.0.0 → 1.1.0）。どちらも
 **auth-worker を先にデプロイする**。逆順にすると、新しい dashboard-worker が
 まだメソッドを持たない auth-worker を呼び、Service Binding が throw する。
 `RpcIdentityGateway.call()` がそれを `identity_unavailable` へ畳むので画面は

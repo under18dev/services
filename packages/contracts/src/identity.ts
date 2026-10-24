@@ -17,10 +17,49 @@ export const sessionTokenSchema = z
 
 export const userIdSchema = z.string().min(1).max(64);
 
+/**
+ * RPC の呼び出し元 Worker（#22）。
+ *
+ * ## 申告であって認証ではない
+ *
+ * **Service Binding は呼び出し元の身元を運ばない。** 呼ばれた側から
+ * 「どの Worker が呼んだか」を確かめる API は無く、`ctx.props` や
+ * 名前付き entrypoint を使っても、設定するのは呼び出し元の
+ * `wrangler.jsonc` なので信頼の度合いは同じである。
+ *
+ * したがってこの値は **監査ログの帰属（attribution）にだけ使う**。
+ * 認可の判断に使ってはならない —— 侵害された Worker は別の Worker を
+ * 名乗れる。本人性の根拠は従来どおりセッショントークンに置く。
+ *
+ * それでも入れる価値がある理由は、**平常時にどちらの経路から来た操作かが
+ * 分かる**こと。消費者が 2 つある以上、監査ログだけ見て
+ * 「dashboard から来たのか nfc から来たのか」が分からないのは、
+ * 侵害調査で「どの Worker が侵害されたか」を切り分けられないということ。
+ *
+ * ## 閉じた集合にする理由
+ *
+ * 任意の文字列を受けると、呼び出し元が監査ログへ好きな値を書き込める
+ * （ログ注入）。`actor` は調査でそのまま読む列なので、ここは閉じる。
+ */
+export const RPC_CALLERS = ["dashboard-worker", "nfc-worker"] as const;
+export type RpcCaller = (typeof RPC_CALLERS)[number];
+
+/**
+ * **optional にしてある。** 必須にすると、auth-worker を先にデプロイした
+ * 瞬間に古い呼び出し元が全滅する（`CONTRACT_VERSION` の運用、
+ * docs/architecture.md §5.3）。渡されなければ `actor` は "unknown" になる。
+ *
+ * 渡し忘れが静かに "unknown" へ落ちるのを防ぐため、**両方の消費者が
+ * 実際に送っていることをそれぞれのテストが固定している。**
+ */
+export const rpcCallerSchema = z.enum(RPC_CALLERS).optional();
+
 // ---------------------------------------------------------------- getSession
 
 export const getSessionInputSchema = z.object({
   sessionToken: sessionTokenSchema,
+  /** 呼び出し元 Worker。監査ログの帰属にだけ使う（認証ではない）。 */
+  caller: rpcCallerSchema,
 });
 
 export type GetSessionInput = z.infer<typeof getSessionInputSchema>;
@@ -43,6 +82,8 @@ export const getUserProfileInputSchema = z.object({
    * userId は受け取らない —— 受け取ると「他人の userId を指定して読む」入口になるため。
    */
   sessionToken: sessionTokenSchema,
+  /** 呼び出し元 Worker。監査ログの帰属にだけ使う（認証ではない）。 */
+  caller: rpcCallerSchema,
 });
 
 export type GetUserProfileInput = z.infer<typeof getUserProfileInputSchema>;
@@ -63,6 +104,8 @@ export type GetUserProfileResult = RpcResult<UserProfile | null>;
 
 export const listSessionsInputSchema = z.object({
   sessionToken: sessionTokenSchema,
+  /** 呼び出し元 Worker。監査ログの帰属にだけ使う（認証ではない）。 */
+  caller: rpcCallerSchema,
 });
 
 export type ListSessionsInput = z.infer<typeof listSessionsInputSchema>;
@@ -89,6 +132,8 @@ export const revokeSessionInputSchema = z.object({
   sessionToken: sessionTokenSchema,
   /** 失効させたいセッションの ID。操作者自身のセッションでなければ拒否される。 */
   targetSessionId: z.string().min(1).max(64),
+  /** 呼び出し元 Worker。監査ログの帰属にだけ使う（認証ではない）。 */
+  caller: rpcCallerSchema,
 });
 
 export type RevokeSessionInput = z.infer<typeof revokeSessionInputSchema>;
@@ -113,6 +158,8 @@ export const listGrantsInputSchema = z.object({
    * userId を引数にした瞬間に他人の分を読む入口になる（仕様書 4.2 の注意書き）。
    */
   sessionToken: sessionTokenSchema,
+  /** 呼び出し元 Worker。監査ログの帰属にだけ使う（認証ではない）。 */
+  caller: rpcCallerSchema,
 });
 
 export type ListGrantsInput = z.infer<typeof listGrantsInputSchema>;
@@ -143,6 +190,8 @@ export const revokeGrantInputSchema = z.object({
   sessionToken: sessionTokenSchema,
   /** 取り消す同意の相手。公開 `client_id`。操作者自身の同意でなければ拒否される。 */
   clientId: z.string().min(1).max(255),
+  /** 呼び出し元 Worker。監査ログの帰属にだけ使う（認証ではない）。 */
+  caller: rpcCallerSchema,
 });
 
 export type RevokeGrantInput = z.infer<typeof revokeGrantInputSchema>;

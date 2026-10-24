@@ -17,6 +17,14 @@ export type RequestContext = {
   readonly userAgent: string | null;
   /** `ExecutionContext.waitUntil`。応答後へ副作用を逃がすのに使う（#126）。 */
   readonly waitUntil?: ((task: Promise<unknown>) => void) | undefined;
+  /**
+   * 操作の主体（`audit_logs.actor`）。
+   *
+   * 公開 HTTP では付けない —— 主体は `user_id` で表され、`actor` は
+   * 「利用者本人以外が動かした」ことを示す列だから。入るのは
+   * Cron（`"cron"`）と、Service Binding 越しの呼び出し元 Worker（#22）。
+   */
+  readonly actor?: string | undefined;
 };
 
 /**
@@ -71,6 +79,7 @@ export class RequestScopedAuditLogger implements AuditLogger {
       ...event,
       ipHash: event.ipHash ?? (await this.ipHash()) ?? undefined,
       userAgent: event.userAgent ?? this.request.userAgent ?? undefined,
+      actor: event.actor ?? this.request.actor,
     });
   }
 
