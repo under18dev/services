@@ -69,8 +69,20 @@ jobs:
 
       # 各 Worker の build は `wrangler deploy --dry-run`。Cloudflare への
       # 認証は不要なので、PR からの実行でも secrets を渡さない。
-      - name: Build workers
+      - name: Build workers (default env)
         run: pnpm build
+
+      # 本番は `wrangler deploy --env production` で出す（deploy.yml）。
+      # env.production は d1_databases / vars / Service Binding を再定義する
+      # ため、既定 env の dry-run だけでは本番側の設定を一度も評価していない。
+      # 実測では、env.production 内の JSONC 構文エラーは既定 env の dry-run を
+      # 素通りし、--env production でのみ落ちる（#48）。
+      - name: Build workers (production env)
+        run: |
+          pnpm --filter @u18/auth-worker exec \
+            wrangler deploy --dry-run --env production --outdir dist/production
+          pnpm --filter @u18/dashboard-worker exec \
+            wrangler deploy --dry-run --env production --outdir dist/production
 
   # ブランチ保護で要求する単一のステータス。個別ジョブを足しても
   # 保護設定を触らずに済むよう、ここで集約する。
