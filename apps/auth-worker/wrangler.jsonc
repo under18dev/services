@@ -16,7 +16,16 @@
   //   Could not resolve "./generated/login-island.bundle"
   // で落ちた。生成を npm スクリプトではなく Worker のビルド定義に置くことで、
   // dev / deploy / dry-run のどの経路から入っても必ず走るようにする。
-  "build": { "command": "node scripts/build-client.mjs" },
+  // watch_dir を island のソースだけに絞る。既定の監視範囲は src 全体で、
+  // このビルドの出力 (src/presentation/http/ui/generated/login-island.bundle.ts)
+  // もその中にあるため、生成 -> 変更検知 -> 再生成 が無限に続いて
+  // `wrangler dev` が一度も起動しない（25 秒で 40 回リビルドした）。
+  // deploy / dry-run は watch しないので、watch_dir を絞っても
+  // 「どの経路から入っても必ず走る」という #132 の意図は保たれる。
+  "build": {
+    "command": "node scripts/build-client.mjs",
+    "watch_dir": "src/presentation/http/ui/client",
+  },
   "observability": { "enabled": true },
 
   // Identity D1 の所有者は auth-worker だけ（仕様書 2.2）。
