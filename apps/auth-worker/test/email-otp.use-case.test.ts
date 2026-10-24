@@ -342,6 +342,33 @@ describe("VerifyEmailOtpUseCase", () => {
     expect(user?.emailVerified).toBe(true);
   });
 
+  it("管理者は正しいコードでもログインできない（仕様書 §14.1 決定 8）", async () => {
+    // 強制点は `IssueSessionUseCase` にあり、この経路はその失敗を
+    // `invalid_code` に畳む。**応答で見分けられないことまでが要件である** ——
+    // 「このアドレスは管理者のものだ」と読めると、攻撃対象を絞る材料になる。
+    const admin = ctx.users.seed(aUser({ email: EMAIL, isAdmin: true }));
+    const code = await requestCode();
+
+    const result = await ctx.verify.execute({
+      email: EMAIL,
+      code,
+      purpose: "login",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("invalid_code");
+    // セッション行が生まれていないこと。「発行はするが使わせない」では、
+    // 後から管理操作が増えたときにその入口が拾ってしまう。
+    expect(await ctx.sessions.listByUserId(admin.id)).toEqual([]);
+    expect(
+      ctx.audit.events.some(
+        (e) => e.event === "otp.verify" && e.reason === "issue_session:forbidden",
+      ),
+    ).toBe(true);
+  });
+
   it("停止中ユーザーは正しいコードでもログインできない", async () => {
     const user = ctx.users.seed(aUser({ email: EMAIL }));
     const code = await requestCode();

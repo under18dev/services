@@ -153,6 +153,58 @@ describe("IssueSessionUseCase", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("管理者にはメール OTP でセッションを発行しない（仕様書 §14.1 決定 8）", async () => {
+    // メール OTP はメールボックスの支配権がそのままアカウントの支配権になる。
+    // 管理権限に対してはその取引が割に合わないので、#40 で Passkey 必須と決めた。
+    const admin = ctx.users.seed(aUser({ isAdmin: true }));
+
+    const result = await ctx.issueSession.execute({
+      userId: admin.id,
+      authMethod: "email_otp",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("forbidden");
+    // セッション行そのものが生まれていないこと。「発行したが使えない」では、
+    // 後から管理操作が増えたときにその入口が拾ってしまう。
+    expect(await ctx.sessions.listByUserId(admin.id)).toEqual([]);
+    expect(
+      ctx.audit.events.some(
+        (e) => e.event === "session.issue" && e.reason === "admin_requires_passkey",
+      ),
+    ).toBe(true);
+  });
+
+  it("管理者でも Passkey なら発行する", async () => {
+    const admin = ctx.users.seed(aUser({ isAdmin: true }));
+
+    const result = await ctx.issueSession.execute({
+      userId: admin.id,
+      authMethod: "passkey",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.session.authMethod).toBe("passkey");
+  });
+
+  it("一般利用者のメール OTP は塞がない（決定 2）", async () => {
+    // 決定 8 を広げすぎると、Passkey を持たない利用者が締め出される。
+    const user = ctx.users.seed(aUser({ isAdmin: false }));
+
+    const result = await ctx.issueSession.execute({
+      userId: user.id,
+      authMethod: "email_otp",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
   it("存在しないユーザーには発行しない", async () => {
     const result = await ctx.issueSession.execute({
       userId: "usr_nope",
