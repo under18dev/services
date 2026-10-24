@@ -2,7 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "u18-dashboard",
   "main": "src/index.ts",
-  "compatibility_date": "2026-10-24",
+  // @cloudflare/vitest-pool-workers が抱える workerd のビルド日より後の日付を
+  // 指定すると、テスト起動時に ERR_FUTURE_COMPATIBILITY_DATE で落ちる。
+  // 上げるときは vitest-pool-workers / miniflare も一緒に上げること。
+  "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
@@ -13,12 +16,29 @@
     {
       "binding": "IDENTITY",
       "service": "u18-auth",
-      "entrypoint": "IdentityRPC"
-    }
+      "entrypoint": "IdentityRPC",
+    },
   ],
 
   "vars": {
     "AUTH_ISSUER": "http://localhost:8787",
-    "ENVIRONMENT": "development"
-  }
+    "ENVIRONMENT": "development",
+  },
+
+  // 本番用の上書き。auth-worker と同じ理由で、既定値のまま deploy しないこと。
+  "env": {
+    "production": {
+      "services": [
+        {
+          "binding": "IDENTITY",
+          "service": "u18-auth",
+          "entrypoint": "IdentityRPC",
+        },
+      ],
+      "vars": {
+        "AUTH_ISSUER": "https://REPLACE_WITH_PRODUCTION_ISSUER",
+        "ENVIRONMENT": "production",
+      },
+    },
+  },
 }

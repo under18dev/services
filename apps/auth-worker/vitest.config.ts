@@ -1,26 +1,33 @@
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import { join } from "node:path";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { defineConfig } from "vitest/config";
 
 /**
  * Workers ランタイム上でテストを走らせる（仕様書 11.2）。
  *
- * `d1Databases` を指定すると miniflare がローカル D1 を用意し、
- * 本番と同じ SQLite の挙動で Repository を検証できる。
+ * マイグレーションの読み込みは **Node 側（この設定ファイル）** で行う。
+ * テスト本体は workerd の中で動くので node:fs を使えない。読み込んだ SQL は
+ * バインディング経由でテストへ渡し、setup で適用する。
  */
-export default defineWorkersConfig({
-  test: {
-    include: ["test/**/*.test.ts"],
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: "./wrangler.jsonc" },
-        miniflare: {
-          d1Databases: ["IDENTITY_DB"],
-          bindings: {
-            ENVIRONMENT: "development",
-            ISSUER: "http://localhost:8787",
-            IP_HASH_PEPPER: "test-pepper",
-          },
+const migrations = await readD1Migrations(join(import.meta.dirname, "../../packages/db/drizzle"));
+
+export default defineConfig({
+  plugins: [
+    cloudflareTest({
+      wrangler: { configPath: "./wrangler.jsonc" },
+      miniflare: {
+        d1Databases: ["IDENTITY_DB"],
+        bindings: {
+          TEST_MIGRATIONS: migrations,
+          ENVIRONMENT: "development",
+          ISSUER: "http://localhost:8787",
+          IP_HASH_PEPPER: "test-pepper",
         },
       },
-    },
+    }),
+  ],
+  test: {
+    include: ["test/**/*.test.ts"],
+    setupFiles: ["./test/setup.ts"],
   },
 });

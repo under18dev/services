@@ -28,7 +28,8 @@ export type RpcError = {
   readonly message: string;
 };
 
-export type RpcResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: RpcError };
+export type RpcResult<T> =
+  { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: RpcError };
 
 export const rpcOk = <T>(value: T): RpcResult<T> => ({ ok: true, value });
 

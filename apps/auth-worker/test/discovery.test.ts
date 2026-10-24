@@ -1,15 +1,14 @@
-import { env } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import worker from "../src/index";
 
-const ctx = { waitUntil: () => undefined, passThroughOnException: () => undefined } as ExecutionContext;
-
-const fetchDiscovery = () =>
-  worker.fetch!(new Request("http://localhost/.well-known/openid-configuration"), env, ctx);
+const fetchDiscovery = async (): Promise<Record<string, unknown>> => {
+  const response = await SELF.fetch("http://localhost/.well-known/openid-configuration");
+  return (await response.json()) as Record<string, unknown>;
+};
 
 describe("OIDC Discovery", () => {
   it("issuer と各エンドポイントを返す", async () => {
-    const body = (await (await fetchDiscovery()).json()) as Record<string, unknown>;
+    const body = await fetchDiscovery();
 
     expect(body["issuer"]).toBe("http://localhost:8787");
     expect(body["authorization_endpoint"]).toBe("http://localhost:8787/oauth/authorize");
@@ -18,7 +17,7 @@ describe("OIDC Discovery", () => {
   });
 
   it("Authorization Code Flow のみを広告する", async () => {
-    const body = (await (await fetchDiscovery()).json()) as Record<string, unknown>;
+    const body = await fetchDiscovery();
 
     expect(body["response_types_supported"]).toEqual(["code"]);
     expect(body["grant_types_supported"]).toEqual(["authorization_code"]);
@@ -28,9 +27,14 @@ describe("OIDC Discovery", () => {
   });
 
   it("PKCE は S256 のみを広告する", async () => {
-    const body = (await (await fetchDiscovery()).json()) as Record<string, unknown>;
+    const body = await fetchDiscovery();
 
     expect(body["code_challenge_methods_supported"]).toEqual(["S256"]);
     expect(body["code_challenge_methods_supported"]).not.toContain("plain");
+  });
+
+  it("scope は openid / profile / email のみ", async () => {
+    const body = await fetchDiscovery();
+    expect(body["scopes_supported"]).toEqual(["openid", "profile", "email"]);
   });
 });

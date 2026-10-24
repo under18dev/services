@@ -152,6 +152,19 @@ describe("GetSessionUseCase", () => {
 
     expect(result).toEqual({ ok: true, value: null });
   });
+
+  it("論理削除されたユーザーは status が active のままでも通さない", async () => {
+    // deleted_at だけ立てて status を戻し忘れる運用は起こりうる。
+    // status しか見ていないと、削除済みユーザーがログインし続けられる。
+    const user = aUser({ status: "active", deletedAt: NOW });
+    ctx.users.seed(user);
+    const session = aSession({ userId: user.id });
+    ctx.sessions.seed({ ...session, revokedAt: null });
+
+    const result = await ctx.getSession.execute({ sessionToken: session.id });
+
+    expect(result).toEqual({ ok: true, value: null });
+  });
 });
 
 describe("ListSessionsUseCase", () => {

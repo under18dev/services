@@ -33,7 +33,12 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          patterns: [...FRAMEWORKS, "**/infrastructure/**", "**/presentation/**", "**/composition/**"],
+          patterns: [
+            ...FRAMEWORKS,
+            "**/infrastructure/**",
+            "**/presentation/**",
+            "**/composition/**",
+          ],
         },
       ],
     },

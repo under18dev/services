@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import type { AppBindings } from "./types";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 /**
@@ -8,7 +9,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
  * 区別が外から見えると、アカウント列挙の材料になる（仕様書 9）。
  */
 export function problem(
-  c: Context,
+  c: Context<AppBindings>,
   status: ContentfulStatusCode,
   code: string,
   message: string,

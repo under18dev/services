@@ -91,7 +91,6 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
         lastSeenAt: session.lastSeenAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),
         userAgent: session.userAgent,
-        ipHash: session.ipHash,
       })),
     );
   }

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AppBindings } from "./app";
+import type { AppBindings } from "./types";
 import { problem } from "./problem";
 
 /**

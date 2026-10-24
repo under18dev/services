@@ -23,6 +23,7 @@
     "db:migrate:remote": "pnpm --filter @u18/auth-worker migrate:remote"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261023.1",
     "@types/node": "26.6.5",
     "eslint": "10.13.0",
     "prettier": "3.9.10",
