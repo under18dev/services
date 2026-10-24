@@ -10,6 +10,7 @@ import {
   InMemoryUserRepository,
   RecordingAuditLogger,
 } from "./fakes";
+import { InMemoryAuthorizationCodeRepository } from "./fakes.oauth";
 
 const NOW = new Date("2026-10-24T00:00:00.000Z");
 
@@ -19,10 +20,13 @@ function setup() {
   const audit = new RecordingAuditLogger();
   const clock = new FixedClock(NOW);
   const hasher = new FakeHasher();
+  // ログアウトは未交換の認可コードも落とす（#15）。
+  const codes = new InMemoryAuthorizationCodeRepository();
 
   return {
     users,
     sessions,
+    codes,
     audit,
     clock,
     issueSession: new IssueSessionUseCase({
@@ -35,7 +39,7 @@ function setup() {
       audit,
     }),
     getSession: new GetSessionUseCase({ sessions, users, hasher, clock, audit }),
-    logout: new LogoutUseCase({ sessions, hasher, clock, audit }),
+    logout: new LogoutUseCase({ sessions, codes, hasher, clock, audit }),
   };
 }
 

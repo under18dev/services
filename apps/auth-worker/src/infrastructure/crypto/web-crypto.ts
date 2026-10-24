@@ -1,6 +1,7 @@
 import type {
   ConstantTimeComparator,
   IpHasher,
+  PkceVerifier,
   RandomTokenGenerator,
   TokenHasher,
 } from "../../application/ports/crypto.port";
@@ -89,6 +90,26 @@ export class TimingSafeComparator implements ConstantTimeComparator {
       diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
     }
     return diff === 0;
+  }
+}
+
+/**
+ * PKCE S256 の検証（RFC 7636 §4.6）。
+ *
+ * `BASE64URL(SHA256(ASCII(code_verifier)))` を計算して `code_challenge` と
+ * 定時間比較する。計算結果を外へ返さず、ここで比較まで終える
+ * （`PkceVerifier` のコメントを参照）。
+ */
+export class WebCryptoPkceVerifier implements PkceVerifier {
+  constructor(private readonly comparator: ConstantTimeComparator) {}
+
+  async verifyS256(codeVerifier: string, codeChallenge: string): Promise<boolean> {
+    // RFC 7636 は ASCII での符号化を指定している。`code_verifier` の文字集合は
+    // unreserved に限られる（domain/services/pkce.ts で検証済み）ので、
+    // UTF-8 エンコードした結果は ASCII と一致する。
+    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(codeVerifier));
+    const computed = toBase64Url(new Uint8Array(digest));
+    return this.comparator.equals(computed, codeChallenge);
   }
 }
 

@@ -1,4 +1,5 @@
 import type { AuditLogger } from "../ports/audit-log.port";
+import type { AuthorizationCodeRepository } from "../ports/authorization-code.repository";
 import type { Clock } from "../ports/clock.port";
 import type { SessionRepository } from "../ports/session.repository";
 import { settleSideEffects } from "./side-effects";
@@ -13,6 +14,8 @@ export type RevokeSessionCommand = {
 export type RevokeSessionDeps = {
   readonly getSession: GetSessionUseCase;
   readonly sessions: SessionRepository;
+  /** 失効させたセッション中の未交換コードを連鎖失効させるため（#15）。 */
+  readonly codes: AuthorizationCodeRepository;
   readonly clock: Clock;
   readonly audit: AuditLogger;
 };
@@ -55,7 +58,12 @@ export class RevokeSessionUseCase {
     // 「Cookie も落とすべきか」を判断するのに要る。
     const self = target.id === auth.value.session.id;
 
-    const revoked = await this.deps.sessions.revoke(target.id, this.deps.clock.now());
+    const now = this.deps.clock.now();
+    const revoked = await this.deps.sessions.revoke(target.id, now);
+    // セッションを切ったのに、そのセッション中に発行された未交換の認可コードが
+    // 60 秒間生き残ると、「この端末からの認可を止めた」という操作の意味が
+    // 欠ける。ログアウトと同じ扱いにする（#15）。
+    await this.deps.codes.revokeUnconsumedBySession(target.id, now);
     await settleSideEffects(
       "session.revoke",
       this.deps.audit.record({

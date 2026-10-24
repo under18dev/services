@@ -1,17 +1,22 @@
 import { createIdentityDatabase, type IdentityDatabase } from "@u18/db";
 import { systemClock } from "@u18/domain";
 import type { AuditLogger } from "../application/ports/audit-log.port";
+import type { AuthorizationCodeRepository } from "../application/ports/authorization-code.repository";
 import type { Clock } from "../application/ports/clock.port";
 import type {
   ConstantTimeComparator,
   IpHasher,
+  PkceVerifier,
   RandomTokenGenerator,
   TokenHasher,
 } from "../application/ports/crypto.port";
 import type { EmailChallengeRepository } from "../application/ports/email-challenge.repository";
 import type { EmailSender } from "../application/ports/email-sender.port";
 import type { DatabaseProbe } from "../application/ports/health.port";
+import type { IdTokenIssuer } from "../application/ports/id-token.port";
 import type { OAuthClientRepository } from "../application/ports/oauth-client.repository";
+import type { OAuthGrantRepository } from "../application/ports/oauth-grant.repository";
+import type { OAuthTokenRepository } from "../application/ports/oauth-token.repository";
 import type { PasskeyRepository } from "../application/ports/passkey.repository";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { SigningKeyProvider } from "../application/ports/signing-key.port";
@@ -19,6 +24,9 @@ import type { UserRepository } from "../application/ports/user.repository";
 import type { WebAuthnChallengeRepository } from "../application/ports/webauthn-challenge.repository";
 import type { WebAuthnService } from "../application/ports/webauthn.port";
 import { AuthenticateOAuthClientUseCase } from "../application/use-cases/authenticate-oauth-client.use-case";
+import { AuthorizeRequestUseCase } from "../application/use-cases/authorize-request.use-case";
+import { ExchangeAuthorizationCodeUseCase } from "../application/use-cases/exchange-authorization-code.use-case";
+import { IssueAuthorizationCodeUseCase } from "../application/use-cases/issue-authorization-code.use-case";
 import { DeletePasskeyUseCase } from "../application/use-cases/delete-passkey.use-case";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
 import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
@@ -34,21 +42,26 @@ import { PasskeyRegisterVerifyUseCase } from "../application/use-cases/passkey-r
 import { ResolveOAuthClientUseCase } from "../application/use-cases/resolve-oauth-client.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import { UpdateProfileUseCase } from "../application/use-cases/update-profile.use-case";
+import { JoseIdTokenIssuer } from "../infrastructure/crypto/jose-id-token-signer";
 import { JoseSigningKeyProvider } from "../infrastructure/crypto/jose-signing-key";
 import {
   PepperedIpHasher,
   UnconfiguredIpHasher,
   Sha256TokenHasher,
   TimingSafeComparator,
+  WebCryptoPkceVerifier,
   WebCryptoTokenGenerator,
 } from "../infrastructure/crypto/web-crypto";
 import { CloudflareEmailSender } from "../infrastructure/email/cloudflare-email-sender";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
+import { DrizzleAuthorizationCodeRepository } from "../infrastructure/persistence/drizzle-authorization-code.repository";
 import { DrizzleEmailChallengeRepository } from "../infrastructure/persistence/drizzle-email-challenge.repository";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
 import { DrizzleOAuthClientRepository } from "../infrastructure/persistence/drizzle-oauth-client.repository";
+import { DrizzleOAuthGrantRepository } from "../infrastructure/persistence/drizzle-oauth-grant.repository";
+import { DrizzleOAuthTokenRepository } from "../infrastructure/persistence/drizzle-oauth-token.repository";
 import { DrizzlePasskeyRepository } from "../infrastructure/persistence/drizzle-passkey.repository";
 import { DrizzleSessionRepository } from "../infrastructure/persistence/drizzle-session.repository";
 import { DrizzleSigningKeyMetadataRepository } from "../infrastructure/persistence/drizzle-signing-key-metadata.repository";
@@ -72,17 +85,22 @@ export type Container = {
     readonly passkeys: PasskeyRepository;
     readonly webauthnChallenges: WebAuthnChallengeRepository;
     readonly oauthClients: OAuthClientRepository;
+    readonly oauthGrants: OAuthGrantRepository;
+    readonly oauthTokens: OAuthTokenRepository;
+    readonly authorizationCodes: AuthorizationCodeRepository;
   };
   readonly services: {
     readonly hasher: TokenHasher;
     readonly ipHasher: IpHasher;
     readonly tokens: RandomTokenGenerator;
     readonly comparator: ConstantTimeComparator;
+    readonly pkce: PkceVerifier;
     readonly email: EmailSender;
     readonly audit: AuditLogger;
     readonly databaseProbe: DatabaseProbe;
     readonly webauthn: WebAuthnService;
     readonly signingKeys: SigningKeyProvider;
+    readonly idTokens: IdTokenIssuer;
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
@@ -101,6 +119,9 @@ export type Container = {
     readonly passkeyLoginVerify: PasskeyLoginVerifyUseCase;
     readonly resolveOAuthClient: ResolveOAuthClientUseCase;
     readonly authenticateOAuthClient: AuthenticateOAuthClientUseCase;
+    readonly authorizeRequest: AuthorizeRequestUseCase;
+    readonly issueAuthorizationCode: IssueAuthorizationCodeUseCase;
+    readonly exchangeAuthorizationCode: ExchangeAuthorizationCodeUseCase;
   };
 };
 
@@ -114,6 +135,7 @@ export type ContainerOverrides = Partial<{
   databaseProbe: DatabaseProbe;
   oauthClients: OAuthClientRepository;
   signingKeys: SigningKeyProvider;
+  idTokens: IdTokenIssuer;
 }>;
 
 /**
@@ -148,6 +170,9 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
         : new UnconfiguredIpHasher("IP_HASH_PEPPER is not set outside development");
   const tokens = new WebCryptoTokenGenerator();
   const comparator = new TimingSafeComparator();
+  // PKCE の比較も定時間で行う（#16）。`TokenHasher` と分けているのは、
+  // 保存用ハッシュが 16 進で code_challenge が base64url と符号化が違うため。
+  const pkce = new WebCryptoPkceVerifier(comparator);
 
   // メール送信は Cloudflare Email Sending を使う（#35）。
   //
@@ -168,11 +193,18 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   // 閉じ込めるため、ハッシュ化と定時間比較を注入する。
   const oauthClients =
     overrides.oauthClients ?? new DrizzleOAuthClientRepository(db, hasher, comparator);
+  const oauthGrants = new DrizzleOAuthGrantRepository(db);
+  const oauthTokens = new DrizzleOAuthTokenRepository(db);
+  const authorizationCodes = new DrizzleAuthorizationCodeRepository(db);
 
   // ID Token の署名鍵（#14）。秘密鍵は D1 ではなく Workers Secret から読む（仕様書 7.1）。
   const signingKeys = overrides.signingKeys ?? createSigningKeyProvider(env, db, clock);
+  // 署名そのものは Port の向こう側に置き、`alg` を選ぶコードを Application へ
+  // 出さない（application/ports/id-token.port.ts のコメント）。
+  const idTokens = overrides.idTokens ?? new JoseIdTokenIssuer(signingKeys);
 
   const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const resolveOAuthClient = new ResolveOAuthClientUseCase({ clients: oauthClients, audit });
   const issueSession = new IssueSessionUseCase({
     users,
     sessions,
@@ -186,17 +218,29 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   return {
     db,
     clock,
-    repositories: { users, sessions, emailChallenges, passkeys, webauthnChallenges, oauthClients },
+    repositories: {
+      users,
+      sessions,
+      emailChallenges,
+      passkeys,
+      webauthnChallenges,
+      oauthClients,
+      oauthGrants,
+      oauthTokens,
+      authorizationCodes,
+    },
     services: {
       hasher,
       ipHasher,
       tokens,
       comparator,
+      pkce,
       email,
       audit,
       databaseProbe,
       webauthn,
       signingKeys,
+      idTokens,
     },
     useCases: {
       getSession,
@@ -218,9 +262,15 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
         clock,
         audit,
       }),
-      logout: new LogoutUseCase({ sessions, hasher, clock, audit }),
+      logout: new LogoutUseCase({ sessions, codes: authorizationCodes, hasher, clock, audit }),
       listSessions: new ListSessionsUseCase({ getSession, sessions, clock }),
-      revokeSession: new RevokeSessionUseCase({ getSession, sessions, clock, audit }),
+      revokeSession: new RevokeSessionUseCase({
+        getSession,
+        sessions,
+        codes: authorizationCodes,
+        clock,
+        audit,
+      }),
       updateProfile: new UpdateProfileUseCase({ getSession, users, clock, audit }),
       listPasskeys: new ListPasskeysUseCase({ getSession, passkeys }),
       deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, clock, audit }),
@@ -254,8 +304,36 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
         clock,
         audit,
       }),
-      resolveOAuthClient: new ResolveOAuthClientUseCase({ clients: oauthClients, audit }),
+      resolveOAuthClient,
       authenticateOAuthClient: new AuthenticateOAuthClientUseCase({ clients: oauthClients, audit }),
+      authorizeRequest: new AuthorizeRequestUseCase({
+        resolveClient: resolveOAuthClient,
+        getSession,
+        users,
+        grants: oauthGrants,
+        clock,
+        audit,
+      }),
+      issueAuthorizationCode: new IssueAuthorizationCodeUseCase({
+        codes: authorizationCodes,
+        grants: oauthGrants,
+        tokens,
+        hasher,
+        clock,
+        audit,
+      }),
+      exchangeAuthorizationCode: new ExchangeAuthorizationCodeUseCase({
+        codes: authorizationCodes,
+        grants: oauthGrants,
+        tokens: oauthTokens,
+        users,
+        idTokens,
+        hasher,
+        random: tokens,
+        pkce,
+        clock,
+        audit,
+      }),
     },
   };
 }
