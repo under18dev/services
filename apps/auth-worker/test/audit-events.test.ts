@@ -1,6 +1,11 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { AUDIT_EVENTS } from "../src/application/ports/audit-log.port";
+import {
+  AUDIT_EVENTS,
+  AUDIT_EVENT_RETENTION,
+  auditEventDeadlines,
+} from "../src/application/ports/audit-log.port";
+import { AuditRetention } from "../src/domain/services/retention-policy";
 
 /**
  * 監査イベント名の登録簿（`AUDIT_EVENTS`）と実装を照合する（#22）。
@@ -33,5 +38,65 @@ describe("AUDIT_EVENTS と実装", () => {
 
   it("登録簿に重複が無い", () => {
     expect(registered.length).toBe(new Set(registered).size);
+  });
+});
+
+/**
+ * 保持区分と登録簿の照合（#22）。
+ *
+ * `Record<AuditEventName, ...>` なので**網羅は型が守る**。ここで見るのは
+ * 型をすり抜ける形——キャストで足した名前、改名の片側忘れ——と、
+ * 区分そのものの不変条件である。
+ */
+describe("AUDIT_EVENT_RETENTION", () => {
+  const classified = Object.keys(AUDIT_EVENT_RETENTION).sort();
+  const registered = [...AUDIT_EVENTS].sort();
+
+  it("登録簿と過不足なく一致する", () => {
+    // 片方だけ改名すると、改名後の名前が既定（180 日）に落ちる。
+    // 長期側のつもりのイベントが静かに半年で消え始める形になる。
+    expect(classified).toEqual(registered);
+  });
+
+  it("security は standard より長い", () => {
+    // 逆転すると「長期側に置いたのに先に消える」になる。
+    expect(AuditRetention.security).toBeGreaterThan(AuditRetention.standard);
+  });
+
+  it("境界は security 区分のイベントにだけ出る", () => {
+    const deadlines = auditEventDeadlines(new Date("2026-10-24T00:00:00.000Z"));
+    const expected = Object.entries(AUDIT_EVENT_RETENTION)
+      .filter(([, tier]) => tier !== "standard")
+      .map(([event]) => event)
+      .sort();
+
+    expect([...deadlines.keys()].sort()).toEqual(expected);
+    // standard を入れると既定と同じ条件を 2 回書くことになる。
+    expect(deadlines.size).toBeLessThan(registered.length);
+  });
+
+  it("security 区分が空にならない", () => {
+    // 全部 standard に倒れたら、区分化そのものが効いていない。
+    const secured = Object.values(AUDIT_EVENT_RETENTION).filter((t) => t === "security");
+    expect(secured.length).toBeGreaterThan(0);
+  });
+
+  it("長期側は量の少ないイベントに限る", () => {
+    // リクエストごとに 1 行出るイベントを 2 年持つと、区分化の目的
+    // （行数を抑えつつ調査に要る記録を残す）と逆を向く。
+    // 名前を直書きしているのは、「量が多い」が型で表現できないため。
+    const perRequest = [
+      "oauth.userinfo",
+      "oauth.token.issued",
+      "oauth.token.exchange",
+      "oauth.client.authenticate",
+      "session.issue",
+      "session.rejected",
+      "retention.sweep",
+    ] as const;
+
+    for (const event of perRequest) {
+      expect(AUDIT_EVENT_RETENTION[event], `${event} を長期側に置いている`).toBe("standard");
+    }
   });
 });

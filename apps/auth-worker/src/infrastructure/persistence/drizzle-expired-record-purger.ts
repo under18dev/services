@@ -6,7 +6,7 @@ import {
   sessions,
   webauthnChallenges,
 } from "@u18/db";
-import { and, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
+import { and, inArray, isNull, lt, notInArray, or, type SQL } from "drizzle-orm";
 import type { AnySQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { ArchiveSink } from "../../application/ports/archive.port";
 import type {
@@ -34,7 +34,7 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
   ) {}
 
   async purge(request: PurgeRequest): Promise<PurgeResult> {
-    const { target, deadBefore: dead, limit } = request;
+    const { target, deadBefore: dead, limit, eventDeadlines } = request;
 
     const deleted = await (() => {
       switch (target) {
@@ -106,7 +106,8 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
         case "audit_logs":
           // 監査ログに「使えなくなる時刻」は無いので、記録時刻で切る。
           // ここだけ退避してから消す（`ARCHIVED_TARGETS`）。
-          return this.archiveThenDelete(lt(auditLogs.createdAt, dead), limit);
+          // 保持期間はイベントによって変わる（#22）。
+          return this.archiveThenDelete(auditLogCondition(dead, eventDeadlines), limit);
       }
     })();
 
@@ -189,4 +190,50 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
     const result = await this.db.delete(table).where(inArray(id, doomed)).run();
     return result.meta.changes;
   }
+}
+
+/**
+ * `audit_logs` の削除条件（#22 / #43）。
+ *
+ * `eventDeadlines` に名前がある行は**そちらの境界**、無い行は
+ * `deadBefore` で判定する。SQL はこうなる:
+ *
+ * ```sql
+ * (event not in (長期の名前...) and created_at < 既定の境界)
+ *   or (event in (2 年の名前...) and created_at < 2 年前)
+ * ```
+ *
+ * ## `not in` を省かないこと
+ *
+ * 1 本目を単に `created_at < 既定の境界` にすると、**長期側のイベントが
+ * そこで拾われて 180 日で消える。** 区分を足した意味が丸ごと消え、しかも
+ * テーブルの中身を見るまで気づけない（SQL は成功し、件数も自然に見える）。
+ *
+ * ## 区分ごとにまとめる
+ *
+ * 同じ境界のイベントは 1 本の `in (...)` に畳む。イベントごとに OR を
+ * 並べると、区分が増えたときに条件の本数が名前の数だけ増える。
+ */
+function auditLogCondition(
+  deadBefore: Date,
+  eventDeadlines: ReadonlyMap<string, Date> | undefined,
+): SQL | undefined {
+  const longerLived = [...(eventDeadlines ?? new Map<string, Date>())];
+  if (longerLived.length === 0) return lt(auditLogs.createdAt, deadBefore);
+
+  // 境界時刻ごとにイベント名をまとめる。
+  const byDeadline = new Map<number, string[]>();
+  for (const [event, deadline] of longerLived) {
+    const key = deadline.getTime();
+    byDeadline.set(key, [...(byDeadline.get(key) ?? []), event]);
+  }
+
+  const names = longerLived.map(([event]) => event);
+  return or(
+    // 既定の区分。長期側の名前を必ず除く。
+    and(notInArray(auditLogs.event, names), lt(auditLogs.createdAt, deadBefore)),
+    ...[...byDeadline].map(([deadline, events]) =>
+      and(inArray(auditLogs.event, events), lt(auditLogs.createdAt, new Date(deadline))),
+    ),
+  );
 }

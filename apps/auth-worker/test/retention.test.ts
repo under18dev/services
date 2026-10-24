@@ -23,6 +23,7 @@ import type {
   PurgeResult,
 } from "../src/application/ports/retention.port";
 import { RetentionPolicy, type RetentionTarget } from "../src/domain/services/retention-policy";
+import { auditEventDeadlines, type AuditEventName } from "../src/application/ports/audit-log.port";
 import { OtpPolicy, TokenLifetime } from "../src/domain/services/token-lifetime";
 import { UnconfiguredArchiveSink } from "../src/infrastructure/archive/r2-archive-sink";
 import { DrizzleExpiredRecordPurger } from "../src/infrastructure/persistence/drizzle-expired-record-purger";
@@ -320,6 +321,81 @@ describe("DrizzleExpiredRecordPurger", () => {
   });
 
   /**
+   * イベントごとの保持区分（#22）。
+   *
+   * 一律 180 日だと、**アカウントの支配権が変わった操作の記録が、
+   * 侵害が発覚するより先に消える。** 「攻撃者がいつ自分の認証器を
+   * 足したのか」は半年以上経ってから訊かれる。
+   */
+  describe("audit_logs の保持区分", () => {
+    const putLog = (id: string, event: AuditEventName, createdAt: Date) =>
+      db.insert(auditLogs).values({ id, event, outcome: "success", createdAt }).run();
+
+    /** 本物と同じ経路で境界を作る。テスト側で日数を書き写さない。 */
+    const purgeAuditLogs = () =>
+      purger.purge({
+        target: "audit_logs",
+        deadBefore: cutoff("audit_logs"),
+        limit: 100,
+        eventDeadlines: auditEventDeadlines(now),
+      });
+
+    const remaining = async (): Promise<string[]> =>
+      (await db.select({ id: auditLogs.id }).from(auditLogs).all()).map((r) => r.id).sort();
+
+    it("支配権が変わる操作は 180 日では消えない", async () => {
+      // 1 年前。既定（180 日）なら消えるが、security 区分（2 年）なら残る。
+      await putLog("aud_passkey", "passkey.register", ago(365 * DAY));
+      await putLog("aud_profile", "profile.updated", ago(365 * DAY));
+      await putLog("aud_replay", "oauth.code.replayed", ago(365 * DAY));
+
+      expect((await purgeAuditLogs()).deleted).toBe(0);
+      expect(await remaining()).toEqual(["aud_passkey", "aud_profile", "aud_replay"]);
+    });
+
+    it("区分の無いイベントは 180 日で消える", async () => {
+      await putLog("aud_issue", "session.issue", ago(181 * DAY));
+      await putLog("aud_userinfo", "oauth.userinfo", ago(181 * DAY));
+
+      expect((await purgeAuditLogs()).deleted).toBe(2);
+      expect(await remaining()).toEqual([]);
+    });
+
+    it("同じ日付でも区分で生死が分かれる", async () => {
+      // **これが区分化の本体。** 1 本のクエリで両方を正しく扱えていないと、
+      // どちらかが巻き込まれる。
+      const oneYearAgo = ago(365 * DAY);
+      await putLog("aud_keep", "passkey.deleted", oneYearAgo);
+      await putLog("aud_drop", "session.issue", oneYearAgo);
+
+      expect((await purgeAuditLogs()).deleted).toBe(1);
+      expect(await remaining()).toEqual(["aud_keep"]);
+    });
+
+    it("2 年を過ぎれば支配権が変わる操作も消える", async () => {
+      await putLog("aud_old", "session.revoke", ago(731 * DAY));
+      await putLog("aud_young", "session.revoke", ago(729 * DAY));
+
+      expect((await purgeAuditLogs()).deleted).toBe(1);
+      expect(await remaining()).toEqual(["aud_young"]);
+    });
+
+    it("区分を渡さなければ全件が既定の境界で判定される", async () => {
+      // `eventDeadlines` を省いた呼び出し（audit_logs 以外の経路と同じ形）。
+      // ここが壊れると、区分を渡し忘れた瞬間に長期側が 180 日で消える。
+      await putLog("aud_passkey", "passkey.register", ago(181 * DAY));
+
+      const result = await purger.purge({
+        target: "audit_logs",
+        deadBefore: cutoff("audit_logs"),
+        limit: 100,
+      });
+
+      expect(result.deleted).toBe(1);
+    });
+  });
+
+  /**
    * 退避してから消す（#43 の残件）。
    *
    * 180 日を過ぎた監査ログは「消してよいから」ではなく「D1 に置き続ける
@@ -488,6 +564,35 @@ describe("PurgeExpiredRecordsUseCase", () => {
     ]);
     for (const request of purger.requests) {
       expect(request.deadBefore).toEqual(cutoff(request.target));
+    }
+  });
+
+  it("audit_logs にだけイベントごとの境界を渡す", async () => {
+    // **区分を実装しても、UseCase が渡さなければ効かない。**
+    // 条件側のテストは「渡されたら正しく効く」しか見ていないので、
+    // ここで経路が繋がっていることを別に固定する（#143 で入れた
+    // 「入口が ctx.waitUntil を呼んでいる」と同じ理由）。
+    const purger = new RecordingPurger();
+    const useCase = new PurgeExpiredRecordsUseCase({
+      purger,
+      clock: new FixedClock(now),
+      audit: silentAudit,
+    });
+
+    await useCase.execute({ limit: 10 });
+
+    const byTarget = new Map(purger.requests.map((r) => [r.target, r]));
+    const auditRequest = byTarget.get("audit_logs");
+    expect(auditRequest?.eventDeadlines, "audit_logs に境界が渡っていない").toBeDefined();
+    // 中身も本物と一致すること。空の Map を渡しても上の toBeDefined は通る。
+    expect([...(auditRequest?.eventDeadlines ?? [])].sort()).toEqual(
+      [...auditEventDeadlines(now)].sort(),
+    );
+
+    // 他のテーブルには渡さない。渡すと「ここにも区分がある」と読める。
+    for (const request of purger.requests) {
+      if (request.target === "audit_logs") continue;
+      expect(request.eventDeadlines, `${request.target} に境界が渡っている`).toBeUndefined();
     }
   });
 
