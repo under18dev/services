@@ -1,4 +1,4 @@
-import type { IdentityRpcContract, RpcError, RpcResult } from "@u18/contracts";
+import type { IdentityRpcContract, RpcError, RpcResult, RpcCaller } from "@u18/contracts";
 import type { IdentityGateway, IdentityOutcome } from "../../application/ports";
 import type { IdentityFailure } from "../../domain/errors";
 
@@ -67,28 +67,45 @@ function toFailure(error: RpcError): IdentityFailure {
 export class RpcIdentityGateway implements IdentityGateway {
   constructor(private readonly identity: IdentityRpcContract) {}
 
+  /**
+   * 監査ログの `actor` に入る呼び出し元の名前（#22）。
+   *
+   * **全呼び出しに必ず付ける。** 契約上は optional なので、付け忘れても
+   * 型は通り、RPC も成功し、`actor` が "unknown" になるだけ —— つまり
+   * **壊れたことに気づけない**。付け忘れが起きないよう、呼び出しは
+   * すべて `input()` を通す。実際に付いていることはテストが固定している。
+   */
+  private static readonly CALLER = "dashboard-worker" as const satisfies RpcCaller;
+
+  /** 呼び出し元を必ず混ぜる。RPC の入力はここを通して作る。 */
+  private input<T extends object>(fields: T): T & { caller: RpcCaller } {
+    return { ...fields, caller: RpcIdentityGateway.CALLER };
+  }
+
   getSession(sessionToken: string) {
-    return this.call(() => this.identity.getSession({ sessionToken }));
+    return this.call(() => this.identity.getSession(this.input({ sessionToken })));
   }
 
   getProfile(sessionToken: string) {
-    return this.call(() => this.identity.getUserProfile({ sessionToken }));
+    return this.call(() => this.identity.getUserProfile(this.input({ sessionToken })));
   }
 
   listSessions(sessionToken: string) {
-    return this.call(() => this.identity.listSessions({ sessionToken }));
+    return this.call(() => this.identity.listSessions(this.input({ sessionToken })));
   }
 
   revokeSession(sessionToken: string, targetSessionId: string) {
-    return this.call(() => this.identity.revokeSession({ sessionToken, targetSessionId }));
+    return this.call(() =>
+      this.identity.revokeSession(this.input({ sessionToken, targetSessionId })),
+    );
   }
 
   listGrants(sessionToken: string) {
-    return this.call(() => this.identity.listGrants({ sessionToken }));
+    return this.call(() => this.identity.listGrants(this.input({ sessionToken })));
   }
 
   revokeGrant(sessionToken: string, clientId: string) {
-    return this.call(() => this.identity.revokeGrant({ sessionToken, clientId }));
+    return this.call(() => this.identity.revokeGrant(this.input({ sessionToken, clientId })));
   }
 
   /**

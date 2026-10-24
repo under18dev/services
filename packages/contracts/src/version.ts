@@ -28,5 +28,25 @@
  * **両方**の消費者を揃えてデプロイし直す必要があり、「dashboard だけ直せばよい」
  * という以前の前提はもう成り立たない。
  */
-export const CONTRACT_VERSION = "1.1.0" as const;
+/**
+ * ## 1.1.0 → 1.2.0（#22: `caller` の追加）
+ *
+ * 書き込みを伴う 6 メソッドの入力に **optional** な `caller` を足した。
+ * 監査ログの `actor` に入れ、dashboard-worker と nfc-worker の
+ * どちらから来た操作かを後から辿れるようにする。
+ *
+ * **後方互換な追加**なので MINOR。optional にしてあるのは、必須にすると
+ * auth-worker を先にデプロイした瞬間に古い呼び出し元が全滅するため。
+ * 渡されなければ `actor` は `"unknown"` になる。
+ *
+ * デプロイ順は従来どおり **auth-worker が先**。逆順にすると、新しい
+ * 呼び出し元が `caller` を送っても古い auth-worker は zod の
+ * `safeParse` で未知のキーを落とすだけなので**壊れはしない**が、
+ * その間の監査ログは `actor` が空のままになる。
+ *
+ * **`caller` は認証ではない。** Service Binding は呼び出し元の身元を
+ * 運ばないので、これは自己申告である。認可の判断に使わないこと
+ * （`identity.ts` の `RPC_CALLERS` のコメント）。
+ */
+export const CONTRACT_VERSION = "1.2.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;
