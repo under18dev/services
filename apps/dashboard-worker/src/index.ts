@@ -1,4 +1,4 @@
-import { sessionCookieName } from "@u18/contracts";
+import { buildClearedSessionCookie, sessionCookieName } from "@u18/contracts";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { secureHeaders } from "hono/secure-headers";
@@ -75,6 +75,14 @@ app.delete("/api/me/sessions/:id", async (c) => {
 
   const result = await c.get("identity").revokeSession(token, c.req.param("id"));
   if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
+
+  // 自分自身のセッションを消した場合**だけ** Cookie を落とす（auth-worker と同じ判断）。
+  // 落とさないと、失効済みの Cookie をブラウザが送り続け、次に 401 を
+  // 踏むまで「ログアウトが効かなかった」ように見える。
+  // revoked だけで判断すると、別端末を失効させた操作で自分がログアウトされる。
+  if (result.value.revoked && result.value.self) {
+    c.header("Set-Cookie", buildClearedSessionCookie(c.env.ENVIRONMENT), { append: true });
+  }
 
   return c.json(result.value);
 });
