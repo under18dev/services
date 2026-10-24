@@ -340,6 +340,17 @@ Port の設計上の含意をいくつか:
 Service Binding 呼び出しをこの 1 クラスに閉じ込めてあるので、将来 RPC を
 HTTP 呼び出しへ置き換えても上の層は変わらない（仕様書 4.4）。
 
+**dashboard-worker の HTTP ルートは `/account` 接頭辞ごと登録する**
+（`ACCOUNT_BASE_PATH`、#106）。本番の Workers route は
+`auth.under18.dev/account/*` で、Cloudflare は一致した接頭辞を URL から
+取り除かない。Worker には `/account/api/me` がそのまま届くので、
+`/api/me` と登録すると本番では 404 になる。`auth.under18.dev/api/me` のほうは
+より短い pattern の auth-worker（`auth.under18.dev/*`）に吸われるため、
+やはり dashboard には届かない。`wrangler dev` は単独オリジンで起動するので
+接頭辞が無くても叩けてしまい、**壊れていても正常に見える**——
+`apps/dashboard-worker/test/api.test.ts` に「接頭辞なしは 404」を固定してある。
+nfc-worker も同じ対応を取っている（`CARDS_BASE_PATH`）。
+
 ### 4.3 コンテナのライフサイクル
 
 `createContainer(env)` は**リクエストごと**に呼ばれる。Workers では `Env` が
@@ -425,8 +436,21 @@ dashboard-worker が侵害された瞬間にそれが Identity の侵害にな�
 ### 5.3 `CONTRACT_VERSION` とデプロイ順
 
 ```ts
-export const CONTRACT_VERSION = "1.0.0" as const;
+export const CONTRACT_VERSION = "1.1.0" as const;
 ```
+
+直近の更新は #18 の `listGrants` / `revokeGrant` 追加で、既存 4 メソッドの
+署名・意味・DTO を変えていないため MINOR（1.0.0 → 1.1.0）。したがって
+**auth-worker を先にデプロイする**。逆順にすると、新しい dashboard-worker が
+まだメソッドを持たない auth-worker を呼び、Service Binding が throw する。
+`RpcIdentityGateway.call()` がそれを `identity_unavailable` へ畳むので画面は
+503 で済むが、同意管理だけが無言で壊れた状態がデプロイ完了まで続く。
+
+**`IdentityRpcContract` の消費者は dashboard-worker と nfc-worker の 2 つある。**
+今回はインターフェースへのメソッド追加なので、`getSession` しか使わない
+nfc-worker は型も壊れず再デプロイも要らない。この非対称性は MAJOR 変更では
+逆転し、両方を揃えてデプロイし直す必要が出る——「dashboard だけ直せばよい」
+という前提はもう成り立たない。
 
 2 つの Worker は独立してデプロイされるため、デプロイの瞬間に必ず
 「新しい呼び出し元 × 古い呼び出し先」または「古い呼び出し元 × 新しい呼び出し先」が
@@ -456,21 +480,25 @@ Authorization Code Flow + PKCE が端から端まで通る。残るのは
 
 ### 6.1 動くもの
 
-| 入口                                                                                          | 実体                                                                                            |
-| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `GET /health`                                                                                 | `health.routes.ts` → `DatabaseProbe.ping()`（D1 へ `select 1`）。失敗時は 503 + `degraded`      |
-| `GET /.well-known/openid-configuration`                                                       | `oauth.routes.ts`。`ISSUER` から静的に組み立てる                                                |
-| `GET /oauth/authorize`                                                                        | `oauth.authorize.routes.tsx` → `AuthorizeRequestUseCase` → `IssueAuthorizationCodeUseCase`      |
-| `POST /oauth/consent`                                                                         | 同上。同意の送信先。CSRF はログイン画面と同じ double-submit + Origin 検証                       |
-| `POST /oauth/token`                                                                           | `oauth.token.routes.ts` → `AuthenticateOAuthClientUseCase` → `ExchangeAuthorizationCodeUseCase` |
-| `GET /api/me`                                                                                 | `me.routes.ts` → `GetSessionUseCase` → `UserRepository.findById`                                |
-| `GET /api/me/sessions`                                                                        | `me.routes.ts` → `ListSessionsUseCase`                                                          |
-| `DELETE /api/me/sessions/:id`                                                                 | `me.routes.ts` → `RevokeSessionUseCase`。Origin 検証つき                                        |
-| `PATCH /api/me`                                                                               | `me.routes.ts` → `UpdateProfileUseCase`。Origin 検証 + username 変更時の再認証                  |
-| `GET /api/me/passkeys`                                                                        | `me.routes.ts` → `ListPasskeysUseCase`。公開鍵と Credential ID は返さない                       |
-| `DELETE /api/me/passkeys/:id`                                                                 | `me.routes.ts` → `DeletePasskeyUseCase`。Origin 検証 + 再認証 + 所有者チェック                  |
-| RPC `getSession` / `getUserProfile` / `listSessions` / `revokeSession`                        | `identity.entrypoint.ts`                                                                        |
-| dashboard `GET /health`, `GET /api/me`, `GET /api/me/sessions`, `DELETE /api/me/sessions/:id` | `apps/dashboard-worker/src/index.ts`                                                            |
+| 入口                                                                              | 実体                                                                                            |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `GET /health`                                                                     | `health.routes.ts` → `DatabaseProbe.ping()`（D1 へ `select 1`）。失敗時は 503 + `degraded`      |
+| `GET /.well-known/openid-configuration`                                           | `oauth.routes.ts`。`ISSUER` から静的に組み立てる                                                |
+| `GET /oauth/authorize`                                                            | `oauth.authorize.routes.tsx` → `AuthorizeRequestUseCase` → `IssueAuthorizationCodeUseCase`      |
+| `POST /oauth/consent`                                                             | 同上。同意の送信先。CSRF はログイン画面と同じ double-submit + Origin 検証                       |
+| `POST /oauth/token`                                                               | `oauth.token.routes.ts` → `AuthenticateOAuthClientUseCase` → `ExchangeAuthorizationCodeUseCase` |
+| `GET/POST /oauth/userinfo`                                                        | `oauth.userinfo.routes.ts` → `GetUserInfoUseCase`。Bearer 認証 + scope で claim を絞る          |
+| `POST /oauth/revoke`                                                              | `oauth.revoke.routes.ts` → `RevokeAccessTokenUseCase`。RFC 7009。常に 200                       |
+| `GET /api/me`                                                                     | `me.routes.ts` → `GetSessionUseCase` → `UserRepository.findById`                                |
+| `GET /api/me/sessions`                                                            | `me.routes.ts` → `ListSessionsUseCase`                                                          |
+| `DELETE /api/me/sessions/:id`                                                     | `me.routes.ts` → `RevokeSessionUseCase`。Origin 検証つき                                        |
+| `PATCH /api/me`                                                                   | `me.routes.ts` → `UpdateProfileUseCase`。Origin 検証 + username 変更時の再認証                  |
+| `GET /api/me/passkeys`                                                            | `me.routes.ts` → `ListPasskeysUseCase`。公開鍵と Credential ID は返さない                       |
+| `DELETE /api/me/passkeys/:id`                                                     | `me.routes.ts` → `DeletePasskeyUseCase`。Origin 検証 + 再認証 + 所有者チェック                  |
+| RPC `getSession` / `getUserProfile` / `listSessions` / `revokeSession`            | `identity.entrypoint.ts`                                                                        |
+| RPC `listGrants` / `revokeGrant`                                                  | `identity.entrypoint.ts` → `ListGrantsUseCase` / `RevokeGrantUseCase`（#18）                    |
+| dashboard `/account/health`, `/account/api/me`, `/account/api/me/sessions{,/:id}` | `apps/dashboard-worker/src/index.ts`。**`/account` 接頭辞が要る**（下記）                       |
+| dashboard `/account/api/me/grants`, `DELETE /account/api/me/grants/:clientId`     | 同上（#18）                                                                                     |
 
 Repository は 3 本とも実装済み（`users`, `sessions`, `audit_logs`）。
 Drizzle スキーマは仕様書 7.1 の全テーブル分が `packages/db/src/schema/` に定義され、
