@@ -102,6 +102,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-workspace
+
+      # auth-worker は development 以外で IP_HASH_PEPPER / SIGNING_KEY_JWK 等が
+      # 無いと起動を拒否する。デプロイ自体は成功して実リクエストで初めて落ちる
+      # ため、先に Workers Secret の「名前」だけを確認しておく（値は取得しない）。
+      # 初回デプロイ時は Worker 自体が存在せず一覧を取れないので、ここでは
+      # 落とさずに警告にとどめる。
+      - name: Check required Worker secrets
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/auth-worker
+        run: |
+          if ! secrets_json="$(pnpm exec wrangler secret list --name u18-auth 2>/dev/null)"; then
+            echo "::warning::Could not list Worker secrets (the Worker may not exist yet on a first deploy). Skipping the check."
+            exit 0
+          fi
+          missing=""
+          for name in SIGNING_KEY_JWK SIGNING_KEY_KID IP_HASH_PEPPER; do
+            echo "$secrets_json" | grep -q "\"$name\"" || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Missing Worker secrets:$missing. Set them with 'wrangler secret put <NAME> --name u18-auth'; auth-worker refuses to boot without them outside development."
+          else
+            echo "All required Worker secrets are present."
+          fi
+
       - name: wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
