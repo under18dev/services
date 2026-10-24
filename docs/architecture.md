@@ -61,7 +61,7 @@ Infrastructure は Application が定義した Port を実装する（依存は 
 
 ```text
 apps/auth-worker/src/
-├── index.ts                     Worker エントリ。default export (HTTP) と IdentityRPC (RPC)
+├── index.ts                     Worker エントリ。default export (HTTP + scheduled) と IdentityRPC (RPC)
 ├── presentation/
 │   ├── http/
 │   │   ├── app.ts               Hono アプリ組み立て、container ミドルウェア、404/500 ハンドラ
@@ -79,7 +79,7 @@ apps/auth-worker/src/
 │   └── use-cases/               GetSession / ListSessions / RevokeSession + types.ts
 ├── domain/
 │   ├── entities/                session.ts, user.ts
-│   ├── services/                scope.ts, token-lifetime.ts
+│   ├── services/                scope.ts, token-lifetime.ts, retention-policy.ts
 │   └── errors/                  domain-error.ts
 ├── infrastructure/
 │   ├── persistence/             Drizzle Repository 3 本 + DatabaseProbe
@@ -87,6 +87,13 @@ apps/auth-worker/src/
 │   └── email/console-email-sender.ts
 └── composition/container.ts     Env → 具象実装の組み立て
 ```
+
+入口は 3 つある。HTTP（`default export` の `fetch`）、RPC（`IdentityRPC`）、
+そして Cron Trigger（`default export` の `scheduled`）。`scheduled` は
+保持期限を過ぎた行の掃除だけを行い、`PurgeExpiredRecordsUseCase` を 1 回呼ぶ
+（#43、仕様書 7.3）。**掃除の経路はこの 1 本に限る。** テーブルごとに Cron を
+分けると、片方だけ止まっていても誰も気づかない。テーブルごとに違う保持期間は
+`domain/services/retention-policy.ts` が吸収する。
 
 `AppBindings` が `app.ts` ではなく `types.ts` にあるのは循環参照を避けるため。
 ルートが `app.ts` から型を import すると `app.ts -> *.routes.ts -> app.ts` になる。
@@ -256,6 +263,7 @@ Port は Application が「必要な操作」として定義し、Infrastructure
 | `SessionRepository`              | `session.repository.ts`                           | `DrizzleSessionRepository` — `persistence/drizzle-session.repository.ts`                                      |
 | `AuditLogger`                    | `audit-log.port.ts`                               | `DrizzleAuditLogger` — `persistence/drizzle-audit-logger.ts`                                                  |
 | `DatabaseProbe`                  | `health.port.ts`                                  | `DrizzleDatabaseProbe` — `persistence/drizzle-database-probe.ts`                                              |
+| `ExpiredRecordPurger`            | `retention.port.ts`                               | `DrizzleExpiredRecordPurger` — `persistence/drizzle-expired-record-purger.ts`                                 |
 | `TokenHasher`                    | `crypto.port.ts`                                  | `Sha256TokenHasher` — `crypto/web-crypto.ts`                                                                  |
 | `IpHasher`                       | `crypto.port.ts`                                  | `PepperedIpHasher` — `crypto/web-crypto.ts`                                                                   |
 | `RandomTokenGenerator`           | `crypto.port.ts`                                  | `WebCryptoTokenGenerator` — `crypto/web-crypto.ts`                                                            |

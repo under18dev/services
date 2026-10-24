@@ -1383,6 +1383,86 @@ npx wrangler d1 export u18-identity --remote --no-data \
 
 ## 7. データ保持と削除
 
+### 7.0 保持期限と自動削除（#43）
+
+#### 決定した保持期間
+
+起点は **行が使えなくなった時刻**（期限切れ / 失効 / 消費、`email_challenges` は最終送信も含む）であって、作成時刻ではない。定義は `apps/auth-worker/src/domain/services/retention-policy.ts` の `RetentionPolicy` に集約してある。**値を変えるときはこの表とコードの両方を直すこと。**
+
+| テーブル                    | 保持期間    | 消す行                               | 根拠                                                                                                    |
+| --------------------------- | ----------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `sessions`                  | **30 日**   | 期限切れ・失効済み                   | セッション一覧 UI の履歴表示と侵害調査。D1 Time Travel の 30 日窓とも揃う                               |
+| `oauth_authorization_codes` | **24 時間** | 消費済み・期限切れ                   | コードの寿命は 60 秒だが、消費済み行は「同じコードが 2 回来た」の事後照合に使える                       |
+| `email_challenges`          | **1 時間**  | 消費済み・期限切れ（最終送信も見る） | **5 つの中で最短。** このテーブルだけメールアドレスを平文で持つ（仕様書 9 Privacy）。下の注意も読むこと |
+| `webauthn_challenges`       | **24 時間** | 消費済み・期限切れ                   | 単回消費で個人情報を含まない。当日中の調査に足りる長さだけ残す                                          |
+| `audit_logs`                | **180 日**  | 記録から 180 日経過                  | §7.2 の推奨値。インシデントの発覚は遅れるため直近半年を遡れる必要がある                                 |
+
+**`users` は対象外である。** アカウントは物理削除せず凍結で表現する（仕様書 14.1 決定 7）。凍結アカウントの保持期間は未決で、#27 / #51 で扱う。§7.1 の物理削除は引き続き運用者の手動操作である。
+
+**`oauth_tokens` はまだ対象に入っていない。** トークンを発行する経路（#15 / #16）の実装と合わせて追加すること。`RetentionPolicy` にエントリを足し、`DrizzleExpiredRecordPurger` に `case` を 1 つ書けば同じ Cron に乗る。
+
+#### `email_challenges` を 1 時間より短くしてはならない理由
+
+`email_challenges.resend_count` / `last_sent_at` は **OTP 再送のクールダウン判定**に使われている（`OtpPolicy.resendCooldownMs` = 60 秒、`StartEmailOtpUseCase`）。消費済みの行を即座に消すと、「コードを受け取って消費する → 行が消える → 送信履歴が無くなる」という順序でクールダウンと再送上限を回り込める。
+
+そのため削除条件には `expires_at` と `consumed_at` に加えて **`last_sent_at` も入っている**。1 時間はクールダウン窓（60 秒）の 60 倍、OTP の有効期限（5 分）の 12 倍で、どちらの窓も確実に跨ぐ。回帰テストは `apps/auth-worker/test/retention.test.ts` の「クールダウン窓の内側にある消費済みの行は消さない」。
+
+#### 実行経路
+
+**掃除の経路は 1 本だけである。** Cron Trigger → `apps/auth-worker/src/index.ts` の `scheduled` → `PurgeExpiredRecordsUseCase` → `ExpiredRecordPurger`（Port）→ `DrizzleExpiredRecordPurger`。
+
+```text
+*/15 * * * *  →  scheduled()  →  PurgeExpiredRecordsUseCase.execute()
+                                    └─ 5 テーブルを直列に、テーブルごとの保持期間で
+```
+
+テーブルごとに Cron やハンドラを分けていないのは意図的である。経路が分かれると、片方だけ止まっていても誰も気づかない。
+
+Cron 式は `apps/auth-worker/wrangler.jsonc` の `triggers.crons` に書く。**`env.production` にも同じものが要る**（env ごとの設定は継承されない）。ここを書き忘れると、本番だけ掃除が走らないまま D1 が増え続け、容量上限に達した時点で監査ログが静かに欠落し始める。
+
+#### 1 回あたりの上限と持ち越し
+
+1 回の実行で 1 テーブルから消すのは **1,000 行まで**（`RETENTION_SWEEP_LIMIT`）。D1 は 1 ステートメントの実行時間に上限があり、溜まった行を 1 回の `delete` で消そうとすると途中で落ちる。落ちた分は 1 行も消えないので、「溜まっているほど掃除が失敗する」という最悪の挙動になる。
+
+上限に達した分は次回の実行へ持ち越す。15 分間隔なので 1 テーブルあたり 1 日 96,000 行を処理できる。
+
+#### 動いていることをどう確認するか
+
+実行のたびに、件数が 2 か所に残る。**0 件でも必ず出る**ので、「最後にいつ掃除が走ったか」はログの有無で判断できる。
+
+1. Workers の構造化ログ（`observability` が有効なのでダッシュボードから検索できる）
+
+   ```text
+   retention sweep  { deleted, byTarget, carriedOver, failed, limit }
+   ```
+
+2. `audit_logs` の `event = 'retention.sweep'`
+
+   ```bash
+   cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+   npx wrangler d1 execute u18-identity --remote --command "
+   select datetime(created_at/1000, 'unixepoch') as at, outcome, metadata
+   from audit_logs where event = 'retention.sweep' order by created_at desc limit 10;
+   "
+   ```
+
+監視で拾うべき異常は 3 つ。
+
+- **`retention.sweep` が 1 時間以上出ていない** — Cron が止まっている。`triggers.crons` が本番 env に無いことを最初に疑う
+- **`carriedOver` が毎回出続ける** — 流入が掃除の速度を超えている。1 回の上限を上げるのではなく、先に Cron の間隔を詰める（D1 の実行時間上限から遠いままでいられる）
+- **`failed` が空でない** — そのテーブルの削除が落ちている。`retention sweep failed` のログに原因が出る
+
+#### 手動で 1 回走らせる
+
+```bash
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+# ローカル。wrangler dev 起動中に別端末から叩く
+npx wrangler dev
+curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
+```
+
+本番で即時に走らせる手段は無い。緊急に大量削除が必要なときは §7.2 の SQL を手で実行する。
+
 ### 7.1 アカウント削除
 
 #### スキーマ上の前提
@@ -1469,18 +1549,20 @@ npx wrangler d1 export u18-identity --remote --no-data \
 
    **ただしこれは監査証跡を失う操作である。** 「削除要求への対応」と「セキュリティ証跡の保全」のどちらを優先するかは、§8 の未決事項として扱うべき方針判断である。
 
-**この一連の処理を自動化するバッチは存在しない。** 猶予期間を過ぎた論理削除ユーザーを定期的に物理削除する仕組み（Cron Trigger またはスケジュールジョブ）が必要である。Phase 3 の「アカウント削除・復旧手順」で実装する。
+**この一連の処理を自動化するバッチは存在しない。** §7.0 の Cron は `users` を意図的に対象外にしている。アカウントは物理削除せず凍結で表現する決定（仕様書 14.1 決定 7）があり、凍結アカウントの保持期間自体がまだ決まっていないためである。期間が決まるまで自動削除の経路を先に作ると、方針より先に実装が既成事実になる。#27 / #51 で扱う。
 
 ### 7.2 `audit_logs` の保持
 
 #### 現状
 
-- 保持期間は**未定義**である。
-- 削除・アーカイブのバッチは**存在しない**。したがって現在は**無期限に増え続ける**。
+- 保持期間は **180 日**（§7.0、#43）。15 分おきの Cron が自動で削除する。
+- **アーカイブ（別ストレージへの退避）は存在しない。** 180 日を過ぎたログは退避されずに消える。長期保全が必要なイベントを分けるなら、削除前に §6.3 のエクスポートを定期実行する運用が要る（残件）。
 - `audit_logs` にはインデックスが 3 本（`event+created_at`、`user_id+created_at`、`created_at`）あり、行数に比例してストレージを消費する。D1 のデータベースサイズには上限があるため、放置すれば最終的に書き込みが止まる。
 - 書き込み失敗は握り潰される（`drizzle-audit-logger.ts`）。つまり **DB が容量上限に達しても、認証は動き続け、監査ログだけが静かに欠落する。** ログに `audit log write failed` が出るので、これを監視対象に入れること。
 
-#### 推奨する保持方針（Phase 3 で確定させる）
+#### イベント区分ごとの保持（未適用）
+
+現在の実装は **一律 180 日**で、下の区分はまだ効いていない。高リスクイベントを 2 年残すには `event` 名での選別が要る（残件、#22 と合わせて扱う）。
 
 | 区分                                                                                     | 推奨保持期間 | 理由                                                   |
 | ---------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------ |
@@ -1488,7 +1570,7 @@ npx wrangler d1 export u18-identity --remote --no-data \
 | 認証失敗（`outcome = 'failure'`）                                                        | **180 日**   | 総当たりの長期的パターン分析に使う                     |
 | 高リスクイベント（鍵ローテーション、アカウント停止・削除、管理操作）                     | **2 年**     | 件数が少なく、保持コストに対して価値が高い             |
 
-#### 削除の手順（実装までの暫定運用）
+#### 手で削除する手順（Cron が止まっている / 緊急で容量を空ける場合）
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
@@ -1507,9 +1589,9 @@ delete from audit_logs where created_at < (unixepoch() - 180 * 86400) * 1000;
 
 一度に大量の行を削除すると D1 のクエリ時間上限に当たる。初回は期間を区切って小分けに実行する。
 
-#### 期限切れ行の掃除（audit_logs 以外）
+#### 期限切れ行の滞留を確認する（audit_logs 以外）
 
-同じ問題が他のテーブルにもある。**いずれも期限切れ行を掃除するバッチは存在しない。**
+掃除は自動で走る（§7.0）。それでも溜まっているなら Cron が止まっているか、流入が掃除の速度を超えている。件数はこれで見る。
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
@@ -1522,7 +1604,13 @@ union all select 'oauth_tokens',              count(*) from oauth_tokens        
 "
 ```
 
-`sessions` は 12 時間で期限切れになるため、最も速く増える。セッション行の保持は「期限切れ後 30 日」程度にし（セッション一覧 UI での履歴表示と調査のため）、それ以降は削除する方針を Phase 3 で確定させる。認可コード・チャレンジ類は期限切れ後すぐに消してよい（`consumed_at` の記録が必要なら `audit_logs` 側に残す）。
+`sessions` は 12 時間で期限切れになるため、最も速く増える。保持期間は §7.0 の表で確定済み（期限切れ後 30 日）。**`oauth_tokens` だけがまだ自動削除の対象に入っていない**（#15 / #16 の実装と合わせて追加する）ので、当面はこの SQL で件数を見て、必要なら手で消すこと。
+
+```bash
+npx wrangler d1 execute u18-identity --remote --command "
+delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
+"
+```
 
 ### 7.3 `ipHash` の保持 — 未決の論点
 
@@ -1614,7 +1702,7 @@ union all select 'oauth_tokens',              count(*) from oauth_tokens        
 仕様書 14 に挙がっていないが、運用上決める必要があるもの。
 
 1. **バックアップの実行頻度と自動化手段**（§6.3）。現在エクスポートは完全に手動であり、スケジュール実行の仕組みが存在しない。
-2. **`audit_logs` およびセッション行の保持期間**（§7.2）。削除バッチが存在せず、現在は無期限に増える。
+2. ~~**`audit_logs` およびセッション行の保持期間**~~ — 決定済み（§7.0、#43）。残るのは「高リスクイベントだけ 2 年残す」区分の実装と、削除前のアーカイブ、`oauth_tokens` の対象追加。
 3. **`ip_hash` の保持期間**（§7.3）。
 4. **削除済みメールアドレスの再利用可否**（§7.1 手順 7）。`lower()` 式の UNIQUE インデックスにより、現状では再登録できない。
 5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。
