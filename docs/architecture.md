@@ -724,12 +724,12 @@ sequenceDiagram
    `tests/e2e/` を使うのは複数 Worker を同時に起動する必要が出てからでよい
    （`tests/e2e/README.md` に判断と実機手順を書いてある）。
 
-5. **`compatibility_date` は `2026-08-15`** で、今日の日付ではない。
-   テストが使う workerd が知らない日付を指定すると、起動時に
-   `ERR_FUTURE_COMPATIBILITY_DATE` で全滅する。**上限は workerd のビルド日では
-   ない** —— 実測では `1.20261019.1`（2026-10-19 ビルド）が 2026-10-24 を
-   受け付け、2026-11-15 で落ちる。進めるときは実際に `pnpm test` を通して
-   確かめること（README の固定バージョン節、#108）。
+5. **`compatibility_date` は `2026-10-24`**（仕様書の日付。#108）。3 つの
+   Worker で同じ値にする。テストが使う workerd が知らない日付を指定すると、
+   起動時に `ERR_FUTURE_COMPATIBILITY_DATE` で全滅する。**上限は workerd の
+   ビルド日ではない** —— 実測では `1.20261019.1`（2026-10-19 ビルド）が
+   2026-10-24 を受け付け、2026-11-15 で落ちる。進めるときは実際に
+   `pnpm test` を通して確かめること（README の固定バージョン節）。
 
 6. **`wrangler.jsonc` の `database_id` は `REPLACE_WITH_D1_DATABASE_ID` のまま**。
    各自が `wrangler d1 create` した ID で置き換える前提で、リポジトリには

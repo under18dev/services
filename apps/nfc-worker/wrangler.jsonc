@@ -2,14 +2,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "u18-nfc",
   "main": "src/index.ts",
-  // 既存 2 つの Worker と**同じ日付に揃える**。
-  // @cloudflare/vitest-plugin が抱える workerd のビルド日より後の
-  // 日付を指定すると、テスト起動時に ERR_FUTURE_COMPATIBILITY_DATE で落ちる。
-  // 新しい Worker だからといって今日の日付を入れないこと
-  // （README「固定しているバージョンとその理由」を参照）。
-  // 上げるときは 3 つまとめて、@cloudflare/vitest-plugin も一緒に上げる。
-  // **上限は workerd のビルド日ではない。** 実際に pnpm test で確かめること（#108）。
-  "compatibility_date": "2026-08-15",
+  // 3 つの Worker で同じ値にすること。仕様書の日付に揃えてある（#108）。
+  //
+  // テストが使う workerd が知らない日付を指定すると、テスト起動時に
+  // ERR_FUTURE_COMPATIBILITY_DATE で全滅する（wrangler dev は通るので気づきにくい）。
+  //
+  // **上限は workerd のビルド日ではない。** 実測では workerd 1.20261019.1
+  // （2026-10-19 ビルド）が 2026-10-24 を受け付け、2026-11-15 で落ちる。
+  // 進めるときは @cloudflare/vitest-plugin を先に上げ、実際に pnpm test で
+  // 確かめること。
+  "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 

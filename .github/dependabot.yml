@@ -48,7 +48,7 @@ updates:
       # テストが 1 件も走らず起動時に
       # MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE で全滅する。
       # このため 3 つの wrangler.jsonc は compatibility_date を意図的に
-      # 2026-08-15 に固定してある（上限はビルド日とは一致しない。#108）。
+      # 2026-10-24（仕様書の日付）に揃えてある。上限はビルド日とは一致しない（#108）。
       #
       # 厄介なのは失敗の見え方で、`wrangler dev` は動き続けるのに
       # テストだけが落ちるため、バンプと無関係な破損に見える。
