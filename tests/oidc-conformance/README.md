@@ -45,19 +45,41 @@
 
 ### 2.1 自前ホスト版（まずこちら）
 
-Docker で手元に立てる。この場合、**`wrangler dev` に向けて流せる**。
+手元のコンテナで立てる。この場合、**`wrangler dev` に向けて流せる**。
 本番ドメインも D1 も要らないので、**#5 とデプロイ一式を待たずに着手できる**。
 
-**Maven ビルドは不要だった。** 公式のビルド済みイメージがリポジトリ内の
+**Maven ビルドは不要。** 公式のビルド済みイメージがスイートのリポジトリ内の
 compose ファイルで参照されている。
 
 ```sh
 git clone https://gitlab.com/openid/conformance-suite.git
 cd conformance-suite
 git checkout release-v5.3.3
-IMAGE_TAG=release-v5.3.3 docker compose -f docker-compose-prebuilt.yml up -d
+IMAGE_TAG=release-v5.3.3 podman compose -f docker-compose-prebuilt.yml up -d
 # https://localhost.emobix.co.uk:8443 で待ち受ける
 ```
+
+**Podman で動かすこと。** このリポジトリの開発マシンでは Docker Desktop を
+停止している（VM が CPU 10 個 / メモリ 8GB を確保したまま応答しなくなったため）。
+`docker compose` でも同じ compose ファイルがそのまま動くが、**手順書としては
+Podman を正とする。**
+
+Podman 固有の注意は 1 つだけだった。
+
+- **`host.docker.internal` はそのまま使える。** Podman の本来の名前は
+  `host.containers.internal` だが、両方が同じ IP に解決される。
+  `wrangler dev` を参照する箇所を書き換える必要は無い
+
+  ```sh
+  $ podman run --rm alpine getent hosts host.docker.internal
+  192.168.127.254   host.containers.internal host.docker.internal
+  ```
+
+- Java + MongoDB なので VM のメモリは 4GiB 以上にしておく
+  （`podman machine set --memory 4096`）
+
+Docker 版と Podman 版の両方で Config OP を流し、**SUCCESS / FAILURE の件数も
+FAILURE の集合も完全に一致する**ことを確認してある（`2026-10-24-config-op.md`）。
 
 手順の全体と、流す先（`wrangler dev`）の立て方は
 `2026-10-24-config-op.md` の「再現手順」に実際に動いた形で書いてある。
