@@ -679,14 +679,22 @@ sequenceDiagram
    クライアントアイランドのビルド工程（`scripts/build-client.mjs` と
    `tsconfig.client.json`）も同様で、ここだけ DOM 型を有効にしている。
 
-4. **`tests/e2e`, `tests/oidc-conformance`, `tests/security` は空ディレクトリのまま**。
-   現存するテストは `apps/auth-worker/test/`（33 本・477 件）、
-   `apps/dashboard-worker/test/`（26 件）、`apps/nfc-worker/test/`（89 件）、
-   `packages/domain/test/`（25 件）。認可フロー（#15 / #16）が入ったので、
-   仕様書 11.3 の E2E / 適合性テスト（#20 / #28）に着手できる状態になった。
-   なお単回交換の競合（#19）は `tests/security/` ではなく
-   `apps/auth-worker/test/oauth-code-concurrency.test.ts` に置いた。実 D1 と
-   Worker 本体の両方が要り、auth-worker の vitest 設定の外では走らせられないため。
+4. **`tests/` 以下に実行されるテストは 1 本も無い**（README と適合性テストの
+   記録だけ）。`pnpm-workspace.yaml` が `apps/*` と `packages/*` しか含まないので、
+   ここに置いたテストはルートの `pnpm test` から走らない。
+   現存するテストは `apps/auth-worker/test/`、`apps/dashboard-worker/test/`、
+   `apps/nfc-worker/test/`、`packages/domain/test/` にある。
+
+   **Worker 本体と実 D1 が要るテストは、`tests/` ではなく app の `test/` へ置く**
+   という判断を 2 度続けている。単回交換の競合（#19）は
+   `apps/auth-worker/test/oauth-code-concurrency.test.ts`、2 クライアント間の
+   SSO（#20・Phase 2 完了条件）は `apps/auth-worker/test/sso-two-clients.test.ts`。
+   どちらも auth-worker の vitest 設定（`@cloudflare/vitest-pool-workers` +
+   `TEST_MIGRATIONS`）の外では走らせられず、設定を 2 つ持てば
+   `compatibility_date` やマイグレーションの受け渡しが片方だけ古くなる。
+   CI で走らないテストは無いのと同じなので、実行される場所を優先する。
+   `tests/e2e/` を使うのは複数 Worker を同時に起動する必要が出てからでよい
+   （`tests/e2e/README.md` に判断と実機手順を書いてある）。
 
 5. **`compatibility_date` は `2026-08-15`** で、今日の日付ではない。
    `@cloudflare/vitest-pool-workers` が同梱する workerd のビルド日より後の日付を
