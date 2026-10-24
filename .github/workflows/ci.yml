@@ -75,8 +75,15 @@ jobs:
       # 本番は `wrangler deploy --env production` で出す（deploy.yml）。
       # env.production は d1_databases / vars / Service Binding を再定義する
       # ため、既定 env の dry-run だけでは本番側の設定を一度も評価していない。
-      # 実測では、env.production 内の JSONC 構文エラーは既定 env の dry-run を
-      # 素通りし、--env production でのみ落ちる（#48）。
+      #
+      # 実測で捕まる誤りの種類（#57）:
+      #   - JSON として壊れている場合はファイル全体のパースが失敗するため、
+      #     既定 env の dry-run でも落ちる。このステップ固有の価値ではない。
+      #   - 既定を素通りして --env production でのみ落ちるのは、JSON としては
+      #     読めるがスキーマ検証に通らないもの。型違い（"vars" を文字列にする等）
+      #     と必須フィールドの欠落がこれにあたる。ここがこのステップの価値。
+      #   - binding 名の typo と無効な compatibility_flags は、どちらの dry-run
+      #     でも検知できない。wrangler がローカルで検証しないため（#57）。
       - name: Build workers (production env)
         run: |
           pnpm --filter @u18/auth-worker exec \
