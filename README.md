@@ -109,6 +109,11 @@ pnpm --filter @u18/auth-worker exec wrangler d1 create u18-identity
 #    出力された database_id を apps/auth-worker/wrangler.jsonc の
 #    "database_id": "REPLACE_WITH_D1_DATABASE_ID" と差し替える。
 #    この置換を忘れると wrangler dev も migrate も失敗する。
+pnpm --filter @u18/nfc-worker exec wrangler d1 create u18-nfc
+#    NFC 用は**別の D1**。apps/nfc-worker/wrangler.jsonc の
+#    "REPLACE_WITH_NFC_D1_DATABASE_ID" と差し替える。
+#    Identity と同じ DB にしないこと（D1 binding に行レベルの粒度が無く、
+#    同居させると nfc-worker の侵害が sessions の露出になる）。
 
 # 4. Cloudflare の binding 型を再生成する
 pnpm cf-typegen
@@ -120,14 +125,17 @@ pnpm cf-typegen
 #    apps/auth-worker/worker-env.d.ts で手書き宣言している（生成対象外）。
 
 # 5. マイグレーションを適用する
-pnpm db:generate        # packages/db/src/schema/ → packages/db/drizzle/*.sql
-                        # 生成済み（0000_fat_thunderbird.sql、13 テーブル）なので
-                        # スキーマを変えたときだけ再実行する
-pnpm db:migrate:local   # ローカル D1 (miniflare) へ適用
+pnpm db:generate            # packages/db と packages/nfc-db の両方を生成する
+                            # Identity: 0000_fat_thunderbird.sql ほか（13 テーブル）
+                            # NFC:      0000_first_spirit.sql（2 テーブル）
+                            # スキーマを変えたときだけ再実行する
+pnpm db:migrate:local       # Identity D1 (miniflare) へ適用
+pnpm db:migrate:local:nfc   # NFC D1 へ適用（別 DB なので別コマンド）
 
 # 6. 開発サーバー
 pnpm dev                # auth-worker → http://localhost:8787
 pnpm dev:dashboard      # dashboard-worker（別ターミナル）
+pnpm dev:nfc            # nfc-worker（別ターミナル。--port で空きポートを指定する）
 ```
 
 動作確認:
@@ -139,7 +147,7 @@ curl http://localhost:8787/login   # ログイン画面（HTML）
 
 pnpm lint       # クリーンに通る
 pnpm typecheck  # 6 パッケージすべて通る
-pnpm test       # 232 件（packages/domain 25、dashboard-worker 21、auth-worker 186）
+pnpm test       # 453 件（domain 25 / auth-worker 318 / dashboard-worker 21 / nfc-worker 89）
 ```
 
 これが現在のグリーンな基準値。手元で落ちたら、自分の変更かセットアップ
@@ -165,25 +173,31 @@ auth-worker を先に `pnpm dev` で起動しておくこと。
 
 ルートの `package.json` から実行する。
 
-| コマンド                                      | 内容                                                                                            |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `pnpm dev`                                    | auth-worker を `wrangler dev` で起動する（既定で :8787）。先に Auth UI の JS を作る             |
-| `pnpm dev:dashboard`                          | dashboard-worker を `wrangler dev` で起動する                                                   |
-| `pnpm build`                                  | 全 workspace の `build`。Worker は `wrangler deploy --dry-run --outdir dist` でバンドル検証する |
-| `pnpm typecheck`                              | 全 workspace で `tsc --noEmit`。`cf-typegen` 済みであることが前提                               |
-| `pnpm lint`                                   | ルートから `eslint .`。レイヤ依存ルール（`packages/config/eslint.layers.js`）を含む             |
-| `pnpm lint:fix`                               | 上記を `--fix` 付きで実行する                                                                   |
-| `pnpm format`                                 | Prettier で全体を整形する                                                                       |
-| `pnpm test`                                   | 全 workspace のテスト。Worker 側は `cloudflareTest()` プラグインで workerd 上の vitest          |
-| `pnpm cf-typegen`                             | `apps/*` で `wrangler types` を実行し `worker-configuration.d.ts` を再生成する                  |
-| `pnpm --filter @u18/auth-worker build:client` | Auth UI のクライアントアイランドだけを esbuild でバンドルする（通常は上記が自動で呼ぶ）         |
-| `pnpm db:generate`                            | Drizzle スキーマからマイグレーション SQL を `packages/db/drizzle/` に生成する                   |
-| `pnpm db:migrate:local`                       | 生成済みマイグレーションをローカル D1 へ適用する                                                |
-| `pnpm db:migrate:remote`                      | 同じく Cloudflare 上の D1 へ適用する。本番に当たるため実行前に差分を確認すること                |
+| コマンド                                      | 内容                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `pnpm dev`                                    | auth-worker を `wrangler dev` で起動する（既定で :8787）。先に Auth UI の JS を作る              |
+| `pnpm dev:dashboard`                          | dashboard-worker を `wrangler dev` で起動する                                                    |
+| `pnpm dev:nfc`                                | nfc-worker を `wrangler dev` で起動する。8787 / 8788 と衝突するので `--port` を足す              |
+| `pnpm build`                                  | 全 workspace の `build`。Worker は `wrangler deploy --dry-run --outdir dist` でバンドル検証する  |
+| `pnpm typecheck`                              | 全 workspace で `tsc --noEmit`。`cf-typegen` 済みであることが前提                                |
+| `pnpm lint`                                   | ルートから `eslint .`。レイヤ依存ルール（`packages/config/eslint.layers.js`）を含む              |
+| `pnpm lint:fix`                               | 上記を `--fix` 付きで実行する                                                                    |
+| `pnpm format`                                 | Prettier で全体を整形する                                                                        |
+| `pnpm test`                                   | 全 workspace のテスト。Worker 側は `cloudflareTest()` プラグインで workerd 上の vitest           |
+| `pnpm cf-typegen`                             | `apps/*` で `wrangler types` を実行し `worker-configuration.d.ts` を再生成する                   |
+| `pnpm --filter @u18/auth-worker build:client` | Auth UI のクライアントアイランドだけを esbuild でバンドルする（通常は上記が自動で呼ぶ）          |
+| `pnpm db:generate`                            | Drizzle スキーマからマイグレーション SQL を生成する（`packages/db` と `packages/nfc-db` の両方） |
+| `pnpm db:migrate:local`                       | Identity のマイグレーションをローカル D1 へ適用する                                              |
+| `pnpm db:migrate:remote`                      | 同じく Cloudflare 上の D1 へ適用する。本番に当たるため実行前に差分を確認すること                 |
+| `pnpm db:migrate:local:nfc`                   | NFC のマイグレーションをローカル D1 (`u18-nfc`) へ適用する                                       |
+| `pnpm db:migrate:remote:nfc`                  | 同じく Cloudflare 上の `u18-nfc` へ適用する                                                      |
 
 スキーマを変更したときは `pnpm db:generate` → `pnpm db:migrate:local` の順。
-生成物（`packages/db/drizzle/*.sql`）はコミットする。テストは wrangler ではなく
-この SQL を直接流すので、生成を忘れるとテストと実装のスキーマがずれる。
+生成物（`packages/db/drizzle/*.sql` と `packages/nfc-db/drizzle/*.sql`）はコミットする。
+テストは wrangler ではなくこの SQL を直接流すので、生成を忘れるとテストと実装の
+スキーマがずれる。Identity と NFC は**別の D1 で別のマイグレーション列**なので、
+適用コマンドも別（上表）。同じ `migrations_dir` を指すと、片方の DB に
+もう片方のテーブルが生える。
 
 ---
 
@@ -209,16 +223,28 @@ services/
 │   │   ├── wrangler.jsonc        D1 binding、compatibility_date、vars、Secrets 一覧（コメント）
 │   │   ├── worker-env.d.ts       Workers Secret の型宣言（手書き。cf-typegen の対象外）
 │   │   └── .dev.vars.example     ローカル用シークレットの雛形
-│   └── dashboard-worker/         アカウント設定 UI / BFF。D1 binding は持たない
-│       └── src/
-│           ├── index.ts              Hono アプリとルート
-│           ├── application/ports.ts  IdentityGateway
-│           ├── domain/errors.ts      IdentityFailure
-│           └── infrastructure/rpc/   Service Binding adapter
+│   ├── dashboard-worker/         アカウント設定 UI / BFF。D1 binding は持たない
+│   │   └── src/
+│   │       ├── index.ts              Hono アプリとルート
+│   │       ├── application/ports.ts  IdentityGateway
+│   │       ├── domain/errors.ts      IdentityFailure
+│   │       └── infrastructure/rpc/   Service Binding adapter
+│   └── nfc-worker/               NFC カードの短縮 URL と管理 API。NFC 専用 D1 の所有者
+│       ├── src/
+│       │   ├── index.ts              Worker のエクスポートだけ（薄い層）
+│       │   ├── presentation/http/    Hono ルート、Origin / CSRF、リダイレクト解決
+│       │   ├── application/ports.ts  IdentityGateway / CardRepository / ClaimCodeService
+│       │   ├── application/use-cases/ 所有者判定を含むユースケース
+│       │   ├── domain/               Card Entity と遷移先 URL の検証
+│       │   ├── infrastructure/       Drizzle Repository、Service Binding adapter、Web Crypto
+│       │   └── composition/          Env から具象実装を組み立てる唯一の場所
+│       ├── test/                 workerd 上のテスト（setup.ts で NFC の migration を適用）
+│       └── wrangler.jsonc        NFC D1 binding、2 つの route、compatibility_date
 ├── packages/
 │   ├── contracts/                Worker 間 RPC の DTO・zod スキーマ・エラー契約・Cookie 名・バージョン
-│   ├── domain/                   両 Worker で共有する純粋な Value Object（Clock, Id, Email, Username）
-│   ├── db/                       Drizzle スキーマとマイグレーション。D1 アクセス実装は置かない
+│   ├── domain/                   3 Worker で共有する純粋な Value Object（Clock, Id, Email, Username）
+│   ├── db/                       Identity の Drizzle スキーマとマイグレーション。D1 アクセス実装は置かない
+│   ├── nfc-db/                   NFC 専用の Drizzle スキーマとマイグレーション（Identity とは別 D1）
 │   ├── config/                   共有 tsconfig と ESLint のレイヤ境界ルール
 │   └── testing/                  テスト用 fixture と FixedClock の再エクスポート
 ├── tests/                        e2e / oidc-conformance / security（いずれも未着手の空ディレクトリ）
@@ -273,9 +299,13 @@ RPC の DTO に限らず、「両 Worker が一致していないと壊れる値
 DTO に機密を増やすときは、dashboard-worker がそれをそのままブラウザへ返しうる
 ことを前提に判断する（`SessionListItem` から `ipHash` を外したのはこの理由）。
 
-**db**（`packages/db/`）
+**db**（`packages/db/` と `packages/nfc-db/`）
 テーブル定義のみ。クエリを書く実装はそのテーブルを所有する Worker の
-Infrastructure に置く。
+Infrastructure に置く。Identity と NFC は**別パッケージ・別 D1・別マイグレーション**で、
+互いに import しない。分離の理由は「将来分けやすいから」ではなく、
+D1 binding に行レベルの粒度が無い以上、同じ DB を共有した時点で
+nfc-worker の侵害が `sessions` の露出になるため
+（`packages/nfc-db/src/schema/cards.ts` に詳述）。
 
 ---
 
@@ -377,6 +407,63 @@ pnpm --filter @u18/auth-worker build:client
 
 `test/login.ui.test.ts` が、登録済みと未登録で応答が 1 バイトも変わらないこと
 （入力されたアドレス自身を除く）を固定している。
+
+---
+
+## NFC カード（Phase 4）
+
+文化祭で配る NFC タグには固定の短縮 URL を焼き、遷移先はサーバー側で差し替える
+（仕様書 10 / #30 / #31）。`apps/nfc-worker/` がこれを受け持つ。
+
+```text
+NFC タグ → https://go.under18.dev/c/<random-card-id>
+        → nfc-worker が所有者の設定を引く
+        → 所有者が設定した https: の URL へ 302
+```
+
+### 2 つのホストに載る 1 つの Worker
+
+| 入口                                   | 役割            | 認証                     |
+| -------------------------------------- | --------------- | ------------------------ |
+| `go.under18.dev/c/*`                   | 短縮 URL の解決 | しない（誰でもかざせる） |
+| `auth.under18.dev/account/nfc/cards/*` | カード管理 API  | セッション Cookie が必須 |
+
+管理 API を短縮 URL 側のホストに置けないのは、セッション Cookie が `__Host-`
+接頭辞で Domain 属性を持てず、発行ホスト（`auth.under18.dev`）にしか
+送られないため。`go.under18.dev` に置くとログイン済みでも永久に 401 になる。
+
+`go.under18.dev` は**既定の想定であって、実在のドメインとして確定していない**。
+配布物に URL を印刷する前にゾーンと route の割り当てを確認すること。
+
+### 守っている不変条件
+
+- **カード ID はユーザー ID と独立**した 100bit の乱数。タグを読んでも `sub` は分からない
+- **タグ自体は資格情報ではない。** 紐づけには「セッション」と「タグに書かれていない
+  紐づけコード」の両方が要る。カード ID を知っているだけでは自分のものにできない
+- **遷移先は `https:` のみ。** URL 内の資格情報、IP リテラル、イントラネット名、
+  既定以外のポート、IdP 自身のオリジンはすべて拒否する
+  （`apps/nfc-worker/src/domain/services/target-url.ts` に理由を書いてある）
+- **ここで登録された URL を OIDC の `redirect_uri` として許可しない。**
+  所有者がいつでも書き換えられる値なので、認可コードの宛先に使うと
+  IdP 公認のオープンリダイレクタになる
+- **解決できないカードは、理由を問わず同じ 404。** 未発行・未紐づけ・無効化済み・
+  遷移先未設定で応答が 1 バイトも変わらない（仕様書 9 の列挙対策）
+- **リダイレクトは 302 + `no-store`。** 301 を返すとブラウザが対応付けを無期限に
+  キャッシュし、遷移先の変更も紛失時の無効化もその端末には届かなくなる
+
+### 所有権の移転と紛失
+
+- **紛失** → `POST .../cards/:cardId/disable`。片道の操作で、所有者は自分で戻せない
+- **譲渡** → `POST .../cards/:cardId/release` で手放すと、新しい紐づけコードが
+  **1 度だけ**返る。それを手渡しで受け取った相手が `POST .../cards/claim` する。
+  相手の userId を指定する API にしていないのは、ユーザー検索の RPC を
+  足したくないため（Binding を持つ Worker から任意のユーザーを引ける入口になる）
+
+### カードの発行
+
+発行（`CardRepository.issue()`）は HTTP に出していない。管理者ロールが未実装
+（仕様書 14-8）で、「運営だけが実行できる」を表現する手段がまだ無いため。
+現状は運用スクリプト／`wrangler d1 execute` で入れる前提。
 
 ---
 

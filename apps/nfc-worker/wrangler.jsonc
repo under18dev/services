@@ -1,0 +1,133 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "u18-nfc",
+  "main": "src/index.ts",
+  // 既存 2 つの Worker と**同じ日付に揃える**。
+  // @cloudflare/vitest-pool-workers が抱える workerd のビルド日より後の
+  // 日付を指定すると、テスト起動時に ERR_FUTURE_COMPATIBILITY_DATE で落ちる。
+  // 新しい Worker だからといって今日の日付を入れないこと
+  // （README「固定しているバージョンとその理由」を参照）。
+  // 上げるときは 3 つまとめて、vitest-pool-workers / miniflare も一緒に上げる。
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // NFC 専用の D1。**Identity D1 (`u18-identity`) の binding は持たない。**
+  //
+  // 仕様書 2.2「Identity の書き込み権限は auth-worker に集約する」/
+  // 4.1「nfc-worker は NFC 専用データの所有者」。
+  // D1 binding には行レベルの粒度が無いので、同じ DB を共有した時点で
+  // nfc-worker の侵害が sessions / oauth_tokens の露出になる
+  // （docs/architecture.md 1.1 と packages/nfc-db/src/schema/cards.ts）。
+  //
+  // マイグレーションも packages/db とは別ディレクトリを指す。同じ
+  // ディレクトリを指すと `wrangler d1 migrations apply` が Identity の
+  // テーブルをこの DB にも作ってしまう。
+  "d1_databases": [
+    {
+      "binding": "NFC_DB",
+      "database_name": "u18-nfc",
+      // `wrangler d1 create u18-nfc` の出力で置き換える。
+      "database_id": "REPLACE_WITH_NFC_D1_DATABASE_ID",
+      "migrations_dir": "../../packages/nfc-db/drizzle",
+    },
+  ],
+
+  // auth-worker の IdentityRPC。セッション照会にだけ使う。
+  // 契約は packages/contracts の IdentityRpcContract で、nfc-worker は
+  // その新しい消費者にあたる（CONTRACT_VERSION は据え置き。
+  // src/infrastructure/rpc/identity.gateway.ts に経緯を書いてある）。
+  "services": [
+    {
+      "binding": "IDENTITY",
+      "service": "u18-auth",
+      "entrypoint": "IdentityRPC",
+    },
+  ],
+
+  "vars": {
+    // 遷移先として禁止するオリジン（composition/container.ts が使う）。
+    // IdP 自身と、この Worker 自身の短縮 URL ホスト。
+    "AUTH_ISSUER": "http://localhost:8787",
+    "SHORT_URL_ORIGIN": "http://localhost:8789",
+    "ENVIRONMENT": "development",
+  },
+
+  // 本番用の上書き。auth / dashboard と同じ理由で、既定値のまま deploy しない。
+  "env": {
+    "production": {
+      "d1_databases": [
+        {
+          "binding": "NFC_DB",
+          "database_name": "u18-nfc",
+          "database_id": "REPLACE_WITH_NFC_D1_DATABASE_ID",
+          "migrations_dir": "../../packages/nfc-db/drizzle",
+        },
+      ],
+
+      "services": [
+        {
+          "binding": "IDENTITY",
+          // `wrangler deploy --env production` は Worker 名を
+          // "<name>-<env>" に派生させるため、本番の auth-worker は
+          // "u18-auth-production" になる。ここを "u18-auth" のままにすると、
+          // 本番の nfc-worker が development 設定の auth-worker に
+          // 黙って繋がりうる（dashboard-worker と同じ罠）。
+          "service": "u18-auth-production",
+          "entrypoint": "IdentityRPC",
+        },
+      ],
+
+      // ## ドメインについて（未確定）
+      //
+      // 仕様書 10 は短縮 URL の形を `https://go.u18.example/c/<id>` と
+      // 例示しているだけで、実ホスト名は決まっていない。ここでは
+      // **`go.under18.dev` を既定の想定**として置いているが、
+      // **実在のドメイン／ゾーンとして確定したわけではない。**
+      // 文化祭の配布物にこの URL を印刷する前に、ゾーンの存在と
+      // route の割り当てを必ず確認すること（#31 の運用手順）。
+      //
+      // ## なぜ 2 つの route に分かれているのか
+      //
+      // 1. `go.under18.dev/c/*` — 公開の短縮 URL。NFC タグに焼く値。
+      //    短いホストにするのは、タグの容量ではなく**印刷と口頭伝達**の
+      //    都合（NDEF の容量は十分にある）。
+      //
+      // 2. `auth.under18.dev/account/nfc/*` — 管理 API。
+      //    セッション Cookie は `__Host-` 接頭辞で Domain 属性を持てず、
+      //    発行ホスト (auth.under18.dev) にしか送られない
+      //    （packages/contracts/src/session-cookie.ts）。
+      //    管理 API を go.under18.dev 側に置くと Cookie が届かず、
+      //    ログイン済みでも永久に 401 になる。
+      //
+      // ## dashboard-worker の route との関係（重要）
+      //
+      // dashboard-worker は `auth.under18.dev/account/*` を持っている。
+      // Cloudflare はより長い pattern を優先するので、
+      // `/account/nfc/*` のほうがこちらに来る。**この前提が崩れると
+      // カード管理 API が dashboard の 404 に飲まれる**ので、
+      // どちらかの route を変えるときは両方を見ること。
+      //
+      // 公開ホストと管理ホストを 1 つの Worker で受けている以上、
+      // route をどう割っても「管理 API が go 側に出る」事故はありうるが、
+      // その場合も Cookie が届かず 401 になる（fail-closed）。
+      "routes": [
+        { "pattern": "go.under18.dev/c/*", "zone_name": "under18.dev" },
+        { "pattern": "auth.under18.dev/account/nfc/*", "zone_name": "under18.dev" },
+      ],
+
+      "vars": {
+        // #33 で確定した本番 Issuer。遷移先として禁止する。
+        "AUTH_ISSUER": "https://auth.under18.dev",
+        // 短縮 URL のオリジン。自分自身への遷移（リダイレクト連鎖）を禁止する。
+        "SHORT_URL_ORIGIN": "https://go.under18.dev",
+        "ENVIRONMENT": "production",
+      },
+    },
+  },
+
+  // Secrets は持たない。
+  // 紐づけコードはハッシュだけを D1 に保存し、鍵もペッパーも使わない
+  // （高エントロピーな乱数なので SHA-256 で足りる。
+  //  src/infrastructure/crypto/web-crypto.ts を参照）。
+}

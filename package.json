@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "pnpm --filter @u18/auth-worker dev",
     "dev:dashboard": "pnpm --filter @u18/dashboard-worker dev",
+    "dev:nfc": "pnpm --filter @u18/nfc-worker dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
@@ -18,9 +19,11 @@
     "format": "prettier --write .",
     "test": "pnpm -r test",
     "cf-typegen": "pnpm -r --filter \"./apps/*\" cf-typegen",
-    "db:generate": "pnpm --filter @u18/db generate",
+    "db:generate": "pnpm --filter @u18/db generate && pnpm --filter @u18/nfc-db generate",
     "db:migrate:local": "pnpm --filter @u18/auth-worker migrate:local",
-    "db:migrate:remote": "pnpm --filter @u18/auth-worker migrate:remote"
+    "db:migrate:remote": "pnpm --filter @u18/auth-worker migrate:remote",
+    "db:migrate:local:nfc": "pnpm --filter @u18/nfc-worker migrate:local",
+    "db:migrate:remote:nfc": "pnpm --filter @u18/nfc-worker migrate:remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261023.1",
