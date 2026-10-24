@@ -59,7 +59,14 @@ export const userEmails = sqliteTable(
   },
   (table) => [
     // 同じアドレスを複数アカウントが「確認済み」として持てないようにする。
-    uniqueIndex("user_emails_email_unique").on(sql`lower(${table.email})`),
+    //
+    // 一意性を verified_at が立った行だけに限るのが肝。無条件にすると、
+    // 確認を完了しないサインアップが他人のアドレスを占有でき、本来の
+    // 持ち主が登録できなくなる（所有を誰も証明していない行との衝突）。
+    // 未確認行は重複を許し、確認完了時に初めてこの索引で弾く。
+    uniqueIndex("user_emails_email_unique")
+      .on(sql`lower(${table.email})`)
+      .where(sql`${table.verifiedAt} is not null`),
     index("user_emails_user_idx").on(table.userId),
   ],
 );
