@@ -9,6 +9,19 @@ export interface NewUser {
 }
 
 /**
+ * プロフィール更新の結果。
+ *
+ * username の一意性を最終的に裁くのは `users_username_unique`（lower(username)）で、
+ * アプリ側で「引いてから書く」だけでは同時更新の競合を防げない。衝突を例外では
+ * なく値で返し、Application が 409 へ翻訳できるようにする。`PasskeyRepository.create`
+ * が一意制約の負けを null で返すのと同じ考え方（仕様書 7.3）。
+ */
+export type UpdateProfileOutcome =
+  | { readonly kind: "updated"; readonly user: User }
+  | { readonly kind: "username_taken" }
+  | { readonly kind: "not_found" };
+
+/**
  * ユーザー永続化の Port。
  *
  * Application が必要とする操作だけを並べる。Drizzle のクエリビルダや
@@ -23,6 +36,6 @@ export interface UserRepository {
   updateProfile(
     id: string,
     changes: { displayName?: string; username?: string },
-  ): Promise<User | null>;
+  ): Promise<UpdateProfileOutcome>;
   markEmailVerified(id: string, email: string): Promise<void>;
 }
