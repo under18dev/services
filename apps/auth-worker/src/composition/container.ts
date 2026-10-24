@@ -1,5 +1,6 @@
 import { createIdentityDatabase, type IdentityDatabase } from "@u18/db";
 import { systemClock } from "@u18/domain";
+import { RateLimitPolicy, type RateLimitScope } from "../domain/services/rate-limit-policy";
 import type { AuditLogger } from "../application/ports/audit-log.port";
 import type { AuthorizationCodeRepository } from "../application/ports/authorization-code.repository";
 import type { Clock } from "../application/ports/clock.port";
@@ -18,6 +19,7 @@ import type { OAuthClientRepository } from "../application/ports/oauth-client.re
 import type { OAuthGrantRepository } from "../application/ports/oauth-grant.repository";
 import type { OAuthTokenRepository } from "../application/ports/oauth-token.repository";
 import type { PasskeyRepository } from "../application/ports/passkey.repository";
+import type { RateLimiter } from "../application/ports/rate-limiter.port";
 import type { ExpiredRecordPurger } from "../application/ports/retention.port";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { SigningKeyProvider } from "../application/ports/signing-key.port";
@@ -55,6 +57,10 @@ import {
   WebCryptoTokenGenerator,
 } from "../infrastructure/crypto/web-crypto";
 import { CloudflareEmailSender } from "../infrastructure/email/cloudflare-email-sender";
+import {
+  CloudflareRateLimiter,
+  UnconfiguredRateLimiter,
+} from "../infrastructure/rate-limit/cloudflare-rate-limiter";
 import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender";
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
@@ -105,6 +111,7 @@ export type Container = {
     readonly signingKeys: SigningKeyProvider;
     readonly purger: ExpiredRecordPurger;
     readonly idTokens: IdTokenIssuer;
+    readonly rateLimiter: RateLimiter;
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
@@ -142,6 +149,7 @@ export type ContainerOverrides = Partial<{
   signingKeys: SigningKeyProvider;
   purger: ExpiredRecordPurger;
   idTokens: IdTokenIssuer;
+  rateLimiter: RateLimiter;
 }>;
 
 /**
@@ -189,6 +197,11 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   // それ以外の環境でバインディングが無いまま起動すると、OTP がログに出るか
   // 送信自体が静かに失敗するので、起動を止める。
   const email = overrides.email ?? createEmailSender(env);
+
+  // レート制限（#21）。binding が 1 つでも欠けていれば、欠けている scope を
+  // 使った時点で失敗する。黙って通すと「制限が入っているつもりで無防備」
+  // という #88 と同じ形になる。
+  const rateLimiter = overrides.rateLimiter ?? createRateLimiter(env);
 
   // Origin / RP ID は設定から決まるので、ここで 1 度だけ束ねて Port に閉じ込める。
   // 検証パラメータをルートや UseCase へ配らない（仕様書 9 WebAuthn）。
@@ -251,6 +264,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       signingKeys,
       purger,
       idTokens,
+      rateLimiter,
     },
     useCases: {
       getSession,
@@ -347,6 +361,34 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
       }),
     },
   };
+}
+
+/**
+ * レート制限の実装を組み立てる（#21）。
+ *
+ * binding 名は `RateLimitPolicy` が持っている。`Env` の型は cf-typegen が
+ * `wrangler.jsonc` から生成するので、binding を消すと**ここが型エラーになる**
+ * （#68 の drift guard と同じ効き方）。
+ *
+ * ここでも throw しない（#53）。制限をかけようとした時点で失敗させる。
+ */
+function createRateLimiter(env: Env): RateLimiter {
+  const bindings: Partial<Record<RateLimitScope, RateLimit>> = {};
+  for (const [scope, rule] of Object.entries(RateLimitPolicy) as [
+    RateLimitScope,
+    (typeof RateLimitPolicy)[RateLimitScope],
+  ][]) {
+    const binding = (env as unknown as Record<string, RateLimit | undefined>)[rule.binding];
+    if (binding !== undefined) bindings[scope] = binding;
+  }
+
+  if (Object.keys(bindings).length === 0) {
+    return new UnconfiguredRateLimiter("no ratelimits binding is present");
+  }
+  // 一部だけ存在する場合も CloudflareRateLimiter を返す。欠けている scope を
+  // 使ったときだけ失敗し、ある scope は正しく効く。まとめて無効化するより、
+  // 壊れている範囲が狭いほうが良い。
+  return new CloudflareRateLimiter(bindings);
 }
 
 function createEmailSender(env: Env): EmailSender {

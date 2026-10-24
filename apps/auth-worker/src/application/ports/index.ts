@@ -10,6 +10,7 @@ export type * from "./oauth-client.repository";
 export type * from "./oauth-grant.repository";
 export type * from "./oauth-token.repository";
 export type * from "./passkey.repository";
+export type * from "./rate-limiter.port";
 export type * from "./retention.port";
 export type * from "./session.repository";
 export type * from "./signing-key.port";

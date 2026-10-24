@@ -47,9 +47,14 @@ export type ClaimCardInput = {
  *
  * ## 残余リスク: 紐づけコードの総当たり
  *
- * ここにはレート制限が無い（仕様書 9 Abuse の Rate Limiting は未実装）。
- * コード自体が十分長い乱数なので現実的な脅威は小さいが、
- * 試行回数の制限は別途必要。残件として #31 に残す。
+ * ここにはレート制限が無い。#21 で auth-worker の `/api/auth/email/*` と
+ * `/api/auth/passkeys/login/verify` には入ったが、**nfc-worker はどの経路にも
+ * かかっていない**（binding も持っていない）。コード自体が十分長い乱数なので
+ * 現実的な脅威は小さいが、試行回数の制限は別途必要。残件として #31 に残す。
+ *
+ * 入れるときは auth-worker の `RateLimitPolicy` と同じ形（`wrangler.jsonc` の
+ * `ratelimits` + ポリシー定数 + 設定照合テスト）に揃えること。binding の
+ * `period` が 10 / 60 秒しか取れないので、持続的な総当たりには別の層が要る。
  */
 export class ClaimCardUseCase {
   constructor(

@@ -8,8 +8,22 @@ declare global {
   namespace Cloudflare {
     interface Env {
       readonly TEST_MIGRATIONS: D1Migration[];
+      /** `wrangler.jsonc` の中身。JSONC のままなので `test/jsonc.ts` で読む（#21）。 */
+      readonly TEST_WRANGLER_JSONC: string;
     }
   }
 }
 
 export {};
+
+/**
+ * `?raw` 付きの import を型で通す。
+ *
+ * `rate-limit-config.test.ts` が `wrangler.jsonc` を**文字列として**読む。
+ * JSON として import すると Vite が JSONC を解釈できずに落ちるので、
+ * 生のまま取ってテスト側のパーサ（`test/jsonc.ts`）に渡している。
+ */
+declare module "*?raw" {
+  const content: string;
+  export default content;
+}
