@@ -11,6 +11,7 @@ import type {
 import type {
   OAuthGrantRepository,
   RecordOAuthGrantInput,
+  UserGrantSummary,
 } from "../src/application/ports/oauth-grant.repository";
 import type {
   IssueAccessTokenInput,
@@ -200,6 +201,24 @@ export class InMemoryOAuthGrantRepository implements OAuthGrantRepository {
   async find(userId: string, clientId: string): Promise<OAuthGrant | null> {
     const row = this.rows.get(this.key(userId, clientId));
     return row === undefined ? null : OAuthGrant.fromPersistence(row);
+  }
+
+  /**
+   * 本物と同じく、取り消し済みも含めて返す（絞るのは UseCase の仕事）。
+   *
+   * クライアントの表示情報はこの fake が知らないので、内部 ID から
+   * 決まる形の値を入れておく。一覧の中身そのものを検証したいテストは
+   * 実 D1 を使う `oauth-grants.rpc.test.ts` 側にある。
+   */
+  async listByUser(userId: string): Promise<readonly UserGrantSummary[]> {
+    return [...this.rows.values()]
+      .filter((row) => row.userId === userId)
+      .map((row) => ({
+        grant: OAuthGrant.fromPersistence(row),
+        clientId: row.clientId,
+        clientName: `client ${row.clientId}`,
+        logoUrl: null,
+      }));
   }
 
   async record(input: RecordOAuthGrantInput): Promise<OAuthGrant> {

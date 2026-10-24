@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { SUPPORTED_SCOPES } from "../../domain/services/scope";
 import { oauthAuthorizeRoutes } from "./oauth.authorize.routes";
+import { oauthRevokeRoutes } from "./oauth.revoke.routes";
 import { oauthTokenRoutes } from "./oauth.token.routes";
+import { oauthUserinfoRoutes } from "./oauth.userinfo.routes";
 import type { AppBindings } from "./types";
 import { problem } from "./problem";
 
@@ -10,10 +12,17 @@ import { problem } from "./problem";
  *
  * 外部クライアントは Service Binding ではなくここを使う（設計原則 4）。
  *
- * Discovery / JWKS はここに直接置き、量のある `/oauth/authorize`（#15）と
- * `/oauth/token`（#16）は別ファイルへ分けている。前者は「静的に決まる応答」、
- * 後者は「検証の順序が security そのもの」で、1 つのファイルに混ぜると
+ * Discovery / JWKS はここに直接置き、量のある `/oauth/authorize`（#15）・
+ * `/oauth/token`（#16）・`/oauth/userinfo` と `/oauth/revoke`（#17）は
+ * 別ファイルへ分けている。前者は「静的に決まる応答」、後者は
+ * 「検証の順序が security そのもの」で、1 つのファイルに混ぜると
  * レビューの読み筋が変わる。
+ *
+ * **Discovery に書いた広告と、各ファイルの実装は必ず一致させること。**
+ * 「広告しているのに実装が拒否する」「実装が受けるのに広告していない」の
+ * どちらも、RP 側から見れば原因の掴めない失敗になる。`request_parameter_supported`
+ * を false と明示してあるのと同じ理由で、失効エンドポイントの認証方式と
+ * 対応トークン種別もここに出してある。
  */
 export const oauthRoutes = new Hono<AppBindings>();
 
@@ -38,6 +47,20 @@ oauthRoutes.get("/.well-known/openid-configuration", (c) => {
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["ES256"],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
+    // RFC 7009 §2.1 は失効エンドポイントにトークンエンドポイントと同じ
+    // 認証方式を求めている。実装も `oauth.client-auth.ts` を共有しており、
+    // ここが食い違うことは無い（#17）。
+    revocation_endpoint_auth_methods_supported: [
+      "client_secret_basic",
+      "client_secret_post",
+      "none",
+    ],
+    // 失効させられるのは Access Token だけ（仕様書 1.2 により Refresh Token を
+    // 発行しない）。RFC 8414 にこの項目は無いが、issue #17 が
+    // 「サポートするトークン種別を明示して Discovery にも書く」ことを
+    // 求めているので独自キーで出す。標準の名前空間を汚さないよう
+    // `u18_` を冠してある。
+    u18_revocation_endpoint_token_types_supported: ["access_token"],
     // PKCE は S256 必須。plain は公開しない。
     code_challenge_methods_supported: ["S256"],
     // Request Object は受け付けない（#15）。黙って無視するのではなく
@@ -94,11 +117,5 @@ oauthRoutes.get("/.well-known/jwks.json", async (c) => {
 
 oauthRoutes.route("/", oauthAuthorizeRoutes);
 oauthRoutes.route("/", oauthTokenRoutes);
-
-oauthRoutes.on(["GET", "POST"], "/oauth/userinfo", (c) =>
-  problem(c, 501, "not_implemented", "userinfo endpoint is implemented in Phase 2"),
-);
-
-oauthRoutes.post("/oauth/revoke", (c) =>
-  problem(c, 501, "not_implemented", "revocation endpoint is implemented in Phase 2"),
-);
+oauthRoutes.route("/", oauthUserinfoRoutes);
+oauthRoutes.route("/", oauthRevokeRoutes);

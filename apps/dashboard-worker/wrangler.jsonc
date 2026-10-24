@@ -49,6 +49,13 @@
       // dashboard を別ホストに置くとログイン状態を読めない。
       // Cloudflare は route をより長い pattern 優先で解決するので、
       // auth 側の auth.under18.dev/* より先にここが拾う。
+      //
+      // **この pattern の "/account" は src/base-path.ts の
+      // ACCOUNT_BASE_PATH と一致していなければならない**（#106）。
+      // Cloudflare は一致した接頭辞を URL から取り除かないので、
+      // Worker には /account/api/me がそのまま届く。ハンドラ側を
+      // 接頭辞なしで登録すると本番で全エンドポイントが 404 になる。
+      // ここを変えるときは必ず ACCOUNT_BASE_PATH も変えること。
       "routes": [{ "pattern": "auth.under18.dev/account/*", "zone_name": "under18.dev" }],
 
       "vars": {

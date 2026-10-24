@@ -104,6 +104,81 @@ export type RevokeSessionResult = RpcResult<{
   readonly self: boolean;
 }>;
 
+// ----------------------------------------------------------------- listGrants
+
+export const listGrantsInputSchema = z.object({
+  /**
+   * セッショントークンだけを受け取る。`userId` は受け取らない —— 同意一覧は
+   * 「どのアプリに何を許可したか」という、セッション一覧と同じ機微度の情報で、
+   * userId を引数にした瞬間に他人の分を読む入口になる（仕様書 4.2 の注意書き）。
+   */
+  sessionToken: sessionTokenSchema,
+});
+
+export type ListGrantsInput = z.infer<typeof listGrantsInputSchema>;
+
+export type GrantListItem = {
+  /**
+   * OIDC の公開 `client_id`。`oauth_clients.id`（内部 ID）ではない。
+   *
+   * 取り消し（`revokeGrant`）の引数にもこれを使う。内部 ID を外へ出すと、
+   * ダッシュボードの HTML に内部識別子が載り、以後それを受け付ける API を
+   * 消せなくなる。
+   */
+  readonly clientId: string;
+  readonly clientName: string;
+  readonly logoUrl: string | null;
+  /** 許可済み scope。表示のために配列で渡す（スペース区切りの再分解を各所でやらせない）。 */
+  readonly scopes: readonly string[];
+  /** ISO 8601 (UTC) */
+  readonly grantedAt: string;
+};
+
+export type ListGrantsResult = RpcResult<readonly GrantListItem[]>;
+
+// ---------------------------------------------------------------- revokeGrant
+
+export const revokeGrantInputSchema = z.object({
+  /** 操作者の本人確認に使うセッション。 */
+  sessionToken: sessionTokenSchema,
+  /** 取り消す同意の相手。公開 `client_id`。操作者自身の同意でなければ拒否される。 */
+  clientId: z.string().min(1).max(255),
+});
+
+export type RevokeGrantInput = z.infer<typeof revokeGrantInputSchema>;
+
+export type RevokeGrantResult = RpcResult<{
+  /** 同意の行が「取り消し済み」へ遷移したか。既に取り消し済みなら false（冪等）。 */
+  readonly revoked: boolean;
+  /**
+   * 巻き添えで失効した Access Token の件数。
+   *
+   * 「取り消しました」とだけ言われても、利用者は発行済みトークンが残って
+   * いないかを確かめられない。件数を返して UI が「n 個のアクセスを停止した」と
+   * 言えるようにしておく。
+   */
+  readonly revokedTokenCount: number;
+}>;
+
+// ----------------------------------------------------------------------- ping
+
+/**
+ * 死活確認の結果（#44）。
+ *
+ * **引数を取らず、個人情報も識別子も返さない。** dashboard-worker の
+ * `/health` は認証されていない要求から呼ばれるので、ここに `userId` や
+ * `email` が 1 つでも混じると、認証なしで読める経路になる。
+ * 既存の `getSession` を health に流用しないのも同じ理由である
+ * （セッションの実在が外から測れてしまう）。
+ */
+export type IdentityPing = {
+  /** auth-worker が自分の依存先（D1）まで到達できているか。 */
+  readonly status: "ok" | "degraded";
+  readonly service: "u18-auth";
+};
+
+export type PingResult = RpcResult<IdentityPing>;
+
 // ----------------------------------------------------------------- Entrypoint
 
 /**
@@ -115,4 +190,8 @@ export interface IdentityRpcContract {
   getUserProfile(input: GetUserProfileInput): Promise<GetUserProfileResult>;
   listSessions(input: ListSessionsInput): Promise<ListSessionsResult>;
   revokeSession(input: RevokeSessionInput): Promise<RevokeSessionResult>;
+  listGrants(input: ListGrantsInput): Promise<ListGrantsResult>;
+  revokeGrant(input: RevokeGrantInput): Promise<RevokeGrantResult>;
+  /** 副作用の無い死活確認（#44）。認証を要求しない。 */
+  ping(): Promise<PingResult>;
 }

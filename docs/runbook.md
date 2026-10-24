@@ -526,15 +526,24 @@ curl -i https://<auth-worker-の-URL>/health
 #### 3.3.2 dashboard-worker の `/health`
 
 ```bash
-curl -i https://<dashboard-worker-の-URL>/health
+curl -i https://auth.under18.dev/account/health
 ```
 
-**この endpoint は常に 200 を返す。** 実装（`apps/dashboard-worker/src/index.ts`）は固定の JSON を返すだけで、`IDENTITY` Service Binding の疎通を確認していない。auth-worker が完全に落ちていても緑になる。
+**パスは `/account/health` である**（#106）。dashboard-worker の本番 route は `auth.under18.dev/account/*` で、Cloudflare は一致した接頭辞を URL から取り除かない。`/health` を叩くと auth-worker の `auth.under18.dev/*` に吸われ、**auth-worker の health が返る**ので気づきにくい。接頭辞は `apps/dashboard-worker/src/base-path.ts` の `ACCOUNT_BASE_PATH` に定数として置いてある。
+
+**この endpoint は `IDENTITY` Service Binding の疎通まで確かめる**（#44 で修正済み）。`IdentityRPC.ping()` を呼び、結果を `checks.identity` として返す。
+
+| `checks.identity` | 意味                                                               | HTTP |
+| ----------------- | ------------------------------------------------------------------ | ---- |
+| `ok`              | auth-worker に届き、auth-worker も D1 へ届いている                 | 200  |
+| `degraded`        | auth-worker は生きているが D1 へ届いていない                       | 503  |
+| `unreachable`     | Binding が切れている / auth-worker が落ちている / 2 秒で応答しない | 503  |
 
 したがって:
 
-- **dashboard-worker の `/health` を外形監視の合否判定に使ってはならない。** 「Worker がデプロイされていてルーティングが生きている」以上の情報はない。
-- 統合的な死活判定には auth-worker の `/health` を使う。
+- **外形監視の合否判定に使ってよい。** 以前（#44 修正前）は固定の JSON を返すだけで、auth-worker が完全に落ちていても緑になった。その頃の手順書を読んでいる場合は注意すること。
+- `ping()` は認証を要さず、識別子も件数も返さない。応答に機密情報は含まれない。
+- 待ち時間の上限は 2 秒（`identity.gateway.ts` の `PING_TIMEOUT_MS`）。auth-worker の遅延が dashboard の `/health` の遅延になると、監視から「落ちている」と「遅い」の区別が消えるため。
 - dashboard-worker 側で RPC 障害を見たい場合は、Workers のログで `identity_unavailable` を検索する（`apps/dashboard-worker/src/infrastructure/rpc/identity.gateway.ts` がこの値に翻訳している）。
 
   ```bash
@@ -1178,7 +1187,7 @@ delete from signing_key_metadata where kid = '<旧 kid>';
 
 - auth-worker の `/health` が **503**、`checks.database` が `unreachable`（§3.3.1）。
 - ログに `database probe failed`。
-- dashboard-worker の `/health` は **200 のまま**（§3.3.2）。騙されないこと。
+- dashboard-worker の `/account/health` も **503**、`checks.identity` が `degraded`（§3.3.2）。auth-worker は生きているが D1 へ届いていない、という切り分けがそのまま出る。
 
 #### 動くもの / 動かないもの
 
@@ -1682,13 +1691,13 @@ delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
 
 **決定**（#33 / PR #77 / 仕様書 §14.1 決定 1）:
 
-| 項目                      | 値                                   |
-| ------------------------- | ------------------------------------ |
-| `ISSUER`                  | `https://auth.under18.dev`           |
-| auth-worker の route      | `auth.under18.dev/*`                 |
-| dashboard-worker の route | `auth.under18.dev/account/*`         |
-| WebAuthn `RP_ID`          | `under18.dev`（ゾーン）              |
-| `WEBAUTHN_ORIGIN`         | `https://auth.under18.dev`（ホスト） |
+| 項目                      | 値                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| `ISSUER`                  | `https://auth.under18.dev`                                                            |
+| auth-worker の route      | `auth.under18.dev/*`                                                                  |
+| dashboard-worker の route | `auth.under18.dev/account/*`（登録パスも `/account` 接頭辞付き。`ACCOUNT_BASE_PATH`） |
+| WebAuthn `RP_ID`          | `under18.dev`（ゾーン）                                                               |
+| `WEBAUTHN_ORIGIN`         | `https://auth.under18.dev`（ホスト）                                                  |
 
 3 択のうち **(1) 同一ホスト・パス分離**を採った。`__Host-` の保護を捨てずに dashboard がセッションを読める。Cloudflare は route をより長い pattern 優先で解決するため両立する。
 
@@ -1745,9 +1754,8 @@ delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
 4. **削除済みメールアドレスの再利用可否**（§7.1 手順 7）。`lower()` 式の UNIQUE インデックスにより、現状では再登録できない。
 5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。
 6. **`signing_key_metadata` と `SIGNING_KEY_JWK` の整合を検証する手段**（§4.1 制約 3）。DB と Secret が食い違っても誰も気づかない。`/health` のチェック項目に「現役 kid と `SIGNING_KEY_KID` の一致」を加えるのが安価な対策である。
-7. **dashboard-worker の `/health` に RPC 疎通チェックを入れるか**（§3.3.2）。現在は常に 200 を返すため、監視として機能しない。
-8. **`/health` を公開したままにするか**（§5.3）。認証なしで D1 にクエリを打つ唯一の公開 endpoint である。
-9. **`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**（§1.1）。現在はテストツールチェーンの制約で 2026-08-15 に据え置かれている。
+7. **`/health` を公開したままにするか**（§5.3）。認証なしで D1 にクエリを打つ唯一の公開 endpoint である。
+8. **`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**（§1.1）。現在はテストツールチェーンの制約で 2026-08-15 に据え置かれている。
 
 ---
 

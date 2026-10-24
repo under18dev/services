@@ -199,9 +199,19 @@ pnpm test       # 617 件（domain 25 / auth-worker 477 / dashboard-worker 26 / 
 > `apps/auth-worker/test/session-repository.test.ts` と
 > `packages/testing/src/fixtures.ts` を参照。
 
-`pnpm dev:dashboard` 単体では RPC 先が存在しないため `/api/me` が
-503（`identity_unavailable`）になる。Service Binding をローカルで通すには
-auth-worker を先に `pnpm dev` で起動しておくこと。
+`pnpm dev:dashboard` 単体では RPC 先が存在しないため
+`/account/api/me` が 503（`identity_unavailable`）になる。
+Service Binding をローカルで通すには auth-worker を先に `pnpm dev` で
+起動しておくこと。
+
+> **dashboard-worker のパスには `/account` 接頭辞が要る**（#106）。
+> 本番の Workers route は `auth.under18.dev/account/*` で、Cloudflare は
+> 一致した接頭辞を URL から取り除かない。つまり Worker には
+> `/account/api/me` がそのまま届くので、ハンドラもその形で登録してある。
+> **開発時も同じパスを叩くこと**（`http://localhost:<port>/account/api/me`）。
+> 接頭辞なしは 404 になる。エンドポイントは
+> `/account/health`、`/account/api/me`、`/account/api/me/sessions`、
+> `/account/api/me/grants` とそれぞれの `DELETE`。
 
 ---
 

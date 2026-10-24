@@ -316,6 +316,65 @@ export function tokenRequest(
   return fetchApp(tokenHttpRequest(body, options.basic), options.env ?? appEnv());
 }
 
+/**
+ * `/oauth/userinfo`（#17）。
+ *
+ * メソッドを選べるようにしてあるのは、仕様書 5.2 が GET と POST の
+ * 両方を求めているため。Bearer は常にヘッダから渡す（実装がクエリや
+ * 本文から読まないことを、この helper の形自体が示している）。
+ */
+export function userinfoRequest(
+  accessToken: string | null,
+  options: {
+    readonly method?: "GET" | "POST";
+    readonly env?: Env;
+    /** `Bearer ` 接頭辞ごと差し替えたいとき用。 */
+    readonly rawAuthorization?: string;
+  } = {},
+): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (options.rawAuthorization !== undefined) {
+    headers["Authorization"] = options.rawAuthorization;
+  } else if (accessToken !== null) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+
+  const request = new Request(`${BASE}/oauth/userinfo`, {
+    method: options.method ?? "GET",
+    headers,
+  });
+  return fetchApp(request, options.env ?? appEnv());
+}
+
+/** `POST /oauth/revoke`（#17）。認証方式は `/oauth/token` と同じ。 */
+export function revokeRequest(
+  body: Record<string, string | undefined>,
+  options: {
+    readonly basic?: { id: string; secret: string };
+    readonly env?: Env;
+  } = {},
+): Promise<Response> {
+  const form = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (value !== undefined) form.set(key, value);
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  if (options.basic !== undefined) {
+    const encoded = `${encodeURIComponent(options.basic.id)}:${encodeURIComponent(options.basic.secret)}`;
+    headers["Authorization"] = `Basic ${btoa(encoded)}`;
+  }
+
+  const request = new Request(`${BASE}/oauth/revoke`, {
+    method: "POST",
+    headers,
+    body: form.toString(),
+  });
+  return fetchApp(request, options.env ?? appEnv());
+}
+
 /** 並列実行のために、要求の組み立てと送信を分けておく（#19）。 */
 export function tokenHttpRequest(
   body: TokenRequestBody,

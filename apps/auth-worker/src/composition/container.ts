@@ -32,10 +32,12 @@ import { ExchangeAuthorizationCodeUseCase } from "../application/use-cases/excha
 import { IssueAuthorizationCodeUseCase } from "../application/use-cases/issue-authorization-code.use-case";
 import { DeletePasskeyUseCase } from "../application/use-cases/delete-passkey.use-case";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
+import { GetUserInfoUseCase } from "../application/use-cases/get-user-info.use-case";
 import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
 import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { StartEmailOtpUseCase } from "../application/use-cases/start-email-otp.use-case";
 import { VerifyEmailOtpUseCase } from "../application/use-cases/verify-email-otp.use-case";
+import { ListGrantsUseCase } from "../application/use-cases/list-grants.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -44,6 +46,8 @@ import { PasskeyRegisterOptionsUseCase } from "../application/use-cases/passkey-
 import { PasskeyRegisterVerifyUseCase } from "../application/use-cases/passkey-register-verify.use-case";
 import { PurgeExpiredRecordsUseCase } from "../application/use-cases/purge-expired-records.use-case";
 import { ResolveOAuthClientUseCase } from "../application/use-cases/resolve-oauth-client.use-case";
+import { RevokeAccessTokenUseCase } from "../application/use-cases/revoke-access-token.use-case";
+import { RevokeGrantUseCase } from "../application/use-cases/revoke-grant.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import { UpdateProfileUseCase } from "../application/use-cases/update-profile.use-case";
 import { JoseIdTokenIssuer } from "../infrastructure/crypto/jose-id-token-signer";
@@ -134,6 +138,10 @@ export type Container = {
     readonly authorizeRequest: AuthorizeRequestUseCase;
     readonly issueAuthorizationCode: IssueAuthorizationCodeUseCase;
     readonly exchangeAuthorizationCode: ExchangeAuthorizationCodeUseCase;
+    readonly getUserInfo: GetUserInfoUseCase;
+    readonly revokeAccessToken: RevokeAccessTokenUseCase;
+    readonly listGrants: ListGrantsUseCase;
+    readonly revokeGrant: RevokeGrantUseCase;
   };
 };
 
@@ -356,6 +364,33 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
         hasher,
         random: tokens,
         pkce,
+        clock,
+        audit,
+      }),
+      // #17: `/oauth/userinfo` と `/oauth/revoke`。どちらも Bearer / クライアント
+      // 認証を経た後の判断だけを持ち、HTTP の作法は Presentation 側にある。
+      getUserInfo: new GetUserInfoUseCase({
+        tokens: oauthTokens,
+        grants: oauthGrants,
+        users,
+        hasher,
+        clock,
+        audit,
+      }),
+      revokeAccessToken: new RevokeAccessTokenUseCase({
+        tokens: oauthTokens,
+        hasher,
+        clock,
+        audit,
+      }),
+      // #18: 同意管理。dashboard-worker から RPC 越しに呼ばれる。
+      listGrants: new ListGrantsUseCase({ getSession, grants: oauthGrants }),
+      revokeGrant: new RevokeGrantUseCase({
+        getSession,
+        clients: oauthClients,
+        grants: oauthGrants,
+        tokens: oauthTokens,
+        codes: authorizationCodes,
         clock,
         audit,
       }),
