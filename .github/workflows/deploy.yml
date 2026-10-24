@@ -49,23 +49,57 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           ready=true
+          blockers=0
+          summary=""
+
+          note() { # 1 行の blocker を記録する
+            blockers=$((blockers + 1))
+            summary="${summary}
+          - $1"
+            ready=false
+          }
 
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set. Skipping deploy."
-            ready=false
+            note "Cloudflare secrets are not set (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)."
           fi
 
-          # wrangler.jsonc の env.production には D1 の id と Issuer / RP ID の
-          # placeholder が残っている。これらを埋める前にデプロイすると、
+          # wrangler.jsonc に残る placeholder を埋める前にデプロイすると、
           # 存在しない DB を指すか、localhost を広告する Worker が本番に出る。
-          placeholders="$(grep -l "REPLACE_WITH_" apps/auth-worker/wrangler.jsonc apps/dashboard-worker/wrangler.jsonc 2>/dev/null || true)"
-          if [ -n "$placeholders" ]; then
-            echo "::warning::These wrangler configs still contain REPLACE_WITH_ placeholders, so deploying would ship a broken production Worker. Skipping deploy."
-            for f in $placeholders; do
-              echo "  $f:"
-              grep -n "REPLACE_WITH_" "$f" | sed 's/^/    /'
+          #
+          # 残り 1 件になっても「ほぼ緑」ではない。1 件でもデプロイは止まる。
+          # 件数と残っている中身を必ず出し、読んだ人が推測しなくて済むようにする。
+          found="$(grep -c "REPLACE_WITH_" apps/auth-worker/wrangler.jsonc apps/dashboard-worker/wrangler.jsonc 2>/dev/null \
+            | awk -F: '{ total += $2 } END { print total + 0 }')"
+          if [ "$found" != "0" ]; then
+            note "$found REPLACE_WITH_ placeholder(s) remain in wrangler config:"
+            for f in apps/auth-worker/wrangler.jsonc apps/dashboard-worker/wrangler.jsonc; do
+              hits="$(grep -n "REPLACE_WITH_" "$f" 2>/dev/null || true)"
+              [ -z "$hits" ] && continue
+              summary="${summary}
+              $f:"
+              while IFS= read -r line; do
+                summary="${summary}
+                $line"
+              done <<< "$hits"
             done
-            ready=false
+          fi
+
+          {
+            echo "## Deploy preflight"
+            echo
+            if [ "$ready" = "true" ]; then
+              echo "All prerequisites satisfied. Proceeding with deploy."
+            else
+              echo "**Deploy is BLOCKED.** $blockers blocker(s) remaining:"
+              echo "$summary"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ready" = "true" ]; then
+            echo "All deploy prerequisites satisfied."
+          else
+            echo "::warning::Deploy is BLOCKED by $blockers item(s). Nothing will be deployed. See the job summary for details."
+            echo "$summary"
           fi
 
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
