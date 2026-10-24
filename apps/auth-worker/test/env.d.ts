@@ -10,6 +10,8 @@ declare global {
       readonly TEST_MIGRATIONS: D1Migration[];
       /** `wrangler.jsonc` の中身。JSONC のままなので `test/jsonc.ts` で読む（#21）。 */
       readonly TEST_WRANGLER_JSONC: string;
+      /** `src/` に書かれている監査イベント名（#22）。vitest.config.ts が走査する。 */
+      readonly TEST_AUDIT_EVENT_NAMES: string[];
     }
   }
 }

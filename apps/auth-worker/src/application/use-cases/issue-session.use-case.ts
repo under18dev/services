@@ -85,6 +85,13 @@ export class IssueSessionUseCase {
     });
 
     // 監査ログは本筋ではない。書けなくてもログインは成立させる。
+    //
+    // ipHash / userAgent をここで渡しているのは、**セッション発行が
+    // 「どこから入られたか」を後から辿る起点**だから（ランブック §5.2）。
+    // 既にハッシュ化済みの値がこのスコープにあるので、追加の計算は要らない。
+    //
+    // 他のイベントには付いていない。付けるには各 UseCase までリクエストの
+    // 文脈を通す必要があり、設計の判断が要る（#122）。
     await settleSideEffects(
       "session.issue",
       this.deps.audit.record({
@@ -92,6 +99,8 @@ export class IssueSessionUseCase {
         userId: user.id,
         outcome: "success",
         metadata: { authMethod: command.authMethod, sessionId: session.id },
+        ipHash: ipHash ?? undefined,
+        userAgent: command.userAgent ?? undefined,
       }),
     );
 
