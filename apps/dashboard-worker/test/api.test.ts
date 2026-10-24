@@ -1,4 +1,10 @@
-import { DEV_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
+import {
+  DEV_SESSION_COOKIE_NAME,
+  SESSION_COOKIE_NAME,
+  buildClearedSessionCookie,
+  rpcErr,
+  rpcOk,
+} from "@u18/contracts";
 import type { RpcErrorCode, SessionListItem, UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import app from "../src/index";
@@ -189,6 +195,66 @@ describe("RPC の失敗を HTTP ステータスへ翻訳する", () => {
     );
 
     expect(response.status).toBe(401);
+  });
+});
+
+describe("自己失効のときだけ Cookie を落とす", () => {
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+
+  function revokeWith(self: boolean, environment = "development") {
+    // 送る Cookie の名前も環境に合わせる。production で開発用の名前を
+    // 送ると読まれずに 401 で返り、Cookie の検証まで到達しない。
+    const name = environment === "development" ? DEV_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
+    return request(
+      "/api/me/sessions/ses_x",
+      envWith({ revokeSession: async () => rpcOk({ revoked: true, self }) }, environment),
+      { method: "DELETE", headers: { Cookie: `${name}=token-value`, Origin: ORIGIN } },
+    );
+  }
+
+  it("自分自身のセッションなら Cookie を落とす", async () => {
+    // 落とさないと、失効済みの Cookie をブラウザが送り続け、
+    // 次に 401 を踏むまで「ログアウトが効かなかった」ように見える。
+    const response = await revokeWith(true);
+
+    expect(response.headers.get("Set-Cookie")).toBe(
+      `${DEV_SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
+    );
+  });
+
+  it("別端末のセッションなら Cookie を落とさない", async () => {
+    // revoked だけで判断すると、別端末を失効させた操作で自分がログアウトされる。
+    const response = await revokeWith(false);
+
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("production では Secure 付きで落とす", async () => {
+    // 属性が 1 つでもずれるとブラウザは別の Cookie とみなし、元の Cookie が残る。
+    const response = await revokeWith(true, "production");
+
+    expect(response.headers.get("Set-Cookie")).toBe(
+      `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`,
+    );
+  });
+
+  it("失効しなかった場合は Cookie を落とさない", async () => {
+    const response = await request(
+      "/api/me/sessions/ses_x",
+      envWith({ revokeSession: async () => rpcOk({ revoked: false, self: true }) }),
+      { method: "DELETE", headers: { Cookie: cookie, Origin: ORIGIN } },
+    );
+
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("auth-worker と同じ文字列を使う", () => {
+    // 生成を共有している証拠。片方だけ属性が変わる事故を防ぐ。
+    expect(buildClearedSessionCookie("development")).toBe(
+      `${DEV_SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
+    );
+    // __Host- は Domain 属性を許さない。足すと __Host- を捨てたことになる。
+    expect(buildClearedSessionCookie("production")).not.toContain("Domain");
   });
 });
 

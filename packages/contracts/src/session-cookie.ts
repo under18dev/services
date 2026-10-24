@@ -31,3 +31,30 @@ export const DEV_SESSION_COOKIE_NAME = "u18_session";
 export function sessionCookieName(environment: string | undefined): string {
   return environment === "development" ? DEV_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
 }
+
+/**
+ * セッション Cookie を無効化する `Set-Cookie` の値。
+ *
+ * auth-worker と dashboard-worker の**両方**がログアウト・自己失効で Cookie を
+ * 落とす。属性が片方でもずれると、ブラウザは別の Cookie とみなして元の
+ * Cookie を消さない。名前だけ共有して生成を各自に書くと、そのずれが
+ * 本番でしか表に出ない（#41 で Cookie 名をハードコードして本番で読めなかった
+ * のと同じ構図）ので、ここで 1 つに持つ。
+ *
+ * `Max-Age=0` と空値の両方を置くのは、どちらか一方しか見ない実装への保険。
+ *
+ * ## `Domain` 引数を足さないこと
+ *
+ * `__Host-` 接頭辞は `Domain` 属性が**無い**ことをブラウザに強制させる。
+ * #33 で auth は `auth.under18.dev/*`、dashboard は `auth.under18.dev/account/*` と
+ * 同一ホストに載ることが決まったので、`Path=/` のままで両者に届く。
+ *
+ * 将来どちらかが別サブドメインへ移ったとき、`Domain` を足して解決しては
+ * **いけない**。それは `__Host-` を捨てる（サブドメインからの Cookie 上書きを
+ * 許す）ことと同義で、しかも失敗が目に見えない形で緩む。正しい対処は
+ * #33 のドメイン構成を見直すこと。
+ */
+export function buildClearedSessionCookie(environment: string | undefined): string {
+  const secure = environment === "development" ? "" : "; Secure";
+  return `${sessionCookieName(environment)}=; Path=/; Max-Age=0; HttpOnly${secure}; SameSite=Lax`;
+}
