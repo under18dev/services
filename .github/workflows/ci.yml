@@ -124,8 +124,20 @@ jobs:
         run: pnpm build
 
       # 本番は `wrangler deploy --env production` で出す（deploy.yml）。
-      # env.production は d1_databases / vars / Service Binding を再定義する
-      # ため、既定 env の dry-run だけでは本番側の設定を一度も評価していない。
+      # env.production は d1_databases / vars / Service Binding / routes を
+      # 再定義するため、既定 env の dry-run だけでは本番側の設定を一度も
+      # 評価していない。
+      #
+      # Worker を列挙せず apps/*/wrangler.jsonc を走査するのは、列挙だと
+      # Worker が増えたときに足し忘れるから。実際 #92 で nfc-worker が
+      # 入ったとき、その env.production は CI のどこからも評価されない
+      # 状態になった。走査にしておけば次の Worker は黙って対象に入る。
+      #
+      # このステップは直前の `pnpm build` に依存している。auth-worker は
+      # クライアント JS を scripts/build-client.mjs で生成していて、その
+      # 出力は .gitignore 済み。wrangler を直接呼ぶここだけでは生成されず、
+      # 単独で動かすと "Could not resolve ./generated/login-island.bundle"
+      # で落ちる。ステップの順序を入れ替えないこと。
       #
       # 実測で捕まる誤りの種類（#57）:
       #   - JSON として壊れている場合はファイル全体のパースが失敗するため、
@@ -137,10 +149,23 @@ jobs:
       #     でも検知できない。wrangler がローカルで検証しないため（#57）。
       - name: Build workers (production env)
         run: |
-          pnpm --filter @u18/auth-worker exec \
-            wrangler deploy --dry-run --env production --outdir dist/production
-          pnpm --filter @u18/dashboard-worker exec \
-            wrangler deploy --dry-run --env production --outdir dist/production
+          checked=0
+          for cfg in apps/*/wrangler.jsonc; do
+            [ -e "$cfg" ] || continue
+            app="$(dirname "$cfg")"
+            checked=$((checked + 1))
+            echo "::group::$app --env production"
+            ( cd "$app" && pnpm exec wrangler deploy --dry-run --env production --outdir dist/production )
+            echo "::endgroup::"
+          done
+
+          # glob が 1 件も当たらなければ、このステップは何も検査していない。
+          # 緑のまま素通りさせず、ワークフロー側の不具合として落とす。
+          if [ "$checked" = "0" ]; then
+            echo "::error::No apps/*/wrangler.jsonc found. The production dry-run checked nothing."
+            exit 1
+          fi
+          echo "Checked $checked worker(s) with --env production."
 
   # ブランチ保護で要求する単一のステータス。個別ジョブを足しても
   # 保護設定を触らずに済むよう、ここで集約する。
