@@ -32,6 +32,34 @@ jobs:
       - name: Prettier
         run: pnpm exec prettier --check .
 
+      # github/codeql-action の init と analyze は同一バージョンでなければ
+      # ならない。Dependabot 側は #71 でグループ化したので割れた PR は
+      # 作られないが、手で編集してずらすことは依然できる。
+      #
+      # そしてそのズレは CI からは見えない。CodeQL ジョブは public
+      # リポジトリでのみ実行されるため（#26）、private の間は壊れた
+      # 組み合わせでも何の信号も出ず、public 化した日に初めて露見する。
+      # だから実行ではなく静的な突き合わせで検査する。
+      - name: Check codeql-action refs are consistent
+        run: |
+          refs="$(grep -ho 'github/codeql-action/[a-zA-Z0-9_-]*@[0-9a-f]\{40\}' \
+            .github/workflows/*.yml .github/actions/*/*.yml 2>/dev/null || true)"
+
+          if [ -z "$refs" ]; then
+            echo "No codeql-action references found; nothing to check."
+            exit 0
+          fi
+
+          echo "$refs" | sed 's/^/  /'
+
+          distinct="$(echo "$refs" | sed 's/.*@//' | sort -u | wc -l | tr -d ' ')"
+          if [ "$distinct" != "1" ]; then
+            echo "::error::github/codeql-action references point at $distinct different commits. init and analyze must be the same version; a mismatch is invisible here because the CodeQL job only runs on public repositories (#26)."
+            exit 1
+          fi
+
+          echo "All codeql-action references are pinned to the same commit."
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
