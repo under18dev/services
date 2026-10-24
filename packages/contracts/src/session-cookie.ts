@@ -12,16 +12,21 @@
  * 送られない**。つまり auth.example と dashboard.example のように
  * ホストが分かれている構成では、dashboard-worker はこの Cookie を受け取れない。
  *
- * 仕様書 14-1「本番 Issuer ドメインと Cookie のドメイン・サイト境界」は未決だが、
- * `__Host-` を採る時点で次のいずれかを選んだことになる:
+ * `__Host-` を採る時点で、構成は次のいずれかに絞られていた:
  *
  *  1. auth と dashboard を**同一ホスト**に載せる（パスで分ける）。`__Host-` を維持できる。
  *  2. `Domain=.example` の共有 Cookie にする。`__Host-` の保護（サブドメインからの
  *     Cookie 上書き防止）を捨てることになる。
  *  3. dashboard は Cookie を使わず、auth から別途トークンを受け取る。
  *
- * Phase 2 でこれを決めるまで、dashboard-worker の Cookie 読み取りは
- * 同一ホスト構成（1）を前提とした暫定実装である。
+ * 仕様書 14-1「本番 Issuer ドメインと Cookie のドメイン・サイト境界」は #33 / #77 で
+ * **1 に決まった** —— auth が `auth.under18.dev/*`、dashboard が
+ * `auth.under18.dev/account/*`。dashboard-worker の Cookie 読み取りはもう暫定ではない。
+ *
+ * なお WebAuthn の RP ID はゾーンの `under18.dev` で、この Cookie のスコープ
+ * （発行ホストのみ）とは**わざと一致していない**。RP ID を広く採るのは IdP の
+ * ホスト名を変えても登録済み Passkey を失わないためで、Cookie を広げる根拠には
+ * ならない。片方を見てもう片方を合わせないこと。
  */
 export const SESSION_COOKIE_NAME = "__Host-u18_session";
 
