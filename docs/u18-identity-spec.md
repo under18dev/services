@@ -485,17 +485,24 @@ NFCタグ → https://go.u18.example/c/<random-card-id>
 - [ ] アカウント復旧・削除・鍵ローテーションの運用が定義される
 - [ ] 主要なセキュリティテストとOIDC準拠確認が完了する
 
-## 14. 未決定事項
+## 14. 決定事項と未決定事項
 
-1. 本番IssuerドメインとCookieのドメイン・サイト境界
-2. 初回登録時にPasskeyを必須にするか
-3. Email OTP送信プロバイダと到達性監視
-4. Auth UIをauth-workerから配信するか、別フロントエンドにするか
-5. Access Tokenを不透明トークンにするかJWTにするか
-6. OIDCライブラリの選定と適合性検証結果
-7. 外部Developer Portalを将来公開するか
-8. MFA/管理者アカウント復旧のポリシー
-9. 文化祭NFCの発行・失効・本人への初回紐づけの運用
+### 14.1 決定済み
+
+| # | 論点 | 決定 | 根拠・反映先 |
+| --- | --- | --- | --- |
+| 1 | 本番IssuerドメインとCookie境界 | Issuerは `https://auth.under18.dev`。auth-workerとdashboard-workerを**同一ホストに載せ、dashboardは `/account/*` のパスで分離**する。WebAuthnのRP IDは `under18.dev`、検証に使うoriginは `https://auth.under18.dev` に絞る。 | セッションCookieが `__Host-` 接頭辞でDomain属性を持てず、発行ホストにしか送られないため（`packages/contracts/src/session-cookie.ts` の選択肢1）。RP IDをゾーンにするのは、IdPのホスト名を変えたときに登録済みPasskeyを失わないため。反映先は両 `wrangler.jsonc` の `env.production`。 |
+| 2 | 初回登録時にPasskeyを必須にするか | **必須にしない。** メールOTPで登録・ログインでき、Passkeyは登録後に追加する方式を推奨経路として案内する。 | Passkey必須は、認証器を持たない端末からの初回登録を塞ぐ。復旧手段がメールOTPしか無い現状（6.1）で必須化すると、Passkey紛失時の導線が登録時点から詰む。 |
+| 3 | Email OTP送信プロバイダ | **Cloudflare Email Sending**（`send_email` バインディング）を使う。APIキーのSecretは持たない。 | Worker外部への認証情報を増やさずに済む。`wrangler dev` では既定でシミュレートされ実送信しない。 |
+| 4 | Auth UIの配信元 | **auth-workerから配信する。** `hono/jsx` でサーバーレンダリングし、Passkey操作など対話が必要な部分だけ `hono/jsx/dom` のクライアントアイランドにする（HonoXと同じ構成を、追加のメタフレームワーク無しで採る）。 | ログイン画面はセッションCookieを発行するホストと同一オリジンである必要がある。別フロントエンドに出すとCookie境界とCSRF境界が増える。 |
+| 5 | Access Tokenの形式 | **不透明トークン + DB失効**。`oauth_tokens` にハッシュを保存し、`/oauth/userinfo` と `/oauth/revoke` はサーバー側で状態を見る。 | 失効が即時に効く。JWTにすると失効のためにintrospectionが別途必要になり、MVPの利点が薄い。 |
+| 6 | OIDCライブラリの選定 | 既製のOIDC Providerフレームワークは採らず、**プロトコルの組み立ては自前・暗号は `jose`、WebAuthnは `@simplewebauthn/server`** に委ねる。 | 独自の暗号プリミティブ・JWTパーサは作らない（5.4）という制約は `jose` で満たせる。一方で対応するフローが `code` + PKCE のみに限られるため、Providerフレームワーク全体を抱える利点が小さい。適合性は11.3のテストで担保する。 |
+
+### 14.2 未決定
+
+1. 外部Developer Portalを将来公開するか
+2. MFA/管理者アカウント復旧のポリシー
+3. 文化祭NFCの発行・失効・本人への初回紐づけの運用
 
 ## 15. 参考資料
 
