@@ -28,7 +28,7 @@
       "binding": "NFC_DB",
       "database_name": "u18-nfc",
       // `wrangler d1 create u18-nfc` の出力で置き換える。
-      "database_id": "REPLACE_WITH_NFC_D1_DATABASE_ID",
+      "database_id": "1df47c69-556d-4bae-89d2-9aa53dccb042",
       "migrations_dir": "../../packages/nfc-db/drizzle",
     },
   ],
@@ -60,7 +60,7 @@
         {
           "binding": "NFC_DB",
           "database_name": "u18-nfc",
-          "database_id": "REPLACE_WITH_NFC_D1_DATABASE_ID",
+          "database_id": "1df47c69-556d-4bae-89d2-9aa53dccb042",
           "migrations_dir": "../../packages/nfc-db/drizzle",
         },
       ],

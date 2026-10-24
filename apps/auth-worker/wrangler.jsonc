@@ -16,7 +16,7 @@
       "binding": "IDENTITY_DB",
       "database_name": "u18-identity",
       // `wrangler d1 create u18-identity` の出力で置き換える。
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "b63c7ee9-42d8-40f2-8f02-e6b5b867eb55",
       "migrations_dir": "../../packages/db/drizzle",
     },
   ],
@@ -83,7 +83,7 @@
         {
           "binding": "IDENTITY_DB",
           "database_name": "u18-identity",
-          "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+          "database_id": "b63c7ee9-42d8-40f2-8f02-e6b5b867eb55",
           "migrations_dir": "../../packages/db/drizzle",
         },
       ],
