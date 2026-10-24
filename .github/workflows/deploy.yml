@@ -243,7 +243,7 @@ jobs:
 
       # `wrangler deploy` の exit 0 はアップロードの成功しか示さない。
       # 起動を拒否する Worker でもデプロイ自体は成功するため、実際に
-      # /health を叩いて中身まで確かめる。
+      # /health を叩いて中身まで確かめる（#66）。
       #
       # ステータスだけでなく body を検証するのが肝。`--env production` を
       # 付け忘れたデプロイは ENVIRONMENT=development のまま 200 を返し、
@@ -251,61 +251,31 @@ jobs:
       # 強制・Cookie の __Host- と Secure が同時に無効になる。
       # ステータスだけ見る検査はこれを素通りさせる。
       #
-      # PRODUCTION_URL が未設定の間は skip する（#33 でドメイン確定後に設定）。
+      # curl とリトライの実体は scripts/smoke-probe.sh にある。3 つの Worker
+      # すべてが同じものを使う。複数箇所に写すと片方だけ直す事故が起きる。
+      #
+      # PRODUCTION_URL が未設定の間は skip する。
       - name: Smoke test the deployed Worker
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the smoke test. Set it once the production issuer domain is decided (#33)."
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the smoke test."
             exit 0
           fi
-
-          url="${PRODUCTION_URL%/}/health"
-          echo "Probing $url"
-
-          # デプロイ直後は伝播に数秒かかることがあるので数回試す。
-          for attempt in 1 2 3 4 5; do
-            # `|| echo 000` だと curl が -w で出した値と連結して 000000 等に
-            # なりうる。失敗時は代入ごと置き換える。
-            code="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$url")" || code=000
-            [ "$code" = "200" ] && break
-            echo "attempt $attempt: HTTP $code, retrying..."
-            sleep 5
-          done
-
-          echo "--- response ---"
-          cat /tmp/health.json || true
-          echo
-
-          if [ "$code" != "200" ]; then
-            echo "::error::Health check returned HTTP $code (expected 200). The Worker deployed but is not serving."
-            exit 1
-          fi
-
-          fail=0
-          check() { # jq-path expected
-            actual="$(jq -r "$1 // \"<missing>\"" /tmp/health.json)"
-            if [ "$actual" != "$2" ]; then
-              echo "::error::$1 is \"$actual\", expected \"$2\"."
-              fail=1
-            fi
-          }
-          check '.status' 'ok'
-          check '.checks.database' 'ok'
-          # これが --env production の付け忘れを捕まえる唯一の検査。
-          check '.environment' 'production'
-
-          [ "$fail" = "0" ] || exit 1
-          echo "Smoke test passed."
+          scripts/smoke-probe.sh "${PRODUCTION_URL%/}/health" 200 \
+            --jq .status ok \
+            --jq .checks.database ok \
+            --jq .environment production
 
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
   # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは
   # 互いに依存しないため、並列で構わない。
   #
-  # スモークテストは置いていない。nfc-worker の本番 route は
-  # go.under18.dev/c/* と auth.under18.dev/account/nfc/* の 2 つだけで、
-  # /health はどちらにも当たらず外から叩けないため（#97）。
+  # /health は使えない。nfc-worker の本番 route は go.under18.dev/c/* と
+  # auth.under18.dev/account/nfc/* の 2 つだけで、/health はどちらにも
+  # 当たらず外から叩けない（#97）。
+  # 死活確認には既存の応答をそのまま使う。新しい公開面を増やさずに済む。
   deploy-nfc-worker:
     name: Deploy nfc-worker
     runs-on: ubuntu-latest
@@ -323,6 +293,33 @@ jobs:
         working-directory: apps/nfc-worker
         run: pnpm exec wrangler deploy --env production
 
+      # 存在しないカード ID を引いて 404 と本文を確かめる（#97）。
+      #
+      # ID は CARD_ID_PATTERN（/^[a-z0-9_]{1,64}$/）に合う形にしてある。
+      # わざと不正な形にすると入口の形式チェックで弾かれて終わり、
+      # ルーティングと Worker の起動しか確かめられない。合う形にすれば
+      # 解決処理まで通る。
+      #
+      # 本文まで見るのは「正しい Worker が答えていること」を確かめるため。
+      # 404 を返す主体は他にもいる（route の割り当てを間違えれば
+      # dashboard や auth の 404 が返る）ので、ステータスだけでは足りない。
+      #
+      # 限界: NFC_DB に到達できない場合も resolveCard が失敗して同じ 404 に
+      # なる。この検査は DB の死活までは見ていない。
+      #
+      # deploy_smoke_probe という ID のカードを実際に作るとこの検査は
+      # 302 になって落ちる。作らないこと。
+      - name: Smoke test the deployed Worker
+        env:
+          NFC_SHORT_URL: ${{ vars.NFC_SHORT_URL }}
+        run: |
+          if [ -z "$NFC_SHORT_URL" ]; then
+            echo "::warning::NFC_SHORT_URL repository variable is not set, skipping the smoke test. Set it to the production short-URL origin (e.g. https://go.under18.dev)."
+            exit 0
+          fi
+          scripts/smoke-probe.sh "${NFC_SHORT_URL%/}/c/deploy_smoke_probe" 404 \
+            --contains "このカードは利用できません。"
+
   deploy-dashboard-worker:
     name: Deploy dashboard-worker
     runs-on: ubuntu-latest
@@ -339,3 +336,26 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         working-directory: apps/dashboard-worker
         run: pnpm exec wrangler deploy --env production
+
+      # Cookie を付けずに /account/api/me を叩いて 401 を確かめる（#97）。
+      # dashboard にも外から叩ける /health は無い（auth.under18.dev/health は
+      # 最長一致で auth-worker に入る）ので、既存の応答をそのまま使う。
+      #
+      # 401 の本文まで見るのは、正しい Worker が答えていることの確認。
+      #
+      # **このステップは #106 が直るまで落ちる。** dashboard-worker は
+      # /api/me を登録しているが本番 route は auth.under18.dev/account/* で、
+      # Cloudflare の route は一致した接頭辞を URL から取り除かない。
+      # つまり Worker には /account/api/me が丸ごと届き、どのハンドラにも
+      # 一致せず 404 になる。落ちるのが正しい状態で、
+      # #106 の修正が入ったときに緑へ変わることが修正が効いた証拠になる。
+      - name: Smoke test the deployed Worker
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the smoke test."
+            exit 0
+          fi
+          scripts/smoke-probe.sh "${PRODUCTION_URL%/}/account/api/me" 401 \
+            --jq .error unauthenticated

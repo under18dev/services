@@ -55,3 +55,30 @@ gh api repos/<owner>/<repo>/git/tags/<上で得た sha> --jq '.object.sha'
 | `security.yml` | PR / main への push / 週次             | CodeQL・dependency review・pnpm audit                                                                 |
 
 `deploy.yml` のデプロイ順は入れ替えないこと。dashboard-worker は auth-worker の `IdentityRPC` に Service Binding で依存するため、auth を先に出す（仕様書 4.4）。
+
+## リポジトリ変数
+
+`deploy.yml` のスモークテストは **Repository variables**（Settings → Secrets and variables → Actions → Variables）を読む。Secret ではないので値は公開情報でよい。
+
+| 変数             | 用途                                                 | 例                         |
+| ---------------- | ---------------------------------------------------- | -------------------------- |
+| `PRODUCTION_URL` | auth-worker と dashboard-worker のスモークテスト先   | `https://auth.under18.dev` |
+| `NFC_SHORT_URL`  | nfc-worker のスモークテスト先（短縮 URL のオリジン） | `https://go.under18.dev`   |
+
+**未設定の間、該当するスモークテストは warning を出して skip する。** デプロイは止めない。ドメインが確定する前から deploy.yml を動かせるようにするためだが、裏を返すと**設定し忘れると検査が静かに無くなる**。本番を公開したら必ず両方を設定すること。
+
+### なぜ 3 つで叩く先が違うのか
+
+Worker ごとに本番の route が違い、**外から叩けるパスが 1 つずつしか無い**ため。
+
+| Worker    | 叩く先                                          | 期待                                                              |
+| --------- | ----------------------------------------------- | ----------------------------------------------------------------- |
+| auth      | `$PRODUCTION_URL/health`                        | 200 / `status=ok`・`checks.database=ok`・`environment=production` |
+| dashboard | `$PRODUCTION_URL/account/api/me`（Cookie 無し） | 401 / `error=unauthenticated`                                     |
+| nfc       | `$NFC_SHORT_URL/c/deploy_smoke_probe`           | 404 / `このカードは利用できません。`                              |
+
+dashboard と nfc に `/health` を使わないのは、**どちらの `/health` も本番 route に当たらず外から叩けない**ため（#97）。`auth.under18.dev/health` は最長一致で auth-worker に入る。新しい route を増やさずに済むよう、既存の応答をそのまま死活確認に使っている。
+
+いずれもステータスだけでなく**本文を検証する**。ステータスだけだと「別の Worker が同じステータスを返している」を見逃す。route の割り当てを間違えたときにまさにそれが起きる。
+
+curl とリトライの実体は `scripts/smoke-probe.sh` にある。3 つの Worker が同じものを使う。複数箇所に写すと片方だけ直す事故が起きるため。
