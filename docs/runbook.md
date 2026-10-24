@@ -1421,9 +1421,15 @@ npx wrangler d1 export u18-identity --remote --no-data \
 
 #### `email_challenges` を 1 時間より短くしてはならない理由
 
-`email_challenges.resend_count` / `last_sent_at` は **OTP 再送のクールダウン判定**に使われている（`OtpPolicy.resendCooldownMs` = 60 秒、`StartEmailOtpUseCase`）。消費済みの行を即座に消すと、「コードを受け取って消費する → 行が消える → 送信履歴が無くなる」という順序でクールダウンと再送上限を回り込める。
+**再送上限が `email_challenges` の行を数えて成り立っているため、保持期間を短くすると上限が緩む。**
 
-そのため削除条件には `expires_at` と `consumed_at` に加えて **`last_sent_at` も入っている**。1 時間はクールダウン窓（60 秒）の 60 倍、OTP の有効期限（5 分）の 12 倍で、どちらの窓も確実に跨ぐ。回帰テストは `apps/auth-worker/test/retention.test.ts` の「クールダウン窓の内側にある消費済みの行は消さない」。
+`StartEmailOtpUseCase` は「直近 `OtpPolicy.resendWindowMs`（1 時間）の間にそのアドレス・用途で作られた行数」で再送上限を判定する（#88）。掃除で消えた行は数えられないので、**保持期間が窓より短いと、待つだけで上限を回り込める**。現在はどちらも 1 時間で余裕がゼロである。短くするなら `OtpPolicy.resendWindowMs` を先に短くすること。
+
+`last_sent_at` はクールダウン判定（`OtpPolicy.resendCooldownMs` = 60 秒）にも使われている。消費済みの行を即座に消すと、「コードを受け取って消費する → 行が消える → 送信履歴が無くなる」という順序でクールダウンを回り込める。そのため削除条件には `expires_at` と `consumed_at` に加えて **`last_sent_at` も入っている**。
+
+回帰テストは `apps/auth-worker/test/retention.test.ts` の「クールダウン窓の内側にある消費済みの行は消さない」と、`apps/auth-worker/test/otp-resend-limit.test.ts` の「窓は保持期間を超えてはならない」。後者はどちらの定数を動かしても落ちる。
+
+なお `email_challenges.resend_count` 列は**使われていない**。かつてこの列で再送回数を数える設計だったが、送信のたびに新しい行を作るためカウンタが常に 0 に戻り、上限が一度も発動しなかった（#88）。列は残っているが読んでも書いてもいない。
 
 #### 実行経路
 
