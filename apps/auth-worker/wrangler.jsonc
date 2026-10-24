@@ -7,6 +7,16 @@
   // 上げるときは vitest-pool-workers / miniflare も一緒に上げること。
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
+
+  // ログイン画面のクライアントアイランドは生成物で、リポジトリに入っていない
+  // （#36: ソースと食い違ったバンドルが本番へ出るのを防ぐため）。
+  // package.json の dev / build / typecheck / test は生成を前に挟んでいるが、
+  // **deploy は挟んでおらず、CI は `pnpm exec wrangler deploy` を直接呼ぶので
+  // スクリプト自体を迂回する。** 実際それで本番デプロイが
+  //   Could not resolve "./generated/login-island.bundle"
+  // で落ちた。生成を npm スクリプトではなく Worker のビルド定義に置くことで、
+  // dev / deploy / dry-run のどの経路から入っても必ず走るようにする。
+  "build": { "command": "node scripts/build-client.mjs" },
   "observability": { "enabled": true },
 
   // Identity D1 の所有者は auth-worker だけ（仕様書 2.2）。
