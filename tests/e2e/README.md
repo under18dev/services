@@ -24,7 +24,7 @@ Phase 2 の完了条件「独立した 2 サービスから『Sign in with u18�
 workspace への追加と vitest 設定の新設が要るが、確かめたいもの
 （`/oauth/authorize` の同意分岐・実 D1 上の `oauth_grants` / `oauth_tokens`・
 ID Token の署名）はすべて auth-worker 単体の中で完結しており、
-**`@cloudflare/vitest-pool-workers` の設定を 2 つ持つ理由にならない。**
+**`@cloudflare/vitest-plugin` の設定を 2 つ持つ理由にならない。**
 設定が 2 つあれば、`compatibility_date` や `TEST_MIGRATIONS` の受け渡しが
 片方だけ古くなる形でずれていく。
 

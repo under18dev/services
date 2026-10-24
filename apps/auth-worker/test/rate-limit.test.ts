@@ -159,7 +159,7 @@ describe("OTP 送信要求の IP レート制限", () => {
   /*
    * 「超過が Workers のログに出ること」はここでは検証していない。
    *
-   * `@cloudflare/vitest-pool-workers` の下では `vi.spyOn(console, "warn")` が
+   * `@cloudflare/vitest-plugin` の下では `vi.spyOn(console, "warn")` が
    * **直接の `console.warn("x")` すら捕まえない**（実測済み。pool 側が workerd の
    * console を先に差し替えているため）。`SELF.fetch` を `createApp().fetch()` に
    * 置き換えて同じ isolate で動かしても同じだった。

@@ -43,12 +43,12 @@ updates:
     groups:
       # Cloudflare のランタイム一式は必ずまとめて上げる。
       #
-      # @cloudflare/vitest-pool-workers は workerd を同梱しており、
-      # wrangler.jsonc の compatibility_date がその workerd のビルド日より
-      # 後だと、テストが 1 件も走らずプール起動時に
+      # @cloudflare/vitest-plugin は wrangler 経由で workerd を連れてくる。
+      # wrangler.jsonc の compatibility_date がその workerd の知らない日付だと、
+      # テストが 1 件も走らず起動時に
       # MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE で全滅する。
-      # このため両 wrangler.jsonc は compatibility_date を意図的に
-      # 2026-08-15 に固定してある。
+      # このため 3 つの wrangler.jsonc は compatibility_date を意図的に
+      # 2026-08-15 に固定してある（上限はビルド日とは一致しない。#108）。
       #
       # 厄介なのは失敗の見え方で、`wrangler dev` は動き続けるのに
       # テストだけが落ちるため、バンプと無関係な破損に見える。
@@ -65,12 +65,9 @@ updates:
       cloudflare-workers-runtime:
         applies-to: version-updates
         patterns:
+          # 旧名。#108 で @cloudflare/vitest-plugin へ移行済みだが、
+          # 残しておいても無害で、取り違えて戻した場合に拾える。
           - "@cloudflare/vitest-pool-workers"
-          # vitest-pool-workers の移行先。まだ依存に入っていないが、
-          # 移行した瞬間にグループから外れて単独バンプが復活し、しかも
-          # その時点では CI が緑のままなので、数週間後にテストが全滅して
-          # 初めて気づくことになる。存在しない名前へのマッチは無害なので
-          # 先に入れておく。
           - "@cloudflare/vitest-plugin"
           - "@cloudflare/workers-types"
           - "miniflare"
@@ -103,8 +100,9 @@ updates:
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
-      # vitest 4.1.12 固定。@cloudflare/vitest-pool-workers 0.23.0 が
-      # peer で ^4.1.0 を要求するため majorバンプは不可。
+      # vitest 4.1.12 固定。@cloudflare/vitest-plugin 1.4.7 の peer は
+      # ^4.1.0 || ^5.0.0 なので 5 系も入りうるが、#108 の移行では
+      # 一度に 2 つ動かさないため据え置いた。上げるなら単独の判断で。
       - dependency-name: "vitest"
         update-types:
           - "version-update:semver-major"

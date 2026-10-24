@@ -2,9 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "u18-dashboard",
   "main": "src/index.ts",
-  // @cloudflare/vitest-pool-workers が抱える workerd のビルド日より後の日付を
-  // 指定すると、テスト起動時に ERR_FUTURE_COMPATIBILITY_DATE で落ちる。
-  // 上げるときは vitest-pool-workers / miniflare も一緒に上げること。
+  // テストが使う workerd が知らない日付を指定すると、テスト起動時に
+  // ERR_FUTURE_COMPATIBILITY_DATE で全滅する（wrangler dev は通るので気づきにくい）。
+  //
+  // **上限は workerd のビルド日ではない。** 実測では workerd 1.20261019.1
+  // （2026-10-19 ビルド）が 2026-10-24 を受け付け、2026-11-15 で落ちる。
+  // 進めるときは @cloudflare/vitest-plugin を先に上げ、実際に pnpm test で
+  // 確かめること（#108）。
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
