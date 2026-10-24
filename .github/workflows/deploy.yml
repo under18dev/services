@@ -40,7 +40,7 @@ jobs:
     outputs:
       ready: ${{ steps.check.outputs.ready }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: check
         name: Check deploy prerequisites
@@ -78,7 +78,7 @@ jobs:
     if: needs.preflight.outputs.ready == 'true' && !inputs.skip_migrations
     environment: production
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
 
       # スキーマから生成した SQL がコミットされているかを確かめる。
@@ -115,7 +115,7 @@ jobs:
     if: always() && needs.preflight.outputs.ready == 'true' && needs.migrate.result != 'failure' && needs.migrate.result != 'cancelled'
     environment: production
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
 
       # auth-worker は development 以外で IP_HASH_PEPPER / SIGNING_KEY_JWK 等が
@@ -159,7 +159,7 @@ jobs:
     if: needs.preflight.outputs.ready == 'true' && needs.deploy-auth-worker.result == 'success'
     environment: production
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
       - name: wrangler deploy
         env:
