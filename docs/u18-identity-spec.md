@@ -316,6 +316,27 @@ type User = {
 | `signing_key_metadata` | kid・鍵の有効期間・公開情報（秘密鍵は保存しない） |
 | `audit_logs` | セキュリティイベント |
 
+#### メールアドレスの正本
+
+**一意性の正本は `users.primary_email` である。`user_emails` は確認状態の台帳であって、一意性の裁定者ではない。**
+
+当初は `user_emails` を正本に据える想定だったが、§14.1 決定 7（アカウントを物理削除せず凍結で表現する）と両立しない。`user_emails_email_unique` は**確認済みの行だけ**に効く部分インデックスであり、そこへ占有判定を預けると未確認のまま凍結されたアカウントのアドレスが解放され、BAN を回避できる。正本は自分の一意性を無条件に裁けなければならず、それができるのは `users_primary_email_unique` だけである。
+
+2 つの索引の形が違うことは**意図して残す**。揃えるのではなく役割を分けた。
+
+| 索引 | 形 | 答える問い |
+| --- | --- | --- |
+| `users_primary_email_unique` | 無条件 | このアドレスで新規アカウントを作れるか（占有。凍結アカウントも占有を保つ） |
+| `user_emails_email_unique` | 確認済みの行だけ（partial） | このアドレスを 2 人が確認済みとして持っていないか（二重所有の防止。未確認の占有では他人を締め出さない） |
+
+この分離が成り立つのは、`DrizzleUserRepository.create()` が D1 の batch で `users` → `user_emails` の順に書くためである。凍結アドレスでの再登録は 1 文目で落ち、`user_emails` の判定に到達しない。batch は暗黙のトランザクションなので、途中の文が一意制約で落ちれば先行する文も巻き戻り、`users` だけ入って台帳が欠ける状態にはならない（7.3）。
+
+したがって次が不変条件になる。
+
+- `users` の各行は、同じアドレスの `user_emails` 行（`is_primary = 1`）を必ず 1 本持つ。写しを書かないと `user_emails_email_unique` は守るべき行を見失い、二重所有の判定が素通りする
+- `markEmailVerified()` は `users.email_verified` と `user_emails.verified_at` を同じ batch で立てる。片方だけ立てると「確認済みか」の答えが 2 通りになる
+- `findByEmail()` は `users.primary_email` を引く。正本がそこにある以上、引き当ても同じ列で行う。「確認済みの別アドレスでログインする」ことは未対応で、その経路を足すときは副アドレスが `users_primary_email_unique` の占有判定に参加しないこと（= 他人の primary と衝突しうること）を先に決める必要がある
+
 ### 7.2 Repository例
 
 ```ts
