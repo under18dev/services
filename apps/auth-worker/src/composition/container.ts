@@ -10,12 +10,19 @@ import type {
 } from "../application/ports/crypto.port";
 import type { EmailSender } from "../application/ports/email-sender.port";
 import type { DatabaseProbe } from "../application/ports/health.port";
+import type { PasskeyRepository } from "../application/ports/passkey.repository";
 import type { SessionRepository } from "../application/ports/session.repository";
 import type { UserRepository } from "../application/ports/user.repository";
+import type { WebAuthnChallengeRepository } from "../application/ports/webauthn-challenge.repository";
+import type { WebAuthnService } from "../application/ports/webauthn.port";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
 import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-case";
 import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
+import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
+import { PasskeyLoginVerifyUseCase } from "../application/use-cases/passkey-login-verify.use-case";
+import { PasskeyRegisterOptionsUseCase } from "../application/use-cases/passkey-register-options.use-case";
+import { PasskeyRegisterVerifyUseCase } from "../application/use-cases/passkey-register-verify.use-case";
 import { RevokeSessionUseCase } from "../application/use-cases/revoke-session.use-case";
 import {
   PepperedIpHasher,
@@ -29,8 +36,11 @@ import { ConsoleEmailSender } from "../infrastructure/email/console-email-sender
 import { UnconfiguredEmailSender } from "../infrastructure/email/unconfigured-email-sender";
 import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleDatabaseProbe } from "../infrastructure/persistence/drizzle-database-probe";
+import { DrizzlePasskeyRepository } from "../infrastructure/persistence/drizzle-passkey.repository";
 import { DrizzleSessionRepository } from "../infrastructure/persistence/drizzle-session.repository";
 import { DrizzleUserRepository } from "../infrastructure/persistence/drizzle-user.repository";
+import { DrizzleWebAuthnChallengeRepository } from "../infrastructure/persistence/drizzle-webauthn-challenge.repository";
+import { SimpleWebAuthnService } from "../infrastructure/webauthn/simplewebauthn.service";
 
 /**
  * 依存性の組み立て（仕様書 2.3）。
@@ -44,6 +54,8 @@ export type Container = {
   readonly repositories: {
     readonly users: UserRepository;
     readonly sessions: SessionRepository;
+    readonly passkeys: PasskeyRepository;
+    readonly webauthnChallenges: WebAuthnChallengeRepository;
   };
   readonly services: {
     readonly hasher: TokenHasher;
@@ -53,6 +65,7 @@ export type Container = {
     readonly email: EmailSender;
     readonly audit: AuditLogger;
     readonly databaseProbe: DatabaseProbe;
+    readonly webauthn: WebAuthnService;
   };
   readonly useCases: {
     readonly getSession: GetSessionUseCase;
@@ -60,6 +73,10 @@ export type Container = {
     readonly logout: LogoutUseCase;
     readonly listSessions: ListSessionsUseCase;
     readonly revokeSession: RevokeSessionUseCase;
+    readonly passkeyRegisterOptions: PasskeyRegisterOptionsUseCase;
+    readonly passkeyRegisterVerify: PasskeyRegisterVerifyUseCase;
+    readonly passkeyLoginOptions: PasskeyLoginOptionsUseCase;
+    readonly passkeyLoginVerify: PasskeyLoginVerifyUseCase;
   };
 };
 
@@ -84,6 +101,8 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
 
   const users = overrides.users ?? new DrizzleUserRepository(db);
   const sessions = overrides.sessions ?? new DrizzleSessionRepository(db);
+  const passkeys = new DrizzlePasskeyRepository(db);
+  const webauthnChallenges = new DrizzleWebAuthnChallengeRepository(db);
   const audit = overrides.audit ?? new DrizzleAuditLogger(db);
   const databaseProbe = overrides.databaseProbe ?? new DrizzleDatabaseProbe(db);
 
@@ -109,27 +128,66 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}): C
   // 送信自体が静かに失敗するので、起動を止める。
   const email = overrides.email ?? createEmailSender(env);
 
+  // Origin / RP ID は設定から決まるので、ここで 1 度だけ束ねて Port に閉じ込める。
+  // 検証パラメータをルートや UseCase へ配らない（仕様書 9 WebAuthn）。
+  const webauthn = new SimpleWebAuthnService({
+    rpId: env.RP_ID,
+    rpName: env.RP_NAME,
+    origin: env.WEBAUTHN_ORIGIN,
+  });
+
   const getSession = new GetSessionUseCase({ sessions, users, hasher, clock, audit });
+  const issueSession = new IssueSessionUseCase({
+    users,
+    sessions,
+    hasher,
+    ipHasher,
+    tokens,
+    clock,
+    audit,
+  });
 
   return {
     db,
     clock,
-    repositories: { users, sessions },
-    services: { hasher, ipHasher, tokens, comparator, email, audit, databaseProbe },
+    repositories: { users, sessions, passkeys, webauthnChallenges },
+    services: { hasher, ipHasher, tokens, comparator, email, audit, databaseProbe, webauthn },
     useCases: {
       getSession,
-      issueSession: new IssueSessionUseCase({
-        users,
-        sessions,
-        hasher,
-        ipHasher,
-        tokens,
-        clock,
-        audit,
-      }),
+      issueSession,
       logout: new LogoutUseCase({ sessions, hasher, clock, audit }),
       listSessions: new ListSessionsUseCase({ getSession, sessions, clock }),
       revokeSession: new RevokeSessionUseCase({ getSession, sessions, clock, audit }),
+      passkeyRegisterOptions: new PasskeyRegisterOptionsUseCase({
+        getSession,
+        users,
+        passkeys,
+        challenges: webauthnChallenges,
+        webauthn,
+        clock,
+      }),
+      passkeyRegisterVerify: new PasskeyRegisterVerifyUseCase({
+        getSession,
+        passkeys,
+        challenges: webauthnChallenges,
+        webauthn,
+        clock,
+        audit,
+      }),
+      passkeyLoginOptions: new PasskeyLoginOptionsUseCase({
+        challenges: webauthnChallenges,
+        webauthn,
+        clock,
+      }),
+      passkeyLoginVerify: new PasskeyLoginVerifyUseCase({
+        issueSession,
+        users,
+        passkeys,
+        challenges: webauthnChallenges,
+        webauthn,
+        clock,
+        audit,
+      }),
     },
   };
 }

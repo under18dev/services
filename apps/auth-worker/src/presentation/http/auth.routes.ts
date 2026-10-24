@@ -19,19 +19,7 @@ authRoutes.post("/email/verify", (c) =>
   problem(c, 501, "not_implemented", "email OTP verify is not implemented yet"),
 );
 
-// --- Passkey (WebAuthn) ---
-authRoutes.post("/passkeys/register/options", (c) =>
-  problem(c, 501, "not_implemented", "passkey registration is not implemented yet"),
-);
-authRoutes.post("/passkeys/register/verify", (c) =>
-  problem(c, 501, "not_implemented", "passkey registration is not implemented yet"),
-);
-authRoutes.post("/passkeys/login/options", (c) =>
-  problem(c, 501, "not_implemented", "passkey login is not implemented yet"),
-);
-authRoutes.post("/passkeys/login/verify", (c) =>
-  problem(c, 501, "not_implemented", "passkey login is not implemented yet"),
-);
+// Passkey (WebAuthn) は auth.passkey.routes.ts が /api/auth/passkeys に持つ。
 
 /**
  * ログアウト。

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { createContainer } from "../../composition/container";
+import { passkeyRoutes } from "./auth.passkey.routes";
 import { authRoutes } from "./auth.routes";
 import { healthRoutes } from "./health.routes";
 import { meRoutes } from "./me.routes";
@@ -25,6 +26,7 @@ export function createApp() {
   app.route("/", healthRoutes);
   app.route("/", oauthRoutes);
   app.route("/api/auth", authRoutes);
+  app.route("/api/auth/passkeys", passkeyRoutes);
   app.route("/api", meRoutes);
 
   app.notFound((c) => problem(c, 404, "not_found", "endpoint does not exist"));

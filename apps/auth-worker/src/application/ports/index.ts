@@ -3,5 +3,8 @@ export type * from "./clock.port";
 export type * from "./crypto.port";
 export type * from "./email-sender.port";
 export type * from "./health.port";
+export type * from "./passkey.repository";
 export type * from "./session.repository";
 export type * from "./user.repository";
+export type * from "./webauthn-challenge.repository";
+export type * from "./webauthn.port";
