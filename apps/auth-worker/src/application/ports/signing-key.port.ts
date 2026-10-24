@@ -1,0 +1,88 @@
+/**
+ * ID Token の署名鍵（仕様書 5.4 / 7.1）。
+ *
+ * **秘密鍵は D1 に置かない。** 秘密鍵は Workers Secret（`SIGNING_KEY_JWK` /
+ * `SIGNING_KEY_KID`）にだけ存在し、`signing_key_metadata` が持つのは
+ * kid・公開 JWK・有効期間だけ。この分離があるので、D1 のバックアップや
+ * Time Travel のスナップショットが漏れても ID Token は偽造できない。
+ */
+
+/**
+ * JWKS に出す公開鍵。
+ *
+ * **フィールドを列挙した型にしてあるのが肝。** JWK を
+ * `Record<string, unknown>` で持ち回すと、秘密鍵成分 `d` を含む JWK が
+ * 紛れ込んでも型では止まらず、そのまま `/.well-known/jwks.json` から
+ * 配信されうる（運用手順でも `public_jwk` に秘密鍵を貼る取り違えを
+ * 警告している: docs/runbook.md 2.4.1）。実装側はこの型のフィールドだけを
+ * 明示的に詰め替えることで、何が入力されても `d` が外へ出ない。
+ */
+export type PublicSigningJwk = {
+  readonly kid: string;
+  readonly kty: "EC";
+  readonly crv: "P-256";
+  readonly x: string;
+  readonly y: string;
+  readonly alg: "ES256";
+  readonly use: "sig";
+};
+
+/**
+ * 署名に使う鍵。
+ *
+ * 鍵そのものは Web Crypto の `CryptoKey` で受け渡す。JWK 文字列のまま
+ * 配ると、使う側が毎回 import することになり、秘密鍵の文字列が
+ * 必要以上に多くの場所を通る。
+ */
+export type ActiveSigningKey = {
+  readonly kid: string;
+  readonly alg: "ES256";
+  readonly privateKey: CryptoKey;
+};
+
+export interface SigningKeyProvider {
+  /**
+   * 新規署名に使う鍵をちょうど 1 つ返す。
+   *
+   * 秘密鍵が未設定、kid が `signing_key_metadata` に無い、あるいはその kid が
+   * 現在 active でない場合は **throw する**。`UnconfiguredEmailSender` /
+   * `UnconfiguredIpHasher` と同じ方針で、失敗はコンテナの組み立て時ではなく
+   * 「署名しようとした時点」に置く。組み立てで投げると `/health` や
+   * Discovery まで 500 になる（#53）。
+   */
+  getActiveSigningKey(): Promise<ActiveSigningKey>;
+
+  /**
+   * JWKS に出す公開鍵の集合。
+   *
+   * `signing_key_metadata` が正本。`active_until` を過ぎて新規署名に
+   * 使われなくなった鍵も、`retires_at` までは返し続ける —— ローテーション
+   * 直前に発行した ID Token は旧 kid で署名されており、それを検証する RP が
+   * まだ存在するため（仕様書 5.4 / docs/runbook.md 4.2 ステップ 5）。
+   *
+   * 秘密鍵を一切参照しないので、`SIGNING_KEY_JWK` が未設定でも成功する。
+   * 鍵の設定漏れで JWKS まで落とさないための分離。
+   */
+  getPublicJwks(): Promise<readonly PublicSigningJwk[]>;
+}
+
+/** `signing_key_metadata` の 1 行。 */
+export type SigningKeyMetadata = {
+  readonly kid: string;
+  readonly algorithm: string;
+  /** JWKS に載せる公開鍵（JWK の JSON 文字列）。 */
+  readonly publicJwk: string;
+  readonly activeFrom: Date;
+  readonly activeUntil: Date | null;
+  readonly retiresAt: Date | null;
+};
+
+export interface SigningKeyMetadataRepository {
+  /**
+   * `retires_at` を迎えていない鍵をすべて返す（= JWKS に出す候補）。
+   * `active_until` は見ない。旧鍵を公開し続けるのがこのメソッドの目的。
+   */
+  listPublishable(now: Date): Promise<readonly SigningKeyMetadata[]>;
+
+  findByKid(kid: string): Promise<SigningKeyMetadata | null>;
+}
