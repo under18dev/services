@@ -176,7 +176,9 @@ jobs:
 
           # デプロイ直後は伝播に数秒かかることがあるので数回試す。
           for attempt in 1 2 3 4 5; do
-            code="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$url" || echo 000)"
+            # `|| echo 000` だと curl が -w で出した値と連結して 000000 等に
+            # なりうる。失敗時は代入ごと置き換える。
+            code="$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 10 "$url")" || code=000
             [ "$code" = "200" ] && break
             echo "attempt $attempt: HTTP $code, retrying..."
             sleep 5
