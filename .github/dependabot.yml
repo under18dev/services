@@ -21,6 +21,38 @@ updates:
       prefix-development: "chore(deps-dev)"
       include: "scope"
     groups:
+      # Cloudflare のランタイム一式は必ずまとめて上げる。
+      #
+      # @cloudflare/vitest-pool-workers は workerd を同梱しており、
+      # wrangler.jsonc の compatibility_date がその workerd のビルド日より
+      # 後だと、テストが 1 件も走らずプール起動時に
+      # MiniflareCoreError: ERR_FUTURE_COMPATIBILITY_DATE で全滅する。
+      # このため両 wrangler.jsonc は compatibility_date を意図的に
+      # 2026-08-15 に固定してある。
+      #
+      # 厄介なのは失敗の見え方で、`wrangler dev` は動き続けるのに
+      # テストだけが落ちるため、バンプと無関係な破損に見える。
+      # 単独バンプを作らせないことでこれを防ぐ。
+      #
+      # @cloudflare/workers-types も同じ理由で同梱する。
+      # packages/config/tsconfig.lib.json が全パッケージに対して
+      # "types": ["@cloudflare/workers-types"] を設定しており、これは
+      # compatibility_date が選ぶのと同じランタイム表面を記述している。
+      # 単独で上がると、固定した workerd に存在しない API を参照しても
+      # typecheck が緑のまま通る（型は新しいが実行環境は古い）。
+      #
+      # 上げるときは compatibility_date も併せて見直すこと（#24）。
+      cloudflare-workers-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@cloudflare/vitest-pool-workers"
+          - "@cloudflare/workers-types"
+          - "miniflare"
+          - "wrangler"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       # minor/patchはまとめてPRノイズを減らす
       production-minor-patch:
         applies-to: version-updates
