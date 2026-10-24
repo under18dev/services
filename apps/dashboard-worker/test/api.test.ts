@@ -1,0 +1,237 @@
+import { DEV_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
+import type { RpcErrorCode, SessionListItem, UserProfile } from "@u18/contracts";
+import { describe, expect, it } from "vitest";
+import app from "../src/index";
+import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
+
+/**
+ * dashboard-worker の HTTP 層。
+ *
+ * この Worker の責務は「Cookie を読み、Origin を確かめ、RPC の失敗を
+ * HTTP ステータスへ翻訳する」こと。Identity の判断そのものは auth-worker が持つ。
+ * ここではその 3 つだけを、fake の RPC を差して検証する。
+ */
+
+async function request(path: string, env: Env, init: RequestInit = {}): Promise<Response> {
+  return await app.fetch(new Request(`${ORIGIN}${path}`, init), env, executionContext());
+}
+
+const PROFILE: UserProfile = {
+  id: "usr_test",
+  username: "taro",
+  displayName: "Taro",
+  email: "taro@example.com",
+  emailVerified: true,
+  status: "active",
+  createdAt: "2026-10-24T00:00:00.000Z",
+};
+
+describe("Cookie の名前は環境で切り替わる", () => {
+  const identity = { getUserProfile: async () => rpcOk(PROFILE) };
+
+  it("development では接頭辞なしの Cookie を読む", async () => {
+    const response = await request("/api/me", envWith(identity, "development"), {
+      headers: { Cookie: `${DEV_SESSION_COOKIE_NAME}=token-value` },
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  it("production では __Host- 付きの Cookie を読む", async () => {
+    const response = await request("/api/me", envWith(identity, "production"), {
+      headers: { Cookie: `${SESSION_COOKIE_NAME}=token-value` },
+    });
+
+    expect(response.status).toBe(200);
+  });
+
+  it("production で開発用の名前の Cookie は読まない", async () => {
+    // 以前ここが "u18_session" にハードコードされており、本番では
+    // __Host- 付きの Cookie を永久に読めなかった。その回帰。
+    const response = await request("/api/me", envWith(identity, "production"), {
+      headers: { Cookie: `${DEV_SESSION_COOKIE_NAME}=token-value` },
+    });
+
+    expect(response.status).toBe(401);
+  });
+});
+
+describe("Cookie が無ければ RPC を呼ばずに 401", () => {
+  const identity = {
+    getUserProfile: () => neverCalled("getUserProfile"),
+    listSessions: () => neverCalled("listSessions"),
+    revokeSession: () => neverCalled("revokeSession"),
+  } as never;
+
+  it.each(["/api/me", "/api/me/sessions"])("%s", async (path) => {
+    const response = await request(path, envWith(identity));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthenticated" });
+  });
+
+  it("DELETE /api/me/sessions/:id", async () => {
+    const response = await request("/api/me/sessions/ses_x", envWith(identity), {
+      method: "DELETE",
+      headers: { Origin: ORIGIN },
+    });
+
+    expect(response.status).toBe(401);
+  });
+});
+
+describe("状態を変える操作の Origin 検証", () => {
+  const identity = { revokeSession: () => neverCalled("revokeSession") } as never;
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+
+  it("Origin が無ければ拒否する", async () => {
+    // 「無ければ通す」にすると、ヘッダを落とせる経路があった時点で
+    // CSRF 対策が SameSite 頼みになる。
+    const response = await request("/api/me/sessions/ses_x", envWith(identity), {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden" });
+  });
+
+  it("別オリジンからは拒否する", async () => {
+    const response = await request("/api/me/sessions/ses_x", envWith(identity), {
+      method: "DELETE",
+      headers: { Cookie: cookie, Origin: "https://evil.example" },
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("同一オリジンなら RPC まで到達する", async () => {
+    const response = await request(
+      "/api/me/sessions/ses_x",
+      envWith({ revokeSession: async () => rpcOk({ revoked: true, self: false }) }),
+      { method: "DELETE", headers: { Cookie: cookie, Origin: ORIGIN } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ revoked: true });
+  });
+
+  it("GET には Origin 検証を課さない", async () => {
+    // 状態を変えないので、通常のブラウザ遷移を壊さない。
+    const response = await request(
+      "/api/me",
+      envWith({ getUserProfile: async () => rpcOk(PROFILE) }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("RPC の失敗を HTTP ステータスへ翻訳する", () => {
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+
+  const cases: ReadonlyArray<[RpcErrorCode, number]> = [
+    ["unauthenticated", 401],
+    ["forbidden", 403],
+    ["not_found", 404],
+    // 以下は利用者から見れば「Identity が使えない」に畳み込む。
+    ["invalid_input", 503],
+    ["rate_limited", 503],
+    ["internal", 503],
+  ];
+
+  it.each(cases)("%s は %i になる", async (code, status) => {
+    const response = await request(
+      "/api/me/sessions",
+      envWith({ listSessions: async () => rpcErr(code, "internal detail from auth-worker") }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(status);
+  });
+
+  it("auth-worker 側のメッセージを応答に載せない", async () => {
+    const response = await request(
+      "/api/me/sessions",
+      envWith({
+        listSessions: async () => rpcErr("internal", "sqlite: no such table: sessions"),
+      }),
+      { headers: { Cookie: cookie } },
+    );
+
+    // 内部の事情が利用者へ漏れると、構成を推測する材料になる。
+    expect(await response.text()).not.toContain("sqlite");
+  });
+
+  it("RPC が例外を投げても 503 に畳み込む", async () => {
+    // Worker の停止やデプロイ中の不整合で throw されうる。
+    // 素通しすると Presentation が 500 以外を選べなくなる。
+    const response = await request(
+      "/api/me/sessions",
+      envWith({
+        listSessions: () => {
+          throw new Error("service binding is not available");
+        },
+      }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("service binding");
+  });
+
+  it("セッションが無効なら 401", async () => {
+    const response = await request(
+      "/api/me",
+      envWith({ getUserProfile: async () => rpcOk(null) }),
+      { headers: { Cookie: cookie } },
+    );
+
+    expect(response.status).toBe(401);
+  });
+});
+
+describe("セッション一覧", () => {
+  it("auth-worker から受けた配列をそのまま返す", async () => {
+    // この Worker は DTO を**加工せず**ブラウザへ渡す。つまり
+    // SessionListItem に項目を足すと、それはそのまま利用者へ届く。
+    // ipHash を契約から外してあるのはこのため（packages/contracts/src/identity.ts）。
+    const items: SessionListItem[] = [
+      {
+        sessionId: "ses_1",
+        createdAt: "2026-10-24T00:00:00.000Z",
+        lastSeenAt: "2026-10-24T00:00:00.000Z",
+        expiresAt: "2026-11-24T00:00:00.000Z",
+        current: true,
+        userAgent: "Mozilla/5.0",
+      },
+    ];
+
+    const response = await request(
+      "/api/me/sessions",
+      envWith({ listSessions: async () => rpcOk(items) }),
+      { headers: { Cookie: `${DEV_SESSION_COOKIE_NAME}=token-value` } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ sessions: items });
+  });
+});
+
+describe("/health", () => {
+  it("Identity に触れずに応答する", async () => {
+    // 死活確認が auth-worker の状態に引きずられると、
+    // どちらが落ちているのか切り分けられなくなる。
+    const response = await request(
+      "/health",
+      envWith({ getSession: () => neverCalled("getSession") } as never),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "ok",
+      service: "u18-dashboard",
+    });
+  });
+});
