@@ -193,6 +193,28 @@ npx wrangler d1 info u18-identity
 
 `REPLACE_WITH_` が残っていると、`wrangler dev` も `wrangler deploy` も binding 解決の段階で失敗する。
 
+#### `database_id` を変えると、各自のローカル D1 が別実体になる
+
+**この行を書き換えた時点で、手元の `--local` D1 は「別のデータベース」になる。** miniflare はローカルの状態を `database_id` ごとに分けて持つため、新しい ID に対応する実体は空である。
+
+症状はこう出る。
+
+```
+✘ [ERROR] no such table: oauth_clients: SQLITE_ERROR
+```
+
+マイグレーションを適用し忘れたときと同じメッセージなので、**原因が `database_id` の変更だと気づきにくい。** 実際、本番 D1 を払い出して `REPLACE_WITH_` を実値へ置き換えた直後に、各セッションの手元がこの状態になった。
+
+復旧は作り直すだけでよい（ローカルの中身は開発用データしかない）。
+
+```bash
+pnpm db:migrate:local
+pnpm --filter @u18/auth-worker key:generate --apply-local   # 署名鍵も消えている
+pnpm --filter @u18/auth-worker client:seed-dev              # 必要なら開発用クライアント
+```
+
+`key:generate` をやり直すと `.dev.vars` の `SIGNING_KEY_JWK` も入れ替える必要がある。これを忘れると `/.well-known/jwks.json` が 503 を返し、ID Token も発行できない（§9.5）。
+
 ### 2.4 Secret の生成と設定
 
 #### 2.4.1 ES256 署名鍵（`SIGNING_KEY_JWK` / `SIGNING_KEY_KID`）
@@ -1512,6 +1534,26 @@ npx wrangler d1 export u18-identity --remote --no-data \
   --output "/tmp/u18-identity-schema-$(date -u +%Y%m%d).sql"
 ```
 
+#### 復元は「空の DB」にしか流せない
+
+**`d1 export` の出力を、中身のある D1 へ `d1 execute` で流し込むことはできない。**
+
+```
+✘ [ERROR] UNIQUE constraint failed: d1_migrations.id
+```
+
+ダンプには `d1_migrations` テーブルの行が含まれており、既に同じマイグレーションを適用済みの DB では主キーが衝突する。**「本番を上書きして戻す」という操作は、この経路では成立しない。**
+
+手順は次の 3 段になる。
+
+1. **新しい D1 を作る**（`wrangler d1 create u18-identity-restore` など）
+2. そこへダンプを流し込む
+3. `wrangler.jsonc` の `database_id` を新しい DB の ID へ差し替えてデプロイする
+
+**3 を行うと、上の「ローカル D1 が別実体になる」が全員の手元で再発する。** 復旧作業の連絡には、手元を作り直す必要がある旨も含めること。
+
+Time Travel（§6.2）は同じ DB の中で時刻を戻すので、この制約を受けない。**まず Time Travel を試し、それで足りないときだけエクスポートからの復元を使う**という順序になる。
+
 #### エクスポートファイルの取り扱い
 
 このファイルは `sessions.token_hash`、`email_challenges.code_hash`、`passkeys.public_key`、`users.primary_email`、`audit_logs.ip_hash` を含む。**Identity DB のフルダンプは、署名鍵に次いで機密性が高い成果物である。**
@@ -1955,6 +1997,10 @@ delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
 | **Workers Paid プラン**                                                   | Free では outbound sending が "Not available"                            |
 
 料金は **月 3,000 通まで込み、超過は $0.35 / 1,000 通**。検証済み宛先への送信はどのプランでも無料で、この quota にも乗らない。
+
+> **金額は公式の Pricing ページで確認してから使うこと。** 公式の [Limits](https://developers.cloudflare.com/email-service/platform/limits/) ページには料金も込み通数も書かれておらず、「検証済み宛先への送信は常に無料で、どのプランでも quota と日次上限に乗らない」とだけある。上の数字は別経路で得たもので、**予算の根拠にするには一次情報で裏を取る必要がある**。製品は public beta なので変わりうる。
+>
+> 同ページは plan ではなく **「送信ドメインを onboarding したかどうか」** で区切って説明している（onboarding 前は検証済み宛先のみ、onboarding 後は任意の宛先へ即座に送れる）。上の表の 2 行は実地で踏んだ事実として正しいが、**公式ドキュメント上の切り分けとは軸が違う**ので、参照するときは両方を見ること。
 
 > **`E_RECIPIENT_NOT_ALLOWED` は誤解を招くコードである。** 公式ドキュメントはこれを「宛先が `allowed_destination_addresses` に無い」と説明しているが、**本リポジトリはそのキーを設定していない**。つまり文書どおりならこのコードは出ないはずで、**存在しない allowlist を探すことになる**。
 >
