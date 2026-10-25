@@ -65,26 +65,46 @@ export function sanitizeReturnTo(raw: string | null | undefined): string | null 
   // ここで落としておけば `Location` へ届く前に消える。
   if (/[\r\n]/.test(raw)) return null;
 
-  // **`..` を含む値は捨てる。**
+  // **正規化してから接頭辞を見る。**
   //
   // 下位パス（`/account/sessions`）を許すために接頭辞の直後の `/` を
-  // 通すようにしたが、そのままだと `/oauth/authorize/../../evil` が
-  // 接頭辞に一致してしまう。ブラウザは `Location` を正規化するので
-  // 実際には `/evil` へ飛ぶ。**許可リストを素通りする。**
+  // 通すようにしたが、生の文字列のままだと `..` で接頭辞の外へ出られる。
+  // ブラウザは `Location` を正規化するので実際には `/evil` へ飛ぶ ——
+  // **許可リストを素通りする。**
   //
-  // 以前は「ちょうど一致」か「`?` が続く」しか許していなかったので
-  // この形は構造的に入らなかった。下位パスを許した時点で入口ができる
-  // ——既存のテストがそれを捕まえた。
-  if (raw.split(/[?#]/)[0]?.split("/").includes("..") === true) return null;
+  // `..` という綴りを探すだけでは足りない。**符号化された形が 3 通りとも
+  // 素通りする**（実測）:
+  //
+  //     /account/../../evil           -> /evil   （綴りで捨てられる）
+  //     /account/%2e%2e/%2e%2e/evil   -> /evil   （捨てられない）
+  //     /account/%2E%2E/evil          -> /evil   （捨てられない）
+  //     /account/.%2e/evil            -> /evil   （捨てられない）
+  //
+  // 綴りを増やして追いかけるのではなく、**ブラウザと同じ正規化を 1 回
+  // 通してから**判定する。基準 URL は解決にしか使わず、結果の `pathname`
+  // と `search` だけを見るので、どこを指していても判定は変わらない。
+  //
+  // **上の `//` と `/\` の検査はこれより前に無ければならない。**
+  // あの 2 つは「パーサに渡した時点で別オリジンになる」形なので、
+  // 渡す前にしか決められない。
+  let normalized: URL;
+  try {
+    normalized = new URL(raw, "https://invalid.example");
+  } catch {
+    return null;
+  }
+  const path = `${normalized.pathname}${normalized.search}`;
 
   // **接頭辞の直後を見る。** 前方一致だけだと `/accountevil` が通る。
   // 許すのは「ちょうど一致」「`?` が続く」「`/` が続く」の 3 つだけ。
   const allowed = ALLOWED_PREFIXES.some(
-    (prefix) => raw === prefix || raw.startsWith(`${prefix}?`) || raw.startsWith(`${prefix}/`),
+    (prefix) => path === prefix || path.startsWith(`${prefix}?`) || path.startsWith(`${prefix}/`),
   );
   if (!allowed) return null;
 
-  return raw;
+  // **正規化した形を返す。** 生の値を返すと、検証したものと `Location` に
+  // 載るものが別になる。
+  return path;
 }
 
 /**

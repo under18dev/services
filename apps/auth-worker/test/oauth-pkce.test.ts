@@ -137,6 +137,10 @@ describe("sanitizeReturnTo", () => {
     ["接頭辞の偽装（アカウント）", "/accountevil.test"],
     ["接頭辞の偽装（区切り無し）", "/account.evil.test"],
     ["パストラバーサル（アカウント）", "/account/../../evil"],
+    // 綴りを探すだけでは足りない。符号化された形も正規化すると /evil になる。
+    ["符号化したパストラバーサル", "/account/%2e%2e/%2e%2e/evil"],
+    ["大文字で符号化", "/account/%2E%2E/evil"],
+    ["符号化と生の混在", "/account/.%2e/evil"],
     ["パストラバーサル", "/oauth/authorize/../../evil"],
     ["改行（ヘッダ分割）", "/oauth/authorize?a=1\r\nLocation: https://evil.test"],
     ["スキーム", "javascript:alert(1)"],
