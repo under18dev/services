@@ -51,6 +51,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveSigningKey, signRequest, SIGNING_KEY_VECTORS } from "./lib/aws-sigv4.mjs";
+import { reorderDump } from "./lib/d1-dump.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUCKET = "u18-identity-archive";
@@ -145,7 +146,7 @@ function selfCheck() {
   if (failed > 0) throw new Error(`署名鍵の導出が公開ベクタと一致しない (${failed} 件)`);
   console.log("\nSigV4 の鍵導出は公開ベクタと一致している。");
   console.log(
-    "※ 正規化リクエストの組み立ては実サービスに対して未検証（R2 有効化後に runbook 12.6 で確認する）。",
+    "※ 正規化リクエストの組み立ては 2026-10-25 に実サービスで確認済み（list が R2 から一覧を取得）。",
   );
 }
 
@@ -249,9 +250,47 @@ async function main() {
       return;
     }
 
-    case "list":
-      wrangler(["r2", "object", "list", BUCKET, "--prefix", flags.prefix ?? PREFIX, "--remote"]);
+    case "list": {
+      // **wrangler には一覧が無い。** `wrangler r2 object` にあるのは
+      // get / put / delete の 3 つだけで、`wrangler r2 bucket` 側にも
+      // オブジェクトの一覧は無い（wrangler 4.152.0 で確認、#164）。
+      // 以前はここが存在しないサブコマンドを呼んでいて、**一度も
+      // 動いたことが無かった**。
+      //
+      // そのため list だけは S3 の ListObjectsV2 を使う。結果として
+      // **list だけが `.env` の認証情報を要求する**——12.5 の
+      // 「保管場所を増やさない」方針とは噛み合わないが、一覧を
+      // 諦めるよりは良いと判断した。upload / restore は wrangler のまま。
+      const env = readS3Credentials();
+      const url = new URL(`${env.S3_ENDPOINT.replace(/\/$/, "")}/${BUCKET}`);
+      url.searchParams.set("list-type", "2");
+      url.searchParams.set("prefix", flags.prefix ?? PREFIX);
+      const headers = signRequest({
+        method: "GET",
+        url,
+        accessKey: env.ACCESS_KEY,
+        secretKey: env.SECRET_KEY,
+        now: new Date(),
+      });
+      const response = await fetch(url, { method: "GET", headers });
+      if (!response.ok) {
+        throw new Error(`一覧に失敗した: HTTP ${response.status} ${await response.text()}`);
+      }
+      const xml = await response.text();
+      const entries = [...xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)].map((m) => ({
+        key: /<Key>(.*?)<\/Key>/.exec(m[1])?.[1] ?? "",
+        size: /<Size>(.*?)<\/Size>/.exec(m[1])?.[1] ?? "",
+        at: /<LastModified>(.*?)<\/LastModified>/.exec(m[1])?.[1] ?? "",
+      }));
+      if (entries.length === 0) {
+        console.log(`r2://${BUCKET}/${flags.prefix ?? PREFIX} にオブジェクトが無い`);
+        return;
+      }
+      for (const entry of entries) {
+        console.log(`${entry.at}  ${String(entry.size).padStart(9)} バイト  ${entry.key}`);
+      }
       return;
+    }
 
     case "restore": {
       if (!flags.key) throw new Error("--key が要る");
@@ -260,9 +299,28 @@ async function main() {
       const file = join(dir, flags.key.split("/").pop());
       wrangler(["r2", "object", "get", `${BUCKET}/${flags.key}`, "--file", file, "--remote"]);
       console.log(`\n取得した: ${file}`);
-      console.log("\n復元は中身を確認してから手で流すこと（既存のデータを上書きする）:");
-      console.log(`  cd apps/auth-worker`);
-      console.log(`  npx wrangler d1 execute u18-identity --remote --file ${file}`);
+
+      // 取得した生のダンプはそのまま残し、流す用を別ファイルに書く。
+      // どちらが Cloudflare の出力かを後から見分けられるようにするため。
+      const ready = file.replace(/\.sql$/, "") + ".restorable.sql";
+      writeFileSync(ready, reorderDump(readFileSync(file, "utf8")));
+      console.log(`並べ替えた: ${ready}`);
+
+      // **既存の DB には流せない。** ダンプは `d1_migrations` の行まで
+      // 含むので、中身のある DB に流すと最初の INSERT が
+      // `UNIQUE constraint failed: d1_migrations.id` で止まる。
+      // 「上書きで戻す」という操作は存在しない（runbook 12.8）。
+      const name = (flags.key.split("/").pop() ?? "").startsWith("u18-nfc")
+        ? "u18-nfc"
+        : "u18-identity";
+      console.log("\n復元先は**空の DB** でなければならない。既存の DB には流せない:");
+      console.log(`  npx wrangler d1 create ${name}-restored`);
+      console.log(`  npx wrangler d1 execute ${name}-restored --remote --file ${ready}`);
+      console.log("\n中身を確認してから wrangler.jsonc の database_id を差し替える:");
+      console.log(
+        `  npx wrangler d1 execute ${name}-restored --remote --command "PRAGMA foreign_key_check"`,
+      );
+      console.log("\n**ローカルに残ったファイルを消すこと。** 平文のメールアドレスが入っている。");
       return;
     }
 
