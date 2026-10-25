@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@u18/contracts": "workspace:*",
+    "@u18/web-ui": "workspace:*",
     "@u18/domain": "workspace:*",
     "@u18/nfc-db": "workspace:*",
     "drizzle-orm": "0.45.4",

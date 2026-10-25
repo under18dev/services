@@ -2,7 +2,18 @@
   "extends": "../../packages/config/tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
+    // カード一覧の画面は hono/jsx のサーバーレンダリング（§14.1 決定 4）。
+    // ブラウザ側のアイランドは無い —— この画面は JS を要求しない。
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "worker-configuration.d.ts",
+    "vitest.config.ts"
+  ]
 }

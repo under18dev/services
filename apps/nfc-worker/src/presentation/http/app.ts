@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { createContainer, type ContainerOverrides } from "../../composition/container";
 import { registerCardRoutes } from "./cards.routes";
+import { registerCardsUiRoutes } from "./ui/cards-ui.routes";
 import { registerRedirectRoutes } from "./redirect.routes";
 import type { AppBindings } from "./types";
 
@@ -21,6 +22,9 @@ import type { AppBindings } from "./types";
  * route の衝突に注意すること（wrangler.jsonc に詳述）。
  */
 export const CARDS_BASE_PATH = "/account/nfc/cards";
+
+/** カード一覧の画面。API（`CARDS_BASE_PATH`）とは別のパスに置く。 */
+export const CARDS_UI_PATH = "/account/nfc";
 
 /**
  * nfc-worker の HTTP アプリ。
@@ -63,6 +67,9 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
 
   registerRedirectRoutes(app);
   registerCardRoutes(app, CARDS_BASE_PATH);
+  // 画面は API より先に登録しない。`/account/nfc` と `/account/nfc/cards`
+  // は別のパスなので衝突しないが、順序を揃えておくと読む側が迷わない。
+  registerCardsUiRoutes(app, CARDS_UI_PATH);
 
   return app;
 }

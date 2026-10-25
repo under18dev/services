@@ -273,6 +273,9 @@ importers:
       '@u18/nfc-db':
         specifier: workspace:*
         version: link:../../packages/nfc-db
+      '@u18/web-ui':
+        specifier: workspace:*
+        version: link:../../packages/web-ui
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@cloudflare/workers-types@5.20261023.1)
