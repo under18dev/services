@@ -1,5 +1,6 @@
 import type { AccountApiErrorCode } from "@u18/contracts";
 import { createApiClient } from "./api-client";
+import { isRevoked } from "./revoked";
 
 /**
  * アカウント管理画面の取り消し操作（#9 / 仕様書 §14.1 決定 16）。
@@ -53,6 +54,8 @@ const client = createApiClient(location.origin);
  */
 type ApiResponse = {
   readonly ok: boolean;
+  // 404 を「消えた」と見るのに要る（`client/revoked.ts`）。
+  readonly status: number;
   readonly json: () => Promise<unknown>;
 };
 
@@ -182,7 +185,8 @@ function attach(item: HTMLElement, kind: string, action: Action): void {
     void action
       .send(id)
       .then(async (response) => {
-        if (response.ok) {
+        // 404 も「消えた」と見る。理由は `client/revoked.ts`。
+        if (isRevoked(response)) {
           // 自分自身のセッションを切った場合はサーバーが Cookie を落として
           // いる。そのまま一覧を触らせても次の操作が全部 401 になるので、
           // ログイン画面へ送る。
