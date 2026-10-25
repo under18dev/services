@@ -31,6 +31,59 @@ function freshIp(): string {
   return `203.0.113.${nextIp}`;
 }
 
+/**
+ * 窓の**境界を跨がない**位置から始める（#176）。
+ *
+ * ## なぜ要るのか
+ *
+ * Cloudflare の Rate Limiting は**壁時計に揃った固定窓**で、
+ * `epoch = floor(now / period)` で数える。つまり全キーが**同じ瞬間に
+ * 一斉にリセットされる**。
+ *
+ * このファイルのテストはどれも「上限まで送ってから 1 本余計に送る」形なので、
+ * その途中で窓が切り替わるとカウンタが 0 に戻り、**最後の 1 本が通ってしまう**。
+ * 実装は正しいのにテストだけが落ちる。実際 #163 のマージ後、無関係な
+ * ドキュメント PR が `expected 401 to be 429` で赤くなった。
+ *
+ * ## 直し方
+ *
+ * 窓の残り時間が足りなければ、次の窓の頭まで待ってから始める。
+ * 実測でバースト 20 本が 21ms（1 本あたり約 1ms）なので、最大でも
+ * 60 本で 70ms 程度。1 秒の余裕は 10 倍以上ある。
+ *
+ * **個々のテストに「気をつけて書く」ことを求めない。** `beforeEach` で
+ * 全件に効かせてあるので、あとから足したテストも自動的に守られる。
+ *
+ * ## 境界そのものは固定していない
+ *
+ * 「窓を跨ぐと 2×limit 通る」のは**プラットフォーム側の性質**で、
+ * こちらのコードに判断が無い。再現するには最大 60 秒待つ必要があり、
+ * 得られるのは「Cloudflare の固定窓が固定窓であること」の確認でしかない。
+ * **性質としてはランブック §13 に書いてある**（攻撃者が境界を狙えば
+ * 短時間に 2 倍送れる）。
+ */
+const WINDOW_MARGIN_MS = 1_000;
+
+async function startOfWindow(periodSeconds: number): Promise<void> {
+  const period = periodSeconds * 1_000;
+  const remaining = period - (Date.now() % period);
+  if (remaining >= WINDOW_MARGIN_MS) return;
+  await new Promise((resolve) => setTimeout(resolve, remaining + 50));
+}
+
+beforeEach(async () => {
+  // 全 scope が同じ period を使っている前提（下のテストで固定している）。
+  await startOfWindow(RateLimitPolicy.email_start.periodSeconds);
+});
+
+it("すべての scope が同じ窓の長さを使う", () => {
+  // 違う長さが混ざると、上の beforeEach が片方の境界しか避けられない。
+  // 混ぜるなら、scope ごとに待つ形へ変えること。
+  const periods = new Set(Object.values(RateLimitPolicy).map((rule) => rule.periodSeconds));
+
+  expect([...periods]).toEqual([60]);
+});
+
 function startOtp(ip: string, body: unknown = { email: "nobody@example.com", purpose: "login" }) {
   return SELF.fetch(`${BASE}/api/auth/email/start`, {
     method: "POST",
