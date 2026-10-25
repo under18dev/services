@@ -133,7 +133,8 @@ describe("Cookie が無ければ RPC を呼ばずに 401 とログイン導線",
 
     const html = await response.text();
     // ログイン画面は auth-worker 側。接頭辞を付けるとこの Worker へ戻ってくる。
-    expect(html).toContain('href="/login"');
+    // 戻り先のクエリが付くので前方一致で見る。
+    expect(html).toMatch(/href="\/login(\?|")/);
     expect(html).not.toContain(`href="${ACCOUNT_BASE_PATH}/login"`);
   });
 

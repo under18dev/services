@@ -10,13 +10,14 @@
  * ログイン画面のリンクを配れば、u18 のドメインから始まるフィッシング導線が
  * できあがる。
  *
- * ## 採った方針: 許可リストで、1 つのパスだけ
+ * ## 採った方針: 許可リストで、決め打ちのパスだけ
  *
  * 「同一オリジンなら許す」でも「相対パスなら許す」でもなく、
- * **`/oauth/authorize` で始まる相対パスだけ**を通す。
+ * **列挙した接頭辞で始まる相対パスだけ**を通す。
  *
- * - 戻り先が要る経路は認可フローしか無い。将来増えたらそのときに足せばよく、
- *   先回りして広げる理由が無い。
+ * - 戻り先が要る経路は限られている。認可フロー（`/oauth/authorize`）と、
+ *   未ログインで弾かれたアカウント管理画面（`/account`）の 2 つ。
+ *   **先回りして広げない** —— 増えたらここへ足す。
  * - 「相対パスなら安全」は成り立たない。`//evil.test/` と `/\evil.test` は
  *   ブラウザによって別オリジンの絶対 URL として解釈される。
  *   先頭 2 文字を見るだけの実装はここで落ちる。
@@ -27,14 +28,28 @@
  * トップへ戻った」だけで、やり直せる。
  */
 
-/** 戻り先として受け付けるパス。認可フロー以外に戻り先の要る経路は無い。 */
-const ALLOWED_PREFIX = "/oauth/authorize";
+/**
+ * 戻り先として受け付けるパスの接頭辞。
+ *
+ * `/account` は dashboard-worker と nfc-worker の画面が載る接頭辞で、
+ * **同一ホストの別 Worker**（§14.1 決定 1）。未ログインで弾かれた画面へ
+ * 戻すために要る。`/account/sessions` のような下位パスも通す。
+ */
+const ALLOWED_PREFIXES = ["/oauth/authorize", "/account"] as const;
 
-/** ログイン画面へ戻り先を渡すときのクエリ名。 */
-export const RETURN_TO_PARAM = "return_to";
+/**
+ * ログイン画面へ戻り先を渡すときのクエリ名。
+ *
+ * **実体は `@u18/contracts`。** 他の Worker（dashboard / nfc）も同じ名前で
+ * 渡してくるので、ここで独自に定義すると片方を直し忘れた瞬間に
+ * 「ログインはできるが元の画面へ戻らない」という、誰も落ちないまま
+ * 壊れる形になる。
+ */
+export { RETURN_TO_PARAM } from "@u18/contracts";
+import { RETURN_TO_PARAM as CONTRACT_RETURN_TO_PARAM } from "@u18/contracts";
 
 /** form で戻り先を持ち回すときの hidden input 名。クエリ名と揃える。 */
-export const RETURN_TO_FIELD = RETURN_TO_PARAM;
+export const RETURN_TO_FIELD = CONTRACT_RETURN_TO_PARAM;
 
 /**
  * 戻り先として使ってよい値だけを返す。使えなければ null。
@@ -50,9 +65,46 @@ export function sanitizeReturnTo(raw: string | null | undefined): string | null 
   // ここで落としておけば `Location` へ届く前に消える。
   if (/[\r\n]/.test(raw)) return null;
 
-  if (raw !== ALLOWED_PREFIX && !raw.startsWith(`${ALLOWED_PREFIX}?`)) return null;
+  // **正規化してから接頭辞を見る。**
+  //
+  // 下位パス（`/account/sessions`）を許すために接頭辞の直後の `/` を
+  // 通すようにしたが、生の文字列のままだと `..` で接頭辞の外へ出られる。
+  // ブラウザは `Location` を正規化するので実際には `/evil` へ飛ぶ ——
+  // **許可リストを素通りする。**
+  //
+  // `..` という綴りを探すだけでは足りない。**符号化された形が 3 通りとも
+  // 素通りする**（実測）:
+  //
+  //     /account/../../evil           -> /evil   （綴りで捨てられる）
+  //     /account/%2e%2e/%2e%2e/evil   -> /evil   （捨てられない）
+  //     /account/%2E%2E/evil          -> /evil   （捨てられない）
+  //     /account/.%2e/evil            -> /evil   （捨てられない）
+  //
+  // 綴りを増やして追いかけるのではなく、**ブラウザと同じ正規化を 1 回
+  // 通してから**判定する。基準 URL は解決にしか使わず、結果の `pathname`
+  // と `search` だけを見るので、どこを指していても判定は変わらない。
+  //
+  // **上の `//` と `/\` の検査はこれより前に無ければならない。**
+  // あの 2 つは「パーサに渡した時点で別オリジンになる」形なので、
+  // 渡す前にしか決められない。
+  let normalized: URL;
+  try {
+    normalized = new URL(raw, "https://invalid.example");
+  } catch {
+    return null;
+  }
+  const path = `${normalized.pathname}${normalized.search}`;
 
-  return raw;
+  // **接頭辞の直後を見る。** 前方一致だけだと `/accountevil` が通る。
+  // 許すのは「ちょうど一致」「`?` が続く」「`/` が続く」の 3 つだけ。
+  const allowed = ALLOWED_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}?`) || path.startsWith(`${prefix}/`),
+  );
+  if (!allowed) return null;
+
+  // **正規化した形を返す。** 生の値を返すと、検証したものと `Location` に
+  // 載るものが別になる。
+  return path;
 }
 
 /**
@@ -71,8 +123,10 @@ export function returnToForRequest(requestUrl: string): string | null {
   return sanitizeReturnTo(`${url.pathname}${url.search}`);
 }
 
-/** 戻り先つきのログイン画面 URL。 */
-export function loginUrlWithReturnTo(returnTo: string | null): string {
-  if (returnTo === null) return "/login";
-  return `/login?${RETURN_TO_PARAM}=${encodeURIComponent(returnTo)}`;
-}
+/**
+ * 戻り先つきのログイン画面 URL。
+ *
+ * **実体は `@u18/contracts`。** dashboard / nfc も同じ形で組み立てるので、
+ * ここで独自に持つと符号化の仕方がずれる余地ができる。
+ */
+export { loginUrlWithReturnTo } from "@u18/contracts";

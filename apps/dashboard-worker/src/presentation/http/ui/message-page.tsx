@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
 import { LOGIN_PATH } from "./asset-paths";
+import { loginUrlWithReturnTo } from "@u18/contracts";
 
 /**
  * 一覧を出せないときの画面。未ログインと、Identity に届かないときの 2 つ。
@@ -17,13 +18,20 @@ import { LOGIN_PATH } from "./asset-paths";
  * 構成を推測する材料を未認証の相手に渡さない。
  */
 
-export const SignInRequiredPage: FC = () => (
+/**
+ * ログインが必要な画面。
+ *
+ * **戻り先を載せる。** 素の `/login` へ送ると、ログインしたあと利用者が
+ * 自分でこの画面まで辿り直すことになる。戻り先の検証は auth-worker の
+ * `sanitizeReturnTo` が行うので（関門は 1 つ）、ここは渡すだけ。
+ */
+export const SignInRequiredPage: FC<{ readonly returnTo: string | null }> = ({ returnTo }) => (
   <AccountShell title="ログインが必要です">
     <section class="section">
       <h2>ログインが必要です</h2>
       <p class="section-lead">アカウント情報を表示するにはログインしてください。</p>
       <p class="links">
-        <a href={LOGIN_PATH}>ログイン画面へ</a>
+        <a href={returnTo === null ? LOGIN_PATH : loginUrlWithReturnTo(returnTo)}>ログイン画面へ</a>
       </p>
     </section>
   </AccountShell>

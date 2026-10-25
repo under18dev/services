@@ -73,7 +73,16 @@ describe("カード一覧の画面", () => {
   it("未ログインはログイン画面へ送る（JSON を見せない）", async () => {
     const response = await open();
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/login");
+    expect(response.headers.get("Location")).toMatch(/^\/login\?/);
+  });
+
+  it("ログイン後にこの画面へ戻れるよう戻り先を載せる", async () => {
+    // 素の /login へ送ると、ログインしたあと利用者が自分でここまで
+    // 辿り直すことになる。
+    const response = await open();
+    const location = response.headers.get("Location") ?? "";
+    const returnTo = new URL(location, ORIGIN).searchParams.get("return_to");
+    expect(returnTo).toBe(CARDS_UI_PATH);
   });
 
   it("auth-worker が落ちているときはログインへ送らない", async () => {
