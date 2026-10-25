@@ -1699,6 +1699,26 @@ Time Travel（§6.2）は同じ DB の中で時刻を戻すので、この制約
 
 #### 決定した保持期間
 
+##### `nfc_card_events`（別 D1）
+
+**この表は `u18-identity` の 5 テーブルだけである。** `u18-nfc` の `nfc_card_events` は別の D1 なので対象外で、**掃除する経路が 1 つも無かった**（仕様書 §9 Privacy は保持期間の明示を要求しているので、決めていないこと自体が要求を満たしていなかった）。
+
+| イベント                                | 保持       | 理由                                                                                                                          |
+| --------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `card.claimed` / `card.released`        | **2 年**   | **カードの支配権が移った記録。** 「誰がこのカードを取ったか」は争いになってから訊かれる —— 文化祭で配った当日ではなく、後から |
+| `card.target_updated` / `card.disabled` | **180 日** | 現在の遷移先は `nfc_cards.target_url`、停止中であることは `nfc_cards.status` に残る。消えるのは「いつ変えたか」だけ           |
+
+正本は `apps/nfc-worker/src/domain/services/retention-policy.ts`。Identity 側と**意図的に基準を揃えてある**（「支配権が変わる操作」を長期側に置く）が、定数は共有していない —— 共有すると nfc-worker の依存グラフから Identity 側のテーブル定義が見える。
+
+**掃除は nfc-worker 自身の Cron（毎時 17 分）が回す。** auth-worker からは回せない —— `u18-nfc` の binding を持たないため（持たせると「nfc-worker が侵害されても Identity は読めない」という §1.3 の線が逆向きに崩れる）。**このリポジトリには Cron が 2 本ある。**
+
+```bash
+npx wrangler tail u18-nfc-production --format json --search "nfc.retention.sweep"
+# {"event":"nfc.retention.sweep","deleted":0,"limit":1000,"failed":null,"deadlines":{...}}
+```
+
+0 件でも出る。「最後にいつ掃除が走ったか」を件数ではなくログの有無で判断するため。
+
 起点は **行が使えなくなった時刻**（期限切れ / 失効 / 消費、`email_challenges` は最終送信も含む）であって、作成時刻ではない。定義は `apps/auth-worker/src/domain/services/retention-policy.ts` の `RetentionPolicy` に集約してある。**値を変えるときはこの表とコードの両方を直すこと。**
 
 | テーブル                    | 保持期間    | 消す行                               | 根拠                                                                                                    |

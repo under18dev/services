@@ -1,15 +1,17 @@
 import { systemClock } from "@u18/domain";
 import { createNfcDatabase } from "@u18/nfc-db";
-import type { CardRepository, IdentityGateway } from "../application/ports";
+import type { CardRepository, ExpiredEventPurger, IdentityGateway } from "../application/ports";
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
 import { ListMyCardsUseCase } from "../application/use-cases/list-cards.use-case";
 import { ReleaseCardUseCase } from "../application/use-cases/release-card.use-case";
+import { PurgeExpiredEventsUseCase } from "../application/use-cases/purge-expired-events.use-case";
 import { ResolveCardUseCase } from "../application/use-cases/resolve-card.use-case";
 import { UpdateCardTargetUseCase } from "../application/use-cases/update-card-target.use-case";
 import { WebCryptoClaimCodeService } from "../infrastructure/crypto/web-crypto";
 import { DrizzleCardEventRecorder } from "../infrastructure/persistence/drizzle-card-event.recorder";
 import { DrizzleCardRepository } from "../infrastructure/persistence/drizzle-card.repository";
+import { DrizzleExpiredEventPurger } from "../infrastructure/persistence/drizzle-expired-event.purger";
 import { RpcIdentityGateway, asIdentityRpc } from "../infrastructure/rpc/identity.gateway";
 
 /**
@@ -29,6 +31,7 @@ import { RpcIdentityGateway, asIdentityRpc } from "../infrastructure/rpc/identit
 export type ContainerOverrides = {
   readonly identity?: IdentityGateway;
   readonly cards?: CardRepository;
+  readonly eventPurger?: ExpiredEventPurger;
 };
 
 export type Container = ReturnType<typeof createContainer>;
@@ -55,6 +58,9 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
   const events = new DrizzleCardEventRecorder(db);
   const identity = overrides.identity ?? new RpcIdentityGateway(asIdentityRpc(env.IDENTITY));
   const claimCodes = new WebCryptoClaimCodeService();
+  // 保持期限を過ぎたカードイベントの掃除。scheduled からしか使わないが、
+  // Port の配線先はここ 1 箇所に揃える（auth-worker の purger と同じ）。
+  const eventPurger = overrides.eventPurger ?? new DrizzleExpiredEventPurger(db);
   const clock = systemClock;
 
   return {
@@ -73,6 +79,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       disableCard: new DisableCardUseCase(identity, cards, events, clock),
       claimCard: new ClaimCardUseCase(identity, cards, events, claimCodes, clock),
       releaseCard: new ReleaseCardUseCase(identity, cards, events, claimCodes, clock),
+      purgeExpiredEvents: new PurgeExpiredEventsUseCase({ purger: eventPurger, clock }),
     },
   };
 }
