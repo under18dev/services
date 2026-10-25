@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
-import { Layout } from "./layout";
+import { Layout } from "@u18/web-ui";
 import { loginUrlWithReturnTo, RETURN_TO_FIELD } from "./return-to";
 
 /**

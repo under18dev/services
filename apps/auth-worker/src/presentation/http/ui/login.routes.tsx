@@ -10,7 +10,7 @@ import type { AppBindings } from "../types";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import { LoginPage, type LoginView } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
-import { pageSecurityHeaders } from "./page-headers";
+import { pageSecurityHeaders } from "@u18/web-ui";
 import {
   loginUrlWithReturnTo,
   RETURN_TO_FIELD,

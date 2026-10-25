@@ -199,6 +199,9 @@ importers:
       '@u18/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@u18/web-ui':
+        specifier: workspace:*
+        version: link:../../packages/web-ui
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@cloudflare/workers-types@5.20261023.1)
@@ -236,6 +239,9 @@ importers:
       '@u18/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@u18/web-ui':
+        specifier: workspace:*
+        version: link:../../packages/web-ui
       hono:
         specifier: 4.13.13
         version: 4.13.13
@@ -348,6 +354,16 @@ importers:
       '@u18/domain':
         specifier: workspace:*
         version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
+  packages/web-ui:
+    dependencies:
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
     devDependencies:
       typescript:
         specifier: 5.9.3

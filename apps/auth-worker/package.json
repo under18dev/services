@@ -33,6 +33,7 @@
     "@u18/contracts": "workspace:*",
     "@u18/db": "workspace:*",
     "@u18/domain": "workspace:*",
+    "@u18/web-ui": "workspace:*",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.13",
     "jose": "6.2.13",

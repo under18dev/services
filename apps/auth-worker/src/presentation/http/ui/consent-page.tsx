@@ -1,6 +1,6 @@
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
-import { Layout } from "./layout";
+import { Layout } from "@u18/web-ui";
 
 /**
  * 同意画面（仕様書 1.1 / 7.1、#15）。
