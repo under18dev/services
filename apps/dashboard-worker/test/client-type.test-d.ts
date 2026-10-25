@@ -1,5 +1,7 @@
+import type { Hono } from "hono";
 import { hc } from "hono/client";
 import type { DashboardAppType } from "../src/presentation/http/app";
+import type { ExpectedRoutePath } from "./route-inventory";
 
 /**
  * `hono/client` の型が**実際に効いている**ことを型検査で固定する。
@@ -53,3 +55,32 @@ void client.account.api.me.nonexistent.$get;
 
 // @ts-expect-error GET しかないパスに POST は無い。
 void client.account.api.me.sessions.$post;
+
+/* ------------------------------------------------------------------ *
+ * 一覧との突き合わせ（#188 のレビュー指摘）
+ *
+ * 上の `@ts-expect-error` が守るのは「ここに列挙した分が消えないこと」
+ * だけで、**以後に足すルートがチェーンに乗ることは守れない。** 新しい
+ * ルートを文で分けて書いても既存の型は残るので、上は全部通ってしまう。
+ *
+ * そこで `test/route-inventory.ts` の一覧と**パスの集合そのもの**を
+ * 突き合わせる。一覧の更新は実行時の `route-inventory.test.ts` が
+ * 強制するので、
+ *
+ *   - 一覧に足した & チェーンに乗せた  -> 両方通る
+ *   - 一覧に足した & チェーンの外に書いた -> **ここが落ちる**
+ *   - 一覧に足していない              -> 実行時のほうが落ちる
+ *
+ * となり、どの書き方でも素通りしない。
+ * ------------------------------------------------------------------ */
+
+/** `DashboardAppType` に積まれたパスの union。 */
+type ChainedPath = DashboardAppType extends Hono<infer _E, infer S, infer _P>
+  ? keyof S & string
+  : never;
+
+/** 両向きの包含を見る。片側だけだと、増えたときか減ったときのどちらかを見逃す。 */
+type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+// `false` になったら代入できずに落ちる。**どちらの向きにずれても落ちる。**
+export const chainCoversInventory: Equals<ChainedPath, ExpectedRoutePath> = true;
