@@ -50,16 +50,30 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
 
+      # **道具が動くことを先に確かめる。** これを入れる前、この
+      # ワークフローはリポジトリルートから `pnpm exec wrangler` を呼んで
+      # いて（wrangler はルートの依存ではなく apps/* の依存）、
+      # `Command "wrangler" not found` で 4 つとも失敗した。
+      # それを「トークンに R2 権限が無い」と報告しており、**本番トークンの
+      # 作り直しという user 操作を誤った根拠で要求するところだった。**
+      #
+      # 道具の不在と権限の不足は別の結論になる。先に切り分ける。
+      - name: wrangler が動くことを確かめる
+        working-directory: apps/auth-worker
+        run: pnpm exec wrangler --version
+
       # 失敗しても後続を止めない。「どこまでできるか」を知るのが目的なので、
       # 最初の失敗で打ち切ると残りが分からない。判定は最後にまとめて行う。
       - name: list buckets
         id: list
         continue-on-error: true
+        working-directory: apps/auth-worker
         run: pnpm exec wrangler r2 bucket list
 
       - name: put object
         id: put
         continue-on-error: true
+        working-directory: apps/auth-worker
         run: |
           echo "permission probe from run ${{ github.run_id }}" > /tmp/probe.txt
           pnpm exec wrangler r2 object put "$BUCKET/$KEY" --file /tmp/probe.txt --remote
@@ -67,6 +81,7 @@ jobs:
       - name: get object
         id: get
         continue-on-error: true
+        working-directory: apps/auth-worker
         run: pnpm exec wrangler r2 object get "$BUCKET/$KEY" --file /tmp/probe-readback.txt --remote
 
       # put が失敗していても必ず試す。前回の残骸がある場合に消せるようにする。
@@ -74,8 +89,15 @@ jobs:
         id: delete
         if: always()
         continue-on-error: true
+        working-directory: apps/auth-worker
         run: pnpm exec wrangler r2 object delete "$BUCKET/$KEY" --remote
 
+      # **判定は outcome を見ること。conclusion ではない。**
+      # continue-on-error を付けたステップは、実際に失敗しても
+      # conclusion が success に書き換わる。`gh run view --json jobs` が
+      # 返すのも conclusion なので、**UI とコマンドの両方で「4 つとも成功」に
+      # 見えるのに、実際は全部失敗している**という状態になる。
+      # 実際にそれで一度読み違えた。失敗の有無は outcome で判定する。
       - name: Report
         if: always()
         run: |
