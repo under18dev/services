@@ -2,7 +2,15 @@
   "extends": "../../packages/config/tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "worker-configuration.d.ts",
+    "vitest.config.ts"
+  ]
 }

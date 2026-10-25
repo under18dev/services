@@ -10,7 +10,7 @@ import { readSessionCookie } from "./session-cookie";
 import type { AppBindings } from "./types";
 import { AuthorizeErrorPage, ConsentPage } from "./ui/consent-page";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./ui/csrf";
-import { pageSecurityHeaders } from "./ui/page-headers";
+import { pageSecurityHeaders } from "@u18/web-ui";
 import { loginUrlWithReturnTo, returnToForRequest } from "./ui/return-to";
 
 /**

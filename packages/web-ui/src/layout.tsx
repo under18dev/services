@@ -2,10 +2,12 @@ import { raw } from "hono/html";
 import type { Child, FC } from "hono/jsx";
 
 /**
- * Auth UI の共通レイアウト（仕様書 14-1 の決定 4）。
+ * HTML を返す全画面の共通レイアウト（仕様書 §14.1 決定 4）。
  *
- * ログイン画面だけでなく、`/oauth/authorize` の同意画面（#15）でも
- * そのまま使えるようにしてある。画面固有のものはここに置かない。
+ * ログイン画面・同意画面（auth-worker）と、アカウント管理画面
+ * （dashboard-worker）で共有する。**同じオリジンで配信される別々の Worker**
+ * なので、見た目と `<head>` の中身がずれると利用者には 1 つのサイトが
+ * 突然変わったように見える。画面固有のものはここに置かない。
  *
  * - スクリプトは**外部ファイルだけ**。インライン `<script>` を書くと
  *   `script-src 'self'` の CSP に引っかかり、`'unsafe-inline'` か nonce が
