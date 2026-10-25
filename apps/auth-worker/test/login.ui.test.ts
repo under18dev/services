@@ -153,9 +153,33 @@ describe("GET /login の描画", () => {
     expect(csp).not.toContain("unsafe-eval");
 
     // CSP に合わせて、スクリプトは必ず外部ファイル参照になっている。
-    const html = await response.text();
-    for (const tag of html.match(/<script[^>]*>/g) ?? []) {
-      expect(tag).toContain("src=");
+    //
+    // **正規表現で `<script...>` を拾わない**（CodeQL `js/bad-tag-filter`）。
+    // 属性値に `>` を含むタグで切れるし、`[^>]*` の範囲外にある形を
+    // 取りこぼすと、**インラインスクリプトがあるのにテストが通る**。
+    // 「見ているつもりのものを見ていない」形になる。
+    //
+    // workerd には本物の HTML パーサ（`HTMLRewriter`）があるので、そちらで読む。
+    const scripts: { src: string | null; body: string }[] = [];
+    let current: { src: string | null; body: string } | null = null;
+    await new HTMLRewriter()
+      .on("script", {
+        element(element) {
+          current = { src: element.getAttribute("src"), body: "" };
+          scripts.push(current);
+        },
+        text(chunk) {
+          if (current !== null) current.body += chunk.text;
+        },
+      })
+      .transform(response.clone())
+      .text();
+
+    expect(scripts.length, "script タグが 1 つも見つからない").toBeGreaterThan(0);
+    for (const script of scripts) {
+      expect(script.src, "src の無い script がある").not.toBeNull();
+      // 外部参照でも中身を書けてしまうので、空であることまで見る。
+      expect(script.body.trim(), "インラインのスクリプト本体がある").toBe("");
     }
   });
 
