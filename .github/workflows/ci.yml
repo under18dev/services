@@ -162,6 +162,22 @@ jobs:
       #     と必須フィールドの欠落がこれにあたる。ここがこのステップの価値。
       #   - binding 名の typo と無効な compatibility_flags は、どちらの dry-run
       #     でも検知できない。wrangler がローカルで検証しないため（#57）。
+
+      # **生成物を消してから本番 dry-run を回す。**
+      #
+      # 上の「この依存は無くなっている」は auth-worker については本当だったが、
+      # **検査で担保されていなかった。** dashboard-worker にアイランドが入った
+      # とき `build.command` が付かず、直前の `pnpm build` が npm スクリプト
+      # 経由で bundle を作っていたせいで CI は緑のまま、本番デプロイだけが
+      #   Could not resolve "./generated/account-island.bundle"
+      # で落ちた。#132 と同じ形を、別の Worker で繰り返したことになる。
+      #
+      # 消してから回せば、各 Worker が `wrangler deploy` だけで自立して
+      # いることが毎回確かめられる。Worker が増えても走査なので黙って
+      # 対象に入る。
+      - name: Drop generated client bundles
+        run: find apps -type d -name generated -path "*/ui/*" -prune -exec rm -rf {} +
+
       - name: Build workers (production env)
         run: |
           checked=0
