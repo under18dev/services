@@ -14,6 +14,7 @@
     "migrate:remote": "wrangler d1 migrations apply u18-nfc --remote"
   },
   "dependencies": {
+    "lodash": "4.17.20",
     "@u18/contracts": "workspace:*",
     "@u18/web-ui": "workspace:*",
     "@u18/domain": "workspace:*",
