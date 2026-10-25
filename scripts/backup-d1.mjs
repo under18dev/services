@@ -52,6 +52,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveSigningKey, signRequest, SIGNING_KEY_VECTORS } from "./lib/aws-sigv4.mjs";
 import { reorderDump } from "./lib/d1-dump.mjs";
+import { assertHttpsEndpoint } from "./lib/s3-endpoint.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUCKET = "u18-identity-archive";
@@ -98,6 +99,9 @@ function readS3Credentials() {
   for (const key of ["S3_ENDPOINT", "ACCESS_KEY", "SECRET_KEY"]) {
     if (!env[key]) throw new Error(`.env に ${key} が無い`);
   }
+
+  assertHttpsEndpoint(env.S3_ENDPOINT);
+
   return env;
 }
 
