@@ -50,6 +50,22 @@
 
 **上限は workerd のビルド日ではない。** 実測では `1.20261019.1`（2026-10-19 ビルド）が `2026-10-24` を受け付け、`2026-11-15` で落ちる。どこまで通るかは実際に走らせないと分からない。
 
+#### Cron は 2 本ある
+
+| Worker     | 式             | 何を掃除するか                         |
+| ---------- | -------------- | -------------------------------------- |
+| `u18-auth` | `*/15 * * * *` | `u18-identity` の 5 テーブル（§7.0）   |
+| `u18-nfc`  | `17 * * * *`   | `u18-nfc` の `nfc_card_events`（§7.0） |
+
+**1 本にまとめられない。** D1 の binding を持つのはそれぞれの所有者だけで、auth-worker は `u18-nfc` を読めない（§1.3）。「掃除の入口は 1 本」という原則は **D1 ごと**に適用される。
+
+止まっていないかはログで見る。どちらも 0 件のときも出す:
+
+```bash
+npx wrangler tail u18-auth-production --format json --search "retention sweep"
+npx wrangler tail u18-nfc-production  --format json --search "nfc.retention.sweep"
+```
+
 ### 1.2 Binding
 
 **auth-worker**
