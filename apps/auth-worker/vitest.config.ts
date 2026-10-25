@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
@@ -34,13 +34,17 @@ const wranglerSource = readFileSync(join(import.meta.dirname, "wrangler.jsonc"),
  */
 function collectAuditEventNames(dir: string): string[] {
   const names: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) {
+  // `withFileTypes` で種別まで 1 回の走査で得る。`readdirSync` + `statSync` に
+  // 分けると、その隙間に入れ替えられる余地（CodeQL `js/file-system-race`）が
+  // 残るうえ、エントリごとに syscall が 1 つ増える。**速いほうが安全でもある**
+  // という珍しいケース。
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
       names.push(...collectAuditEventNames(path));
       continue;
     }
-    if (!entry.endsWith(".ts") && !entry.endsWith(".tsx")) continue;
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
     for (const line of readFileSync(path, "utf8").split("\n")) {
       const code = line.split("//")[0] ?? "";
       for (const match of code.matchAll(/event: "([a-z_.]+)"/g)) names.push(match[1]!);
