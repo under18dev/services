@@ -1,5 +1,6 @@
 import type { AccountApiErrorCode } from "@u18/contracts";
 import { createApiClient } from "./api-client";
+import { isRemoved } from "./outcome";
 
 /**
  * アカウント管理画面の取り消し操作（#9 / 仕様書 §14.1 決定 16）。
@@ -53,6 +54,8 @@ const client = createApiClient(location.origin);
  */
 type ApiResponse = {
   readonly ok: boolean;
+  /** 404 を成功として扱うために要る（`outcome.ts`）。 */
+  readonly status: number;
   readonly json: () => Promise<unknown>;
 };
 
@@ -74,6 +77,8 @@ const MESSAGES: Record<AccountApiErrorCode, string> = {
   // `forbidden` と同じ 403 だが、利用者の次の行動が違う。
   reauthentication_required: "安全のため、もう一度ログインしてからお試しください。",
   conflict: "いまの状態では取り消せません。画面を更新してお試しください。",
+  // **この画面では出ない**（404 は成功として扱う。`outcome.ts`）。
+  // 契約の網羅を保つために残してある —— 消すと `Record` が埋まらない。
   not_found: "すでに取り消されています。画面を更新してください。",
   invalid_input: "操作を受け付けられませんでした。画面を更新してお試しください。",
   identity_unavailable: "いま処理できません。しばらく待ってからお試しください。",
@@ -182,7 +187,8 @@ function attach(item: HTMLElement, kind: string, action: Action): void {
     void action
       .send(id)
       .then(async (response) => {
-        if (response.ok) {
+        // 「消えた」の判断は `outcome.ts`（404 を含める理由もそちら）。
+        if (isRemoved(response)) {
           // 自分自身のセッションを切った場合はサーバーが Cookie を落として
           // いる。そのまま一覧を触らせても次の操作が全部 401 になるので、
           // ログイン画面へ送る。
