@@ -32,7 +32,7 @@ test("dev-url: 有効なら open。公開 URL を detail に出す", () => {
     status: 0,
   });
   assert.equal(result.verdict, "open");
-  assert.match(result.detail, /pub-0123456789abcdef\.r2\.dev/);
+  assert.equal(result.detail, "公開 URL が有効: https://pub-0123456789abcdef.r2.dev");
 });
 
 // --- カスタムドメイン -------------------------------------------------------
@@ -71,7 +71,7 @@ test("domain list: 接続があれば open。ドメイン名を detail に出す
     status: 0,
   });
   assert.equal(result.verdict, "open");
-  assert.match(result.detail, /archive\.under18\.dev/);
+  assert.equal(result.detail, "カスタムドメインが接続されている: archive.under18.dev");
 });
 
 test("domain list: 色が付いていても読める", () => {
@@ -84,7 +84,7 @@ test("domain list: 色が付いていても読める", () => {
     status: 0,
   });
   assert.equal(result.verdict, "open");
-  assert.match(result.detail, /archive\.under18\.dev/);
+  assert.equal(result.detail, "カスタムドメインが接続されている: archive.under18.dev");
 });
 
 // --- CORS -------------------------------------------------------------------
@@ -126,7 +126,11 @@ test("cors list: 設定があれば open。許可された origin を detail に
     status: 0,
   });
   assert.equal(result.verdict, "open");
-  assert.match(result.detail, /https:\/\/example\.com/);
+  // **`assert.match` の正規表現にしない。** アンカーの無い URL の
+  // 正規表現は CodeQL の `js/incomplete-url-substring-sanitization` に
+  // 当たる（ここは検査ではなくテストだが、形は同じ）。detail 全体と
+  // 突き合わせるほうが、前置きの文言が変わったことにも気づける。
+  assert.equal(result.detail, "CORS が設定されている: https://example.com");
 });
 
 // --- 確かめられなかったとき -------------------------------------------------
