@@ -288,8 +288,17 @@ jobs:
           scripts/smoke-probe.sh "${PRODUCTION_URL%/}/health" 200 \
             --jq .status ok \
             --jq .checks.database ok \
-            --jq .checks.signingKey ok \
-            --jq .environment production
+            --jq .checks.signingKey ok
+          # `--env production` の付け忘れは Discovery の issuer で見る（RR-18）。
+          #
+          # 以前は /health の `.environment` を読んでいたが、未認証で叩ける
+          # endpoint に構成情報を置くのをやめた。付け忘れると ENVIRONMENT と
+          # 一緒に ISSUER も既定値（http://localhost:8787）のまま乗るので、
+          # **同じ間違いを issuer で検出できる。** しかも Discovery は
+          # OIDC が issuer の公開を必須にしているので、検査のために
+          # 公開面を増やしたことにならない。
+          scripts/smoke-probe.sh "${PRODUCTION_URL%/}/.well-known/openid-configuration" 200 \
+            --jq .issuer "${PRODUCTION_URL%/}"
 
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
   # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは

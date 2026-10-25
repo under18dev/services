@@ -65,6 +65,20 @@ describe("GET /health の checks.signingKey", () => {
     return JSON.stringify({ keys: [privateJwk] });
   }
 
+  it("構成を外へ出さない（RR-18）", async () => {
+    // `/health` は未認証で叩ける唯一の D1 クエリ経路。環境名と issuer を
+    // 返していると、ステージングの存在や構成が外から読める。
+    //
+    // **`--env production` の付け忘れの検知は Discovery の issuer へ移した**
+    // （.github/workflows/deploy.yml）。ここを戻すならあちらも戻すこと。
+    const { body } = await health();
+
+    expect(Object.keys(body).sort()).toEqual(
+      ["checks", "latencyMs", "service", "status", "time"].sort(),
+    );
+    expect(JSON.stringify(body)).not.toContain("localhost:8787");
+  });
+
   it("鍵が揃っていれば ok", async () => {
     const secret = await seedActiveKey();
 

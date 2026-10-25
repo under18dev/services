@@ -123,7 +123,7 @@
 
 3. **セッション Cookie**（`packages/contracts/src/session-cookie.ts` の `sessionCookieName()`）
    `development` では `u18_session`（`Secure` なし）、それ以外では `__Host-u18_session`（`Secure` 付き）になる。この名前は auth-worker と dashboard-worker が **契約パッケージ経由で共有**しており、どちらか片方だけが別名を見ることはない。
-4. **ヘルス応答**：`/health` のボディに `environment` をそのまま出す。
+4. **ヘルス応答**：~~`/health` のボディに `environment` をそのまま出す~~ —— **出さなくなった**（脅威モデル RR-18）。`ENVIRONMENT` の取り違えは Discovery の `issuer` で検知する。
 
 #### `--env production` を付け忘れると安全装置がまとめて外れる
 
@@ -140,7 +140,7 @@
 
 既定値が安全側ではないのは意図的で、「development を明示的に上書きしないと本番にならない」より「本番を明示しないと development のまま」の方が、設定漏れが目に見える形で壊れるためである。
 
-**CI はこれを機械的に止める。** `.github/workflows/deploy.yml` の preflight は `wrangler.jsonc` に `REPLACE_WITH_` が 1 つでも残っていればデプロイを中止し、残っている件数と該当行を出す（#80）。デプロイ後は `/health` のボディに `environment == "production"` が入っていることをスモークテストが検証する（#66）—— **ステータスコードだけ見る検査は `--env` の付け忘れを素通りさせる**ため、本文まで見ている。
+**CI はこれを機械的に止める。** `.github/workflows/deploy.yml` の preflight は `wrangler.jsonc` に `REPLACE_WITH_` が 1 つでも残っていればデプロイを中止し、残っている件数と該当行を出す（#80）。デプロイ後は **Discovery の `issuer` が本番の値である**ことをスモークテストが検証する（#66 / RR-18）—— **ステータスコードだけ見る検査は `--env` の付け忘れを素通りさせる**ため、本文まで見ている。付け忘れると `ENVIRONMENT` と一緒に `ISSUER` も既定値（`http://localhost:8787`）のまま乗るので、`issuer` を突き合わせれば同じ間違いを捕まえられる。
 
 現在 `REPLACE_WITH_D1_DATABASE_ID` が残っているので、**preflight は意図的にデプロイをブロックしている**（#5）。これは障害ではなくガードが働いている状態である。
 
@@ -547,7 +547,7 @@ curl -i https://<auth-worker-の-URL>/health
 
 | 観測                                                                      | 意味                                                                                                                                                 | 対応                                |
 | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| HTTP 200、`{"status":"ok","checks":{"database":"ok"}}`                    | Worker が動き、D1 binding 越しにクエリが通った                                                                                                       | 正常                                |
+| HTTP 200、`{"status":"ok","checks":{"database":"ok","signingKey":"ok"}}`  | Worker が動き、D1 binding 越しにクエリが通った                                                                                                       | 正常                                |
 | **HTTP 503**、`{"status":"degraded","checks":{"database":"unreachable"}}` | **Worker 自体は生きている。** Hono のルーティングもコンテナ生成も成功し、`select 1` だけが例外を投げた                                               | §5.4（D1 障害時の縮退）へ           |
 | HTTP 500、`{"error":"internal_error"}`                                    | Worker は生きているが、コンテナ生成などリクエスト処理の別の箇所で例外。`ENVIRONMENT` が `development` 以外でメール未設定だとここに落ちる（1.5 参照） | `wrangler tail` でスタックを確認    |
 | Cloudflare のエラーページ（1101 / 1102 / 522 など）、JSON が返らない      | **Worker が落ちている / デプロイが壊れている / Worker の例外が捕捉されていない**                                                                     | §3.3.3 へ                           |
@@ -2105,7 +2105,7 @@ delete from oauth_tokens where expires_at < (unixepoch() - 86400) * 1000;
 4. **削除済みメールアドレスの再利用可否**（§7.1 手順 7）。`lower()` 式の UNIQUE インデックスにより、現状では再登録できない。
 5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。
 6. ~~**`signing_key_metadata` と `SIGNING_KEY_JWK` の整合を検証する手段**~~ — 対処済み。`/health` の `checks.signingKey` が、現役の kid が Secret にあり JWKS にも出ているかを返す（§3.3.1 / §4.4）。デプロイ後のスモークテストもこの値を見る。**残るのは「投入前に止める」経路**で、そちらは CI へ `SIGNING_KEY_JWK` を複製する判断が要る（§4.4）。なお、かつてここに書いてあった「現役 kid と `SIGNING_KEY_KID` の一致を見る」案は採れない —— `SIGNING_KEY_KID` は #23 で単一 JWK 形式の後方互換にしか使われなくなっており、JWK Set 形式では**どの鍵で署名するかを決めるのは `signing_key_metadata` の `active_from` / `active_until`** である。
-7. **`/health` を公開したままにするか**（§5.3）。認証なしで D1 にクエリを打つ唯一の公開 endpoint である。
+7. ~~**`/health` を公開したままにするか**~~ — 決着（脅威モデル RR-18）。**公開は維持し、返す内容を削った。** 認証を要求すると「デプロイ直後に外から確認できる」という価値を失い、スモークテスト（§4.4）も作り直しになる。代わりに `environment` と `issuer` を外した —— `issuer` は Discovery が公開を必須にしているので重複、`environment` は外に見せる理由が無い。`--env production` の付け忘れの検知は Discovery の `issuer` へ移してある。
 8. ~~**`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**~~ — 解決済み（#108）。`@cloudflare/vitest-plugin` への移行でテストと deploy の workerd が 1 本に揃い、据え置く理由が消えた。3 つの Worker とも `2026-10-24`。
 
 ---
