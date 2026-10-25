@@ -1,3 +1,6 @@
+/** R2 のエンドポイントのホスト接尾辞。先頭の `.` を含めることが肝。 */
+const R2_HOST_SUFFIX = ".r2.cloudflarestorage.com";
+
 /**
  * `S3_ENDPOINT` の検証（#164 の後続 / CodeQL `js/file-access-to-http`）。
  *
@@ -41,9 +44,6 @@
  * @param {string} value `.env` の S3_ENDPOINT
  * @returns {URL} 検証済みのエンドポイント
  */
-/** R2 のエンドポイントのホスト接尾辞。先頭の `.` を含めることが肝。 */
-const R2_HOST_SUFFIX = ".r2.cloudflarestorage.com";
-
 export function assertHttpsEndpoint(value) {
   let endpoint;
   try {
