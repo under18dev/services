@@ -85,7 +85,26 @@ export class PasskeyLoginVerifyUseCase {
     // Port 実装側のライブラリも同じ検査を持つが、これは実装の都合に左右されて
     // よい判断ではないので Domain のルールとして独立に確かめる。
     if (!passkey.acceptsCounter(verification.value.newCounter)) {
-      return this.fail(passkey.userId, "counter_regression");
+      // **ここだけ `fail()` を使わず、専用のイベント名で記録する**（#147）。
+      //
+      // 保持期間の選別は event 名でしかできないため（`AUDIT_EVENT_RETENTION`）、
+      // `passkey.login` の `reason` に畳むと 180 日で消える。複製の兆候は
+      // 2 年残したい。`passkey.login` を長期側へ移すと、成功したログイン
+      // すべてが 2 年残って量に見合わない。
+      //
+      // **応答は `fail()` とまったく同じにすること。** イベント名を分けたのは
+      // 記録の都合で、「複製を疑われた」が外から分かると攻撃者に手口の
+      // 成否を教える。一致していることはテストで固定してある。
+      await settleSideEffects(
+        "passkey.counter_regression",
+        this.deps.audit.record({
+          event: "passkey.counter_regression",
+          userId: passkey.userId,
+          outcome: "failure",
+          reason: "counter_regression",
+        }),
+      );
+      return err("unauthenticated", AUTHENTICATION_FAILED);
     }
 
     const user = await this.deps.users.findById(passkey.userId);

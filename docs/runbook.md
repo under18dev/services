@@ -1951,7 +1951,12 @@ npx wrangler tail u18-auth-production --format pretty | grep "retention archive"
 ##### 知っておくべき制約 2 つ
 
 1. **選別は `event` 名でしかできない。** `reason` で絞ると WHERE 句が `(event, created_at)` のインデックスから外れ、掃除自体が重くなる。結果として「失敗だけ長く残したい」イベントは**成功も一緒に残すコスト**と引き換えになる。
-   代表例が `passkey.login` で、`reason: counter_regression`（認証器の複製の兆候）だけは長く残す価値があるが、成功したログインすべてを 2 年持つ量には見合わない。**分けたいなら専用のイベント名**（`passkey.counter_regression`）を足すのが正しい。区分ではなく名前の問題。
+   **実際にそうした例が `passkey.counter_regression` である**（#147）。認証器の複製の兆候は 2 年残したいが、`passkey.login` の `reason` に畳んだままでは 180 日で消える。かといって `passkey.login` を長期側へ移すと、成功したログインすべてが 2 年残って量に見合わない。**区分ではなく名前の問題なので、名前を分けた。**
+
+   `passkey.counter_regression` が出たとき `passkey.login` は**出ない**。両方に出ると調査で件数が二重に見える。
+
+   > **過去のデータとは食い違う。** 名前を分ける前（2026-10-25 より前）に記録された巻き戻しは `passkey.login` の `reason: counter_regression` のままなので、それ以前を遡るときは両方を見ること。追加であって改名ではないので、既存の行は壊れていない。
+
 2. **`rate_limit.exceeded` は `audit_logs` に入らない**（#21）。Workers のログへ出している。区分表には型の都合で載っているが、掃除の対象にこの名前の行は現れない。
 
 ##### 区分を変えるとき
@@ -2306,7 +2311,19 @@ from audit_logs where event = 'otp.start' order by created_at desc limit 20;
 
 > **`no_eligible_account` の行には `user_id` が入らない。** 送らないと決めた時点ではアカウントを特定した情報を監査ログに残さない設計なので、**利用者を指定してこの行を引くことはできない。** 申告の時刻で窓を切って探すしかない。問い合わせ対応では「何時何分ごろに試したか」を必ず聞くこと。
 
-Passkey が 1 本残っているのにログインできない場合は、`passkey.login.verify` の `reason` を見る。`user_not_active` なら凍結である（`passkey-login-verify.use-case.ts`。HTTP には 401 として出るので、利用者から見た症状は「Passkey が拒否された」になり、凍結だと分からない）。
+Passkey が 1 本残っているのにログインできない場合は、**`passkey.login`** の `reason` を見る。`user_not_active` なら凍結である（`passkey-login-verify.use-case.ts`。HTTP には 401 として出るので、利用者から見た症状は「Passkey が拒否された」になり、凍結だと分からない）。
+
+> **イベント名は `passkey.login` である。** 本書は長らく `passkey.login.verify` と書いていたが、**そのイベントは存在しない**（#147 で発見）。この名前で引いても 0 件しか返らず、「記録が無い」と読み違える。正しい名前の一覧は `AUDIT_EVENTS`（`apps/auth-worker/src/application/ports/audit-log.port.ts`）にある。
+
+**`passkey.counter_regression` は別のイベントである**（#147）。署名カウンタの巻き戻し＝認証器の複製の疑いで、**利用者から見た症状は `user_not_active` と同じ 401** になる。切り分けるにはこちらも引くこと。
+
+```sh
+npx wrangler d1 execute u18-identity --env production --remote --command "
+select created_at, user_id, reason from audit_logs
+where event in ('passkey.login', 'passkey.counter_regression')
+  and user_id = '<USER_ID>' order by created_at desc limit 20;
+"
+```
 
 ### 10.3 復旧後に既存のセッション・Passkey・grant をどう扱うか
 
@@ -2644,7 +2661,7 @@ delete from email_challenges where user_id = '<USER_ID>';
 | ---------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | 既存セッションでのアクセス   | 即座に拒否される                                                           | `GetSessionUseCase` が毎回 `user.isActive` を見る                                       |
 | メール OTP の送信要求        | **メールが届かない。画面は成功と区別が付かない**                           | `StartEmailOtpUseCase` の `shouldSend`（§10.2）                                         |
-| Passkey でのログイン         | 401。`audit_logs` に `passkey.login.verify` / `user_not_active`            | `PasskeyLoginVerifyUseCase`                                                             |
+| Passkey でのログイン         | 401。`audit_logs` に `passkey.login` / `user_not_active`                   | `PasskeyLoginVerifyUseCase`                                                             |
 | セッション発行（最後の砦）   | `forbidden`。`audit_logs` に `session.issue` / failure / `user_not_active` | `IssueSessionUseCase`                                                                   |
 | OAuth のトークン発行         | セッションが無いので認可フローに入れない                                   | 同上                                                                                    |
 | 同じメールアドレスでの再登録 | **できない**                                                               | `users_primary_email_unique`（`lower(primary_email)` の**無条件** UNIQUE インデックス） |
