@@ -25,13 +25,46 @@
 
 - [ ] `apps/auth-worker`
 - [ ] `apps/dashboard-worker`
+- [ ] `apps/nfc-worker`
 - [ ] `packages/contracts`
 - [ ] `packages/domain`
-- [ ] `packages/db`（Drizzle schema / migration）
+- [ ] `packages/db`（Identity の Drizzle schema / migration）
+- [ ] `packages/nfc-db`（NFC の Drizzle schema / migration）
 - [ ] `packages/config`
 - [ ] `packages/testing`
 - [ ] CI / デプロイ設定
 - [ ] ドキュメントのみ
+
+## 横断的な変更と nfc-worker
+
+<!--
+auth-worker / dashboard-worker に横断的な手当て（レート制限、キャッシュ制御、
+保持期限、監査ログ、ヘッダの既定値など「仕組みとして入れるもの」）を加えた
+場合だけ記入してください。単一機能の変更なら「該当なし」で構いません。
+
+**なぜこの欄があるか。** 同じことが 3 回起きています:
+
+  #21  レート制限          → auth / dashboard に入れ、nfc は範囲外
+  #43  保持期限            → Identity の 5 テーブルだけ。nfc は掃除が無かった
+  #125 no-store の既定化   → auth / dashboard に入れ、nfc は経路ごとに書いたまま
+
+3 回とも「nfc を外す」と決めたのではなく、**思い出さなかった**だけです。
+思い出す場所は変更している最中でないと間に合いません（脅威モデル RR-20）。
+-->
+
+**nfc-worker に同じものが要るか判断しましたか。要らない場合はその理由を書いてください。**
+
+<!--
+チェックボックスにしていないのは、**埋めるのが安すぎる**からです。
+「確認した」にチェックを入れるだけなら、確認していなくても通ります。
+一文でよいので、判断の中身を書いてください。
+
+例:
+  要る  → 同じ PR で nfc-worker にも入れた（`apps/nfc-worker/...`）
+  要る  → 別 issue に切り出した（#NNN）。この PR には含めない理由は …
+  要らない → nfc-worker に該当する経路が無い（セッションを発行しないため）
+  該当なし → 単一機能の変更で、横断的な手当てではない
+-->
 
 ## セキュリティ考慮
 
@@ -61,6 +94,7 @@ u18 Identityは未成年ユーザーの認証を扱うため、すべてのPRで
 - [ ] Domain層からHono、Drizzle、Cloudflareの`Env`を参照していない
 - [ ] Application層はPortを介してInfrastructureに依存している（具象実装に直接依存していない）
 - [ ] 認証DBへの書き込みは`auth-worker`に集約されている
+- [ ] D1 の binding を所有者以外の Worker へ渡していない（`u18-identity` は auth-worker、`u18-nfc` は nfc-worker）
 
 ## テスト
 
