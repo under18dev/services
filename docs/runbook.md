@@ -1374,7 +1374,7 @@ id token signing failed Error: signing key is not configured:
 
 #### 重要な前提
 
-**レート制限は入っているが、Turnstile は未実装である（#21）。** `/api/auth/email/start` / `/api/auth/email/verify` / `/api/auth/passkeys/login/verify` に IP 単位のバースト制限がかかり、アドレス単位の持続制限が `email_challenges` の行数で効いている（§13）。**`/oauth/token` と `/oauth/authorize` にはまだかかっていない** —— #15 / #16 の実装後に足す。`email_challenges` の `resend_count` 列は使っていない（#88）。
+**レート制限は入っており、Turnstile は採らないと決定した**（仕様書 §14.1 決定 13 / 脅威モデル RR-2。再検討の条件は「レート制限で止まらない濫用が実際に観測されたとき」）。 `/api/auth/email/start` / `/api/auth/email/verify` / `/api/auth/passkeys/login/verify` に IP 単位のバースト制限がかかり、アドレス単位の持続制限が `email_challenges` の行数で効いている（§13）。**`/oauth/token` と `/oauth/authorize` にはまだかかっていない** —— #15 / #16 の実装後に足す。`email_challenges` の `resend_count` 列は使っていない（#88）。
 
 したがって現時点で取りうるのは **Cloudflare のエッジ側の対策**と**観測**だけである。
 
