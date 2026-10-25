@@ -146,7 +146,7 @@ function selfCheck() {
   if (failed > 0) throw new Error(`署名鍵の導出が公開ベクタと一致しない (${failed} 件)`);
   console.log("\nSigV4 の鍵導出は公開ベクタと一致している。");
   console.log(
-    "※ 正規化リクエストの組み立ては実サービスに対して未検証（R2 有効化後に runbook 12.6 で確認する）。",
+    "※ 正規化リクエストの組み立ては 2026-10-25 に実サービスで確認済み（list が R2 から一覧を取得）。",
   );
 }
 
