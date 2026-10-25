@@ -8,6 +8,7 @@ import { createContainer } from "../../composition/container";
 import type { IdentityFailure } from "../../domain/errors";
 import { ACCOUNT_BASE_PATH } from "./base-path";
 import type { AppBindings } from "./types";
+import { registerAccountUiRoutes } from "./ui/account-ui.routes";
 
 export { ACCOUNT_BASE_PATH } from "./base-path";
 
@@ -326,7 +327,13 @@ export type DashboardAppType = ReturnType<typeof registerRoutes>;
  * しているのはそのため（詳細は `base-path.ts`）。
  */
 export function createApp(): Hono<AppBindings> {
-  const root = new Hono<AppBindings>();
+  // `strict: false` で末尾スラッシュの有無を同一視する。
+  //
+  // **これが無いと `/account` が 404 になる。** `basePath("/account")` の下で
+  // `get("/")` と書くと登録されるのは `/account/` で、利用者が URL バーに
+  // 打つ `/account` とは別物になる。アカウント画面の入口が踏めないので、
+  // nfc-worker（`app.ts` の同じ指定）と揃える。
+  const root = new Hono<AppBindings>({ strict: false });
 
   root.use("*", secureHeaders());
 
@@ -361,6 +368,10 @@ export function createApp(): Hono<AppBindings> {
    * 直接足すと、本番で到達不能なエンドポイントが 1 つ増える。
    */
   registerRoutes(root.basePath(ACCOUNT_BASE_PATH));
+
+  // 画面（HTML）は API のチェーンに混ぜない。理由は
+  // `ui/account-ui.routes.tsx` の JSDoc を参照。
+  registerAccountUiRoutes(root.basePath(ACCOUNT_BASE_PATH));
 
   // 返すのは `root`。`basePath()` の戻り値は `root` の router を共有して
   // いるので、上で登録したハンドラはすべてここから引ける。
