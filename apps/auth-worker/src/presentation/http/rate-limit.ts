@@ -35,6 +35,19 @@ export function clientIp(c: Context<AppBindings>): string | null {
 export async function enforceIpRateLimit(
   c: Context<AppBindings>,
   scope: RateLimitScope,
+  /**
+   * 鍵に混ぜる追加の材料。
+   *
+   * `/oauth/token` のように**呼び出し元がブラウザではなくサーバ**の経路で使う。
+   * 純粋な IP 単位にすると、1 台の RP サーバに利用者全員分のトークン交換が
+   * 集中して正常利用が弾かれる。逆に `client_id` だけを鍵にすると、
+   * **攻撃者が被害クライアントの枠を使い切って締め出せる**（他人の
+   * `client_id` を名乗るだけでよい。秘密ではない）。
+   *
+   * 両方を混ぜると、攻撃者は「自分の IP × 被害クライアント」の枠しか
+   * 消費できず、本物の RP は自分の IP に自分の枠を持ち続ける。
+   */
+  extraKey?: string,
 ): Promise<Response | null> {
   const container = c.get("container");
   const ip = clientIp(c);
@@ -43,7 +56,8 @@ export async function enforceIpRateLimit(
   // 素通しにすると、ヘッダが落ちる経路が 1 つ見つかった時点で制限が外れる。
   // 共有枠なら、本番で CF-Connecting-IP が欠け始めたときに「全体が詰まる」
   // という目に見える形で壊れる。静かに無防備になるよりよい。
-  const key = ip === null ? "unknown-ip" : await container.services.ipHasher.hash(ip);
+  const ipKey = ip === null ? "unknown-ip" : await container.services.ipHasher.hash(ip);
+  const key = extraKey === undefined ? ipKey : `${extraKey}:${ipKey}`;
 
   const decision = await container.services.rateLimiter.consume(scope, key);
   if (decision.allowed) return null;
@@ -66,7 +80,7 @@ export async function enforceIpRateLimit(
       event: "rate_limit.exceeded" satisfies AuditEventName,
       scope,
       // 生 IP は出さない（仕様書 9 Privacy）。ログも保存先である。
-      ipHash: ip === null ? null : key,
+      ipHash: ip === null ? null : ipKey,
     }),
   );
 

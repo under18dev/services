@@ -87,6 +87,24 @@ export type ClientAuthResult =
  * （RFC 6749 §2.3.1 が「複数の認証方式を使ってはならない」と定めている）。
  * 受け入れると、どちらが検証されたのかが実装依存になる。
  */
+/**
+ * レート制限の鍵に混ぜる `client_id`。**認証ではない。**
+ *
+ * 認証前に読むので、**これは自称である**。鍵として使う分には問題ない ——
+ * 攻撃者が他人の `client_id` を名乗っても、鍵にはハッシュ済み IP も
+ * 混ざるので被害クライアントの枠は減らない（`rate-limit-policy.ts` の
+ * `oauth_client`）。
+ *
+ * **認可の判断には絶対に使わないこと。** 使ってよいのは
+ * `authenticateClient()` が返した `OAuthClient` だけである。
+ */
+export function claimedClientId(c: Context<AppBindings>, form: FormData): string {
+  const basic = readBasicAuth(c.req.header("Authorization"));
+  // 長さを切る。鍵は Cloudflare 側へ送られるうえ、
+  // 任意長の自称値をそのまま乗せる理由が無い。
+  return (basic?.id ?? field(form, "client_id") ?? "unknown-client").slice(0, 128);
+}
+
 export async function authenticateClient(
   c: Context<AppBindings>,
   form: FormData,

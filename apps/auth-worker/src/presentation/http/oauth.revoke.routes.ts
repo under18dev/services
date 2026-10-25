@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { authenticateClient, field, oauthError } from "./oauth.client-auth";
+import { authenticateClient, claimedClientId, field, oauthError } from "./oauth.client-auth";
+import { enforceIpRateLimit } from "./rate-limit";
 import type { AppBindings } from "./types";
 
 /**
@@ -42,6 +43,14 @@ oauthRevokeRoutes.post("/oauth/revoke", async (c) => {
   } catch {
     return oauthError(c, 400, "invalid_request", "request body must be form-encoded");
   }
+
+  // ---- レート制限（#21）----
+  //
+  // `/oauth/token` と**同じ枠**を使う。RFC 7009 §2.1 がクライアント認証に
+  // 同じ方式を求めており、攻撃者がどちらを叩いても同じ予算を消費するほうが
+  // 総量として素直なため（`rate-limit-policy.ts` の `oauth_client`）。
+  const limited = await enforceIpRateLimit(c, "oauth_client", claimedClientId(c, form));
+  if (limited !== null) return limited;
 
   // クライアント認証を先に行う。RFC 7009 §2.1 が `/oauth/token` と同じ方式を
   // 求めているので、読み取りは `oauth.client-auth.ts` を共有している。
