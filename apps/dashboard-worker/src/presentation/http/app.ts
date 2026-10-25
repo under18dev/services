@@ -35,6 +35,20 @@ export function createApp(): Hono<AppBindings> {
 
   root.use("*", secureHeaders());
 
+  // **キャッシュさせないのを既定にする（#125 / RR-10）。**
+  //
+  // この Worker が返すのは全部 auth-worker から中継した個人情報
+  // （プロフィール・セッション一覧・同意済みアプリ）である。
+  // 中間プロキシやブラウザに残ると、共用端末で前の利用者の情報が戻る。
+  //
+  // auth-worker と違い、**意図的に違う値を使う経路は 1 つも無い。**
+  // 静的アセットも公開メタデータもこの Worker には無いので、
+  // ここで付けた値がそのまま全経路に出る。
+  root.use("*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+
   // 組み立てをミドルウェアに閉じ込め、各ルートは `c.get("identity")` だけを
   // 見る。ルートから `Env` を直接触らせない。
   root.use("*", async (c, next) => {
