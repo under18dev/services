@@ -28,6 +28,7 @@ const PROFILE: UserProfile = {
   email: "taro@example.com",
   emailVerified: true,
   status: "active",
+  isAdmin: false,
   createdAt: "2026-10-24T00:00:00.000Z",
 };
 
@@ -74,6 +75,27 @@ describe("3 つの画面が HTML を返す", () => {
       const response = await withCookie(href, FULL_IDENTITY);
       expect(response.status, `ナビの ${href} が引けない`).toBe(200);
     }
+  });
+});
+
+describe("末尾スラッシュの有無で 404 にしない", () => {
+  // Hono は既定（`strict: true`）で `/account` と `/account/` を別物として
+  // 扱う。**画面の入口なので、利用者が URL バーに打った側が登録されて
+  // いなければ踏めない。** `createApp()` の `strict: false` がこれを同一視する。
+  //
+  // services-6f が #197 で見つけた。こちらの実装は `.route()` 経由だったので
+  // 生きているのは逆側（`/account` が 200 で `/account/` が 404）だった。
+  // 片側しか試していなければ、どちらの実装でも「通る」と読めてしまう。
+  it.each([
+    [OVERVIEW_PATH, `${OVERVIEW_PATH}/`],
+    [SESSIONS_PATH, `${SESSIONS_PATH}/`],
+    [GRANTS_PATH, `${GRANTS_PATH}/`],
+  ])("%s と %s が同じ扱いになる", async (withoutSlash, withSlash) => {
+    const a = await withCookie(withoutSlash, FULL_IDENTITY);
+    const b = await withCookie(withSlash, FULL_IDENTITY);
+
+    expect(a.status).toBe(200);
+    expect(b.status, `${withSlash} が 404`).toBe(200);
   });
 });
 

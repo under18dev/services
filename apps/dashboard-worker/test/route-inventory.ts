@@ -1,6 +1,10 @@
 /**
  * この Worker が持つルートの一覧。**手で書く。**
  *
+ * **2 つに分けてある。** `API_ROUTES` は `hono/client` のチェーンに乗る
+ * JSON の経路、`PAGE_ROUTES` は HTML を返す画面とアセット。
+ * 分ける理由は `PAGE_ROUTES` の JSDoc を参照。
+ *
  * ## なぜ手で書いた一覧が要るのか
  *
  * `test/client-type.test-d.ts` は `hono/client` の型が空でないことを
@@ -14,8 +18,9 @@
  *  1. **実行時**（`route-inventory.test.ts`）—— `createApp().routes` と比べる。
  *     チェーンの外に書いたルートもここには出るので、**追加を必ず検知する。**
  *  2. **型**（`client-type.test-d.ts`）—— `DashboardAppType` のスキーマの
- *     キーと比べる。チェーンに乗っていないルートはここに出ないので、
- *     **乗り損ねを検知する。**
+ *     キーを `API_ROUTES` と比べる。チェーンに乗っていないルートはここに
+ *     出ないので、**乗り損ねを検知する。** 逆に画面をチェーンへ足した
+ *     ときも、`API_ROUTES` に無いものが出るので止まる。
  *
  * 1 だけ通って 2 が落ちたら、それは「チェーンの外に書いた」という意味である。
  *
@@ -38,7 +43,7 @@
  * （`@ts-expect-error` が「抑制すべきエラーが無い」で落ちる仕組みも tsc 側）
  * が、知らないと「書いたのに走っていない」に見える。
  */
-export const EXPECTED_ROUTES = [
+export const API_ROUTES = [
   { method: "GET", path: "/account/health" },
   { method: "GET", path: "/account/api/me" },
   { method: "PATCH", path: "/account/api/me" },
@@ -50,5 +55,26 @@ export const EXPECTED_ROUTES = [
   { method: "DELETE", path: "/account/api/me/grants/:clientId" },
 ] as const;
 
-/** 一覧に載っているパス（重複を畳んだ union）。型側の突き合わせに使う。 */
-export type ExpectedRoutePath = (typeof EXPECTED_ROUTES)[number]["path"];
+/**
+ * HTML を返す画面と、そこから読むアセット（#9）。
+ *
+ * **こちらはチェーンに乗せない。** `hc` はブラウザが直接開くページを
+ * 呼ばないので、型に積んでも使い道が無く、型を読む人には雑音になる。
+ *
+ * 分けてあることで**「乗せるべきものが乗っていない」と「乗せるべきで
+ * ないものが乗っている」の両方**を型側が見られる。`API_ROUTES` と
+ * ちょうど一致することを確かめているので、画面をうっかりチェーンへ
+ * 足すとそこで止まる。
+ */
+export const PAGE_ROUTES = [
+  { method: "GET", path: "/account" },
+  { method: "GET", path: "/account/sessions" },
+  { method: "GET", path: "/account/grants" },
+  { method: "GET", path: "/account/ui/u18.css" },
+] as const;
+
+/** 実行時に登録されているべきもの全部。 */
+export const EXPECTED_ROUTES = [...API_ROUTES, ...PAGE_ROUTES];
+
+/** **チェーンに乗るべき**パス（重複を畳んだ union）。型側の突き合わせに使う。 */
+export type ApiRoutePath = (typeof API_ROUTES)[number]["path"];

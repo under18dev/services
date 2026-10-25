@@ -106,9 +106,7 @@ describe("キャッシュしてよい経路はスタイルシートだけ", () =
       );
 
     const anonymous = await (await fetchCss({})).text();
-    const authenticated = await (
-      await fetchCss({ Cookie: "u18_session=someones-token" })
-    ).text();
+    const authenticated = await (await fetchCss({ Cookie: "u18_session=someones-token" })).text();
 
     expect(authenticated).toBe(anonymous);
   });

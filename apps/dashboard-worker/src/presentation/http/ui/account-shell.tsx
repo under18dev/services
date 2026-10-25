@@ -13,12 +13,15 @@ import { GRANTS_PATH, OVERVIEW_PATH, SESSIONS_PATH, STYLESHEET_PATH } from "./as
 /** ナビの現在地。`aria-current` に使う。 */
 export type AccountNavKey = "overview" | "sessions" | "grants";
 
-const NAV: readonly { readonly key: AccountNavKey; readonly href: string; readonly label: string }[] =
-  [
-    { key: "overview", href: OVERVIEW_PATH, label: "アカウント" },
-    { key: "sessions", href: SESSIONS_PATH, label: "ログイン中の端末" },
-    { key: "grants", href: GRANTS_PATH, label: "連携アプリ" },
-  ];
+const NAV: readonly {
+  readonly key: AccountNavKey;
+  readonly href: string;
+  readonly label: string;
+}[] = [
+  { key: "overview", href: OVERVIEW_PATH, label: "アカウント" },
+  { key: "sessions", href: SESSIONS_PATH, label: "ログイン中の端末" },
+  { key: "grants", href: GRANTS_PATH, label: "連携アプリ" },
+];
 
 export type AccountShellProps = {
   readonly title: string;

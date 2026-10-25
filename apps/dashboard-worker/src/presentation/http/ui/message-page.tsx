@@ -21,9 +21,7 @@ export const SignInRequiredPage: FC = () => (
   <AccountShell title="ログインが必要です">
     <section class="section">
       <h2>ログインが必要です</h2>
-      <p class="section-lead">
-        アカウント情報を表示するにはログインしてください。
-      </p>
+      <p class="section-lead">アカウント情報を表示するにはログインしてください。</p>
       <p class="links">
         <a href={LOGIN_PATH}>ログイン画面へ</a>
       </p>
