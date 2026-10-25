@@ -46,7 +46,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,26 @@ function readS3Credentials() {
   return env;
 }
 
+/**
+ * 退避先のディレクトリ。`--out` が無いときの既定。
+ *
+ * **`tmpdir()` を直接使わない。** システムの一時ディレクトリは
+ * world-readable（mode 1777）で、名前も時刻から予測できる。ここへ落ちるのは
+ * **全利用者の平文メールアドレスを含む D1 の完全な複製**なので、同じ機械の
+ * 他の利用者から読める状態になる（CodeQL `js/insecure-temporary-file`）。
+ *
+ * `mkdtempSync` は mode 0700 のディレクトリを一意な名前で作る。名前を
+ * 推測されても中へ入れない。
+ *
+ * **`--out` を自分で指定する場合は、権限の責任は呼び出し側にある。**
+ * CI のランナーのように使い捨ての環境ならそれでよい。
+ */
+function defaultOutDir(prefix) {
+  const base = join(tmpdir(), prefix);
+  mkdirSync(tmpdir(), { recursive: true });
+  return mkdtempSync(base);
+}
+
 function wrangler(args, { cwd = ROOT, capture = false } = {}) {
   const result = spawnSync("npx", ["wrangler", ...args], {
     cwd,
@@ -153,7 +173,7 @@ function selfCheck() {
 function exportDatabases({ db, remote, out }) {
   const targets = db === "all" ? Object.keys(DATABASES) : [db];
   const at = new Date();
-  const dir = out ?? join(tmpdir(), `u18-backup-${at.toISOString().replace(/[:.]/g, "-")}`);
+  const dir = out ?? defaultOutDir("u18-backup-");
   mkdirSync(dir, { recursive: true });
 
   const files = [];
@@ -294,7 +314,7 @@ async function main() {
 
     case "restore": {
       if (!flags.key) throw new Error("--key が要る");
-      const dir = flags.out ?? tmpdir();
+      const dir = flags.out ?? defaultOutDir("u18-restore-");
       mkdirSync(dir, { recursive: true });
       const file = join(dir, flags.key.split("/").pop());
       wrangler(["r2", "object", "get", `${BUCKET}/${flags.key}`, "--file", file, "--remote"]);
