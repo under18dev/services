@@ -6,7 +6,14 @@ import { getCookie } from "hono/cookie";
 import type { IdentityOutcome } from "../../../application/ports";
 import type { AppBindings } from "../types";
 import { AccountPage } from "./account-page";
-import { GRANTS_ROUTE, OVERVIEW_ROUTE, SESSIONS_ROUTE, STYLESHEET_ROUTE } from "./asset-paths";
+import {
+  ACCOUNT_ISLAND_ROUTE,
+  GRANTS_ROUTE,
+  OVERVIEW_ROUTE,
+  SESSIONS_ROUTE,
+  STYLESHEET_ROUTE,
+} from "./asset-paths";
+import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 import { GrantsPage } from "./grants-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
 import { SessionsPage } from "./sessions-page";
@@ -91,6 +98,18 @@ export const accountUiRoutes = new Hono<AppBindings>()
   .get(STYLESHEET_ROUTE, (c) =>
     c.body(UI_STYLESHEET, 200, {
       "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+    }),
+  )
+
+  /**
+   * クライアントアイランド。**CSS と同じ理由でキャッシュを許す** ——
+   * 全利用者に同じバンドルで、個人情報を含まない。URL に内容ハッシュを
+   * 入れていないので窓は 5 分に抑える。
+   */
+  .get(ACCOUNT_ISLAND_ROUTE, (c) =>
+    c.body(ACCOUNT_ISLAND_JS, 200, {
+      "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": "public, max-age=300",
     }),
   );

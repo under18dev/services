@@ -16,6 +16,24 @@
   // 確かめること。
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
+  // アカウント画面のクライアントアイランドは生成物で、リポジトリに入って
+  // いない（auth-worker と同じ理由。ソースと食い違ったバンドルが本番へ
+  // 出るのを防ぐ）。
+  //
+  // **生成を npm スクリプトだけに置かない。** CI は
+  // `pnpm exec wrangler deploy` を直接呼ぶのでスクリプトを迂回し、
+  // 本番デプロイが「bundle を解決できない」で落ちる（#132 で実際に落ちた）。
+  // Worker のビルド定義に置けば dev / deploy / dry-run のどの経路から
+  // 入っても必ず走る。
+  //
+  // watch_dir を island のソースだけに絞る。既定の監視範囲は src 全体で、
+  // 出力もその中にあるため、生成 -> 変更検知 -> 再生成 が無限に続いて
+  // `wrangler dev` が起動しなくなる（#138）。
+  "build": {
+    "command": "node scripts/build-client.mjs",
+    "watch_dir": "src/presentation/http/ui/client",
+  },
+
   "observability": { "enabled": true },
 
   // auth-worker の IdentityRPC だけを束縛する。

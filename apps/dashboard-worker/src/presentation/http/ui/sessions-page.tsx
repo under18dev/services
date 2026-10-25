@@ -1,6 +1,7 @@
 import type { SessionListItem } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
+import { ACCOUNT_ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 import { summarizeUserAgent } from "./user-agent";
 
@@ -39,7 +40,7 @@ export type SessionsPageProps = {
 };
 
 export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
-  <AccountShell title="ログイン中の端末" current="sessions">
+  <AccountShell title="ログイン中の端末" current="sessions" scripts={[ACCOUNT_ISLAND_PATH]}>
     <section class="section">
       <h2>ログイン中の端末</h2>
       <p class="section-lead">
@@ -70,6 +71,16 @@ export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
                   期限 {formatDateTime(session.expiresAt)}
                 </p>
               </div>
+              {/*
+                操作ボタンはアイランドがここに作る（`ui/client/account-island.tsx`）。
+                **サーバーはボタンを出さない。** JS が読み込めなければボタン自体が
+                現れないので、「押せるのに効かない」という形にならない。
+              */}
+              <div
+                class="item-actions"
+                data-revoke-kind="session"
+                data-revoke-id={session.sessionId}
+              />
             </li>
           ))}
         </ul>

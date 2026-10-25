@@ -13,6 +13,7 @@ export default tseslint.config(
       "packages/db/drizzle/**",
       // クライアントアイランドのバンドル（生成物）。
       "apps/auth-worker/src/presentation/http/ui/generated/**",
+      "apps/dashboard-worker/src/presentation/http/ui/generated/**",
     ],
   },
   ...tseslint.configs.recommended,

@@ -24,6 +24,16 @@ import { ACCOUNT_BASE_PATH } from "../base-path";
 export const STYLESHEET_ROUTE = "/ui/u18.css";
 export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}` as const;
 
+/**
+ * クライアントアイランド（失効・解除の操作）。
+ *
+ * **スタイルシートと同じく `*_ROUTE` から `*_PATH` を導出する。** アイランドで
+ * 片方だけ直すと「ボタンが黙って効かない」という形で出る —— 画面は
+ * 正常に描画され、JS だけが 404 になるので、見た目では気づけない。
+ */
+export const ACCOUNT_ISLAND_ROUTE = "/ui/account-island.js";
+export const ACCOUNT_ISLAND_PATH = `${ACCOUNT_BASE_PATH}${ACCOUNT_ISLAND_ROUTE}` as const;
+
 /** アカウント概要（プロフィールと Passkey）。 */
 export const OVERVIEW_ROUTE = "/";
 export const OVERVIEW_PATH = ACCOUNT_BASE_PATH;

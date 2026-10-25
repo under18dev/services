@@ -13,5 +13,9 @@
     "test/**/*.tsx",
     "worker-configuration.d.ts",
     "vitest.config.ts"
-  ]
+  ],
+  // ブラウザでしか動かないアイランド。lib に DOM を足さない本体の設定で
+  // 型検査すると document / HTMLElement が未定義になる。
+  // tsconfig.client.json で別に検査する（auth-worker と同じ）。
+  "exclude": ["src/presentation/http/ui/client/**"]
 }

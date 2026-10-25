@@ -2,6 +2,7 @@ import type { GrantListItem } from "@u18/contracts";
 import { scopeLabel } from "@u18/web-ui";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
+import { ACCOUNT_ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -27,7 +28,7 @@ export type GrantsPageProps = {
 };
 
 export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
-  <AccountShell title="連携アプリ" current="grants">
+  <AccountShell title="連携アプリ" current="grants" scripts={[ACCOUNT_ISLAND_PATH]}>
     <section class="section">
       <h2>連携アプリ</h2>
       <p class="section-lead">
@@ -55,6 +56,12 @@ export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
                   </ul>
                 )}
               </div>
+              {/*
+                操作ボタンはアイランドが作る（`ui/client/account-island.tsx`）。
+                サーバーはボタンを出さないので、JS が読み込めなければ
+                ボタン自体が現れない。
+              */}
+              <div class="item-actions" data-revoke-kind="grant" data-revoke-id={grant.clientId} />
             </li>
           ))}
         </ul>
