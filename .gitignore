@@ -20,3 +20,4 @@ coverage/
 # クライアントアイランドのバンドル（scripts/build-client.mjs の生成物）。
 # dev / build / typecheck / test が毎回作り直すのでコミットしない。
 apps/auth-worker/src/presentation/http/ui/generated/
+apps/dashboard-worker/src/presentation/http/ui/generated/

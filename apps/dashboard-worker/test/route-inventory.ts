@@ -71,6 +71,7 @@ export const PAGE_ROUTES = [
   { method: "GET", path: "/account/sessions" },
   { method: "GET", path: "/account/grants" },
   { method: "GET", path: "/account/ui/u18.css" },
+  { method: "GET", path: "/account/ui/account-island.js" },
 ] as const;
 
 /** 実行時に登録されているべきもの全部。 */

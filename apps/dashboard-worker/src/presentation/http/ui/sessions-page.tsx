@@ -1,6 +1,7 @@
 import type { SessionListItem } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
+import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 import { summarizeUserAgent } from "./user-agent";
 
@@ -39,7 +40,12 @@ export type SessionsPageProps = {
 };
 
 export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
-  <AccountShell title="ログイン中の端末" current="sessions">
+  <AccountShell
+    title="ログイン中の端末"
+    current="sessions"
+    scripts={[ISLAND_PATH]}
+    hasRevokeActions
+  >
     <section class="section">
       <h2>ログイン中の端末</h2>
       <p class="section-lead">
@@ -49,9 +55,17 @@ export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
         // 自分のセッションで見ている以上、普通は 0 件にならない。
         <p class="empty">表示できるセッションがありません。</p>
       ) : (
-        <ul class="list">
+        // `data-*` はアイランドがボタンを付ける目印（`client/account-island.ts`）。
+        // 空になったときの文言もここに置く —— アイランドに日本語を持たせない。
+        <ul class="list" data-empty-text="表示できるセッションがありません。">
           {sessions.map((session) => (
-            <li key={session.sessionId}>
+            <li
+              key={session.sessionId}
+              data-session-id={session.sessionId}
+              // 自分自身を切ったらサーバーが Cookie を落とすので、
+              // アイランドはログイン画面へ送る必要がある。
+              data-current={session.current ? "true" : "false"}
+            >
               <div class="item-main">
                 <div class="item-title">
                   {titleFor(session.userAgent)}

@@ -1,12 +1,19 @@
 import { sessionCookieName } from "@u18/contracts";
 import { pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
+import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { IdentityOutcome } from "../../../application/ports";
 import type { AppBindings } from "../types";
 import { AccountPage } from "./account-page";
-import { GRANTS_ROUTE, OVERVIEW_ROUTE, SESSIONS_ROUTE, STYLESHEET_ROUTE } from "./asset-paths";
+import {
+  GRANTS_ROUTE,
+  ISLAND_ROUTE,
+  OVERVIEW_ROUTE,
+  SESSIONS_ROUTE,
+  STYLESHEET_ROUTE,
+} from "./asset-paths";
 import { GrantsPage } from "./grants-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
 import { SessionsPage } from "./sessions-page";
@@ -28,6 +35,22 @@ import { SessionsPage } from "./sessions-page";
  * ステータスコードは JSON 経路と揃える（未ログイン 401 / 届かない 503）。
  * 200 で「エラーです」と書いた HTML を返すと、外形監視からは正常に見える。
  */
+
+/**
+ * 静的アセットの `Cache-Control`。**この Worker で唯一 `no-store` を
+ * 上書きする値である。**
+ *
+ * 返すのは全利用者に同じ CSS / JS で、個人情報を 1 文字も含まない。
+ * 他の経路（#125 / RR-10）と違い、キャッシュさせて問題が無い。
+ *
+ * 短いのは URL に内容ハッシュを含めていないため。デプロイ後に古いものが
+ * 残る窓を 5 分に抑える（auth-worker と同じ値）。
+ *
+ * **ここを真似して他の経路でキャッシュを許さないこと。** 増やすなら
+ * `test/cache-control.test.ts` の「例外はこれだけ」を更新したうえで、
+ * なぜ個人情報が含まれないのかを書くこと。
+ */
+const ASSET_CACHE_CONTROL = "public, max-age=300";
 
 export const accountUiRoutes = new Hono<AppBindings>()
   /**
@@ -74,24 +97,24 @@ export const accountUiRoutes = new Hono<AppBindings>()
     return c.html(<GrantsPage grants={grants.value} />);
   })
 
-  /**
-   * 共有スタイルシート。
-   *
-   * **この Worker で唯一、`no-store` を上書きする経路である。**
-   * 返すのは全利用者に同じ CSS で、個人情報を 1 文字も含まない。
-   * 他の経路（#125 / RR-10）と違い、キャッシュさせて問題が無い。
-   *
-   * `max-age` が短いのは URL に内容ハッシュを含めていないため。
-   * デプロイ後に古い CSS が残る窓を 5 分に抑える（auth-worker と同じ値）。
-   *
-   * **ここを真似して他の経路でキャッシュを許さないこと。** 増やすなら、
-   * `test/cache-control.test.ts` の「例外はこれ 1 つ」を更新したうえで、
-   * なぜ個人情報が含まれないのかを書くこと。
-   */
+  /** 共有スタイルシート（`@u18/web-ui` の `UI_STYLESHEET`）。 */
   .get(STYLESHEET_ROUTE, (c) =>
     c.body(UI_STYLESHEET, 200, {
       "Content-Type": "text/css; charset=utf-8",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": ASSET_CACHE_CONTROL,
+    }),
+  )
+
+  /**
+   * 取り消し操作のアイランド。スタイルシートと同じく個人情報を含まない。
+   *
+   * **auth-worker の `/ui/login-island.js` とは別物**なので借りられない
+   * （あちらは WebAuthn 専用）。
+   */
+  .get(ISLAND_ROUTE, (c) =>
+    c.body(ACCOUNT_ISLAND_JS, 200, {
+      "Content-Type": "text/javascript; charset=utf-8",
+      "Cache-Control": ASSET_CACHE_CONTROL,
     }),
   );
 

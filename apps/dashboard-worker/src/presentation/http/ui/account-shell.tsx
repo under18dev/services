@@ -32,10 +32,26 @@ export type AccountShellProps = {
    */
   readonly current?: AccountNavKey;
   readonly scripts?: readonly string[];
+
+  /**
+   * 取り消しの操作がある画面かどうか。`true` なら `<noscript>` で
+   * 「JS が無いとできないこと」を伝える。
+   *
+   * **出すかどうかを画面側が決める。** 全画面に出すと、取り消しの無い
+   * 画面でも「何かができない」と読めてしまう。
+   */
+  readonly hasRevokeActions?: boolean;
+
   readonly children?: Child;
 };
 
-export const AccountShell: FC<AccountShellProps> = ({ title, current, scripts = [], children }) => (
+export const AccountShell: FC<AccountShellProps> = ({
+  title,
+  current,
+  scripts = [],
+  hasRevokeActions = false,
+  children,
+}) => (
   <Layout title={title} frame="shell" stylesheet={STYLESHEET_PATH} scripts={scripts}>
     {current !== undefined && (
       <nav class="nav">
@@ -53,5 +69,24 @@ export const AccountShell: FC<AccountShellProps> = ({ title, current, scripts = 
       </nav>
     )}
     {children}
+    {/*
+      **取り消しには JS が要る**（決定 16）。ボタンはアイランドが作るので、
+      JS が無ければそもそも出ない —— 押しても効かないボタンは置かない。
+      代わりに、何ができないかをここで言う。
+
+      いまのところ JS 無しで他端末を切る経路は無い。`POST /login/logout`
+      （auth-worker）は**この端末だけ**で、全端末の指定は JSON API
+      （`/api/auth/logout?all=true`）にしか無く、form からは使えない。
+      埋められていない穴なので、**できない旨を書いて終わりにせず
+      issue にしてある。**
+    */}
+    {hasRevokeActions && (
+      <noscript>
+        <p class="notice">
+          この画面での取り消し操作（ログアウト・削除・連携の解除）には JavaScript
+          が必要です。一覧の表示は JavaScript 無しでも行えます。
+        </p>
+      </noscript>
+    )}
   </Layout>
 );

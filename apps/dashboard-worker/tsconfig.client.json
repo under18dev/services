@@ -1,0 +1,25 @@
+{
+  // ブラウザで動くアイランドだけの型検査。
+  //
+  // 本体の tsconfig.json から分けているのは **DOM の型を Worker 側のコードへ
+  // 持ち込まないため**。本体に lib: ["DOM"] を足すと、workerd には存在しない
+  // `document` や `window` が Domain 層からも見えてしまい、動かないコードが
+  // 型検査を通る（auth-worker の tsconfig.client.json と同じ理由）。
+  //
+  // **逆向きも塞いである。** `types` を空にして workerd のグローバル型を
+  // 入れていない。入れると `Response` と `Element` が DOM のものと衝突し、
+  // やはり動かないコードが通る（理由と実測は client/worker-names.d.ts）。
+  "extends": "../../packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // `app.ts` 経由で .tsx（画面）が読み込まれる。値は 1 つも使わないが、
+    // 型解決のためにパーサの設定は要る。
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "types": []
+  },
+  "include": [
+    "src/presentation/http/ui/client/**/*.ts",
+    "src/presentation/http/ui/client/**/*.d.ts"
+  ]
+}

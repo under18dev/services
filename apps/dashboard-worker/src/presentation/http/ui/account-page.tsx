@@ -1,6 +1,7 @@
 import type { PasskeySummary, UserProfile } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
+import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -50,7 +51,7 @@ function deviceTypeLabel(deviceType: string): string {
 }
 
 export const AccountPage: FC<AccountPageProps> = ({ profile, passkeys }) => (
-  <AccountShell title="アカウント" current="overview">
+  <AccountShell title="アカウント" current="overview" scripts={[ISLAND_PATH]} hasRevokeActions>
     <section class="section">
       <h2>プロフィール</h2>
       <dl class="facts">
@@ -88,9 +89,9 @@ export const AccountPage: FC<AccountPageProps> = ({ profile, passkeys }) => (
       {passkeys.length === 0 ? (
         <p class="empty">登録されているパスキーはありません。</p>
       ) : (
-        <ul class="list">
+        <ul class="list" data-empty-text="登録されているパスキーはありません。">
           {passkeys.map((passkey) => (
-            <li key={passkey.id}>
+            <li key={passkey.id} data-passkey-id={passkey.id}>
               <div class="item-main">
                 <div class="item-title">{passkeyTitle(passkey)}</div>
                 <p class="item-meta">

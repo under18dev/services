@@ -24,6 +24,15 @@ import { ACCOUNT_BASE_PATH } from "../base-path";
 export const STYLESHEET_ROUTE = "/ui/u18.css";
 export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}` as const;
 
+/**
+ * 取り消し操作のアイランド（#9）。
+ *
+ * **スタイルシートと違い、auth-worker のものは借りられない。** あちらの
+ * `/ui/login-island.js` は WebAuthn 専用で中身が別物である。
+ */
+export const ISLAND_ROUTE = "/ui/account-island.js";
+export const ISLAND_PATH = `${ACCOUNT_BASE_PATH}${ISLAND_ROUTE}` as const;
+
 /** アカウント概要（プロフィールと Passkey）。 */
 export const OVERVIEW_ROUTE = "/";
 export const OVERVIEW_PATH = ACCOUNT_BASE_PATH;

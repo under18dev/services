@@ -374,6 +374,13 @@ body.page-shell {
   vertical-align: 0.1em;
 }
 
+/* 取り消しに失敗したときに行内へ出す。消えた行と混ざらないよう行内に置く。 */
+.item-error {
+  margin: 0.4rem 0 0;
+  color: var(--danger);
+  font-size: 0.8125rem;
+}
+
 /* 要約の下に出す User-Agent の原文。見出しより一段落として読み飛ばせるように。 */
 .item-raw {
   margin: 0.2rem 0 0;
