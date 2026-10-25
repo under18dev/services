@@ -1,6 +1,5 @@
-import { hc } from "hono/client";
 import type { AccountApiErrorCode } from "@u18/contracts";
-import type { DashboardAppType } from "../../app";
+import { createApiClient } from "./api-client";
 
 /**
  * アカウント管理画面の取り消し操作（#9 / 仕様書 §14.1 決定 16）。
@@ -37,7 +36,8 @@ import type { DashboardAppType } from "../../app";
  * 他オリジンからの fetch は付く `Origin` が違うので通らない。
  */
 
-const client = hc<DashboardAppType>(location.origin);
+// 組み立ては `api-client.ts`。理由（テストから同じ関数を呼べるように）はそちら。
+const client = createApiClient(location.origin);
 
 /**
  * このアイランドが応答から使うものだけ。
