@@ -6,12 +6,27 @@
  * `'unsafe-inline'` を足すことになる。CSP を緩めるくらいなら外部ファイルに
  * する、という判断（`@u18/web-ui` の `page-headers.ts` を参照）。
  *
- * ## 配信元は auth-worker だが、dashboard-worker も同じものを読む
+ * ## 定義はここ 1 つ。配信は Worker ごとに行う
  *
- * 両者は同じオリジン `auth.under18.dev` に載る（仕様書 §14.1 決定 1）ので、
- * dashboard のページからも `/ui/u18.css` をそのまま参照できる。**定義は
- * 1 つに保つ。** 2 つに分けると、同じサイトに見えるのに画面ごとに見た目が
- * 違う状態が生まれる。
+ * auth-worker は `/ui/u18.css`、dashboard-worker は `/account/ui/u18.css` で
+ * **この同じ定数を**配信する。両者は同じオリジン `auth.under18.dev` に載る
+ * （仕様書 §14.1 決定 1）ので、dashboard から `/ui/u18.css` を直接参照する
+ * ことも**できる**が、採っていない。
+ *
+ * 理由は 2 つ:
+ *
+ *  - **dashboard-worker が単体で成立する。** `wrangler dev` でも vitest でも、
+ *    auth-worker を立てずにページが正しく表示される。参照先が他 Worker だと、
+ *    ローカルでは常にスタイルの無い画面を見ることになる。
+ *  - **auth-worker のアセット経路の変更が dashboard を黙って壊さない。**
+ *    参照だけを持つと、パスが変わっても dashboard 側は型でも検査でも
+ *    気づけず、本番で初めて素の HTML が出る。
+ *
+ * 代償は、ログイン画面とアカウント画面で**同じ内容を 2 つの URL から
+ * 取る**こと（キャッシュが別になる）。数 KiB なので受け入れる。
+ *
+ * **定義を 2 つに分けないこと。** 分けると、同じサイトに見えるのに画面ごとに
+ * 見た目が違う状態が生まれる。
  *
  * ## デザイン
  *
@@ -250,4 +265,177 @@ a:focus-visible {
 /* 同意画面（#15）で要求 scope を並べる。 */
 .scopes { margin: 0 0 1.75rem; padding-left: 1.25rem; color: var(--muted); }
 .scopes li { margin-bottom: 0.5rem; }
+
+/* 連携アプリ画面では一覧の行の中に入るので、余白を詰める。 */
+.list .scopes {
+  margin: 0.4rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted-deep);
+}
+
+.list .scopes li { margin-bottom: 0.15rem; }
+/* ------------------------------------------------------------------ *
+ * アカウント管理画面（dashboard-worker）
+ *
+ * ログイン画面は 1 枚の .card に収まるが、アカウント画面は節が複数あり
+ * 一覧が縦に伸びる。body の中央寄せのままだと、内容が増えたときに
+ * 上がビューポートの外へ出るので、こちらは上端に寄せる。
+ * ------------------------------------------------------------------ */
+
+body.page-shell {
+  align-items: flex-start;
+  padding-top: 3rem;
+  padding-bottom: 4rem;
+}
+
+.shell { width: 100%; max-width: 48rem; }
+
+/* 画面間の移動。.links と違い常時出るので、現在地が分かる必要がある。 */
+.nav {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0 0 2.5rem;
+  font-size: 0.875rem;
+}
+
+.nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid transparent;
+  transition:
+    color 0.15s var(--ease),
+    border-color 0.15s var(--ease);
+}
+
+.nav a:hover { color: var(--fg); }
+
+/* 現在地。色だけで示すと、色覚特性によっては差が出ない。下線を併用する。 */
+.nav a[aria-current="page"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.section {
+  margin: 0 0 2.5rem;
+  padding: 1.75rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.section > h2 { font-size: 1.125rem; }
+.section > h2:not(:first-child) { margin-top: 2rem; }
+
+.section-lead { margin: 0 0 1.5rem; color: var(--muted); font-size: 0.875rem; }
+
+/* 一覧。<ul> で組む —— 項目数が 0 件になりうるので表より素直になる。 */
+.list { margin: 0; padding: 0; list-style: none; }
+
+.list > li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.list > li:first-child { border-top: 0; padding-top: 0; }
+.list > li:last-child { padding-bottom: 0; }
+
+.item-main { min-width: 0; }
+
+/* セッションの User-Agent や client_id。長いので折り返させる。 */
+.item-title {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.item-meta {
+  margin: 0.25rem 0 0;
+  color: var(--muted-deep);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.item-actions { flex: none; }
+
+/* 「このブラウザ」など。アクセントは文字色だけに使い、塗らない。 */
+.badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  vertical-align: 0.1em;
+}
+
+/* 要約の下に出す User-Agent の原文。見出しより一段落として読み飛ばせるように。 */
+.item-raw {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* 注意を促すバッジ。アクセント（青）は「問題なし」に読めるので使わない。 */
+.badge-warn {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.empty {
+  margin: 0;
+  padding: 1.5rem 0;
+  color: var(--muted-deep);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* 定義リスト。プロフィールの「表示名 / ユーザー名 / メール」。 */
+.facts { margin: 0; }
+
+.facts > div {
+  display: flex;
+  gap: 1.25rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.facts > div:first-child { border-top: 0; padding-top: 0; }
+
+.facts dt {
+  flex: none;
+  width: 7.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* 一覧の行に置く小さいボタン。.button は幅 100% なのでここでは使えない。 */
+.button-small {
+  display: inline-block;
+  width: auto;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.button-danger {
+  color: var(--danger);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.button-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
 `;

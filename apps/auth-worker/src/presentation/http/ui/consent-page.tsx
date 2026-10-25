@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
-import { Layout } from "@u18/web-ui";
+import { Layout, scopeLabel } from "@u18/web-ui";
+import { STYLESHEET_PATH } from "./asset-paths";
 
 /**
  * 同意画面（仕様書 1.1 / 7.1、#15）。
@@ -30,13 +31,6 @@ import { Layout } from "@u18/web-ui";
  * 拒否も POST にするのは、CSRF トークンを通すため。拒否をリンク（GET）に
  * すると、攻撃者が被害者に踏ませるだけで認可を妨害できる。
  */
-
-/** 同意を求める scope の説明。利用者に伝わる言葉にする。 */
-const SCOPE_LABELS: Record<string, string> = {
-  openid: "あなたが u18 のアカウントにログインしていることの確認",
-  profile: "表示名とユーザー名の参照",
-  email: "メールアドレスと確認状況の参照",
-};
 
 /** `AuthorizeRequestUseCase` へ渡し直すために持ち回るパラメータ。 */
 export type ConsentRequestFields = {
@@ -71,7 +65,7 @@ export const ConsentPage: FC<ConsentPageProps> = ({
   request,
   csrfToken,
 }) => (
-  <Layout title="アクセスの許可">
+  <Layout title="アクセスの許可" stylesheet={STYLESHEET_PATH}>
     <h2>{clientName} へのアクセスを許可しますか？</h2>
 
     {/*
@@ -86,7 +80,7 @@ export const ConsentPage: FC<ConsentPageProps> = ({
     <p class="lead">許可すると、このアプリは次の情報を受け取れるようになります。</p>
     <ul class="scopes">
       {scopes.map((scope) => (
-        <li key={scope}>{SCOPE_LABELS[scope] ?? scope}</li>
+        <li key={scope}>{scopeLabel(scope)}</li>
       ))}
     </ul>
 
@@ -146,7 +140,7 @@ const ERROR_MESSAGES: Record<AuthorizeErrorPageProps["reason"], string> = {
 };
 
 export const AuthorizeErrorPage: FC<AuthorizeErrorPageProps> = ({ reason }) => (
-  <Layout title="ログインを続行できません">
+  <Layout title="ログインを続行できません" stylesheet={STYLESHEET_PATH}>
     <h2>ログインを続行できません</h2>
     <p class="error" role="alert">
       {ERROR_MESSAGES[reason]}

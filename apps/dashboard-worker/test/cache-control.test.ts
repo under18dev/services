@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
+import {
+  GRANTS_PATH,
+  OVERVIEW_PATH,
+  SESSIONS_PATH,
+  STYLESHEET_PATH,
+} from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
 
 /**
@@ -9,8 +15,9 @@ import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
  * プロフィール・セッション一覧・同意済みアプリで、中間プロキシやブラウザに
  * 残ると共用端末で前の利用者の情報が戻る。
  *
- * auth-worker と違い、**意図的に違う値を使う経路は 1 つも無い** ——
- * 静的アセットも公開メタデータもこの Worker には無い。
+ * **例外は `/account/ui/u18.css` ただ 1 つ。** 全利用者に同じ CSS で、
+ * 個人情報を 1 文字も含まない。増やすときは、ここの「例外はこれ 1 つ」を
+ * 更新したうえで、なぜ個人情報が含まれないのかを書くこと。
  */
 describe("全経路に no-store が付く", () => {
   const identity = {
@@ -50,6 +57,18 @@ describe("全経路に no-store が付く", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
+  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])("HTML の %s にも付く", async (path) => {
+    // 画面にはプロフィールもセッション一覧も載る。JSON の経路より
+    // むしろ共用端末で戻りやすい（「戻る」で再描画されうる）。
+    const response = await createApp().fetch(
+      new Request(`${ORIGIN}${path}`),
+      envWith(identity),
+      executionContext(),
+    );
+
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
   it("接頭辞の無いパス（404）にも付く", async () => {
     const response = await createApp().fetch(
       new Request(`${ORIGIN}/api/me`),
@@ -59,5 +78,38 @@ describe("全経路に no-store が付く", () => {
 
     expect(response.status).toBe(404);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+});
+
+describe("キャッシュしてよい経路はスタイルシートだけ", () => {
+  it("/account/ui/u18.css は public で返る", async () => {
+    // ここだけ既定の no-store を上書きしている。全利用者に同じ CSS で、
+    // 個人情報を含まない。毎回取り直させる理由が無い。
+    const response = await createApp().fetch(
+      new Request(`${ORIGIN}${STYLESHEET_PATH}`),
+      envWith({} as never),
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=300");
+  });
+
+  it("Cookie を送っても応答が変わらない", async () => {
+    // 利用者ごとに違う内容が混ざっていたら、public で配ってはいけない。
+    // 「個人情報を含まない」を、説明ではなく振る舞いで確かめる。
+    const fetchCss = (headers: HeadersInit) =>
+      createApp().fetch(
+        new Request(`${ORIGIN}${STYLESHEET_PATH}`, { headers }),
+        envWith({} as never),
+        executionContext(),
+      );
+
+    const anonymous = await (await fetchCss({})).text();
+    const authenticated = await (
+      await fetchCss({ Cookie: "u18_session=someones-token" })
+    ).text();
+
+    expect(authenticated).toBe(anonymous);
   });
 });
