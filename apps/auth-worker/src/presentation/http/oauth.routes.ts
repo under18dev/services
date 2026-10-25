@@ -29,6 +29,17 @@ export const oauthRoutes = new Hono<AppBindings>();
 oauthRoutes.get("/.well-known/openid-configuration", (c) => {
   const issuer = c.env.ISSUER;
 
+  // **既定の `no-store`（#125）を意図的に上書きする。**
+  //
+  // Discovery は秘密を含まない公開メタデータで、OIDC Discovery 1.0 §4.2 も
+  // 「応答はキャッシュしてよい」としている。RP は接続のたびに取りに来るので、
+  // ここを `no-store` にすると無駄が多い。
+  //
+  // JWKS と同じ 5 分。長くすると endpoint や alg を変えたときに古い情報を
+  // 信じ続ける RP が増え、短くすると意味が無い。**2 つを揃えてあるのは、
+  // 片方だけ動かすと「Discovery は新しいが JWKS は古い」状態が生まれる**ため。
+  c.header("Cache-Control", "public, max-age=300");
+
   return c.json({
     issuer,
     authorization_endpoint: `${issuer}/oauth/authorize`,
