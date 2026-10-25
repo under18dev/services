@@ -498,19 +498,25 @@ NFCタグ → https://go.u18.example/c/<random-card-id>
 
 ## 13. MVP受け入れ基準
 
-- [ ] PasskeyとメールOTPでログインできる
-- [ ] 正常なOIDC Code Flow + PKCEが動く
-- [ ] Authorization Codeを再利用できない
-- [ ] 不正なClient / Redirect URI / PKCEを拒否する
-- [ ] ID Tokenの署名とClaimが検証できる
-- [ ] セッションの期限・失効がサーバー側で機能する
-- [ ] 2つの独立したサービスがSSOを利用できる
-- [ ] dashboard-workerがService Binding/RPCでIdentityに接続する
-- [ ] 認証DBの書き込み権限がauth-workerに集約される
-- [ ] Domain/ApplicationがCloudflare・Hono・Drizzleに直接依存しない
-- [ ] RPCの認可・入力検証・異常系テストが通る
-- [ ] アカウント復旧・削除・鍵ローテーションの運用が定義される
-- [ ] 主要なセキュリティテストとOIDC準拠確認が完了する
+**根拠の強さを書き分ける。** 「本番で通した」と「テストが通る」は別物で、後者だけの項目は**本番の経路が未確認**である。#140（退避が本番で一度も走っていなかった）、#164（バックアップが復元できなかった）、#151（監査が記録されていなかった）は、いずれもテストが緑のまま本番で壊れていた。
+
+- [x] **PasskeyとメールOTPでログインできる** — メールOTPは**本番で実測**（2026-10-25、`otp.start` → `otp.verify success` → `session.issue`）。Passkeyは `passkey.routes.test.ts` / `passkey-webauthn.test.ts` / `passkey.use-case.test.ts` が通るが、**本番の経路は未確認**（認証器の登録を伴うため）
+- [x] **正常なOIDC Code Flow + PKCEが動く** — `oauth-authorize.test.ts` / `oauth-token.test.ts` / `oauth-pkce.test.ts`。加えて **`openid-client@6.8.8` による実RPライブラリとの疎通が全ケース通過**（#150）
+- [x] **Authorization Codeを再利用できない** — `oauth-code-concurrency.test.ts`（同一要求の同時 2 本で成功が 1 回であることを含む）。再使用は `oauth.code.replayed` として監査に残り、保持区分は `security`（単発でも侵害の兆候のため。RFC 6749 §10.5）
+- [x] **不正なClient / Redirect URI / PKCEを拒否する** — `oauth-client.redirect-uri.test.ts` / `oauth-pkce.test.ts` / `oauth-client.use-case.test.ts`。適合性スイート Basic OP で**実バグ 0 件**（#28）
+- [x] **ID Tokenの署名とClaimが検証できる** — `openid-client` が ES256 の ID Token をそのまま受理（#150）。**RS256 を広告しないことによる Config OP の失格 1 件は仕様どおり**（§14.1 決定 10）
+- [x] **セッションの期限・失効がサーバー側で機能する** — **本番で実測**（2026-10-25）。ログアウト後に同じ Cookie を提示すると `401` で、応答が `"no session"` ではなく **`"session is not valid"`** だった。Cookie を消しただけでなくサーバー側で失効していることの確認になる
+- [x] **2つの独立したサービスがSSOを利用できる** — `sso-two-clients.test.ts`（#124）
+- [x] **dashboard-workerがService Binding/RPCでIdentityに接続する** — **本番で実測**（2026-10-25）。dashboard 経由の操作が `audit_logs.actor = 'dashboard-worker'` として残ることを確認（#149 / §14.1 決定 12）
+- [x] **認証DBの書き込み権限がauth-workerに集約される** — `apps/dashboard-worker/wrangler.jsonc` に `d1_databases` が**1 つも無い**。Service Binding の宛先は `scripts/check-service-bindings.mjs` が静的に検査する（#42 / #57）
+- [x] **Domain/ApplicationがCloudflare・Hono・Drizzleに直接依存しない** — **eslint で機械的に強制している**（`packages/config/eslint.layers.js`）。`hono` / `hono/*` / `drizzle-orm` / `drizzle-orm/*` / `cloudflare:*` / `@u18/db` を Domain と Application から禁じ、Presentation には `drizzle-orm` / `@u18/db` / `**/infrastructure/**` を禁じる（Presentation はフレームワークを使う層なので `hono` と `cloudflare:*` は許す）。実際に import が 1 つも無いことも確認済み
+- [x] **RPCの認可・入力検証・異常系テストが通る** — `rpc-actor.test.ts` / `oauth-grants.rpc.test.ts`、dashboard 側は `rpc-caller.test.ts` / `api.test.ts`
+- [x] **アカウント復旧・削除・鍵ローテーションの運用が定義される** — ランブック §4（鍵ローテーション）/ §10（アカウント復旧。§10.4 メールアドレスを失った場合、§10.5 管理者の復旧は自動化しない）/ §11（削除）
+- [x] **主要なセキュリティテストとOIDC準拠確認が完了する** — 適合性スイート Config OP / Basic OP とも**実バグ 0 件**、`openid-client` 疎通も全通過（#28）。public 化後の **CodeQL 初回 9 件はすべて修正済み**（dismiss 0 件。#181 / #182 / #183）
+
+**残件として明示しておくもの。**
+
+- Passkey ログインの**本番経路が未確認**（上記 1 項目め）。テストは通るが、実際の認証器での往復は踏んでいない
 
 ## 14. 決定事項と未決定事項
 
