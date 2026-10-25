@@ -139,6 +139,11 @@
         // このホストは短縮 URL 専用で他に載せるものが無いので、Worker に
         // 全部渡して未知のパスは Worker 自身に 404 を返させる。
         { "pattern": "go.under18.dev/*", "zone_name": "under18.dev" },
+        // `/*` は裸の接頭辞に一致しない（dashboard の wrangler.jsonc の
+        // 同じ箇所を参照）。`/account/nfc` も拾うために 2 つ並べる。
+        // こちらのほうが dashboard の `/account/*` より長いので、
+        // 両方に一致するパスはこちらへ来る。
+        { "pattern": "auth.under18.dev/account/nfc", "zone_name": "under18.dev" },
         { "pattern": "auth.under18.dev/account/nfc/*", "zone_name": "under18.dev" },
       ],
 
