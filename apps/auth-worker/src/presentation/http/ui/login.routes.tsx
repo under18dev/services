@@ -10,7 +10,7 @@ import {
 import type { AppBindings } from "../types";
 import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
-import { LoginPage, type LoginView } from "./login-page";
+import { LoginPage, type LoginMode, type LoginView } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
 import {
   loginUrlWithReturnTo,
@@ -42,9 +42,10 @@ function renderLogin(
   view: LoginView,
   returnTo: string | null,
   status: ContentfulStatusCode = 200,
+  mode: LoginMode = "login",
 ): Response | Promise<Response> {
   return c.html(
-    <LoginPage view={view} csrfToken={ensureCsrfToken(c)} returnTo={returnTo} />,
+    <LoginPage view={view} csrfToken={ensureCsrfToken(c)} returnTo={returnTo} mode={mode} />,
     status,
   );
 }
@@ -214,6 +215,104 @@ uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
   // 相対パス）。それ以外は null に落ちてログイン済み画面へ行くので、
   // ここが外部サイトへのリダイレクタになることはない（ui/return-to.ts）。
   return c.redirect(returnTo ?? "/login", 303);
+});
+
+/**
+ * 新規登録（§6.1 / §8.1）。
+ *
+ * ## なぜログインと別の画面なのか
+ *
+ * `/login/start` の JSDoc が書いているとおり、`purpose` を同じ form から
+ * 選べるようにすると「login では送られないが signup では送られる」という
+ * 差が観測でき、**アカウントの有無が分かってしまう**。別の入口にすれば、
+ * どちらの画面も「その purpose において送られる条件」を満たす場合だけ
+ * 送る、という 1 種類の振る舞いになる。
+ *
+ * ## 既に登録済みのアドレスで登録を試みた場合
+ *
+ * `StartEmailOtpUseCase` は `purpose === "signup"` のとき**未登録の
+ * アドレスにだけ**送る（`shouldSend`）。応答は送った場合と変わらないので、
+ * ここから登録済みかどうかは読めない。
+ *
+ * 万一コードを持っている場合（別経路で登録された等）に検証まで通れば、
+ * `VerifyEmailOtpUseCase.createUser` が既存ユーザーを返すので、
+ * **既存アカウントへのログインとして成立する**。アドレスの所有は
+ * 確認済みなので、これで問題ない。
+ */
+uiRoutes.get("/signup", pageSecurityHeaders, (c) =>
+  // ログイン済みかどうかは見ない。**登録画面はログイン済みでも開ける**
+  // ようにしておく。別のアカウントを作りたい場合に行き止まりにしない。
+  renderLogin(c, { kind: "email", email: "", error: null }, readReturnTo(c), 200, "signup"),
+);
+
+uiRoutes.post("/signup/start", pageSecurityHeaders, async (c) => {
+  const form = await readForm(c);
+  const returnTo = readReturnTo(c, form);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+
+  const email = field(form, "email").trim();
+
+  const result = await c.get("container").useCases.startEmailOtp.execute({
+    email,
+    purpose: "signup",
+  });
+
+  if (!result.ok) {
+    // ログイン側と同じ判断。形式不正だけは指摘してよい（送信先として
+    // 成立していないという話で、アカウントの有無とは無関係）。
+    const message =
+      result.error.code === "invalid_input"
+        ? "メールアドレスの形式をご確認ください。"
+        : "ただいま混み合っています。しばらくしてからお試しください。";
+    return renderLogin(c, { kind: "email", email, error: message }, returnTo, 400, "signup");
+  }
+
+  return renderLogin(c, { kind: "code", email, error: null }, returnTo, 200, "signup");
+});
+
+uiRoutes.post("/signup/verify", pageSecurityHeaders, async (c) => {
+  const form = await readForm(c);
+  const returnTo = readReturnTo(c, form);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+
+  const email = field(form, "email").trim();
+  const code = field(form, "code").trim();
+
+  const failure = (): Response | Promise<Response> =>
+    renderLogin(
+      c,
+      {
+        kind: "code",
+        email,
+        error: "確認コードを確認できませんでした。もう一度お試しください。",
+      },
+      returnTo,
+      400,
+      "signup",
+    );
+
+  if (!/^\d{6}$/.test(code)) return failure();
+
+  const result = await c.get("container").useCases.verifyEmailOtp.execute({
+    email,
+    code,
+    purpose: "signup",
+    userAgent: c.req.header("User-Agent") ?? null,
+    ip: c.req.header("CF-Connecting-IP") ?? null,
+  });
+  if (!result.ok) return failure();
+
+  c.header(
+    "Set-Cookie",
+    buildSessionCookie(c.env, result.value.token, result.value.session.expiresAt),
+    { append: true },
+  );
+  rotateCsrfToken(c);
+
+  // 戻り先が無ければアカウント画面へ送る。**ログインと違って `/login` へ
+  // 戻さない** —— いま作ったばかりのアカウントで、利用者が次にやることは
+  // 自分の情報を確かめるかパスキーを足すことなので、そこへ着地させる。
+  return c.redirect(returnTo ?? "/account", 303);
 });
 
 /**

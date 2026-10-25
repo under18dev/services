@@ -2,7 +2,7 @@ import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
 import { Layout } from "@u18/web-ui";
 import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
-import { loginUrlWithReturnTo, RETURN_TO_FIELD } from "./return-to";
+import { loginUrlWithReturnTo, RETURN_TO_FIELD, signupUrlWithReturnTo } from "./return-to";
 
 /**
  * ログイン画面（仕様書 6.1 / 8.1、決定 14-1 の 4）。
@@ -34,8 +34,20 @@ export type LoginView =
       readonly username: string;
     };
 
+/**
+ * ログインか新規登録か。
+ *
+ * **画面を分けるのではなく、同じ画面の mode として持つ。** 文言の肝は
+ * 「アカウントの有無を漏らさない」ことで（上記）、それをログイン用と
+ * 登録用に書き分けると**片方だけ条件付きでない文言に直される**余地が
+ * 生まれる。form の action と見出しだけが変わる。
+ */
+export type LoginMode = "login" | "signup";
+
 export type LoginPageProps = {
   readonly view: LoginView;
+  /** 既定は `login`。省略時に登録扱いにならないよう、広いほうを既定にしない。 */
+  readonly mode?: LoginMode;
   readonly csrfToken: string;
   /**
    * ログイン後の戻り先（`/oauth/authorize?...`）。無ければ null。
@@ -74,13 +86,18 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
   view,
   csrfToken,
   returnTo,
+  mode = "login",
 }) => (
   <>
-    <h2>ログイン</h2>
-    <p class="lead">u18 のサービスで使うアカウントにログインします。</p>
+    <h2>{mode === "signup" ? "新規登録" : "ログイン"}</h2>
+    <p class="lead">
+      {mode === "signup"
+        ? "メールアドレスだけで登録できます。パスワードはありません。"
+        : "u18 のサービスで使うアカウントにログインします。"}
+    </p>
     <ErrorMessage message={view.error} />
 
-    <form method="post" action="/login/start">
+    <form method="post" action={`/${mode}/start`}>
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
       <label class="field" for="email">
@@ -104,25 +121,42 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
       <p class="notice">確認コードをメールでお送りします。</p>
     </form>
 
-    <div class="separator">または</div>
-
     {/*
+      新規登録ではパスキーの経路を出さない。**まだ認証器が登録されていない
+      のだから押しても失敗するだけ**で、失敗の文言が「このアドレスには
+      パスキーが無い」と読まれれば列挙の材料にもなる。登録後に
+      アカウント画面から追加する（§14.1 決定 2）。
+    */}
+    {mode === "signup" ? (
+      <p class="links">
+        <a href={loginUrlWithReturnTo(returnTo)}>すでにアカウントをお持ちの方</a>
+      </p>
+    ) : (
+      <>
+        <div class="separator">または</div>
+
+        {/*
       アイランドのマウント先。JS が読み込めなかった場合はこの中身が残るので、
       行き止まりにならないよう代替の案内を置いておく。
       「パスキーが登録されていません」とは書かない（列挙の材料になる）。
     */}
-    {/*
+        {/*
       戻り先はアイランドへ data 属性で渡す。インライン `<script>` で
       グローバル変数に入れる手もあるが、`script-src 'self'` の CSP に
       引っかかり `'unsafe-inline'` が要る。CSP を緩めるくらいなら属性で渡す
       （ui/page-headers.ts）。
     */}
-    <div id="passkey-island" data-return-to={returnTo ?? undefined}>
-      <p class="notice">
-        パスキーをお使いの場合は、この端末で JavaScript を有効にするとご利用いただけます。
-        上のメールアドレスでのログインは JavaScript 無しでも行えます。
-      </p>
-    </div>
+        <div id="passkey-island" data-return-to={returnTo ?? undefined}>
+          <p class="notice">
+            パスキーをお使いの場合は、この端末で JavaScript を有効にするとご利用いただけます。
+            上のメールアドレスでのログインは JavaScript 無しでも行えます。
+          </p>
+        </div>
+        <p class="links">
+          <a href={signupUrlWithReturnTo(returnTo)}>アカウントをお持ちでない方</a>
+        </p>
+      </>
+    )}
   </>
 );
 
@@ -130,6 +164,7 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
   view,
   csrfToken,
   returnTo,
+  mode = "login",
 }) => (
   <>
     <h2>確認コードの入力</h2>
@@ -138,12 +173,14 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
       返すため、ここで断定すると応答の差がアカウントの有無を表してしまう。
     */}
     <p class="lead">
-      ご入力のアドレスが登録されている場合、6 桁の確認コードをお送りしました。
+      {mode === "signup"
+        ? "ご入力のアドレスがまだ登録されていない場合、6 桁の確認コードをお送りしました。"
+        : "ご入力のアドレスが登録されている場合、6 桁の確認コードをお送りしました。"}
       届いていない場合は迷惑メールもご確認ください。
     </p>
     <ErrorMessage message={view.error} />
 
-    <form method="post" action="/login/verify">
+    <form method="post" action={`/${mode}/verify`}>
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
       {/*
@@ -218,11 +255,12 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
 
 export const LoginPage: FC<LoginPageProps> = (props) => (
   <Layout
-    title="ログイン"
+    title={props.mode === "signup" ? "新規登録" : "ログイン"}
     // Passkey のアイランドだけが JS を必要とする。ログイン済み画面と
     // コード入力画面には読み込ませない（不要な攻撃面を増やさない）。
     stylesheet={STYLESHEET_PATH}
-    scripts={props.view.kind === "email" ? [LOGIN_ISLAND_PATH] : []}
+    // 新規登録画面もアイランドを出さないので読み込まない。
+    scripts={props.view.kind === "email" && props.mode !== "signup" ? [LOGIN_ISLAND_PATH] : []}
   >
     {props.view.kind === "email" ? <EmailStep {...props} view={props.view} /> : null}
     {props.view.kind === "code" ? <CodeStep {...props} view={props.view} /> : null}
