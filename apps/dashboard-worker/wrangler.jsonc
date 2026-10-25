@@ -87,7 +87,23 @@
       // Worker には /account/api/me がそのまま届く。ハンドラ側を
       // 接頭辞なしで登録すると本番で全エンドポイントが 404 になる。
       // ここを変えるときは必ず ACCOUNT_BASE_PATH も変えること。
-      "routes": [{ "pattern": "auth.under18.dev/account/*", "zone_name": "under18.dev" }],
+      //
+      // **`/*` は裸の接頭辞に一致しない。** `auth.under18.dev/account/*` は
+      // `/account/` を拾うが `/account` を拾わない。後者は auth-worker の
+      // `auth.under18.dev/*` へ落ちて 404 になる —— **利用者が URL バーに
+      // 打つのはこちら。** 実際に本番で 404 を返していた。
+      //
+      // Worker 側の `strict: false`（#198）では直らない。**リクエストが
+      // Worker に届いていない。** 同じ形を #137 で go.under18.dev でも
+      // 踏んでいる（`/c/*` だけにしていたら `/` が 522 だった）。
+      //
+      // pattern を 2 つ並べる以外に書きようが無い。Cloudflare の route に
+      // 「0 文字以上」を表す書き方は無く、`/account*` にすると
+      // `/accountfoo` のような別ホスト上の無関係なパスまで拾う。
+      "routes": [
+        { "pattern": "auth.under18.dev/account", "zone_name": "under18.dev" },
+        { "pattern": "auth.under18.dev/account/*", "zone_name": "under18.dev" },
+      ],
 
       "vars": {
         "AUTH_ISSUER": "https://auth.under18.dev",

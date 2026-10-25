@@ -16,6 +16,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "check:bindings": "node scripts/check-service-bindings.mjs",
+    "check:routes": "node scripts/check-route-patterns.mjs",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "test": "pnpm -r test && pnpm test:scripts",
