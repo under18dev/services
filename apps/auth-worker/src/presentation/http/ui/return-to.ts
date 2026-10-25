@@ -130,3 +130,16 @@ export function returnToForRequest(requestUrl: string): string | null {
  * ここで独自に持つと符号化の仕方がずれる余地ができる。
  */
 export { loginUrlWithReturnTo } from "@u18/contracts";
+
+/**
+ * 戻り先つきの新規登録画面 URL。
+ *
+ * **こちらは contracts に置いていない。** 登録画面へ送るのは
+ * ログイン画面だけ（「アカウントをお持ちでない方」のリンク）で、
+ * **他の Worker から組み立てる経路が無い**。要るようになったら
+ * `loginUrlWithReturnTo` と並べて contracts へ移す。
+ */
+export function signupUrlWithReturnTo(returnTo: string | null): string {
+  if (returnTo === null) return "/signup";
+  return `/signup?${CONTRACT_RETURN_TO_PARAM}=${encodeURIComponent(returnTo)}`;
+}
