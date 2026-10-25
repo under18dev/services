@@ -1,0 +1,118 @@
+# CI のトークンが R2 に対して何をできるかを、実際にやって確かめる。
+#
+# ## なぜ権限一覧を読むのではなく実際に操作するのか
+#
+# `/user/tokens/verify` は「トークンが有効か」しか返さず、R2 のバケットに
+# 対して書けるかは分からない。権限の名前と実際にできることがずれる例は
+# 既に踏んでいる —— `backup-d1.mjs list` が存在しないサブコマンド
+# （`wrangler r2 object list`）を呼んでいて一度も動いていなかった。
+# **通していないものを信用しない。**
+#
+# ## なぜ手元では確かめられないのか
+#
+# 各セッションの wrangler ログインは user 本人の OAuth セッションで、
+# CI が使う API トークンとは別物である。手元で通っても CI で通る保証にならない。
+# GitHub Secrets は書き込み専用で、値を読む API は存在しない（設計上そう）。
+# **CI の中で実際に使う以外に確かめる方法が無い。**
+#
+# ## 手動実行のみ
+#
+# push や deploy に相乗りさせない。本番のバケットへ書き込む操作なので、
+# 誰かが明示的に走らせたときだけ動くようにする。
+name: R2 token probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket:
+        description: 権限を確かめるバケット名
+        type: string
+        default: u18-identity-archive
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe R2 permissions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BUCKET: ${{ inputs.bucket }}
+      # 既存のオブジェクトと衝突しない名前にする。実行ごとに変えるのは、
+      # 前回の後始末が失敗していた場合に、その事実を put の失敗として
+      # 検知するのではなく、新しい鍵で素直に進めるため。
+      KEY: _permission_probe/${{ github.run_id }}-${{ github.run_attempt }}.txt
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+
+      # 失敗しても後続を止めない。「どこまでできるか」を知るのが目的なので、
+      # 最初の失敗で打ち切ると残りが分からない。判定は最後にまとめて行う。
+      - name: list buckets
+        id: list
+        continue-on-error: true
+        run: pnpm exec wrangler r2 bucket list
+
+      - name: put object
+        id: put
+        continue-on-error: true
+        run: |
+          echo "permission probe from run ${{ github.run_id }}" > /tmp/probe.txt
+          pnpm exec wrangler r2 object put "$BUCKET/$KEY" --file /tmp/probe.txt --remote
+
+      - name: get object
+        id: get
+        continue-on-error: true
+        run: pnpm exec wrangler r2 object get "$BUCKET/$KEY" --file /tmp/probe-readback.txt --remote
+
+      # put が失敗していても必ず試す。前回の残骸がある場合に消せるようにする。
+      - name: delete object
+        id: delete
+        if: always()
+        continue-on-error: true
+        run: pnpm exec wrangler r2 object delete "$BUCKET/$KEY" --remote
+
+      - name: Report
+        if: always()
+        run: |
+          verdict() { [ "$1" = "success" ] && echo "OK" || echo "NG"; }
+          list="${{ steps.list.outcome }}"
+          put="${{ steps.put.outcome }}"
+          get="${{ steps.get.outcome }}"
+          del="${{ steps.delete.outcome }}"
+
+          {
+            echo "## R2 token probe — \`$BUCKET\`"
+            echo
+            echo "| 操作 | 結果 |"
+            echo "| --- | --- |"
+            echo "| bucket list | $(verdict "$list") |"
+            echo "| object put | $(verdict "$put") |"
+            echo "| object get | $(verdict "$get") |"
+            echo "| object delete | $(verdict "$del") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "list=$list put=$put get=$get delete=$del"
+
+          # 後始末が失敗したときは、オブジェクトが残っている可能性を明示する。
+          # 中身は固定文字列で機密を含まないが、残っていること自体を知らせる。
+          if [ "$put" = "success" ] && [ "$del" != "success" ]; then
+            echo "::warning::Probe object may remain at $BUCKET/$KEY. Delete it manually."
+            echo "- **後始末に失敗した。** \`$BUCKET/$KEY\` が残っている可能性がある" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # バックアップの定期実行に要るのは put。ここが NG ならトークンを
+          # 作り直す判断になる（user の操作）。
+          if [ "$put" != "success" ]; then
+            echo "::error::The CI token cannot write to R2. Scheduled D1 backups (runbook 12.8) cannot be automated with this token; it needs to be recreated with R2 write access."
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**CI のトークンは R2 へ書けない。** D1 バックアップの定期実行はこのトークンでは組めない。R2 の書き込み権限を付けて作り直す必要がある（user の操作）。" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**CI のトークンは R2 へ書ける。** D1 バックアップの定期実行を組める（runbook 12.8）。" >> "$GITHUB_STEP_SUMMARY"
