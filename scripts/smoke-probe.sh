@@ -41,7 +41,17 @@ code=000
 for attempt in 1 2 3 4 5; do
   # `|| echo 000` だと curl が -w で出した値と連結して 000000 等になりうる。
   # 失敗時は代入ごと置き換える。
-  code="$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 10 "$url")" || code=000
+  # **キャッシュを迂回する。** デプロイ直後の検証が前のデプロイの応答を
+  # 読んだら、検査しているつもりで何も検査していないことになる。
+  # いまのところ Worker の応答はエッジに載らない想定だが、**その想定が
+  # 崩れたときに黙って無効になる**のがこの手の検査の壊れ方なので、
+  # 要求側で迂回しておく（#125 で Discovery に max-age が付いた）。
+  #
+  # 中間プロキシがこの指示を無視することはある。**無視されても困る検査は、
+  # 呼び出し側で URL を変えてキャッシュキーごと変えること**
+  # （deploy.yml の Discovery の例）。
+  code="$(curl -sS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+    -o "$body_file" -w '%{http_code}' --max-time 10 "$url")" || code=000
   [ "$code" = "$expected_status" ] && break
   echo "attempt $attempt: HTTP $code, retrying..."
   sleep 5

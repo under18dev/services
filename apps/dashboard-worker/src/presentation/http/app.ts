@@ -118,7 +118,9 @@ export function createApp(): Hono<AppBindings> {
       {
         status: healthy ? ("ok" as const) : ("degraded" as const),
         service: "u18-dashboard",
-        environment: c.env.ENVIRONMENT,
+        // environment は返さない（RR-18）。未認証で読める構成情報を増やさない。
+        // この値を読んでいる検査は無かった —— dashboard のスモークテストは
+        // /account/api/me の 401 を見ている。
         checks: { identity: check },
         latencyMs: Date.now() - startedAt,
       },

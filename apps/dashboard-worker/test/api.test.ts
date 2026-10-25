@@ -490,6 +490,23 @@ describe("/health は Identity まで確かめる（#44）", () => {
     });
   });
 
+  it("構成を外へ出さない（RR-18）", async () => {
+    // auth-worker 側と同じ判断。未認証で読める構成情報を増やさない。
+    // この値を読んでいる検査は無い —— dashboard のスモークテストは
+    // /account/api/me の 401 を見ている。
+    const response = await request(
+      "/health",
+      envWith(
+        { ping: async () => rpcOk({ status: "ok", service: "u18-auth" } as const) },
+        "production",
+      ),
+    );
+
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["checks", "latencyMs", "service", "status"].sort());
+    expect(JSON.stringify(body)).not.toContain("production");
+  });
+
   it("Identity が degraded なら 503", async () => {
     // auth-worker は生きているが D1 へ届いていない。認証は成立しない。
     const response = await request(
