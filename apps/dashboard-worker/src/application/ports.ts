@@ -1,4 +1,5 @@
 import type {
+  PasskeySummary,
   GrantListItem,
   IdentityPing,
   SessionListItem,
@@ -22,6 +23,15 @@ export interface IdentityGateway {
   getSession(sessionToken: string): Promise<IdentityOutcome<SessionSummary | null>>;
   getProfile(sessionToken: string): Promise<IdentityOutcome<UserProfile | null>>;
   listSessions(sessionToken: string): Promise<IdentityOutcome<readonly SessionListItem[]>>;
+  updateProfile(
+    sessionToken: string,
+    changes: { displayName?: string; username?: string },
+  ): Promise<IdentityOutcome<{ profile: UserProfile; changedFields: readonly string[] }>>;
+  listPasskeys(sessionToken: string): Promise<IdentityOutcome<readonly PasskeySummary[]>>;
+  deletePasskey(
+    sessionToken: string,
+    passkeyId: string,
+  ): Promise<IdentityOutcome<{ deleted: boolean; remaining: number }>>;
   revokeSession(
     sessionToken: string,
     targetSessionId: string,

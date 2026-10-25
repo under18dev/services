@@ -48,5 +48,20 @@
  * 運ばないので、これは自己申告である。認可の判断に使わないこと
  * （`identity.ts` の `RPC_CALLERS` のコメント）。
  */
-export const CONTRACT_VERSION = "1.2.0" as const;
+/**
+ * ## 1.2.0 → 1.3.0（#11 / #75: アカウント API を RPC へ出す）
+ *
+ * `updateProfile` / `listPasskeys` / `deletePasskey` を足した。dashboard から
+ * プロフィール更新と Passkey 管理ができるようになる（仕様書 8.1）。
+ *
+ * **後方互換な追加**なので MINOR。既存 7 メソッドの署名・意味・DTO は
+ * 変えていない。デプロイ順は従来どおり **auth-worker が先**。
+ *
+ * **`RpcErrorCode` に 2 つ足した。** `reauthentication_required` と
+ * `conflict`。これは**呼び出し元が増やした分岐を扱えないと意味が無い**
+ * 変更である —— 古い dashboard は未知のコードを `identity_unavailable` へ
+ * 畳むので、利用者には「障害」と見える（正しくは「もう一度ログイン」）。
+ * **壊れはしないが、デプロイ順を逆にすると案内が間違う。**
+ */
+export const CONTRACT_VERSION = "1.3.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

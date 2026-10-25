@@ -16,6 +16,23 @@ export const RpcErrorCode = {
   NotFound: "not_found",
   /** レート制限に達した。 */
   RateLimited: "rate_limited",
+  /**
+   * 再認証が要る（#11 / #75）。
+   *
+   * **`Forbidden` と分ける。** 呼び出し元の見せ方が違う —— こちらは
+   * 「もう一度ログインすれば通る」であって、権限が無いわけではない。
+   * 畳むと UI が「権限がありません」と出すしかなくなり、利用者は
+   * 何をすれば進めるのか分からなくなる。
+   */
+  ReauthenticationRequired: "reauthentication_required",
+  /**
+   * 状態が衝突している（username の重複、管理者の最後の Passkey など）。
+   *
+   * **`InvalidInput` と分ける。** 入力の形は正しく、**いまの状態では
+   * 通らない**という意味。利用者が直せるもの（別の username にする）と、
+   * 直せないもの（管理者は Passkey を 1 本残す）の両方が入る。
+   */
+  Conflict: "conflict",
   /** 呼び出し先の内部エラー。詳細は呼び出し元へ漏らさない。 */
   Internal: "internal",
 } as const;

@@ -455,10 +455,12 @@ dashboard-worker が侵害された瞬間にそれが Identity の侵害にな�
 ### 5.3 `CONTRACT_VERSION` とデプロイ順
 
 ```ts
-export const CONTRACT_VERSION = "1.2.0" as const;
+export const CONTRACT_VERSION = "1.3.0" as const;
 ```
 
-直近の更新は #22 の `caller` 追加（1.1.0 → 1.2.0）。書き込みを伴う 6 メソッドの
+直近の更新は #11 / #75 の `updateProfile` / `listPasskeys` / `deletePasskey` 追加（1.2.0 → 1.3.0）。あわせて `RpcErrorCode` に `reauthentication_required` と `conflict` を足した —— **呼び出し元の見せ方が変わるものを `forbidden` や `internal` へ畳むと、UI が「失敗しました」としか言えなくなる。**
+
+その前は #22 の `caller` 追加（1.1.0 → 1.2.0）。書き込みを伴う 6 メソッドの
 入力に **optional** なフィールドを足しただけなので MINOR で、既存の呼び出しは
 そのまま通る。**`caller` は監査ログの `actor` に入る帰属情報であって認証ではない**
 —— Service Binding は呼び出し元の身元を運ばないので自己申告である
