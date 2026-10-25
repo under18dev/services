@@ -326,7 +326,15 @@ export type DashboardAppType = ReturnType<typeof registerRoutes>;
  * しているのはそのため（詳細は `base-path.ts`）。
  */
 export function createApp(): Hono<AppBindings> {
-  const root = new Hono<AppBindings>();
+  // `strict: false` で末尾スラッシュの有無を同一視する。
+  //
+  // **これが無いと `/account` と `/account/` の片方が 404 になる。**
+  // どちらが生きるかは登録の書き方で決まり、`basePath("/account")` の下に
+  // `get("/")` と書けば `/account/` だけ、`route("/", ...)` で合流させれば
+  // `/account` だけが届く。**利用者が URL バーに打つのは前者**なので、
+  // どちらの書き方でも踏めるようにしておく。nfc-worker（`app.ts` の
+  // 同じ指定）と揃える。
+  const root = new Hono<AppBindings>({ strict: false });
 
   root.use("*", secureHeaders());
 

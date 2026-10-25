@@ -58,6 +58,8 @@ export default defineConfig({
     }),
   ],
   test: {
-    include: ["test/**/*.test.ts"],
+    // `.tsx` も拾う。JSX を使うテストを `.test.tsx` で置いたときに
+    // **1 件も実行されないまま緑になる**のを防ぐ（実際に踏んだ）。
+    include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
   },
 });
