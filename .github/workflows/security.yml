@@ -21,6 +21,10 @@ jobs:
   # GitHub Advanced Security が要る。under18dev は Free プランなので、
   # private の間は実行しない。仕様書 12 の Phase 3 で public にした時点で
   # 自動的に有効になる。
+  # public になった時点で自動的に動き出すようゲートしてある（#26）。
+  # **ゲートは外さない。** private に戻すと GHAS が無いため両ジョブは
+  # 永続的に失敗し、恒久的に赤い CI は見なくなった時点で無いのと同じになる。
+  # 可視性に追従させておけば、戻したときも静かに skip するだけで済む。
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
