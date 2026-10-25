@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "node scripts/build-client.mjs && wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "cf-typegen": "wrangler types"
+    "build": "node scripts/build-client.mjs && wrangler deploy --dry-run --outdir dist",
+    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "test": "node scripts/build-client.mjs && vitest run",
+    "cf-typegen": "wrangler types",
+    "build:client": "node scripts/build-client.mjs"
   },
   "dependencies": {
     "@u18/contracts": "workspace:*",
@@ -17,6 +18,7 @@
     "hono": "4.13.13"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "@cloudflare/vitest-plugin": "1.4.7",
     "@u18/testing": "workspace:*",
     "typescript": "5.9.3",

@@ -252,6 +252,9 @@ importers:
       '@u18/testing':
         specifier: workspace:*
         version: link:../../packages/testing
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       typescript:
         specifier: 5.9.3
         version: 5.9.3

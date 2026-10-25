@@ -2,6 +2,7 @@ import type { GrantListItem } from "@u18/contracts";
 import { scopeLabel } from "@u18/web-ui";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
+import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -27,7 +28,7 @@ export type GrantsPageProps = {
 };
 
 export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
-  <AccountShell title="連携アプリ" current="grants">
+  <AccountShell title="連携アプリ" current="grants" scripts={[ISLAND_PATH]} hasRevokeActions>
     <section class="section">
       <h2>連携アプリ</h2>
       <p class="section-lead">
@@ -36,9 +37,9 @@ export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
       {grants.length === 0 ? (
         <p class="empty">連携を許可したアプリはありません。</p>
       ) : (
-        <ul class="list">
+        <ul class="list" data-empty-text="連携を許可したアプリはありません。">
           {grants.map((grant) => (
-            <li key={grant.clientId}>
+            <li key={grant.clientId} data-grant-client-id={grant.clientId}>
               <div class="item-main">
                 <div class="item-title">{grant.clientName}</div>
                 <p class="item-meta">許可 {formatDateTime(grant.grantedAt)}</p>

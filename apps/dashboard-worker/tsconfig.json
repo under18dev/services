@@ -13,5 +13,9 @@
     "test/**/*.tsx",
     "worker-configuration.d.ts",
     "vitest.config.ts"
-  ]
+  ],
+  // ブラウザでしか動かないアイランド。lib に DOM を足さない本体の設定で
+  // 型検査すると document / location が未定義になる。
+  // 型検査は tsconfig.client.json が行う（auth-worker と同じ形）。
+  "exclude": ["src/presentation/http/ui/client/**"]
 }
