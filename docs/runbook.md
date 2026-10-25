@@ -2885,8 +2885,8 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 - [ ] **管理者を作るなら Passkey を 2 本以上登録させてから `scripts/admin-role.mjs grant` を使う**（§10.5）。1 本しか無い管理者はその 1 本を外せず、失うと 2 名承認の人手の復旧しか残らない
 - [ ] 2 つの D1 の整合（`nfc_cards.owner_user_id` の宛先）を定期的に照合する仕組みを用意するか、照合しないことを受容するリスクとして記録する（§12.4 (5)）
 - [x] ~~**R2 を U18 Developers アカウントで有効化する**~~ — 完了（§12.7）
-- [x] ~~`wrangler r2 bucket create u18-identity-archive` でバケットを作る~~ — 完了。**公開していないことの確認は未了**（§12.7）
-- [ ] **バケットが公開されていないことを確認する。** 監査ログには `ip_hash` と `user_agent`、D1 ダンプには平文のメールアドレスが入っている
+- [x] ~~`wrangler r2 bucket create u18-identity-archive` でバケットを作る~~ — 完了（§12.7）
+- [x] ~~**バケットが公開されていないことを確認する**~~ — 完了（2026-10-24、§12.7）。監査ログには `ip_hash` と `user_agent`、D1 ダンプには平文のメールアドレスが入るため、**退避先を増やしたときは同じ 3 点を確認すること**
 - [x] ~~**監査ログの退避が本番で動くことを確認する**~~ — 完了（§12.7、2026-10-24 に 1 往復）
 - [ ] **D1 のバックアップから実際に復元を通す**（§12.8）。**退避側は確認済みだが復元側は未検証。** 新しい D1 を作って流すところまで通すこと
 - [ ] `IP_HASH_PEPPER` の控えを持つかどうかを決める（§12.5）
@@ -2966,6 +2966,20 @@ npx wrangler tail u18-auth-production --format pretty | grep retention
 npx wrangler tail u18-auth-production --format pretty | grep "retention archive"
 # {"target":"audit_logs","key":"audit_logs/2026/10/24/…","rowCount":1,"bytes":353,"deleted":1}
 ```
+
+#### 公開していないことの確認（2026-10-24）
+
+退避先には **`ip_hash` と `user_agent`** が入る。D1 のダンプ（§12.8）を同じバケットへ置くなら **平文のメールアドレス**も入る。バケットが読めると監査ログがそのまま読めるので、3 経路を塞いであることを確認した。
+
+| 経路                | 確認に使ったコマンド                                  | 結果                                                    |
+| ------------------- | ----------------------------------------------------- | ------------------------------------------------------- |
+| `r2.dev` の公開 URL | `wrangler r2 bucket dev-url get u18-identity-archive` | `Public access via the r2.dev URL is disabled.`         |
+| カスタムドメイン    | `wrangler r2 bucket domain list u18-identity-archive` | `There are no custom domains connected to this bucket.` |
+| CORS                | `wrangler r2 bucket cors list u18-identity-archive`   | `The CORS configuration does not exist. [code: 10059]`  |
+
+**CORS の確認はエラーとして返る。** `wrangler` は設定が無いことを `[code: 10059]` の ERROR で表現するので、終了コードだけを見るスクリプトに繋ぐと「確認に失敗した」と「公開していない」を取り違える。**この 10059 が安全側である。**
+
+退避先を増やしたとき（別バケット、別アカウント）は同じ 3 点を確認すること。R2 は既定で非公開なので、**公開は必ず誰かの明示的な操作で起こる** —— つまり増やした時点より後に変わりうる。
 
 #### 有効化の経緯（再発時の切り分け用）
 
