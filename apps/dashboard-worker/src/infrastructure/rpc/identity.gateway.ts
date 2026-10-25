@@ -48,6 +48,10 @@ function toFailure(error: RpcError): IdentityFailure {
       return { kind: "forbidden" };
     case "not_found":
       return { kind: "not_found" };
+    case "reauthentication_required":
+      return { kind: "reauthentication_required" };
+    case "conflict":
+      return { kind: "conflict" };
     case "invalid_input":
       // 入力の組み立てはこちらの責任なので、ユーザーには障害として見せる。
       return { kind: "identity_unavailable", detail: "invalid request to identity service" };
@@ -106,6 +110,18 @@ export class RpcIdentityGateway implements IdentityGateway {
 
   revokeGrant(sessionToken: string, clientId: string) {
     return this.call(() => this.identity.revokeGrant(this.input({ sessionToken, clientId })));
+  }
+
+  updateProfile(sessionToken: string, changes: { displayName?: string; username?: string }) {
+    return this.call(() => this.identity.updateProfile(this.input({ sessionToken, ...changes })));
+  }
+
+  listPasskeys(sessionToken: string) {
+    return this.call(() => this.identity.listPasskeys(this.input({ sessionToken })));
+  }
+
+  deletePasskey(sessionToken: string, passkeyId: string) {
+    return this.call(() => this.identity.deletePasskey(this.input({ sessionToken, passkeyId })));
   }
 
   /**

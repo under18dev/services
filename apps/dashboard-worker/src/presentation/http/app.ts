@@ -67,14 +67,28 @@ export function createApp(): Hono<AppBindings> {
    */
   const app = root.basePath(ACCOUNT_BASE_PATH);
 
-  function statusFor(failure: IdentityFailure): 401 | 403 | 404 | 503 {
+  function statusFor(failure: IdentityFailure): 401 | 403 | 404 | 409 | 503 {
     switch (failure.kind) {
       case "unauthenticated":
         return 401;
       case "forbidden":
         return 403;
+      // auth-worker の HTTP 経路と同じ 403。**本文の `error` で区別する** ——
+      // 「権限が無い」と「もう一度ログインすれば通る」は利用者の次の行動が
+      // 違うので、ステータスだけでは足りない。
+      case "reauthentication_required":
+        return 403;
       case "not_found":
         return 404;
+      /**
+       * 409。username の重複と、管理者の最後の Passkey。
+       *
+       * 400 にしない —— 入力の形は正しく、**いまの状態では通らない**
+       * という意味である。利用者が直せるもの（別の username）と
+       * 直せないもの（管理者は 1 本残す）の両方が入る。
+       */
+      case "conflict":
+        return 409;
       case "identity_unavailable":
         return 503;
     }
@@ -181,6 +195,85 @@ export function createApp(): Hono<AppBindings> {
     if (result.value.revoked && result.value.self) {
       c.header("Set-Cookie", buildClearedSessionCookie(c.env.ENVIRONMENT), { append: true });
     }
+
+    return c.json(result.value);
+  });
+
+  /**
+   * BFF: プロフィールの更新（仕様書 8.1 / #11）。
+   *
+   * 変えられるのは `displayName` と `username` だけ。**`username` の変更には
+   * 再認証が要る** —— 判定は auth-worker の UseCase の中にあり、この
+   * Worker は結果を翻訳するだけ。ここに判定を写すと 2 箇所になり、
+   * **片方だけ緩める変更が通ってしまう。**
+   */
+  app.patch("/api/me", async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return c.json({ error: "unauthenticated" }, 401);
+
+    if (!hasTrustedOrigin(c)) return c.json({ error: "forbidden" }, 403);
+
+    // 本文の形だけ見る。長さや文字種の検証は auth-worker が正本
+    // （2 箇所で検証すると、片方だけ緩めた変更が通る）。
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid_input" }, 400);
+    }
+    if (typeof body !== "object" || body === null) {
+      return c.json({ error: "invalid_input" }, 400);
+    }
+
+    const { displayName, username } = body as Record<string, unknown>;
+    const changes: { displayName?: string; username?: string } = {};
+    if (typeof displayName === "string") changes.displayName = displayName;
+    if (typeof username === "string") changes.username = username;
+    if (Object.keys(changes).length === 0) {
+      return c.json({ error: "invalid_input" }, 400);
+    }
+
+    const result = await c.get("identity").updateProfile(token, changes);
+    if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
+
+    return c.json(result.value);
+  });
+
+  /**
+   * BFF: 登録済み Passkey の一覧（仕様書 8.1 / #75）。
+   *
+   * auth-worker から受けた DTO を**加工せず**そのまま返す。
+   * `PasskeySummary` に `credentialId` と公開鍵が無いので、ここで
+   * フィルタしなくても漏れない（packages/contracts）。
+   */
+  app.get("/api/me/passkeys", async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return c.json({ error: "unauthenticated" }, 401);
+
+    const result = await c.get("identity").listPasskeys(token);
+    if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
+
+    return c.json({ passkeys: result.value });
+  });
+
+  /**
+   * BFF: Passkey の削除（仕様書 8.1 / #75）。
+   *
+   * **再認証が要る。** セッションの盗用がそのまま認証器の剥奪に
+   * ならないようにするため。判定は auth-worker 側にあり、ここは
+   * `reauthentication_required` を 403 として返すだけ。
+   *
+   * **管理者は最後の 1 本を削除できない**（決定 8）。これも auth-worker
+   * 側の判定で、ここには `conflict` として届く（409）。
+   */
+  app.delete("/api/me/passkeys/:id", async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return c.json({ error: "unauthenticated" }, 401);
+
+    if (!hasTrustedOrigin(c)) return c.json({ error: "forbidden" }, 403);
+
+    const result = await c.get("identity").deletePasskey(token, c.req.param("id"));
+    if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
 
     return c.json(result.value);
   });

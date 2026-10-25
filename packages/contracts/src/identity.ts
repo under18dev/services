@@ -234,6 +234,80 @@ export type PingResult = RpcResult<IdentityPing>;
  * dashboard-worker が Service Binding 越しに見る auth-worker の形。
  * auth-worker 側の `IdentityRPC` はこの型を満たす必要がある。
  */
+// ----------------------------------------------------------- updateProfile
+
+export const updateProfileInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+  /**
+   * 表示名。省略すると変更しない。
+   *
+   * 上限 64 は auth-worker の `UpdateProfileUseCase` と同じ値。**ここで
+   * 弾くのは早期に返すためで、正本はあちら**（RPC は入口の 1 つでしかなく、
+   * HTTP から来た場合も同じ検証を通る必要がある）。
+   */
+  displayName: z.string().min(1).max(64).optional(),
+  /** username。省略すると変更しない。**変更には再認証が要る。** */
+  username: z.string().min(1).max(64).optional(),
+});
+
+export type UpdateProfileInput = z.infer<typeof updateProfileInputSchema>;
+
+export type UpdateProfileResult = RpcResult<{
+  readonly profile: UserProfile;
+  /** 実際に変わった項目名。呼び出し元が「変更なし」を表示し分けるのに使う。 */
+  readonly changedFields: readonly string[];
+}>;
+
+// ------------------------------------------------------------ listPasskeys
+
+export const listPasskeysInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+});
+
+export type ListPasskeysInput = z.infer<typeof listPasskeysInputSchema>;
+
+/**
+ * 一覧に出す Passkey。
+ *
+ * **`credentialId` と公開鍵を載せない**（仕様書 8.1）。`SessionListItem`
+ * から `ipHash` を外したのと同じで（RR-13）、**フィルタではなく型で
+ * 落とす。** フィルタは将来のハンドラが忘れうるが、型に無い項目は
+ * 漏れようがない。
+ *
+ * `credentialId` は WebAuthn の `allowCredentials` に入る値で、
+ * これが漏れると「この利用者はこの認証器を持っている」が外から分かる。
+ */
+export type PasskeySummary = {
+  readonly id: string;
+  readonly label: string | null;
+  readonly deviceType: string | null;
+  /** ISO 8601 (UTC) */
+  readonly createdAt: string;
+  /** ISO 8601 (UTC)。一度も使われていなければ null。 */
+  readonly lastUsedAt: string | null;
+};
+
+export type ListPasskeysResult = RpcResult<readonly PasskeySummary[]>;
+
+// ----------------------------------------------------------- deletePasskey
+
+export const deletePasskeyInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  /** 削除する Passkey の ID。`credentialId` ではない。 */
+  passkeyId: z.string().min(1).max(64),
+  caller: rpcCallerSchema,
+});
+
+export type DeletePasskeyInput = z.infer<typeof deletePasskeyInputSchema>;
+
+export type DeletePasskeyResult = RpcResult<{
+  readonly deleted: boolean;
+  /** 削除後に残っている本数。呼び出し元が「最後の 1 本」を案内するのに使う。 */
+  readonly remaining: number;
+}>;
+
 export interface IdentityRpcContract {
   getSession(input: GetSessionInput): Promise<GetSessionResult>;
   getUserProfile(input: GetUserProfileInput): Promise<GetUserProfileResult>;
@@ -241,6 +315,9 @@ export interface IdentityRpcContract {
   revokeSession(input: RevokeSessionInput): Promise<RevokeSessionResult>;
   listGrants(input: ListGrantsInput): Promise<ListGrantsResult>;
   revokeGrant(input: RevokeGrantInput): Promise<RevokeGrantResult>;
+  updateProfile(input: UpdateProfileInput): Promise<UpdateProfileResult>;
+  listPasskeys(input: ListPasskeysInput): Promise<ListPasskeysResult>;
+  deletePasskey(input: DeletePasskeyInput): Promise<DeletePasskeyResult>;
   /** 副作用の無い死活確認（#44）。認証を要求しない。 */
   ping(): Promise<PingResult>;
 }

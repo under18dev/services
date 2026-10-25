@@ -1,12 +1,17 @@
 import {
+  deletePasskeyInputSchema,
   getSessionInputSchema,
   getUserProfileInputSchema,
   listGrantsInputSchema,
+  listPasskeysInputSchema,
   listSessionsInputSchema,
+  updateProfileInputSchema,
   revokeGrantInputSchema,
   revokeSessionInputSchema,
   rpcErr,
   rpcOk,
+  type DeletePasskeyInput,
+  type DeletePasskeyResult,
   type GetSessionInput,
   type GetSessionResult,
   type GetUserProfileInput,
@@ -14,6 +19,8 @@ import {
   type IdentityRpcContract,
   type ListGrantsInput,
   type ListGrantsResult,
+  type ListPasskeysInput,
+  type ListPasskeysResult,
   type ListSessionsInput,
   type ListSessionsResult,
   type PingResult,
@@ -21,9 +28,46 @@ import {
   type RevokeGrantResult,
   type RevokeSessionInput,
   type RevokeSessionResult,
+  type RpcErrorCode,
+  type UpdateProfileInput,
+  type UpdateProfileResult,
 } from "@u18/contracts";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createContainer, type RequestContext } from "../../composition/container";
+
+/**
+ * UseCase のエラーコードを RPC の語彙へ写す。
+ *
+ * **畳まないこと。** 以前は `revokeSession` が「`unauthenticated` か、
+ * それ以外は `not_found`」という 2 値に潰していたが、更新系が増えると
+ * それでは足りない —— **呼び出し元の見せ方が変わるものを 1 つにすると、
+ * UI が「失敗しました」としか言えなくなる。**
+ *
+ * - `reauthentication_required` は「もう一度ログインすれば通る」
+ * - `conflict` は「いまの状態では通らない」（username の重複、
+ *   管理者の最後の Passkey）
+ *
+ * 知らないコードは `internal` に倒す。**`not_found` には倒さない** ——
+ * 「存在しない」と言い切るのは、存在するかどうかを確かめた場合だけにする。
+ */
+function toRpcCode(code: string): RpcErrorCode {
+  switch (code) {
+    case "unauthenticated":
+      return "unauthenticated";
+    case "forbidden":
+      return "forbidden";
+    case "not_found":
+      return "not_found";
+    case "invalid_input":
+      return "invalid_input";
+    case "reauthentication_required":
+      return "reauthentication_required";
+    case "conflict":
+      return "conflict";
+    default:
+      return "internal";
+  }
+}
 
 /**
  * dashboard-worker 等へ公開する内部 RPC（仕様書 4.2）。
@@ -206,6 +250,99 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       revokedTokenCount: result.value.revokedTokenCount,
     });
   }
+  /**
+   * 自分のプロフィールを更新する（仕様書 8.1 / #11）。
+   *
+   * **`username` の変更には再認証が要る。** 判定は
+   * `UpdateProfileUseCase` の中（`hasFreshAuthentication`）にあり、
+   * HTTP のミドルウェアではない —— **経路が違っても同じ判定が効く**のは
+   * そのためで、`test/rpc-parity.test.ts` が両方の入口で確かめている。
+   *
+   * 変えられるのは `displayName` と `username` だけ。`email` / `status` /
+   * `id` は UseCase の入力型に存在しないので、ここが余計な項目を渡しても
+   * 届かない。
+   */
+  async updateProfile(input: UpdateProfileInput): Promise<UpdateProfileResult> {
+    const parsed = updateProfileInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.updateProfile.execute({
+      sessionToken: parsed.data.sessionToken,
+      displayName: parsed.data.displayName,
+      username: parsed.data.username,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    const props = result.value.user.snapshot();
+    return rpcOk({
+      profile: {
+        id: props.id,
+        username: props.username,
+        displayName: props.displayName,
+        email: props.email,
+        emailVerified: props.emailVerified,
+        status: props.status,
+        createdAt: props.createdAt.toISOString(),
+      },
+      changedFields: [...result.value.changedFields],
+    });
+  }
+
+  /**
+   * 登録済み Passkey の一覧（仕様書 8.1 / #75）。
+   *
+   * **`credentialId` と公開鍵を返さない。** 契約の `PasskeySummary` に
+   * そのフィールドが無いので、ここで詰め忘れても漏れようがない
+   * （`SessionListItem` から `ipHash` を外したのと同じ形。RR-13）。
+   */
+  async listPasskeys(input: ListPasskeysInput): Promise<ListPasskeysResult> {
+    const parsed = listPasskeysInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "sessionToken is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.listPasskeys.execute({
+      sessionToken: parsed.data.sessionToken,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+    if (result.value === null) return rpcErr("unauthenticated", "session is not valid");
+
+    return rpcOk(
+      result.value.map((passkey) => ({
+        id: passkey.id,
+        label: passkey.label,
+        deviceType: passkey.deviceType,
+        createdAt: passkey.createdAt.toISOString(),
+        lastUsedAt: passkey.lastUsedAt?.toISOString() ?? null,
+      })),
+    );
+  }
+
+  /**
+   * Passkey を削除する（仕様書 8.1 / #75）。
+   *
+   * **再認証が要る。** セッションの盗用がそのまま認証器の剥奪に
+   * ならないようにするため —— これが #75 の本体である。
+   *
+   * **管理者は最後の 1 本を削除できない**（仕様書 §14.1 決定 8）。
+   * 一般利用者は削除できる（決定 2 によりメール OTP が常に残る）。
+   * どちらの判定も `DeletePasskeyUseCase` の中にあるので、RPC 越しでも
+   * 同じに効く。
+   */
+  async deletePasskey(input: DeletePasskeyInput): Promise<DeletePasskeyResult> {
+    const parsed = deletePasskeyInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.deletePasskey.execute({
+      sessionToken: parsed.data.sessionToken,
+      passkeyId: parsed.data.passkeyId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({ deleted: result.value.deleted, remaining: result.value.remaining });
+  }
+
   /**
    * 副作用の無い死活確認（#44）。
    *
