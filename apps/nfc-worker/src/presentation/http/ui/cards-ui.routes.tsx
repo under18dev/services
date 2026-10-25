@@ -1,4 +1,4 @@
-import { sessionCookieName } from "@u18/contracts";
+import { loginUrlWithReturnTo, returnToForCurrentRequest, sessionCookieName } from "@u18/contracts";
 import { pageSecurityHeaders } from "@u18/web-ui";
 import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -33,7 +33,12 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
       // `unauthenticated` だけをログインへ送る。identity_unavailable を
       // 混ぜると、auth-worker が落ちているときに利用者が延々と
       // ログインし直す羽目になる（ログインも同じ Worker が受けている）。
-      if (result.failure.kind === "unauthenticated") return c.redirect("/login", 302);
+      if (result.failure.kind === "unauthenticated") {
+        // 戻り先を載せる。素の `/login` へ送ると、ログインしたあと
+        // 利用者が自分でこの画面まで辿り直すことになる。値の妥当性は
+        // auth-worker の `sanitizeReturnTo` が判断する（関門は 1 つ）。
+        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(c.req.url)), 302);
+      }
       return c.text("しばらくしてからもう一度お試しください。", 503);
     }
 

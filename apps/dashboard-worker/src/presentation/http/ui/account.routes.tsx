@@ -17,6 +17,7 @@ import {
 import { GrantsPage } from "./grants-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
 import { SessionsPage } from "./sessions-page";
+import { returnToForCurrentRequest } from "@u18/contracts";
 
 /**
  * アカウント管理画面（#9 / 仕様書 8.1）。
@@ -61,7 +62,7 @@ export const accountUiRoutes = new Hono<AppBindings>()
    */
   .get(OVERVIEW_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
-    if (token === undefined) return c.html(<SignInRequiredPage />, 401);
+    if (token === undefined) return signInRequired(c);
 
     const identity = c.get("identity");
     const [profile, passkeys] = await Promise.all([
@@ -71,7 +72,7 @@ export const accountUiRoutes = new Hono<AppBindings>()
 
     if (!profile.ok) return renderFailure(c, profile);
     // セッションが無効なら、Passkey の結果がどうであれログインからやり直し。
-    if (profile.value === null) return c.html(<SignInRequiredPage />, 401);
+    if (profile.value === null) return signInRequired(c);
     if (!passkeys.ok) return renderFailure(c, passkeys);
 
     return c.html(<AccountPage profile={profile.value} passkeys={passkeys.value} />);
@@ -79,7 +80,7 @@ export const accountUiRoutes = new Hono<AppBindings>()
 
   .get(SESSIONS_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
-    if (token === undefined) return c.html(<SignInRequiredPage />, 401);
+    if (token === undefined) return signInRequired(c);
 
     const sessions = await c.get("identity").listSessions(token);
     if (!sessions.ok) return renderFailure(c, sessions);
@@ -89,7 +90,7 @@ export const accountUiRoutes = new Hono<AppBindings>()
 
   .get(GRANTS_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
-    if (token === undefined) return c.html(<SignInRequiredPage />, 401);
+    if (token === undefined) return signInRequired(c);
 
     const grants = await c.get("identity").listGrants(token);
     if (!grants.ok) return renderFailure(c, grants);
@@ -125,6 +126,19 @@ export const accountUiRoutes = new Hono<AppBindings>()
  * （`forbidden` / `not_found` / `conflict` など）は、この読み取り専用の
  * 画面では利用者にできることが無いので「一時的に表示できません」に畳む。
  */
+/**
+ * ログインが必要なときの応答。**1 箇所に置く。**
+ *
+ * 画面ごとに `<SignInRequiredPage />` を書くと、**次に足した画面だけ
+ * 戻り先を載せ忘れる**。載せ忘れても誰も落ちず、利用者が自分で辿り直す
+ * ことになるだけなので気づかない。
+ */
+function signInRequired(c: Context<AppBindings>): Response | Promise<Response> {
+  // いま見ようとしていた画面へ戻れるようにする。値の妥当性は
+  // auth-worker の `sanitizeReturnTo` が判断する（関門は 1 つ）。
+  return c.html(<SignInRequiredPage returnTo={returnToForCurrentRequest(c.req.url)} />, 401);
+}
+
 function renderFailure(
   c: Context<AppBindings>,
   outcome: Extract<IdentityOutcome<unknown>, { ok: false }>,
@@ -132,7 +146,9 @@ function renderFailure(
   // ここで `Response` に狭めると、将来子を非同期にした瞬間に型で落ちる。
 ): Response | Promise<Response> {
   if (outcome.failure.kind === "unauthenticated") {
-    return c.html(<SignInRequiredPage />, 401);
+    // いま見ようとしていた画面へ戻れるようにする。値の妥当性は
+    // auth-worker の `sanitizeReturnTo` が判断する（関門は 1 つ）。
+    return c.html(<SignInRequiredPage returnTo={returnToForCurrentRequest(c.req.url)} />, 401);
   }
   return c.html(<UnavailablePage />, 503);
 }
