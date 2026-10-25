@@ -1793,6 +1793,8 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
 
 **退避に失敗したら削除しない。** 退避が静かに失敗したまま削除を続けると、壊れていると分かるのは「半年前の行を見に行ったら無かった」時、つまり侵害調査の最中になる。失敗したときは `audit_logs` の掃除だけが止まり、行が溜まる（§12.7）。
 
+**この経路は本番で 1 往復確認済み**（2026-10-24、§12.7）。実データの退避が始まるのは最初の行が 180 日を過ぎてからなので、それまでバケットにはプローブのオブジェクトが 1 件あるだけである。
+
 どのキーに入ったかは構造化ログに出る。消えた行を探すときの入口になる:
 
 ```bash
@@ -2836,9 +2838,11 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 - [ ] **メールアドレスへのアクセスを失った利用者の審査手順を決める**（§10.4 の 4 項目）。承認者の人数、本人確認の材料、記録の所在、待機期間
 - [ ] **管理者を作るなら Passkey を 2 本以上登録させてから `scripts/admin-role.mjs grant` を使う**（§10.5）。1 本しか無い管理者はその 1 本を外せず、失うと 2 名承認の人手の復旧しか残らない
 - [ ] 2 つの D1 の整合（`nfc_cards.owner_user_id` の宛先）を定期的に照合する仕組みを用意するか、照合しないことを受容するリスクとして記録する（§12.4 (5)）
-- [ ] **R2 を U18 Developers アカウントで有効化する**（§12.7）。有効化するまで `audit_logs` の掃除は止まったままで、D1 のバックアップも置き場所が無い
-- [ ] `wrangler r2 bucket create u18-identity-archive` でバケットを作り、**公開しない**ことを確認する（§12.7）
-- [ ] **バックアップから実際に復元を通す**（§12.8）。現状 R2 を経由した往復は未検証
+- [x] ~~**R2 を U18 Developers アカウントで有効化する**~~ — 完了（§12.7）
+- [x] ~~`wrangler r2 bucket create u18-identity-archive` でバケットを作る~~ — 完了。**公開していないことの確認は未了**（§12.7）
+- [ ] **バケットが公開されていないことを確認する。** 監査ログには `ip_hash` と `user_agent`、D1 ダンプには平文のメールアドレスが入っている
+- [x] ~~**監査ログの退避が本番で動くことを確認する**~~ — 完了（§12.7、2026-10-24 に 1 往復）
+- [ ] **D1 のバックアップから実際に復元を通す**（§12.8）。**退避側は確認済みだが復元側は未検証。** 新しい D1 を作って流すところまで通すこと
 - [ ] `IP_HASH_PEPPER` の控えを持つかどうかを決める（§12.5）
 - [ ] **`PRODUCTION_URL` を設定する前に署名鍵を揃える。** デプロイ後のスモークテストが `/health` の `checks.signingKey == "ok"` を要求する（§4.4）。`SIGNING_KEY_JWK` と `signing_key_metadata` の片方でも欠けているとデプロイジョブが赤くなる。順序は §2.4.1 → §9.5 → `pnpm key:verify`
 
@@ -2853,32 +2857,55 @@ D1 の外へ出す経路は 2 つある。**目的が違うので片方で代用
 
 退避先はどちらも `u18-identity-archive` バケット。**公開しないこと** —— 監査ログには `ip_hash` と `user_agent` が、D1 ダンプには平文のメールアドレスが入っている。
 
-#### 現状: R2 が有効化されていない
+#### 本番で往復を確認済み（2026-10-24）
 
-**U18 Developers アカウント（`a3801efd…`）で R2 が有効になっていない。** 確認した事実は次のとおり。
+R2 は有効化済み、バケット `u18-identity-archive` も作成済み。**退避の経路は本番で実際に 1 往復している。**
 
+| 確認点            | 結果                                                             |
+| ----------------- | ---------------------------------------------------------------- |
+| R2 のオブジェクト | **1 件、353 B**                                                  |
+| キー              | `audit_logs/2026/10/24/2026-10-24T23-00-41-045Z-da99ed02.ndjson` |
+| 退避した Cron     | **23:00 の回**（行を入れたのは 22:51。次の 15 分刻みで拾われた） |
+| D1 の該当行       | **消滅**（`count(*) = 0`）                                       |
+| 中身              | NDJSON として parse 成功、1 行                                   |
+
+検証は 1 年前の `created_at` を持つ合成行を 1 件入れて行った。**そのオブジェクトはバケットに残してある** —— 消すと `object_count` が 0 に戻り、次に見た人が同じ検証を一からやり直すことになるため。中身は `"reason": "archive_probe"` / `"metadata": {"synthetic": true}` で自己申告しており、**実データではない。**
+
+> バケットを「空であるべき」と思って掃除しないこと。実データの退避が始まるのは、最初の行が保持期限（180 日）を過ぎてからである。
+
+#### 復元のとき: NDJSON の型は D1 の列と一致しない
+
+**退避したオブジェクトをそのまま D1 へ戻せない。** 実際に退避された行:
+
+```json
+{
+  "id": "aud_...",
+  "event": "otp.start",
+  "userId": null,
+  "actor": null,
+  "outcome": "success",
+  "reason": "archive_probe",
+  "metadata": { "synthetic": true, "purpose": "verify #140" },
+  "ipHash": null,
+  "userAgent": null,
+  "createdAt": "2025-10-24T22:51:46.215Z"
+}
 ```
-$ CLOUDFLARE_ACCOUNT_ID=a3801efd… npx wrangler r2 bucket list
-✘ [ERROR] A request to the Cloudflare API (/accounts/a3801efd…/r2/buckets) failed.
-  Please enable R2 through the Cloudflare Dashboard. [code: 10042]
-```
 
-**これは wrangler の OAuth スコープ不足ではない。** 同じログインで他の 2 アカウントは `r2 bucket list` が成功し、バケット一覧が返る。10042 を返すのはこのアカウントだけである。
+Drizzle が読んだ値をそのまま `JSON.stringify` しているので、**2 つの列で型が変わっている。**
 
-`<accountid>.r2.cloudflarestorage.com` への TLS が handshake failure になるのも同じ原因と見てよい。**ローカルの TLS スタックの問題ではない** —— `openssl s_client` は証明書を `Verify return code: 0 (ok)` で検証できており（サーバーが証明書の後で接続を打ち切る）、同じ curl で `api.cloudflare.com` は応答する。
+| 列           | D1 の型                 | NDJSON での形              | 戻すときに要る変換        |
+| ------------ | ----------------------- | -------------------------- | ------------------------- |
+| `metadata`   | TEXT（JSON 文字列）     | **オブジェクト**として展開 | `JSON.stringify()` し直す |
+| `created_at` | INTEGER（epoch ミリ秒） | **ISO 8601 文字列**        | `Date.parse()`            |
 
-> 余談として、apex の `r2.cloudflarestorage.com` は **2026-09-09 に期限切れになった証明書**を返す。アカウントのエンドポイントとは別物なので実害は無いが、ここを叩いて切り分けようとすると誤解する。
+この形は**読むのに都合がよく、戻すのに一手間かかる**という取引である。`jq` でそのまま中身を見られることを優先した（§12.8 の「圧縮していない理由」と同じ判断）。
 
-**有効化はダッシュボードでの操作（課金の同意を含む）で、スクリプトからは行えない。** 有効化後にバケットを作る:
+**戻す経路はまだ書いていない。** 必要になったとき——つまり 180 日より前の監査ログを調査で引くとき——に、上の 2 つの変換を入れたスクリプトを書く。読むだけなら `jq` で足りるので、**急いで書く理由は無い**（書いたまま一度も使われない復元スクリプトは、いざというとき動かない）。
 
-```bash
-cd apps/auth-worker
-CLOUDFLARE_ACCOUNT_ID=a3801efd45a491db87f5db3610ed104c npx wrangler r2 bucket create u18-identity-archive
-```
+#### 退避に失敗したら掃除が止まる
 
-#### 有効化されるまで何が起きるか
-
-**`audit_logs` の掃除だけが止まる。** `UnconfiguredArchiveSink` が退避の時点で投げ、`PurgeExpiredRecordsUseCase` が `failed: ["audit_logs"]` を記録して次のテーブルへ進む。他の 4 テーブルは従来どおり消える。認証・`/health`・OIDC は影響を受けない。
+バケットが消えた・権限が落ちた等で退避に失敗すると、**`audit_logs` の掃除だけが止まる。** `PurgeExpiredRecordsUseCase` が `failed: ["audit_logs"]` を記録して次のテーブルへ進む。他の 4 テーブルは従来どおり消える。認証・`/health`・OIDC は影響を受けない。
 
 **これは意図した挙動である。** 退避できないまま消すより、溜めて `retention sweep` のログに出し続けるほうがよい。素通しして削除を続ける実装にはしていない。溜まっていることは次で見る:
 
@@ -2886,6 +2913,23 @@ CLOUDFLARE_ACCOUNT_ID=a3801efd45a491db87f5db3610ed104c npx wrangler r2 bucket cr
 npx wrangler tail u18-auth-production --format pretty | grep retention
 # {"deleted":…,"failed":["audit_logs"],…}
 ```
+
+退避したキーも構造化ログに出る。消えた行がどのオブジェクトに入っているかは、これで辿る:
+
+```bash
+npx wrangler tail u18-auth-production --format pretty | grep "retention archive"
+# {"target":"audit_logs","key":"audit_logs/2026/10/24/…","rowCount":1,"bytes":353,"deleted":1}
+```
+
+#### 有効化の経緯（再発時の切り分け用）
+
+有効化前は `wrangler r2 bucket list` が `Please enable R2 through the Cloudflare Dashboard. [code: 10042]` を返していた。**これは OAuth スコープ不足ではない** —— 同じログインで他のアカウントは成功し、10042 を返すのは当該アカウントだけだった。
+
+`<accountid>.r2.cloudflarestorage.com` への TLS handshake failure も同じ原因である。**ローカルの TLS スタックの問題ではない**（`openssl s_client` は証明書を `Verify return code: 0 (ok)` で検証でき、同じ curl で `api.cloudflare.com` は応答する）。
+
+> 余談として、apex の `r2.cloudflarestorage.com` は **2026-09-09 に期限切れになった証明書**を返す。アカウントのエンドポイントとは別物なので実害は無いが、ここを叩いて切り分けようとすると誤解する。
+
+有効化はダッシュボードでの操作（課金の同意を含む）で、スクリプトからは行えない。
 
 ### 12.8 バックアップの取得と復元（#27）
 
