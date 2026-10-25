@@ -26,6 +26,17 @@
  *
  * `wrangler.jsonc` の route と `ACCOUNT_BASE_PATH` を突き合わせている
  * `route-config.test.ts` と同じ形（設定とコードのドリフト検査）。
+ *
+ * ## 型側の結果は `pnpm test` ではなく `pnpm typecheck` に出る
+ *
+ * `vitest.config.ts` の `include` は `test/**​/*.test.ts` なので、
+ * **`client-type.test-d.ts` は vitest では 1 件も実行されない。** 型検査
+ * （`tsc -p tsconfig.json` が `test/**​/*.ts` を拾う）でだけ走る。
+ *
+ * つまり**型テストを足しても `pnpm test` の件数は増えない。** 落ちるときも
+ * Test ジョブではなく Typecheck ジョブが赤くなる。意図してそうしている
+ * （`@ts-expect-error` が「抑制すべきエラーが無い」で落ちる仕組みも tsc 側）
+ * が、知らないと「書いたのに走っていない」に見える。
  */
 export const EXPECTED_ROUTES = [
   { method: "GET", path: "/account/health" },

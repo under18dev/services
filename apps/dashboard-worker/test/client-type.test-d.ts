@@ -75,9 +75,8 @@ void client.account.api.me.sessions.$post;
  * ------------------------------------------------------------------ */
 
 /** `DashboardAppType` に積まれたパスの union。 */
-type ChainedPath = DashboardAppType extends Hono<infer _E, infer S, infer _P>
-  ? keyof S & string
-  : never;
+type ChainedPath =
+  DashboardAppType extends Hono<infer _E, infer S, infer _P> ? keyof S & string : never;
 
 /** 両向きの包含を見る。片側だけだと、増えたときか減ったときのどちらかを見逃す。 */
 type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
