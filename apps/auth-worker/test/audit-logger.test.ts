@@ -1,7 +1,10 @@
 import { env } from "cloudflare:test";
 import { auditLogs, createIdentityDatabase, type IdentityDatabase } from "@u18/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DrizzleAuditLogger } from "../src/infrastructure/persistence/drizzle-audit-logger";
+import {
+  AUDIT_WRITE_FAILED,
+  DrizzleAuditLogger,
+} from "../src/infrastructure/persistence/drizzle-audit-logger";
 import { resetDatabase } from "./helpers";
 
 /**
@@ -73,8 +76,38 @@ describe("DrizzleAuditLogger", () => {
     ).resolves.toBeUndefined();
 
     // 握り潰すのではなく、Workers のログには残す。
-    expect(errors).toHaveBeenCalledWith("audit log write failed", expect.anything());
+    expect(errors).toHaveBeenCalledTimes(1);
     errors.mockRestore();
+  });
+
+  it("失敗ログは 1 行の JSON で、アラートが引ける形になっている", async () => {
+    // **この形がアラートの照合キーそのもの**（docs/runbook.md 3.3.4）。
+    // 可読文字列の部分一致に頼ると、文言を少し直しただけで鳴らなくなり、
+    // しかも「鳴らない」ことは鳴るべき事象が起きるまで誰も気づけない。
+    const failing = {
+      insert: () => {
+        throw new TypeError("D1_ERROR: no such table: audit_logs");
+      },
+    } as unknown as IdentityDatabase;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await new DrizzleAuditLogger(failing).record({ event: "otp.verify", outcome: "failure" });
+
+    expect(errors).toHaveBeenCalledTimes(1);
+    const [line] = errors.mock.calls[0] as [string];
+    // 引数 1 つの文字列であること。2 引数だと JSON として読めない。
+    expect(typeof line).toBe("string");
+    expect(JSON.parse(line)).toEqual({
+      event: AUDIT_WRITE_FAILED,
+      auditEvent: "otp.verify",
+      reason: "TypeError",
+    });
+  });
+
+  it("照合キーの値そのものを固定する", () => {
+    // 変えるとアラートの条件が無言で外れる。変えたいなら Cloudflare 側の
+    // 設定も同時に直すこと（runbook 3.3.4 / 12.6 のチェックリスト）。
+    expect(AUDIT_WRITE_FAILED).toBe("audit_log.write_failed");
   });
 
   it("失敗したログに秘密を載せない", async () => {
@@ -95,6 +128,9 @@ describe("DrizzleAuditLogger", () => {
 
     const serialized = JSON.stringify(errors.mock.calls);
     expect(serialized).not.toContain("sensitive-value");
+    // 例外のメッセージも載せない。D1 の例外は失敗したクエリを含むことがあり、
+    // そこに値が乗りうる（`reason` は例外の種類だけ）。
+    expect(serialized).not.toContain("boom");
     errors.mockRestore();
   });
 });

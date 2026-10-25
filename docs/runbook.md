@@ -607,14 +607,60 @@ curl -i https://auth.under18.dev/account/health
   npx wrangler tail u18-dashboard --format pretty --status error
   ```
 
-#### 3.3.3 ログの見方
+#### 3.3.3 監査ログの書き込み失敗をアラートにする
+
+**監査ログは「書けなかったこと」に気づけないと意味を失う。** 書き込み失敗は握り潰して認証を通す設計なので（`AuditLogger.record()` の契約。`architecture.md` §4.1）、**失敗しても利用者にも運用者にも何も起きない。** 気づくのは侵害調査で「この期間だけログが無い」と分かった時になる。
+
+##### 何を引くか
+
+`drizzle-audit-logger.ts` が 1 行の JSON を `console.error` に出す。
+
+```json
+{ "event": "audit_log.write_failed", "auditEvent": "otp.verify", "reason": "Error" }
+```
+
+**照合キーは `audit_log.write_failed` の文字列。** 可読メッセージの部分一致ではなく、この値で引く。コード側は `AUDIT_WRITE_FAILED` という定数で持ち、`test/audit-logger.test.ts` が**値そのものを固定**している —— 変えるとテストが落ちるので、Cloudflare 側の設定を直し忘れることはない。
+
+`auditEvent` には書けなかったイベント名が入る。どの経路が落ちているかの手掛かりになる。**`metadata` と例外のメッセージは載せていない** —— 失敗したときだけ秘密がログへ出る形を避けるため（D1 の例外は失敗したクエリを含むことがある）。
+
+##### 設定手順
+
+`observability.enabled: true` なので Workers Logs に入っている。手で見るなら:
+
+```bash
+cd apps/auth-worker
+npx wrangler tail u18-auth-production --format json --search "audit_log.write_failed"
+```
+
+**常設のアラートはダッシュボードで設定する**（API トークン経由でも可）。
+
+1. Cloudflare ダッシュボード → **Notifications** → **Add**
+2. 製品に **Workers** を選び、**Workers Logs Alert**（アカウントのプランに依存）
+3. 対象 Worker: `u18-auth-production`
+4. 条件: ログに `audit_log.write_failed` を含む行が **5 分間に 1 件以上**
+5. 宛先: 運営の連絡先
+
+> **閾値を「1 件以上」にする理由。** 監査ログの書き込みは認証のたびに走るので、恒常的に失敗していれば件数は多い。逆に**1 件しか出ない失敗**（特定のイベントだけ落ちる、`metadata` が大きすぎる等）のほうが見逃しやすく、かつ調査で効いてくる。ノイズになるようなら閾値ではなく**原因を直す**こと。
+
+##### アラートが設定できない場合
+
+プランの都合で Workers Logs Alert が使えないときは、**代わりに定期確認を運用に入れる**。自動化されていないことを明示して記録する:
+
+```bash
+# 直近 24 時間に書き込み失敗が出ていないか
+npx wrangler tail u18-auth-production --format json --search "audit_log.write_failed"
+```
+
+**「手順を書いた」と「設定した」は別である。** 設定したかどうかは §12.6 のチェックリストで追う。
+
+#### 3.3.4 ログの見方
 
 ```bash
 cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
 npx wrangler tail u18-auth --format pretty
 npx wrangler tail u18-auth --format json --status error
 npx wrangler tail u18-auth --search "database probe failed"
-npx wrangler tail u18-auth --search "audit log write failed"
+npx wrangler tail u18-auth --search "audit_log.write_failed"
 ```
 
 両 Worker とも `observability.enabled: true` なので、Cloudflare ダッシュボードの Workers Logs からも過去分を検索できる。
@@ -625,7 +671,7 @@ npx wrangler tail u18-auth --search "audit log write failed"
 | ------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `database probe failed`                                             | `drizzle-database-probe.ts` | D1 への `select 1` が失敗した。`/health` が 503 を返している                                                                                        |
 | `unhandled error`                                                   | `app.ts` の `onError`       | 捕捉されなかった例外。詳細はクライアントへ返していない                                                                                              |
-| `audit log write failed`                                            | `drizzle-audit-logger.ts`   | 監査ログの書き込みが失敗した。**認証自体は成功している。** 監査の欠落として扱う                                                                     |
+| `{"event":"audit_log.write_failed",…}`                              | `drizzle-audit-logger.ts`   | 監査ログの書き込みが失敗した。**認証自体は成功している。** 監査の欠落として扱う（§3.3.3）                                                           |
 | `EMAIL_PROVIDER is not configured for non-development environments` | `container.ts`              | §1.5 参照。`ENVIRONMENT` 設定ミスかメールプロバイダ未実装                                                                                           |
 | `IP_HASH_PEPPER is not set outside development`                     | `container.ts`              | §1.5 / §2.4.2 参照。Secret 未設定のまま非 development で起動した                                                                                    |
 | `[dev] OTP for ...`                                                 | `console-email-sender.ts`   | **本番でこれが出ていたら重大インシデント。** OTP が平文でログに記録されている。直ちに §5.3 相当の対応（`ENVIRONMENT` の是正とログの削除依頼）を行う |
