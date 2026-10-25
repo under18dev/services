@@ -181,8 +181,19 @@ jobs:
       # 消してから回せば、各 Worker が `wrangler deploy` だけで自立して
       # いることが毎回確かめられる。Worker が増えても走査なので黙って
       # 対象に入る。
+      # 消す対象を **.gitignore に委ねる**。`find ... -name generated -path "*/ui/*"`
+      # だと「generated という名前で ui/ の下にある」という命名規約に依存し、
+      # 別の置き方をした Worker が増えたときに**黙って対象から外れる**。
+      # それは #216 で塞いだ穴（auth-worker では成立していた前提が、後から
+      # 増えた dashboard-worker には何も言っていなかった）と同じ形になる。
+      #
+      # 生成物は必ず .gitignore に載る（載せなければコミットされてしまい、
+      # それはそれで別の、もっと目立つ失敗になる）。その**必ず更新される側**に
+      # 紐づければ、置き場所が変わっても追従する。
+      #
+      # 範囲を apps/*/src に限るのは node_modules を消さないため。
       - name: Drop generated client bundles
-        run: find apps -type d -name generated -path "*/ui/*" -prune -exec rm -rf {} +
+        run: git clean -fdX apps/*/src
 
       - name: Build workers (production env)
         run: |
