@@ -46,8 +46,23 @@ export const AUDIT_EVENTS = [
   // --- Passkey ---
   /** Passkey 登録の検証。 */
   "passkey.register",
-  /** Passkey でのログイン検証。`reason` に `counter_regression` が入りうる（複製の兆候）。 */
+  /** Passkey でのログイン検証。 */
   "passkey.login",
+  /**
+   * WebAuthn の署名カウンタが巻き戻った。**認証器が複製された疑い**（仕様書 9 WebAuthn）。
+   *
+   * `passkey.login` の `reason` に畳まず**専用の名前**にしてあるのは、
+   * 保持期間の選別が event 名でしかできないため（#147）。`reason` を
+   * 掃除の条件に足すと `(event, created_at)` インデックスから外れる。
+   *
+   * これだけ 2 年残す。単発でも侵害の兆候で、件数はほぼゼロなので量に見合う。
+   * 一方 `passkey.login` を長期側へ入れると、成功したログインすべてが
+   * 2 年残ることになる。
+   *
+   * **このイベントが出たとき `passkey.login` は出ない。** 両方に出ると
+   * 調査で件数が二重に見える。
+   */
+  "passkey.counter_regression",
   /** Passkey の削除。 */
   "passkey.deleted",
 
@@ -170,6 +185,11 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * 起こらない（RFC 6749 §10.5）。量はほぼゼロなので残さない理由が無い。
    */
   "oauth.code.replayed": "security",
+  /**
+   * 署名カウンタの巻き戻し。**認証器の複製の兆候**で、`oauth.code.replayed` と
+   * 同じ性質 —— 正常な経路では起こらず、量はほぼゼロ（#147）。
+   */
+  "passkey.counter_regression": "security",
 
   // --- それ以外（180 日） ---
   /** ログインのたびに 1 行。直近の異常を見るためのもの。 */

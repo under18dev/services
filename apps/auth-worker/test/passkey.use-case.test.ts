@@ -434,8 +434,65 @@ describe("PasskeyLoginVerifyUseCase", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(ctx.audit.events.at(-1)?.reason).toBe("counter_regression");
     expect((await ctx.passkeys.findByCredentialId("registered-credential"))?.counter).toBe(10);
+
+    // **専用のイベント名で出る**（#147）。保持期間の選別は event 名でしか
+    // できないので、`passkey.login` の `reason` に畳むと 180 日で消える。
+    expect(ctx.audit.events.at(-1)).toMatchObject({
+      event: "passkey.counter_regression",
+      outcome: "failure",
+      reason: "counter_regression",
+    });
+
+    // **`passkey.login` には出ない。** 両方に出ると、調査で件数が二重に見える。
+    expect(ctx.audit.events.filter((e) => e.event === "passkey.login")).toEqual([]);
+  });
+
+  it("巻き戻し以外の失敗は従来どおり passkey.login に出る", async () => {
+    // 専用の名前へ移したのは巻き戻しだけ。ほかの失敗まで分けると、
+    // 「Passkey のログインが失敗した」を 1 つの系列で追えなくなる。
+    seedUserWithPasskey({ status: "suspended" });
+    const challengeId = await startLogin();
+    acceptAuthentication(1);
+
+    await ctx.loginVerify.execute({
+      challengeId,
+      response: credential("registered-credential"),
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(ctx.audit.events.at(-1)).toMatchObject({
+      event: "passkey.login",
+      outcome: "failure",
+      reason: "user_not_active",
+    });
+    expect(ctx.audit.events.filter((e) => e.event === "passkey.counter_regression")).toEqual([]);
+  });
+
+  it("巻き戻しの応答は、ほかの失敗と見分けが付かない", async () => {
+    // イベント名を分けたのは**記録の都合**であって、応答を変える話ではない。
+    // 「複製を疑われた」が外から分かると、攻撃者に手口の成否を教える。
+    seedUserWithPasskey({}, 10);
+    const regressed = await (async () => {
+      const challengeId = await startLogin();
+      acceptAuthentication(9);
+      return ctx.loginVerify.execute({
+        challengeId,
+        response: credential("registered-credential"),
+        userAgent: null,
+        ip: null,
+      });
+    })();
+
+    const unknown = await ctx.loginVerify.execute({
+      challengeId: await startLogin(),
+      response: credential("no-such-credential"),
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(JSON.stringify(regressed)).toBe(JSON.stringify(unknown));
   });
 
   it("据え置きのカウンターも拒否する（0 以外）", async () => {
