@@ -297,7 +297,15 @@ jobs:
           # **同じ間違いを issuer で検出できる。** しかも Discovery は
           # OIDC が issuer の公開を必須にしているので、検査のために
           # 公開面を増やしたことにならない。
-          scripts/smoke-probe.sh "${PRODUCTION_URL%/}/.well-known/openid-configuration" 200 \
+          #
+          # **キャッシュ回避のクエリを付ける。** #125 で Discovery に
+          # `Cache-Control: public, max-age=300` が付いた（JWKS と揃えた値）。
+          # /health は `no-store` なので関係なかったが、こちらは**デプロイ直後に
+          # 前のデプロイの応答を読む**可能性がある。それでは「付け忘れ」を
+          # 検出するという目的を果たせない。クエリを変えればキャッシュキーが
+          # 変わり、Discovery 側はパスでしかルートを解決しないので応答は同じ。
+          scripts/smoke-probe.sh \
+            "${PRODUCTION_URL%/}/.well-known/openid-configuration?cache_bust=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 200 \
             --jq .issuer "${PRODUCTION_URL%/}"
 
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
