@@ -28,7 +28,8 @@
  */
 
 /** 制限をかける対象。エンドポイントではなく「守りたいもの」の単位で切る。 */
-export type RateLimitScope = "email_start" | "email_verify" | "login_verify";
+export type RateLimitScope =
+  "email_start" | "email_verify" | "login_verify" | "oauth_authorize" | "oauth_client";
 
 export type RateLimitRule = {
   /** `wrangler.jsonc` の `ratelimits[].name`。 */
@@ -71,4 +72,50 @@ export const RateLimitPolicy: Readonly<Record<RateLimitScope, RateLimitRule>> = 
    * 正常利用は 1 回で終わるため、他の 2 つより緩めても危険が増えない。
    */
   login_verify: { binding: "RL_LOGIN_VERIFY", limit: 20, periodSeconds: 60 },
+
+  /**
+   * `GET /oauth/authorize`。**IP 単位。**
+   *
+   * ブラウザから来る経路なので、他のエンドポイントと同じ扱いでよい。
+   * 正常利用では RP ごとに 1 回で、SSO で複数アプリを渡り歩いても
+   * 1 分に 30 回へは届かない。
+   */
+  oauth_authorize: { binding: "RL_OAUTH_AUTHORIZE", limit: 30, periodSeconds: 60 },
+
+  /**
+   * `POST /oauth/token` と `POST /oauth/revoke`。**`client_id` と IP を混ぜた鍵。**
+   *
+   * ## なぜ IP 単位にしないのか
+   *
+   * この 2 つを叩くのは**ブラウザではなく RP のサーバ**である。IP 単位に
+   * すると 1 台の RP に利用者全員分のトークン交換が集中して、正常利用が
+   * 弾かれる。
+   *
+   * ## なぜ `client_id` 単位にもしないのか
+   *
+   * #21 の本文は「client 単位」と書いているが、**そのままでは攻撃者が
+   * 被害クライアントを締め出せる。** `client_id` は秘密ではないので、
+   * 他人のそれを名乗って枠を使い切るだけでよい。ブルートフォースを
+   * 防ぐつもりが、より安いサービス妨害を 1 つ増やすことになる。
+   *
+   * ## 混ぜると両方が成り立つ
+   *
+   * 鍵を `<client_id>:<ipHash>` にすると、
+   *
+   *  - 本物の RP は自分の IP に自分の枠を持つ（攻撃者に消費されない）
+   *  - 攻撃者は「自分の IP × 被害クライアント」の枠しか消費できない
+   *
+   * **残る穴**: 攻撃者が `client_id` を変えながら同じ IP から叩くと、
+   * 鍵が毎回変わるので総量は抑えられない。ただしその経路はクライアント
+   * 認証で即座に弾かれるうえ、`client_id` の総当たりそのものになる。
+   * 経路全体の総量規制は RR-1 の残りとして `/api/me` 系と一緒に扱う。
+   *
+   * ## 2 つの経路で枠を共有する
+   *
+   * RFC 7009 §2.1 が `/oauth/revoke` に `/oauth/token` と**同じ**クライアント
+   * 認証を求めており、実装も `oauth.client-auth.ts` を共有している。
+   * 攻撃者がどちらを叩いても同じ枠を消費するほうが、総量として素直である。
+   * 代償として、トークン交換の多い RP は失効の枠も食う。
+   */
+  oauth_client: { binding: "RL_OAUTH_CLIENT", limit: 60, periodSeconds: 60 },
 } as const;

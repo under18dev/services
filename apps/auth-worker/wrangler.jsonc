@@ -90,6 +90,14 @@
     { "name": "RL_EMAIL_START", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
     { "name": "RL_EMAIL_VERIFY", "namespace_id": "1002", "simple": { "limit": 15, "period": 60 } },
     { "name": "RL_LOGIN_VERIFY", "namespace_id": "1003", "simple": { "limit": 20, "period": 60 } },
+    // 以下は OAuth 経路（#21 の残り）。RL_OAUTH_CLIENT だけ鍵が IP 単体ではなく
+    // <client_id>:<ipHash> になる。理由は rate-limit-policy.ts に詳述。
+    {
+      "name": "RL_OAUTH_AUTHORIZE",
+      "namespace_id": "1004",
+      "simple": { "limit": 30, "period": 60 },
+    },
+    { "name": "RL_OAUTH_CLIENT", "namespace_id": "1005", "simple": { "limit": 60, "period": 60 } },
   ],
 
   // 保持期限を過ぎた行の掃除（#43、仕様書 7.3）。src/index.ts の scheduled が受ける。
@@ -171,6 +179,16 @@
           "name": "RL_LOGIN_VERIFY",
           "namespace_id": "1003",
           "simple": { "limit": 20, "period": 60 },
+        },
+        {
+          "name": "RL_OAUTH_AUTHORIZE",
+          "namespace_id": "1004",
+          "simple": { "limit": 30, "period": 60 },
+        },
+        {
+          "name": "RL_OAUTH_CLIENT",
+          "namespace_id": "1005",
+          "simple": { "limit": 60, "period": 60 },
         },
       ],
 

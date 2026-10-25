@@ -1,5 +1,6 @@
 import { Hono } from "hono";
-import { authenticateClient, field, oauthError } from "./oauth.client-auth";
+import { authenticateClient, claimedClientId, field, oauthError } from "./oauth.client-auth";
+import { enforceIpRateLimit } from "./rate-limit";
 import type { AppBindings } from "./types";
 
 /**
@@ -28,6 +29,18 @@ oauthTokenRoutes.post("/oauth/token", async (c) => {
     // 本文が `application/x-www-form-urlencoded` でない、あるいは壊れている。
     return oauthError(c, 400, "invalid_request", "request body must be form-encoded");
   }
+
+  // ---- レート制限（#21）----
+  //
+  // 鍵は `<client_id>:<ipHash>`。IP 単体にすると 1 台の RP サーバに
+  // 利用者全員分のトークン交換が集中して正常利用が弾かれ、`client_id`
+  // 単体にすると**他人の client_id を名乗るだけで枠を使い切れる**
+  // （秘密ではない）。混ぜると本物の RP の枠は攻撃者から触れない。
+  //
+  // クライアント認証より**前**に置く。認証を先にすると、総当たりの
+  // 1 回ごとに秘密の照合（定時間比較つき）を走らせることになる。
+  const limited = await enforceIpRateLimit(c, "oauth_client", claimedClientId(c, form));
+  if (limited !== null) return limited;
 
   // ---- grant_type ----
   const grantType = field(form, "grant_type");

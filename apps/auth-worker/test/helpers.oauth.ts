@@ -245,6 +245,23 @@ export async function fetchApp(request: Request, workerEnv: Env): Promise<Respon
   return response;
 }
 
+/**
+ * テストごとに重複しない送信元 IP を配る。
+ *
+ * OAuth の経路には IP 単位のレート制限が掛かっている（#21）。
+ * `CF-Connecting-IP` を付けないと全テストが `"unknown-ip"` の 1 つの枠を
+ * 共有し、**テストを足しただけで無関係なテストが 429 で落ちる**。
+ * 実際そうなった（`/oauth/authorize` は 30 回 / 60 秒）。
+ *
+ * 呼び出しごとに別の IP を配ることで、順序にも本数にも依存しなくなる。
+ * 本番ではブラウザごと・サーバごとに別 IP なので、こちらのほうが実態に近い。
+ */
+let nextProbeIp = 0;
+export function freshClientIp(): string {
+  nextProbeIp += 1;
+  return `198.51.100.${nextProbeIp % 254}`;
+}
+
 export type AuthorizeQuery = Record<string, string | undefined>;
 
 /** `/oauth/authorize` を GET する。 */
@@ -256,9 +273,9 @@ export function authorize(
   for (const [key, value] of Object.entries(query)) {
     if (value !== undefined) params.set(key, value);
   }
-  const request = new Request(`${BASE}/oauth/authorize?${params.toString()}`, {
-    headers: options.cookie === undefined ? {} : { Cookie: options.cookie },
-  });
+  const headers: Record<string, string> = { "CF-Connecting-IP": freshClientIp() };
+  if (options.cookie !== undefined) headers["Cookie"] = options.cookie;
+  const request = new Request(`${BASE}/oauth/authorize?${params.toString()}`, { headers });
   return fetchApp(request, options.env ?? appEnv());
 }
 
@@ -277,6 +294,7 @@ export function consent(
       "Content-Type": "application/x-www-form-urlencoded",
       Cookie: options.cookie,
       Origin: options.origin ?? ORIGIN,
+      "CF-Connecting-IP": freshClientIp(),
     },
     body: form.toString(),
   });
@@ -360,6 +378,7 @@ export function revokeRequest(
   }
 
   const headers: Record<string, string> = {
+    "CF-Connecting-IP": freshClientIp(),
     "Content-Type": "application/x-www-form-urlencoded",
   };
   if (options.basic !== undefined) {
@@ -386,6 +405,7 @@ export function tokenHttpRequest(
   }
 
   const headers: Record<string, string> = {
+    "CF-Connecting-IP": freshClientIp(),
     "Content-Type": "application/x-www-form-urlencoded",
   };
   if (basic !== undefined) {

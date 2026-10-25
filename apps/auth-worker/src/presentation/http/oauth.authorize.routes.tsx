@@ -5,6 +5,7 @@ import type {
   AuthorizationRequestParams,
 } from "../../application/use-cases/authorize-request.use-case";
 import { formatScope } from "../../domain/services/scope";
+import { enforceIpRateLimit } from "./rate-limit";
 import { readSessionCookie } from "./session-cookie";
 import type { AppBindings } from "./types";
 import { AuthorizeErrorPage, ConsentPage } from "./ui/consent-page";
@@ -275,6 +276,11 @@ async function issueCode(
 }
 
 oauthAuthorizeRoutes.get("/oauth/authorize", pageSecurityHeaders, async (c) => {
+  // ブラウザから来る経路なので IP 単位（#21）。正常利用は RP ごとに 1 回で、
+  // SSO で複数アプリを渡り歩いても 1 分に 30 回へは届かない。
+  const limited = await enforceIpRateLimit(c, "oauth_authorize");
+  if (limited !== null) return limited;
+
   const decision = await c.get("container").useCases.authorizeRequest.execute(paramsFromQuery(c));
   return respond(c, decision);
 });
@@ -287,6 +293,12 @@ oauthAuthorizeRoutes.get("/oauth/authorize", pageSecurityHeaders, async (c) => {
  * だけで、自分のクライアントへ認可コードを発行させられる。
  */
 oauthAuthorizeRoutes.post("/oauth/consent", pageSecurityHeaders, async (c) => {
+  // `/oauth/authorize` と**同じ枠**。同意は認可要求と 1 続きの流れなので、
+  // 片方だけ制限すると残った側へ寄るだけになる。正常利用は 1 往復に
+  // つき authorize 1 回 + consent 1 回。
+  const limited = await enforceIpRateLimit(c, "oauth_authorize");
+  if (limited !== null) return limited;
+
   const form = await readForm(c);
 
   if (!isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
