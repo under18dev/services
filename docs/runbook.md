@@ -3282,6 +3282,42 @@ node scripts/backup-d1.mjs restore --key K
 
 ---
 
+### 12.10 CodeQL の `js/file-access-to-http` が 5 件開いたままである
+
+`scripts/backup-d1.mjs` に対する **`js/file-access-to-http`（medium 5 件）を、直さず開いたままにしている。**
+
+> Outbound network request depends on file data.
+
+**指摘は正しく、しかも意図した動作である。** D1 のダンプを読んで R2 へ送るのがこのスクリプトの目的そのもので、**ファイルの中身が外へ出ないようにすると機能が無くなる。**
+
+#### 「意図どおり」だけでは片付けなかった
+
+ルールが言う _unauthorized information disclosure_ には、この形でしか起きないリスクが実際にあった —— **送り先を無条件に信じていた。** `.env` の `S3_ENDPOINT` が書き換わる、あるいは**単に打ち間違える**と、平文のメールアドレスを含む Identity DB の完全な複製が別の宛先へ届く。
+
+2 段で塞いである。どちらも `scripts/lib/s3-endpoint.mjs`。
+
+| 検査                                                         | 何を保証するか             |
+| ------------------------------------------------------------ | -------------------------- |
+| `https` であること（#183）                                   | 経路上で**盗み見られない** |
+| `hostname` が `.r2.cloudflarestorage.com` であること（#199） | **正しい相手へ送っている** |
+
+**前者だけでは足りない。** https は「盗み見られない」を保証するだけで、宛先が正しいことは何も保証しない。
+
+後者を**生の文字列の後方一致にしていない**のも重要で、fragment もクエリも末尾に付けられるため `endsWith()` は宛先の判定にならない:
+
+```js
+"https://evil.example/#.r2.cloudflarestorage.com".endsWith(SUFFIX); // true
+"https://evil.example/?x=.r2.cloudflarestorage.com".endsWith(SUFFIX); // true
+```
+
+パーサを通した `hostname` を見る。
+
+#### なぜ dismiss していないか
+
+**dismiss の API（`PATCH /code-scanning/alerts/N`）が権限分類器に拒否された。** 迂回していない。Security タブから手で落とすか、開いたままにするかは運用の判断で、**どちらでもこの節が理由になる。**
+
+開いたままにする場合の読み方: **この 5 件は「送り先の検査が無い」ことを指しているのではなく、「ファイルの中身が外へ出る」ことを指している。** 後者は仕様なので消えない。**件数が 5 から増えたら新しい経路が足されたということ**なので、そのときは調べること。
+
 ## 13. レート制限（#21）
 
 ### 13.1 二層で 1 組である
