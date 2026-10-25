@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import { hc } from "hono/client";
 import type { DashboardAppType } from "../src/presentation/http/app";
-import type { ExpectedRoutePath } from "./route-inventory";
+import type { ApiRoutePath } from "./route-inventory";
 
 /**
  * `hono/client` の型が**実際に効いている**ことを型検査で固定する。
@@ -74,7 +74,13 @@ void client.account.api.me.sessions.$post;
  * となり、どの書き方でも素通りしない。
  * ------------------------------------------------------------------ */
 
-/** `DashboardAppType` に積まれたパスの union。 */
+/**
+ * `DashboardAppType` に積まれたパスの union。
+ *
+ * 比べる相手は `API_ROUTES` だけ（`PAGE_ROUTES` ではない）。画面は
+ * チェーンに乗せない決まりなので、**ここに画面が出てきたらそれ自体が誤り**
+ * であり、この比較が止める。
+ */
 type ChainedPath =
   DashboardAppType extends Hono<infer _E, infer S, infer _P> ? keyof S & string : never;
 
@@ -82,4 +88,4 @@ type ChainedPath =
 type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 // `false` になったら代入できずに落ちる。**どちらの向きにずれても落ちる。**
-export const chainCoversInventory: Equals<ChainedPath, ExpectedRoutePath> = true;
+export const chainCoversInventory: Equals<ChainedPath, ApiRoutePath> = true;

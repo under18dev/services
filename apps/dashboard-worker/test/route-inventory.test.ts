@@ -12,9 +12,23 @@ import { EXPECTED_ROUTES } from "./route-inventory";
  */
 describe("ルートの一覧", () => {
   // `ALL /*` はミドルウェア。ここで見たいのはエンドポイントだけ。
-  const actual = createApp()
-    .routes.filter((route) => route.method !== "ALL")
-    .map((route) => `${route.method} ${route.path}`);
+  //
+  // **重複を畳んでから比べる。** Hono は `.get(path, middleware, handler)` の
+  // ようにハンドラを複数渡すと `app.routes` へ同じ method+path を**ハンドラの
+  // 数だけ**積む。画面のルートは CSP ミドルウェアを引数で渡しているので
+  // 2 行ずつ出る（実測）。
+  //
+  // **以前ここに「同じルートを 2 回登録していない」という検査を置いていたが、
+  // 消した。** `app.routes` からは「ハンドラ 2 つの 1 ルート」と「同じルートを
+  // 2 回登録」が区別できず、正当な書き方を誤検出するだけだった。
+  // 二重登録を捕まえたいなら、`app.routes` とは別の面が要る。
+  const actual = [
+    ...new Set(
+      createApp()
+        .routes.filter((route) => route.method !== "ALL")
+        .map((route) => `${route.method} ${route.path}`),
+    ),
+  ];
 
   const expected = EXPECTED_ROUTES.map((route) => `${route.method} ${route.path}`);
 
@@ -26,10 +40,5 @@ describe("ルートの一覧", () => {
   it("一覧にあるルートがすべて登録されている", () => {
     // 消したのに一覧へ残っていると、ここで止まる。
     expect(expected.filter((route) => !actual.includes(route))).toEqual([]);
-  });
-
-  it("同じルートを 2 回登録していない", () => {
-    // 2 回登録すると、先に書いたほうだけが動き、後のは黙って死ぬ。
-    expect(actual).toEqual([...new Set(actual)]);
   });
 });

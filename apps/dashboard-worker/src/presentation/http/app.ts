@@ -7,6 +7,7 @@ import type { BlankSchema } from "hono/types";
 import { createContainer } from "../../composition/container";
 import type { IdentityFailure } from "../../domain/errors";
 import { ACCOUNT_BASE_PATH } from "./base-path";
+import { accountUiRoutes } from "./ui/account.routes";
 import type { AppBindings } from "./types";
 
 export { ACCOUNT_BASE_PATH } from "./base-path";
@@ -369,6 +370,20 @@ export function createApp(): Hono<AppBindings> {
    * 直接足すと、本番で到達不能なエンドポイントが 1 つ増える。
    */
   registerRoutes(root.basePath(ACCOUNT_BASE_PATH));
+
+  /**
+   * HTML を返す画面（#9）。`/account`・`/account/sessions`・`/account/grants`
+   * と、そこから読むスタイルシート。
+   *
+   * **API のチェーンには混ぜない。** `registerRoutes` のチェーンは
+   * `hono/client` に渡す型を作るためのもので、`c.html()` を返す画面を
+   * そこへ積んでも意味が無い（ブラウザが直接開くので `hc` から呼ばない）。
+   * 型を読む人にとっても雑音になる。
+   *
+   * 取得は JSON の経路と**同じ `IdentityGateway`**（ミドルウェアで入る）。
+   * ページ用に別の取得経路を作ると、片方だけ認可が緩む余地ができる。
+   */
+  root.basePath(ACCOUNT_BASE_PATH).route("/", accountUiRoutes);
 
   // 返すのは `root`。`basePath()` の戻り値は `root` の router を共有して
   // いるので、上で登録したハンドラはすべてここから引ける。

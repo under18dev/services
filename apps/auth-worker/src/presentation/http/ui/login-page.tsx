@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
 import { Layout } from "@u18/web-ui";
+import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
 import { loginUrlWithReturnTo, RETURN_TO_FIELD } from "./return-to";
 
 /**
@@ -220,7 +221,8 @@ export const LoginPage: FC<LoginPageProps> = (props) => (
     title="ログイン"
     // Passkey のアイランドだけが JS を必要とする。ログイン済み画面と
     // コード入力画面には読み込ませない（不要な攻撃面を増やさない）。
-    scripts={props.view.kind === "email" ? ["/ui/login-island.js"] : []}
+    stylesheet={STYLESHEET_PATH}
+    scripts={props.view.kind === "email" ? [LOGIN_ISLAND_PATH] : []}
   >
     {props.view.kind === "email" ? <EmailStep {...props} view={props.view} /> : null}
     {props.view.kind === "code" ? <CodeStep {...props} view={props.view} /> : null}

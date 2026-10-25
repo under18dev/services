@@ -1,3 +1,4 @@
+import { pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Context } from "hono";
@@ -7,17 +8,16 @@ import {
   readSessionCookie,
 } from "../session-cookie";
 import type { AppBindings } from "../types";
+import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import { LoginPage, type LoginView } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
-import { pageSecurityHeaders } from "@u18/web-ui";
 import {
   loginUrlWithReturnTo,
   RETURN_TO_FIELD,
   RETURN_TO_PARAM,
   sanitizeReturnTo,
 } from "./return-to";
-import { UI_STYLESHEET } from "./styles";
 
 /**
  * Auth UI のルート（仕様書 14-1 の決定 4 / #36）。
@@ -256,14 +256,14 @@ uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
  */
 const ASSET_CACHE_CONTROL = "public, max-age=300";
 
-uiRoutes.get("/ui/u18.css", (c) =>
+uiRoutes.get(STYLESHEET_PATH, (c) =>
   c.body(UI_STYLESHEET, 200, {
     "Content-Type": "text/css; charset=utf-8",
     "Cache-Control": ASSET_CACHE_CONTROL,
   }),
 );
 
-uiRoutes.get("/ui/login-island.js", (c) =>
+uiRoutes.get(LOGIN_ISLAND_PATH, (c) =>
   c.body(LOGIN_ISLAND_JS, 200, {
     "Content-Type": "text/javascript; charset=utf-8",
     "Cache-Control": ASSET_CACHE_CONTROL,
