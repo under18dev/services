@@ -1,3 +1,4 @@
+import type { NfcCardEventName } from "../domain/services/retention-policy";
 import type { SessionSummary } from "@u18/contracts";
 import type { Card, CardStatus } from "../domain/entities/card";
 import type { NfcFailure } from "../domain/errors";
@@ -112,10 +113,27 @@ export interface CardRepository {
 export interface CardEventRecorder {
   record(event: {
     readonly cardId: string;
-    readonly event: string;
+    /** 登録簿で閉じてある。typo が黙って通ると調査で気づけない（#123 と同じ理由）。 */
+    readonly event: NfcCardEventName;
     readonly actorUserId: string | null;
     readonly metadata?: Record<string, unknown>;
   }): Promise<void>;
+}
+
+/**
+ * 保持期限を過ぎた `nfc_card_events` の行を消す Port。
+ *
+ * **Identity 側の掃除からは触れない。** `u18-nfc` は別の D1 で、
+ * auth-worker はその binding を持たない（持たせると nfc-worker の
+ * 侵害時に届く範囲の話が逆転する）。したがって掃除もこの Worker が回す。
+ */
+export interface ExpiredEventPurger {
+  /**
+   * @param deadlines イベント名ごとの境界。ここに無い名前の行は消さない
+   *   —— **知らないイベントを消すより、残して気づくほうがよい。**
+   * @param limit 1 回で消す上限。
+   */
+  purge(deadlines: ReadonlyMap<string, Date>, limit: number): Promise<number>;
 }
 
 /** 紐づけコードの生成とハッシュ化。実装は Web Crypto に委ねる（仕様書 5.4）。 */

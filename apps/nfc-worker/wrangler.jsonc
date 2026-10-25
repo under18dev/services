@@ -48,6 +48,16 @@
     },
   ],
 
+  // 保持期限を過ぎたカードイベントの掃除（仕様書 §9 Privacy）。src/index.ts の scheduled が受ける。
+  //
+  // **auth-worker の Cron からは回せない。** u18-nfc は別の D1 で、
+  // auth-worker はその binding を持たない。掃除は D1 の所有者が回す。
+  // その結果、このリポジトリには Cron が 2 本ある（auth と nfc で 1 本ずつ）。
+  //
+  // 1 時間間隔。auth 側（15 分）より緩いのは、nfc_card_events の流入が
+  // 所有者の操作に限られるため（リダイレクト解決は記録していない）。
+  "triggers": { "crons": ["17 * * * *"] },
+
   "vars": {
     // 遷移先として禁止するオリジン（composition/container.ts が使う）。
     // IdP 自身と、この Worker 自身の短縮 URL ホスト。
@@ -128,6 +138,9 @@
         { "pattern": "go.under18.dev/*", "zone_name": "under18.dev" },
         { "pattern": "auth.under18.dev/account/nfc/*", "zone_name": "under18.dev" },
       ],
+
+      // triggers は env に継承されない。書き忘れると本番だけ掃除が走らない。
+      "triggers": { "crons": ["17 * * * *"] },
 
       "vars": {
         // #33 で確定した本番 Issuer。遷移先として禁止する。

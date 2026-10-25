@@ -1,3 +1,4 @@
+import { createContainer } from "./composition/container";
 import { createApp } from "./presentation/http/app";
 
 /**
@@ -19,4 +20,35 @@ import { createApp } from "./presentation/http/app";
  */
 const app = createApp();
 
-export default app satisfies ExportedHandler<Env>;
+export default {
+  fetch: app.fetch,
+
+  /**
+   * 保持期限を過ぎたカードイベントを消す（仕様書 §9 Privacy）。
+   *
+   * **auth-worker の Cron からは回せない。** `u18-nfc` は別の D1 で、
+   * auth-worker はその binding を持たない —— 持たせると「nfc-worker が
+   * 侵害されても Identity は読めない」という §2.2 の線が逆向きに崩れる。
+   * **掃除は D1 の所有者が回す**ので、この Worker に Cron がもう 1 本増える。
+   *
+   * `waitUntil` には載せない。scheduled ハンドラは返した Promise の完了まで
+   * 生存が保証されるので、await して結果をログに出せる
+   * （auth-worker の `scheduled` と同じ判断）。
+   */
+  async scheduled(controller, env, _ctx): Promise<void> {
+    const { purgeExpiredEvents } = createContainer(env).useCases;
+    const result = await purgeExpiredEvents.execute();
+
+    if (result.reachedLimit) {
+      // 上限に達した＝まだ溜まっている。次回の実行で続きを消す。
+      // 毎回出続けるなら、流入が掃除の速度を超えている。
+      console.warn(
+        JSON.stringify({
+          event: "nfc.retention.carried_over",
+          cron: controller.cron,
+          deleted: result.deleted,
+        }),
+      );
+    }
+  },
+} satisfies ExportedHandler<Env>;
