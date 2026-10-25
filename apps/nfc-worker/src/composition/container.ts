@@ -3,6 +3,7 @@ import { createNfcDatabase } from "@u18/nfc-db";
 import type { CardRepository, ExpiredEventPurger, IdentityGateway } from "../application/ports";
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
+import { IssueCardsUseCase } from "../application/use-cases/issue-cards.use-case";
 import { ListMyCardsUseCase } from "../application/use-cases/list-cards.use-case";
 import { ReleaseCardUseCase } from "../application/use-cases/release-card.use-case";
 import { PurgeExpiredEventsUseCase } from "../application/use-cases/purge-expired-events.use-case";
@@ -78,6 +79,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       ),
       disableCard: new DisableCardUseCase(identity, cards, events, clock),
       claimCard: new ClaimCardUseCase(identity, cards, events, claimCodes, clock),
+      issueCards: new IssueCardsUseCase(identity, cards, events, claimCodes, clock),
       releaseCard: new ReleaseCardUseCase(identity, cards, events, claimCodes, clock),
       purgeExpiredEvents: new PurgeExpiredEventsUseCase({ purger: eventPurger, clock }),
     },

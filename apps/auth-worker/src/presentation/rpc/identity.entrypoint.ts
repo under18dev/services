@@ -120,6 +120,7 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       userId: session.userId,
       sessionId: session.id,
       expiresAt: session.expiresAt.toISOString(),
+      isAdmin: result.value.isAdmin,
     });
   }
 
@@ -147,6 +148,7 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       emailVerified: props.emailVerified,
       status: props.status,
       createdAt: props.createdAt.toISOString(),
+      isAdmin: props.isAdmin,
     });
   }
 
@@ -284,6 +286,7 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
         emailVerified: props.emailVerified,
         status: props.status,
         createdAt: props.createdAt.toISOString(),
+        isAdmin: props.isAdmin,
       },
       changedFields: [...result.value.changedFields],
     });

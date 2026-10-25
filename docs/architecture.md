@@ -455,10 +455,12 @@ dashboard-worker が侵害された瞬間にそれが Identity の侵害にな�
 ### 5.3 `CONTRACT_VERSION` とデプロイ順
 
 ```ts
-export const CONTRACT_VERSION = "1.3.0" as const;
+export const CONTRACT_VERSION = "1.4.0" as const;
 ```
 
-直近の更新は #11 / #75 の `updateProfile` / `listPasskeys` / `deletePasskey` 追加（1.2.0 → 1.3.0）。あわせて `RpcErrorCode` に `reauthentication_required` と `conflict` を足した —— **呼び出し元の見せ方が変わるものを `forbidden` や `internal` へ畳むと、UI が「失敗しました」としか言えなくなる。**
+直近の更新は #187 の `isAdmin` 追加（1.3.0 → 1.4.0）。`SessionSummary` と `UserProfile` の**両方**に置いてあるのは消費者が違うため —— nfc-worker は発行の可否に 1 ビットだけ要り、`getUserProfile` を呼ばせるとメールアドレスまで渡る。
+
+その前は #11 / #75 の `updateProfile` / `listPasskeys` / `deletePasskey` 追加（1.2.0 → 1.3.0）。あわせて `RpcErrorCode` に `reauthentication_required` と `conflict` を足した —— **呼び出し元の見せ方が変わるものを `forbidden` や `internal` へ畳むと、UI が「失敗しました」としか言えなくなる。**
 
 その前は #22 の `caller` 追加（1.1.0 → 1.2.0）。書き込みを伴う 6 メソッドの
 入力に **optional** なフィールドを足しただけなので MINOR で、既存の呼び出しは

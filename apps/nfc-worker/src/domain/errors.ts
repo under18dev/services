@@ -21,5 +21,14 @@ export type NfcFailure =
   | { readonly kind: "invalid_target_url"; readonly reason: string }
   /** 紐づけコードが違う・期限切れ・既に使用済み。理由は区別しない。 */
   | { readonly kind: "claim_rejected" }
+  /**
+   * 管理者だけが行える操作を、管理者でない利用者が叩いた（#187）。
+   *
+   * **`card_not_found` に畳まない。** 畳む理由は「ID を総当たりされると
+   * 実在が漏れる」ことだが、**発行エンドポイントの存在は秘密ではない**
+   * （仕様書にもコードにも書いてある）。畳むと、権限を外された運営者が
+   * 「壊れている」と誤解するほうの損が大きい。
+   */
+  | { readonly kind: "forbidden" }
   /** auth-worker 側の障害・タイムアウト。 */
   | { readonly kind: "identity_unavailable"; readonly detail: string };

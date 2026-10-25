@@ -2,6 +2,7 @@ import { sessionCookieName } from "@u18/contracts";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { z } from "zod";
+import { MAX_ISSUE_COUNT } from "../../application/use-cases/issue-cards.use-case";
 import type { NfcFailure } from "../../domain/errors";
 import { isAllowedOrigin, isJsonRequest } from "./origin";
 import type { AppBindings } from "./types";
@@ -40,15 +41,27 @@ const disableSchema = z.object({
   reason: z.enum(["lost", "unused"]).default("lost"),
 });
 
+/** 発行の入力。上限は UseCase の `MAX_ISSUE_COUNT` と揃える。 */
+const issueSchema = z.object({
+  count: z.number().int().min(1).max(MAX_ISSUE_COUNT),
+  /** ロット名。配布の単位を後から辿るのに使う。 */
+  batch: z.string().min(1).max(64).optional(),
+});
+
 const claimSchema = z.object({
   cardId: cardIdSchema,
   claimCode: z.string().min(1).max(64),
 });
 
-function statusFor(failure: NfcFailure): 400 | 401 | 404 | 503 {
+function statusFor(failure: NfcFailure): 400 | 401 | 403 | 404 | 503 {
   switch (failure.kind) {
     case "unauthenticated":
       return 401;
+    // **403 を使ってよい唯一の経路。** 下の card_not_found が 403 を
+    // 避けているのは「他人のカード ID を当てた」ことを漏らさないためで、
+    // 発行エンドポイントの存在は秘密ではない（errors.ts の forbidden）。
+    case "forbidden":
+      return 403;
     case "card_not_found":
       // 403 を返さない。403 は「存在するが権限が無い」と読めるので、
       // 他人のカード ID を当てたことが相手に伝わる。
@@ -89,6 +102,32 @@ export function registerCardRoutes(app: Hono<AppBindings>, basePath: string): vo
     if (!isJsonRequest(c)) return c.json({ error: "forbidden" }, 403);
 
     return next();
+  });
+
+  /**
+   * 運営によるカード発行（#187、仕様書 §10 / §12）。
+   *
+   * **管理者だけ。** 判定は UseCase の中（`requireAdminUserId`）にあり、
+   * ここには無い —— ルートに書くと、経路が増えたときに素通りする形を
+   * 作る（#186 の `rpc-parity.test.ts` で確かめた話と同じ）。
+   *
+   * **応答に平文の紐づけコードが載る。** DB にはハッシュしか入らないので、
+   * この応答を取りこぼしたカードは配れない（再発行するしかない）。
+   * `Cache-Control: no-store` が全経路に付いていることが効く場面でもある。
+   */
+  cards.post("/", async (c) => {
+    const parsed = issueSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid_request" }, 400);
+
+    const result = await c
+      .get("container")
+      .useCases.issueCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)), {
+        count: parsed.data.count,
+        batch: parsed.data.batch ?? null,
+      });
+    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+
+    return c.json({ cards: result.value }, 201);
   });
 
   /** 自分のカード一覧。 */

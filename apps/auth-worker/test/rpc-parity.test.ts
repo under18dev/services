@@ -1,4 +1,5 @@
-import { passkeys } from "@u18/db";
+import { passkeys, users } from "@u18/db";
+import { eq } from "drizzle-orm";
 import { newId } from "@u18/domain";
 import { SELF, createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -220,5 +221,47 @@ describe("無効なセッションは両方の入口で拒否される", () => {
   ])("%s は unauthenticated を返す", async (_name, invoke) => {
     const result = await invoke();
     expect(!result.ok && result.error.code).toBe("unauthenticated");
+  });
+});
+
+/**
+ * `getSession` が返す `isAdmin`（#187）。
+ *
+ * **nfc-worker はこの 1 ビットだけでカード発行の可否を決める。** 自分では
+ * 判断できない（Identity D1 を持たない）ので、ここが実際の
+ * `users.is_admin` を反映していなければ、**全員が発行できる**か
+ * **誰も発行できない**かのどちらかになる。
+ *
+ * 常に `true` を返すよう壊しても nfc 側のテストは落ちない —— あちらは
+ * fake の gateway を使うため。**その境目をこちらで塞ぐ。**
+ */
+describe("getSession の isAdmin は実際の users.is_admin を返す", () => {
+  it("一般利用者は false", async () => {
+    const user = await seedLoggedInUser();
+
+    const result = await rpc.getSession({ sessionToken: user.sessionToken });
+
+    expect(result.ok && result.value?.isAdmin).toBe(false);
+  });
+
+  it("管理者は true", async () => {
+    const user = await seedLoggedInUser();
+    await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
+
+    const result = await rpc.getSession({ sessionToken: user.sessionToken });
+
+    expect(result.ok && result.value?.isAdmin).toBe(true);
+  });
+
+  it("getUserProfile も同じ値を返す", async () => {
+    // 2 箇所に同じ値があるので、片方だけ壊れる形を塞ぐ。
+    const user = await seedLoggedInUser();
+    await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
+
+    const session = await rpc.getSession({ sessionToken: user.sessionToken });
+    const profile = await rpc.getUserProfile({ sessionToken: user.sessionToken });
+
+    expect(session.ok && session.value?.isAdmin).toBe(true);
+    expect(profile.ok && profile.value?.isAdmin).toBe(true);
   });
 });

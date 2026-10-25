@@ -54,3 +54,44 @@ export const rpcErr = (code: RpcErrorCode, message: string): RpcResult<never> =>
   ok: false,
   error: { code, message },
 });
+
+/**
+ * アカウント API（`/account/*`）が `error` として返しうるコードの全体（#187）。
+ *
+ * ## なぜ契約側に置くか
+ *
+ * **UI がこれを網羅していることを型で強制できるようにするため。**
+ *
+ * ```ts
+ * const MESSAGES: Record<AccountApiErrorCode, string> = { ... };
+ * ```
+ *
+ * こう書いておけば、**ここへコードを 1 つ足した時点で UI がビルドで落ちる。**
+ * 実行時に「知らないコードが来た」ではなく、変更した人の手元で
+ * 「文言を書いていない」で止まる —— `Record<AuditEventName, AuditRetentionTier>`
+ * が保持区分の指定を強制しているのと同じ形である。
+ *
+ * ## `message` を通さない代わりの仕組みである
+ *
+ * auth-worker の `message` は英語で、利用者向けに書かれていない。
+ * **文言は表示側の責務**にしたうえで、「表示側が知らないコードが増える」
+ * という (A) 方式の唯一の弱点を、この網羅でふさぐ。
+ *
+ * `identity_unavailable` だけ `RpcErrorCode` に無い —— これは
+ * dashboard-worker が「RPC が届かなかった」を表すために作る値で、
+ * auth-worker から送られてくるものではない。
+ */
+export const ACCOUNT_API_ERROR_CODES = [
+  "unauthenticated",
+  "forbidden",
+  /** もう一度ログインすれば通る。`forbidden` と同じ 403 なので本文で分ける。 */
+  "reauthentication_required",
+  /** 入力の形は正しいが、いまの状態では通らない（409）。 */
+  "conflict",
+  "not_found",
+  "invalid_input",
+  /** auth-worker へ届かなかった。dashboard-worker 側で作る値。 */
+  "identity_unavailable",
+] as const;
+
+export type AccountApiErrorCode = (typeof ACCOUNT_API_ERROR_CODES)[number];

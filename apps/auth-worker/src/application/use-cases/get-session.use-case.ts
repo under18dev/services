@@ -14,6 +14,13 @@ export type GetSessionCommand = {
 export type GetSessionOutput = {
   readonly session: Session;
   readonly userId: string;
+  /**
+   * 操作者が管理者か（§14.1 決定 8）。
+   *
+   * **`user` ごと返さない。** 呼び出し元が要るのは認可に使う 1 ビットで、
+   * `User` を渡すとメールアドレスまで RPC の向こうへ運べてしまう（#187）。
+   */
+  readonly isAdmin: boolean;
 } | null;
 
 export type GetSessionDeps = {
@@ -109,6 +116,6 @@ export class GetSessionUseCase {
       this.deps.sessions.touch(session.id, now),
     );
 
-    return ok({ session, userId: session.userId });
+    return ok({ session, userId: session.userId, isAdmin: user.isAdmin });
   }
 }

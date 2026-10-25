@@ -29,12 +29,14 @@
  * （#123）と同じ理由で、typo が黙って通ると調査のときに
  * 「このイベントが 1 件も出てこない」で初めて気づくことになる。
  *
- * **`card.issued` は入れていない。** スキーマのコメントが例として
- * 挙げているが、`src` のどこからも発行されていない。カードの発行は
- * 運用スクリプトが行い、行の存在自体が発行の記録になっている。
- * 発行するようになったら、ここへ足すと区分の判断を迫られる。
+ * **`card.issued` は #187 で足した。** それまでは「`src` のどこからも
+ * 発行されていない」ため入れていなかった。HTTP の発行経路ができたので、
+ * **足した時点で区分の判断を迫られた** —— `Record<NfcCardEventName, …>` が
+ * コンパイルを止めたので、既定へ黙って落ちることはなかった。
  */
 export const NFC_CARD_EVENTS = [
+  /** 運営による発行。カードの**出自**。所有権の連鎖の起点（#187）。 */
+  "card.issued",
   /** 紐づけ。**カードの支配権が移った瞬間。** */
   "card.claimed",
   /** 所有者が自分で紐づけを解除した。支配権の移動の片割れ。 */
@@ -83,6 +85,14 @@ export const NfcRetention: Readonly<Record<NfcRetentionTier, number>> = {
  * 状態が無言で生まれる（Identity 側の `AUDIT_EVENT_RETENTION` と同じ手当て）。
  */
 export const NFC_EVENT_RETENTION: Readonly<Record<NfcCardEventName, NfcRetentionTier>> = {
+  /**
+   * 発行は `ownership`。**所有権の連鎖の起点**で、「このカードはいつ誰が
+   * 出したものか」は claim の争いと同じ場面で訊かれる。
+   *
+   * 行の存在と `nfc_cards.created_at` でも発行時刻は分かるが、
+   * **どの運営者が出したか**はイベントにしか無い。量は 1 枚につき 1 回。
+   */
+  "card.issued": "ownership",
   "card.claimed": "ownership",
   "card.released": "ownership",
   /**

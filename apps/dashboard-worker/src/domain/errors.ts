@@ -1,3 +1,5 @@
+import type { AccountApiErrorCode } from "@u18/contracts";
+
 /**
  * dashboard-worker 側のエラー。
  *
@@ -24,3 +26,14 @@ export type IdentityFailure =
   | { readonly kind: "conflict" }
   /** auth-worker 側の障害・タイムアウト。再試行の案内を出す。 */
   | { readonly kind: "identity_unavailable"; readonly detail: string };
+
+/**
+ * この型の `kind` が、契約の `AccountApiErrorCode` から外れていないこと。
+ *
+ * **外れると UI の網羅写像が効かなくなる。** `Record<AccountApiErrorCode, …>`
+ * を書いている側は契約のほうを見ているので、こちらだけ増やすと
+ * 「型は通るが文言が無い」コードが生まれる。ここで繋いでおく。
+ */
+type _KindsAreDeclared = IdentityFailure["kind"] extends AccountApiErrorCode ? true : never;
+const _kindsAreDeclared: _KindsAreDeclared = true;
+void _kindsAreDeclared;

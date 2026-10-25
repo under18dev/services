@@ -26,6 +26,21 @@ export interface IdentityGateway {
   getSession(sessionToken: string): Promise<NfcOutcome<SessionSummary | null>>;
 }
 
+/** カード発行の入力（#187）。ID と紐づけコードは呼び出し側で生成しない。 */
+export type IssueCardsInput = {
+  /** 何枚発行するか。 */
+  readonly count: number;
+  /** ロット名。配布の単位を後から辿るのに使う。 */
+  readonly batch: string | null;
+};
+
+/** 発行結果。**平文の紐づけコードはこの瞬間にしか存在しない。** */
+export type IssuedCard = {
+  readonly cardId: string;
+  /** 印刷して配る値。DB にはハッシュしか入っていないので再取得できない。 */
+  readonly claimCode: string;
+};
+
 /** 新規発行するカードの初期値。 */
 export type NewCard = {
   readonly id: string;

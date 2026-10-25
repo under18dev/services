@@ -520,7 +520,7 @@ RPC の呼び出し元（caller）は dashboard-worker、呼び出し先（calle
 
 #### 3.2.3 `CONTRACT_VERSION` の運用
 
-`packages/contracts/src/version.ts` の `CONTRACT_VERSION`（現在 `1.3.0`）は semver として扱う。
+`packages/contracts/src/version.ts` の `CONTRACT_VERSION`（現在 `1.4.0`）は semver として扱う。
 
 - **PATCH**：コメント・型の別名など、ワイヤー形式に影響しない変更。デプロイ順の制約なし。
 - **MINOR**：後方互換のある追加（上表の「追加」）。**callee 先行**。
