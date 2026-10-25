@@ -13,6 +13,9 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "test/**/*.ts",
+    // vitest が `.test.tsx` を拾うようになった（#198）ので、型検査も揃える。
+    // 揃えないと "実行はされるが型検査されない" テストが書ける。
+    "test/**/*.tsx",
     "worker-configuration.d.ts",
     "worker-env.d.ts",
     "vitest.config.ts"
