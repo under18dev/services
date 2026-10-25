@@ -69,6 +69,27 @@ export type SessionSummary = {
   readonly sessionId: string;
   /** ISO 8601 (UTC) */
   readonly expiresAt: string;
+  /**
+   * 操作者が管理者か（`users.is_admin`、仕様書 §14.1 決定 8）。
+   *
+   * ## なぜ `UserProfile` ではなくここか
+   *
+   * 必要としているのは **nfc-worker** で、用途は「運営によるカード発行を
+   * 許すか」の 1 点（#187）。`getUserProfile` を呼ばせると、**nfc-worker が
+   * 利用者のメールアドレスと username まで受け取る**ことになる。
+   *
+   * nfc-worker は Identity D1 を持たず、知れることを最小にしてある
+   * （`packages/nfc-db/src/schema/cards.ts`）。**侵害されたときに届く範囲**が
+   * 判断の軸なので、真偽値 1 つで済むならそうする。
+   *
+   * `getSession` は既に呼んでいるので、往復も増えない。
+   *
+   * ## 認可の判断に使ってよい
+   *
+   * `caller`（§14.1 決定 12）と違い、**これは auth-worker が D1 を見て
+   * 決めた値**で、呼び出し元の申告ではない。
+   */
+  readonly isAdmin: boolean;
 };
 
 /** セッションが無効・期限切れ・失効済みの場合は null。存在しないこと自体はエラーではない。 */
@@ -96,6 +117,21 @@ export type UserProfile = {
   readonly emailVerified: boolean;
   readonly status: "active" | "suspended" | "deleted";
   readonly createdAt: string;
+  /**
+   * 管理者か（`users.is_admin`、仕様書 §14.1 決定 8）。
+   *
+   * **`SessionSummary` にも同じ値がある。** 重複しているのは意図的で、
+   * 消費者と最小化の要求が違う:
+   *
+   * - `SessionSummary.isAdmin` —— **nfc-worker** が発行の可否に使う。
+   *   あちらに `getUserProfile` を呼ばせると、メールアドレスと username まで
+   *   渡ることになる（#187）
+   * - ここ —— **dashboard の UI** が管理者向けの導線を出すかに使う。
+   *   どのみちプロフィール全体をブラウザへ返している経路である
+   *
+   * 片方だけにすると、どちらかの消費者が必要以上の情報を受け取る。
+   */
+  readonly isAdmin: boolean;
 };
 
 export type GetUserProfileResult = RpcResult<UserProfile | null>;

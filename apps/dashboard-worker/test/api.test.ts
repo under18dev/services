@@ -45,6 +45,7 @@ const PROFILE: UserProfile = {
   emailVerified: true,
   status: "active",
   createdAt: "2026-10-24T00:00:00.000Z",
+  isAdmin: false,
 };
 
 describe("Cookie の名前は環境で切り替わる", () => {

@@ -63,5 +63,17 @@
  * 畳むので、利用者には「障害」と見える（正しくは「もう一度ログイン」）。
  * **壊れはしないが、デプロイ順を逆にすると案内が間違う。**
  */
-export const CONTRACT_VERSION = "1.3.0" as const;
+/**
+ * ## 1.3.0 → 1.4.0（#187: `isAdmin` と `AccountApiErrorCode`）
+ *
+ * `SessionSummary` と `UserProfile` に `isAdmin` を足した。**消費者が
+ * 違うので両方に置いてある** —— nfc-worker は発行の可否に 1 ビットだけ
+ * 要り、`getUserProfile` を呼ばせるとメールアドレスまで渡る（#187）。
+ *
+ * `ACCOUNT_API_ERROR_CODES` は、UI が失敗種別の網羅を型で強制するための
+ * 公開ユニオン。**ここへ足すと UI がビルドで落ちる**ようにしてある。
+ *
+ * **後方互換な追加**なので MINOR。デプロイ順は auth-worker が先。
+ */
+export const CONTRACT_VERSION = "1.4.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

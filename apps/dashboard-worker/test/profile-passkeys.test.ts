@@ -24,6 +24,7 @@ const PROFILE: UserProfile = {
   emailVerified: true,
   status: "active",
   createdAt: "2026-10-25T00:00:00.000Z",
+  isAdmin: false,
 };
 
 async function request(path: string, env: Env, init: RequestInit = {}): Promise<Response> {

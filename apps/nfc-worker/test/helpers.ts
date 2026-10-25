@@ -30,7 +30,16 @@ export async function resetDatabase(): Promise<void> {
  * リクエストのどこかに userId を書いて通ってしまう経路があれば、
  * fake が返さない userId でカードを操作できてしまい、テストが落ちる。
  */
-export function identityWith(tokenToUserId: Record<string, string>): IdentityGateway {
+export function identityWith(
+  tokenToUserId: Record<string, string>,
+  /**
+   * 管理者として扱う userId（#187）。
+   *
+   * **既定は空。** 管理者を明示しない限り、どのトークンも一般利用者に
+   * なる —— 発行のテストが「うっかり全員管理者」で通らないようにする。
+   */
+  adminUserIds: readonly string[] = [],
+): IdentityGateway {
   return {
     async getSession(sessionToken: string) {
       const userId = tokenToUserId[sessionToken];
@@ -41,6 +50,7 @@ export function identityWith(tokenToUserId: Record<string, string>): IdentityGat
           userId,
           sessionId: "ses_test",
           expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          isAdmin: adminUserIds.includes(userId),
         },
       };
     },
