@@ -79,8 +79,14 @@ fi
 
 # **原因そのものを名指しで押さえる。** 下の POST が通れば結果としては
 # 足りているが、`no-referrer` に戻ったことを直接言えたほうが直す側が速い。
+# **ヘッダ名の綴りに依存しない。** HTTP/2 は小文字で届くが、HTTP/1.1 は
+# `Referrer-Policy` と大文字で届く。awk の `IGNORECASE` は gawk 拡張で、
+# macOS の awk も ubuntu の mawk も無視する —— 本番が HTTP/2 なので CI では
+# たまたま当たっていただけで、HTTP/1.1 の相手には**健全でも「ヘッダが無い」
+# と報告していた**（`wrangler dev` に当てると再現する）。`grep -i` は POSIX。
 referrer_policy="$(tr -d '\r' < "$head_file" \
-  | awk 'BEGIN{IGNORECASE=1} /^referrer-policy:/{sub(/^[^:]*:[ ]*/,""); print; exit}')"
+  | grep -i '^referrer-policy:' | head -1 \
+  | cut -d: -f2- | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
 if [ "$referrer_policy" = "no-referrer" ]; then
   note "$base/login sends 'Referrer-Policy: no-referrer'. Browsers then send 'Origin: null' on same-origin form posts and every form route breaks (#226)."
 elif [ -z "$referrer_policy" ]; then
