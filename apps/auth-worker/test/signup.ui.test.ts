@@ -24,6 +24,24 @@ import { resetDatabase } from "./helpers";
 const BASE = "http://localhost";
 const ORIGIN = "http://localhost:8787";
 
+/**
+ * 要求ごとに違う IP を名乗る。
+ *
+ * **ここを共有していたせいで、このファイルは `/signup/start` の IP
+ * レート制限の枠を全テストで食い合っていた。** 枠が足りているうちは
+ * 誰も気づかないが、テストを 1 本足した人が無関係な 429 で落ちる。
+ *
+ * それとは別に、**共有していたこと自体が `rate-limit-form.test.ts` の
+ * 「制限は CSRF の後ろ」という順序を偶然固定していた**（CSRF に落ちる
+ * 要求が枠を食い尽くすので、順序を前へ動かすとここが 429 で落ちた）。
+ * 支えとしては弱いうえ、落ちたときのメッセージが
+ * `expected 429 to be 403` なので、読んだ人は順序ではなく干渉を疑う。
+ * 順序そのものを見るテストを `rate-limit-form.test.ts` に置いたので、
+ * こちらは本来の形に戻してよい。
+ */
+let ipCounter = 0;
+const freshIp = (): string => `198.51.100.${(ipCounter += 1) % 250}`;
+
 const REGISTERED = "taro@example.com";
 const NEW_ADDRESS = "newcomer@example.com";
 
@@ -85,6 +103,7 @@ function submit(
     redirect: "manual",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      "CF-Connecting-IP": freshIp(),
       ...(origin === null ? {} : { Origin: origin }),
       ...(secFetchSite === undefined ? {} : { "Sec-Fetch-Site": secFetchSite }),
       ...(cookie === undefined ? {} : { Cookie: cookie }),
