@@ -118,6 +118,52 @@ describe("form からの OTP 送信にも IP 制限が掛かる", () => {
     expect(html).toContain('action="/signup/start"');
   });
 
+  it("CSRF に落ちる要求は枠を消費しない（攻撃者が被害者を締め出せない）", async () => {
+    /**
+     * **制限は CSRF 判定の「後」に置く。** この順序がこのテストの対象である。
+     *
+     * クロスサイトから撃たれた form 送信は**被害者のブラウザから出る**ので、
+     * 被害者の IP で届く。制限を CSRF より前に置くと、攻撃者はトークンを
+     * 持たない要求を撃つだけで**被害者の枠を使い切り、締め出せる。**
+     *
+     * `/oauth/token` は逆に**クライアント認証より前**に置いている
+     * （ランブック §13.2）。あちらは守りたい資源が照合の計算そのもので、
+     * かつ「他人の枠」という概念が無い。原則としてはこう言える ——
+     * **制限は高価な処理の前に、かつ「攻撃者の要求と被害者の要求を
+     * 見分ける検査」の後ろに置く。**
+     *
+     * **この順序はこれまで偶然固定されていた。** `signup.ui.test.ts` の
+     * CSRF テストが落ちることで気づける状態だったが、それはあの
+     * ファイルが `CF-Connecting-IP` を設定せず全テストが既定の IP を
+     * 共有していたからで、**IP を分けた瞬間に固定が消える。**
+     * ここでは `freshIp()` を使って、偶然に頼らず order を固定する。
+     */
+    const ip = freshIp();
+    const page = await openPage("/signup");
+
+    // 上限の 2 倍を撃っても、すべて CSRF で落ちること。
+    for (let i = 0; i < limit * 2; i += 1) {
+      const response = await submit(
+        "/signup/start",
+        { email: `attacker${i}@example.test` },
+        page.cookie,
+        ip,
+      );
+      expect(response.status, `${i + 1} 回目は CSRF の 403 であるべき`).toBe(403);
+    }
+
+    // **被害者自身の正規の送信は、まだ通らなければならない。**
+    // ここが 429 になるなら、攻撃者が被害者を締め出せている。
+    const legit = await submit(
+      "/signup/start",
+      { email: "victim@example.test", csrf_token: page.csrf },
+      page.cookie,
+      ip,
+    );
+
+    expect(legit.status).toBe(200);
+  });
+
   it("Retry-After が付く", async () => {
     const ip = freshIp();
     const page = await openPage("/signup");
