@@ -357,6 +357,28 @@ jobs:
           fi
           scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}"
 
+      # **Passkey の options 側だけ本番で踏む。**
+      #
+      # 仕様書 §13 は「Passkey ログインの本番経路が未確認」を残件として
+      # 挙げている。認証器を伴う往復は機械では踏めないが、**options の
+      # 発行だけは踏める** —— そして **RP ID の取り違えはそこに現れる。**
+      #
+      # RP ID はゾーン（`under18.dev`）でなければならない（§14.1 決定 1）。
+      # ホスト名にすると**登録済みの Passkey が全部使えなくなる。**
+      # 変えた日に全員が締め出される形なので、気づける場所を 1 つ置く。
+      #
+      # `webauthn_challenges` に行が 1 つ増えるが、保持は 24 時間で Cron が
+      # 消す。誰のログインかを問わない設計なので `user_id` も入らない。
+      - name: Smoke test the passkey login options
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the passkey smoke test."
+            exit 0
+          fi
+          scripts/smoke-passkey-probe.sh "${PRODUCTION_URL%/}"
+
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
   # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは
   # 互いに依存しないため、並列で構わない。
