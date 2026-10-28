@@ -22,11 +22,18 @@ describe("ルートの一覧", () => {
   // 消した。** `app.routes` からは「ハンドラ 2 つの 1 ルート」と「同じルートを
   // 2 回登録」が区別できず、正当な書き方を誤検出するだけだった。
   // 二重登録を捕まえたいなら、`app.routes` とは別の面が要る。
+  /**
+   * アセットの URL には内容ハッシュが入る（#211）。手で書けないので、
+   * 一覧側は `<hash>` と書いてある。**16 進 16 文字の塊だけを伏せる**ので、
+   * ハッシュが入らなくなればここで一致しなくなる。
+   */
+  const normalize = (path: string): string => path.replace(/\.[0-9a-f]{16}\./g, ".<hash>.");
+
   const actual = [
     ...new Set(
       createApp()
         .routes.filter((route) => route.method !== "ALL")
-        .map((route) => `${route.method} ${route.path}`),
+        .map((route) => `${route.method} ${normalize(route.path)}`),
     ),
   ];
 

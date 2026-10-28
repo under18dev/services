@@ -1,4 +1,6 @@
+import { hashedFileName, UI_STYLESHEET } from "@u18/web-ui";
 import { ACCOUNT_BASE_PATH } from "../base-path";
+import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 
 /**
  * この Worker が配信する静的アセットと画面のパス。
@@ -20,9 +22,21 @@ import { ACCOUNT_BASE_PATH } from "../base-path";
  * 変えることが型の上でできない。
  */
 
+/**
+ * ## URL に内容ハッシュが入る（#211）
+ *
+ * `hashedFileName()` が配信する文字列そのものからファイル名を作るので、
+ * **中身が変われば URL も変わる。** デプロイ直後に古いアセットと新しい
+ * サーバーが重なる窓が消え、`immutable` で配信できる。
+ *
+ * ハッシュは実行時に決まるので、`*_PATH` は**テンプレートリテラル型では
+ * なくただの `string`** になった。`*_ROUTE` から導出している構造は
+ * そのままなので、片方だけ変えられないことは変わらない。
+ */
+
 /** 共有スタイルシート（`@u18/web-ui` の `UI_STYLESHEET`）。 */
-export const STYLESHEET_ROUTE = "/ui/u18.css";
-export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}` as const;
+export const STYLESHEET_ROUTE = `/ui/${hashedFileName("u18.css", UI_STYLESHEET)}`;
+export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}`;
 
 /**
  * 取り消し操作のアイランド（#9）。
@@ -30,8 +44,8 @@ export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}` as cons
  * **スタイルシートと違い、auth-worker のものは借りられない。** あちらの
  * `/ui/login-island.js` は WebAuthn 専用で中身が別物である。
  */
-export const ISLAND_ROUTE = "/ui/account-island.js";
-export const ISLAND_PATH = `${ACCOUNT_BASE_PATH}${ISLAND_ROUTE}` as const;
+export const ISLAND_ROUTE = `/ui/${hashedFileName("account-island.js", ACCOUNT_ISLAND_JS)}`;
+export const ISLAND_PATH = `${ACCOUNT_BASE_PATH}${ISLAND_ROUTE}`;
 
 /** アカウント概要（プロフィールと Passkey）。 */
 export const OVERVIEW_ROUTE = "/";

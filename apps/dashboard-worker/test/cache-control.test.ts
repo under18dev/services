@@ -1,3 +1,4 @@
+import { IMMUTABLE_ASSET_CACHE_CONTROL } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import {
@@ -82,9 +83,13 @@ describe("全経路に no-store が付く", () => {
 });
 
 describe("キャッシュしてよい経路はスタイルシートだけ", () => {
-  it("/account/ui/u18.css は public で返る", async () => {
+  it("スタイルシートは immutable で返る", async () => {
     // ここだけ既定の no-store を上書きしている。全利用者に同じ CSS で、
     // 個人情報を含まない。毎回取り直させる理由が無い。
+    //
+    // **`immutable` にできるのは URL に内容ハッシュが入っているから**
+    // （#211）。中身が変われば URL が変わるので、古いものを掴んだ
+    // ブラウザと新しいサーバーが重なる窓が無い。
     const response = await createApp().fetch(
       new Request(`${ORIGIN}${STYLESHEET_PATH}`),
       envWith({} as never),
@@ -92,7 +97,22 @@ describe("キャッシュしてよい経路はスタイルシートだけ", () =
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=300");
+    expect(response.headers.get("Cache-Control")).toBe(IMMUTABLE_ASSET_CACHE_CONTROL);
+  });
+
+  it("ハッシュの無い古い URL は 404 になる", async () => {
+    // **これは正しい挙動である。** デプロイ前の URL を掴んだブラウザは
+    // 新しいサーバーから取れない —— 代わりに、新しいページが新しい URL を
+    // 指しているので、ページを読めば必ず新しいものを取りに行く。
+    // ここが 200 を返すなら、古い URL も生かしていることになり、
+    // #211 で消したはずの「古いものが使われ続ける窓」が戻る。
+    const response = await createApp().fetch(
+      new Request(`${ORIGIN}${ACCOUNT_BASE_PATH}/ui/u18.css`),
+      envWith({} as never),
+      executionContext(),
+    );
+
+    expect(response.status).toBe(404);
   });
 
   it("Cookie を送っても応答が変わらない", async () => {

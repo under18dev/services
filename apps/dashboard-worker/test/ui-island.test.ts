@@ -116,6 +116,40 @@ describe("JS を読み込む画面と、その配信", () => {
   );
 });
 
+describe("URL に内容ハッシュが入る（#211）", () => {
+  /**
+   * **HTML に実際に書かれた URL を取りに行く。**
+   *
+   * 定数を 2 回使って突き合わせると「定数が自分自身と一致する」しか
+   * 見ていない。ページが書く文字列から抜いて引くと、`asset-paths.ts` と
+   * 配信ルートの間が本当に繋がっていることになる。
+   *
+   * ハッシュが入っていることも見る。**外れても画面は動く**（URL が
+   * 固定に戻るだけ）ので、ここが唯一それに気づく場所である。外れると
+   * `immutable` と組み合わさって、**内容を変えてもブラウザが 1 年
+   * 古いものを使い続ける** —— #211 で消した窓が桁違いの長さで戻る。
+   */
+  const urlsIn = (page: string): string[] =>
+    [...page.matchAll(/(?:src|href)="([^"]*\/ui\/[^"]*)"/g)].map((match) => match[1] ?? "");
+
+  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])("%s が参照する URL", async (path) => {
+    const urls = urlsIn(await html(path));
+    expect(urls.length, "アセットを 1 つも参照していない").toBeGreaterThan(0);
+
+    for (const url of urls) {
+      expect(url, `${url} にハッシュが入っていない`).toMatch(/\.[0-9a-f]{16}\./);
+
+      const response = await createApp().fetch(
+        new Request(`${ORIGIN}${url}`),
+        envWith({} as never),
+        executionContext(),
+      );
+      expect(response.status, `${url} が引けない`).toBe(200);
+      expect(response.headers.get("Cache-Control")).toContain("immutable");
+    }
+  });
+});
+
 describe("サーバーの HTML にボタンを置かない", () => {
   // **押しても効かないボタンを作らないため**（`client/account-island.ts`）。
   // サーバー側で描いて JS で有効化する形だと、読み込み失敗のときだけ

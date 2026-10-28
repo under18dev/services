@@ -1,5 +1,5 @@
 import { sessionCookieName } from "@u18/contracts";
-import { pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
+import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
 import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -44,14 +44,15 @@ import { returnToForCurrentRequest } from "@u18/contracts";
  * 返すのは全利用者に同じ CSS / JS で、個人情報を 1 文字も含まない。
  * 他の経路（#125 / RR-10）と違い、キャッシュさせて問題が無い。
  *
- * 短いのは URL に内容ハッシュを含めていないため。デプロイ後に古いものが
- * 残る窓を 5 分に抑える（auth-worker と同じ値）。
+ * **URL に内容ハッシュが入っている**（#211、`asset-paths.ts`）ので
+ * `immutable` で永久に持たせてよい。中身が変われば URL が変わるため、
+ * 古いものを掴んだブラウザと新しいサーバーが重なる窓が無い。
  *
  * **ここを真似して他の経路でキャッシュを許さないこと。** 増やすなら
  * `test/cache-control.test.ts` の「例外はこれだけ」を更新したうえで、
  * なぜ個人情報が含まれないのかを書くこと。
  */
-const ASSET_CACHE_CONTROL = "public, max-age=300";
+const ASSET_CACHE_CONTROL = IMMUTABLE_ASSET_CACHE_CONTROL;
 
 export const accountUiRoutes = new Hono<AppBindings>()
   /**
