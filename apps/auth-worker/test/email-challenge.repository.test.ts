@@ -228,4 +228,78 @@ describe("DrizzleEmailChallengeRepository", () => {
       expect(await repo.countSentSinceForPurpose("signup", new Date(NOW.getTime() - 1000))).toBe(2);
     });
   });
+
+  describe("どの索引が効いているか（#245）", () => {
+    /**
+     * **索引は「速い」と宣言するだけで、効いているかは何も言わない。**
+     * 効かなくなっても答えは正しいままなので、ふつうのテストでは永久に
+     * 捕まらない。
+     *
+     * このテーブルには実際に**どこからも使われない索引が 1 本あった**
+     * （`(email, purpose)`。email で引く経路はすべて `lower(email)` を
+     * 掛けるので選ばれない）。#245 で落とした。
+     *
+     * 落としただけだと「いまどれが効いているか」が誰にも見えないままに
+     * なるので、ここに出しておく。**次に索引を足したくなった人が最初に
+     * 読む場所**にしたい。
+     *
+     * プランは統計にも依存しうるので、索引名と `SCAN` でないことの
+     * 2 点だけ見る。文言そのものは固定しない。
+     */
+    const planOf = async (sql: string, binds: unknown[]): Promise<string> => {
+      const plan = await env.IDENTITY_DB.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .bind(...binds)
+        .all<{ detail: string }>();
+      return plan.results.map((row) => row.detail).join(" | ");
+    };
+
+    it("countSentSince は purpose + created_at の索引で引く", async () => {
+      // `lower(email)` があるので email 側の索引は選ばれない。**選ばれない
+      // ことが問題なのではなく、選ばれない索引を宣言していたのが問題だった。**
+      const detail = await planOf(
+        "SELECT count(*) FROM email_challenges" +
+          " WHERE lower(email) = lower(?) AND purpose = ? AND created_at > ?",
+        ["a@example.test", "signup", 0],
+      );
+
+      expect(detail).toContain("email_challenges_purpose_created_idx");
+      expect(detail, "フルスキャンに落ちている").not.toContain("SCAN");
+    });
+
+    it("invalidateActive も同じ索引で引く（**第 2 列は効いていない**）", async () => {
+      /**
+       * このクエリは `created_at` を条件に持たないので、
+       * `(purpose, created_at)` の**先頭列だけ**を使う。
+       *
+       * **それで困っていない。** 保持期限は 1 時間で、1 つの purpose に
+       * 溜まる行数は多くない。ここに書いてあるのは「足りない」ではなく
+       * 「**こうなっていることを知ったうえでそのままにしている**」である。
+       *
+       * 速くしたくなったら、まず `lower()` を外せないことを確認すること
+       * （`packages/db/src/schema/auth.ts` に理由がある）。
+       */
+      const detail = await planOf(
+        "UPDATE email_challenges SET consumed_at = ?" +
+          " WHERE lower(email) = lower(?) AND purpose = ? AND consumed_at IS NULL",
+        [0, "a@example.test", "signup"],
+      );
+
+      expect(detail).toContain("email_challenges_purpose_created_idx");
+      expect(detail, "フルスキャンに落ちている").not.toContain("SCAN");
+    });
+
+    it("落とした索引はもう存在しない", async () => {
+      // schema から消しただけだと、**マイグレーションを当て忘れた環境では
+      // 残り続ける。** 実体に聞く。
+      const indexes = await env.IDENTITY_DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'email_challenges'",
+      ).all<{ name: string }>();
+      const names = indexes.results.map((row) => row.name);
+
+      expect(names).not.toContain("email_challenges_email_purpose_idx");
+      // 残っているほうも固定する。**落としすぎたら気づきたい。**
+      expect(names).toContain("email_challenges_purpose_created_idx");
+      expect(names).toContain("email_challenges_expires_idx");
+    });
+  });
 });
