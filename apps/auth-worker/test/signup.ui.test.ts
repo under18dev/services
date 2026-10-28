@@ -219,6 +219,20 @@ describe("アカウントの有無を漏らさない", () => {
 });
 
 describe("CSRF と Origin", () => {
+  it("拒否されても登録画面のまま戻る（ログイン画面に飛ばさない）", async () => {
+    // 既定を login に落とすと、**新規登録で失敗した人がログイン画面へ
+    // 戻されたうえで「操作を受け付けられませんでした」と言われる。**
+    // 自分が何をしようとしていたのか分からなくなり、やり直す先も変わる。
+    const page = await openSignupPage();
+    const response = await submit("/signup/start", { email: NEW_ADDRESS }, { cookie: page.cookie });
+
+    expect(response.status).toBe(403);
+    const html = await response.text();
+    expect(html).toContain("新規登録");
+    expect(html).toContain('action="/signup/start"');
+    expect(html).not.toContain('action="/login/start"');
+  });
+
   it("CSRF トークンが無いと受け付けない", async () => {
     const page = await openSignupPage();
     const response = await submit("/signup/start", { email: NEW_ADDRESS }, { cookie: page.cookie });
