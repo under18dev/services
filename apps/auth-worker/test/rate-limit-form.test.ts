@@ -1,7 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
-import { resetDatabase, startOfWindow } from "./helpers";
+import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 
 /**
  * form 経路の IP レート制限。
@@ -93,7 +93,7 @@ const WINDOW_MARGIN_MS = 5_000;
 
 beforeEach(async () => {
   await resetDatabase();
-  await startOfWindow(RateLimitPolicy.email_start.periodSeconds, WINDOW_MARGIN_MS);
+  await startOfRateLimitWindow(RateLimitPolicy.email_start.periodSeconds, WINDOW_MARGIN_MS);
 });
 
 describe("form からの OTP 送信にも IP 制限が掛かる", () => {

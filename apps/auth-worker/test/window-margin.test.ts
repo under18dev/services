@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { startOfWindow } from "./helpers";
+import { startOfRateLimitWindow } from "./helpers";
 
 /**
- * `startOfWindow` が守る不変条件（#176）。
+ * `startOfRateLimitWindow` が守る不変条件（#176）。
  *
  * **この関数は共有になったので、意味を固定しておく。** 呼ぶ側は
  * 「返った直後から `marginMs` のあいだは窓が切り替わらない」ことに
@@ -11,7 +11,7 @@ import { startOfWindow } from "./helpers";
  *
  * 壁時計を使うので、`period` を 1 秒にして実時間で確かめる。
  */
-describe("startOfWindow", () => {
+describe("startOfRateLimitWindow", () => {
   const remainingMs = (periodSeconds: number): number => {
     const period = periodSeconds * 1_000;
     return period - (Date.now() % period);
@@ -21,7 +21,7 @@ describe("startOfWindow", () => {
     // 1 秒窓・400ms の余裕で 12 回。窓の位置は呼ぶたびに違うので、
     // **待つ側と待たない側の両方を通る。**
     for (let i = 0; i < 12; i += 1) {
-      await startOfWindow(1, 400);
+      await startOfRateLimitWindow(1, 400);
       expect(remainingMs(1), `${i} 回目`).toBeGreaterThanOrEqual(400);
       await new Promise((resolve) => setTimeout(resolve, 90));
     }
@@ -31,9 +31,9 @@ describe("startOfWindow", () => {
     // 窓の頭へ寄せてから、ごく小さい margin で呼ぶ。待つ必要が無いので
     // すぐ返るはず。**「常に待つ」実装でも上のテストは通る**ので、
     // ここが無いと無駄に待つ実装を見逃す。
-    await startOfWindow(1, 900);
+    await startOfRateLimitWindow(1, 900);
     const before = Date.now();
-    await startOfWindow(1, 10);
+    await startOfRateLimitWindow(1, 10);
     expect(Date.now() - before).toBeLessThan(50);
   });
 
@@ -49,7 +49,7 @@ describe("startOfWindow", () => {
     }
 
     const before = Date.now();
-    await startOfWindow(1);
+    await startOfRateLimitWindow(1);
     expect(Date.now() - before, "待っていない＝既定の余裕が小さすぎる").toBeGreaterThan(50);
   });
 });

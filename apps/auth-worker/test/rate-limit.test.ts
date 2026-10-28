@@ -4,7 +4,7 @@ import { aUser } from "@u18/testing";
 import { count } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
-import { resetDatabase, startOfWindow } from "./helpers";
+import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 
 /**
  * IP 単位のレート制限（#21、仕様書 9 Abuse）。
@@ -77,7 +77,7 @@ function freshIp(): string {
  */
 beforeEach(async () => {
   // 全 scope が同じ period を使っている前提（下のテストで固定している）。
-  await startOfWindow(RateLimitPolicy.email_start.periodSeconds);
+  await startOfRateLimitWindow(RateLimitPolicy.email_start.periodSeconds);
 });
 
 it("すべての scope が同じ窓の長さを使う", () => {

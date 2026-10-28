@@ -67,6 +67,9 @@ export async function expectUniqueViolation(run: () => Promise<unknown>): Promis
  *
  * 指示を守れる形にしないと、指示は守られない。
  *
+ * > **文書に「気をつけて」と書く形は守られない。`import` すれば効く場所に
+ * > 置けば、次に書く人は何も覚えていなくてよい。**（#253）
+ *
  * ## `marginMs` を呼び出し側が決める
  *
  * 必要な余裕は**そのファイルの 1 件がどれだけ時間を食うか**で決まる。
@@ -81,7 +84,10 @@ export async function expectUniqueViolation(run: () => Promise<unknown>): Promis
  * 既定を全体に合わせて広げると、速いファイルが毎回無駄に待つので、
  * **使う側が自分の実測から決める。**
  */
-export async function startOfWindow(periodSeconds: number, marginMs = 1_000): Promise<void> {
+export async function startOfRateLimitWindow(
+  periodSeconds: number,
+  marginMs = 1_000,
+): Promise<void> {
   const period = periodSeconds * 1_000;
   const remaining = period - (Date.now() % period);
   if (remaining >= marginMs) return;
