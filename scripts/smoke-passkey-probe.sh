@@ -39,10 +39,17 @@ url="${base}/api/auth/passkeys/login/options"
 
 echo "POST ${url}"
 
+# **`-f` を `set -e` の下で裸にしない。** 本番が 5xx や 403 を返すと curl が
+# 非ゼロで終わり、**`::error::` を 1 行も出さずにスクリプトごと落ちる** ——
+# 下で grep に `|| true` を付けているのと同じ壊れ方が、curl の側に残る
+# （#231）。ジョブは落ちるので検知自体は効くが、**理由がログに出ない。**
 body="$(curl -fsS --max-time 20 -X POST \
   -H "Origin: ${base}" \
   -H "Content-Type: application/json" \
-  "$url")"
+  "$url")" || {
+  echo "::error::${url} から options を取得できませんでした（HTTP エラーかタイムアウト）。curl の出力が上に出ています。"
+  exit 1
+}
 
 echo "--- response body ---"
 echo "$body"
@@ -50,8 +57,10 @@ echo "---------------------"
 
 fail=0
 
-# **`|| true` を付ける。** 一致ゼロの grep を `set -e` の下で変数に取ると
-# 代入ごと落ちて、下の `::error::` に届かない（#231）。
+# **`sed` は一致ゼロでも 0 で終わる**ので、ここの `|| true` は保険である。
+# 付けているのは、この形を `grep` に書き換えた人が外し忘れないため ——
+# `grep` なら一致ゼロで 1 を返し、`set -e` の下では代入ごと落ちて、
+# 下の `::error::` に届かなくなる（#231）。
 rp_id="$(printf '%s' "$body" | sed -n 's/.*"rpId":"\([^"]*\)".*/\1/p' || true)"
 user_verification="$(printf '%s' "$body" | sed -n 's/.*"userVerification":"\([^"]*\)".*/\1/p' || true)"
 
