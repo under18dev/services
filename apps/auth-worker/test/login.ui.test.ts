@@ -143,6 +143,22 @@ describe("GET /login の描画", () => {
 
   it("CSP を足し、インラインスクリプトを 1 つも置かない", async () => {
     const response = await SELF.fetch(`${BASE}/login`);
+    /**
+     * **`Referrer-Policy` を `no-referrer` にしない。**
+     *
+     * Fetch 仕様では、referrer policy が参照元を落とすとき
+     * **ナビゲーション要求の `Origin` も `null` になる**。自分のページから
+     * 出した form 送信が `Origin: null` で届き、Origin 検証に落ちる。
+     *
+     * **本番で JS 無しの form 経路が全滅していた**（ログイン・新規登録・
+     * ログアウト）。`Origin` を明示するテストしか無かったので気づけなかった。
+     *
+     * `same-origin` なら同一オリジンへの要求にだけ参照元が載る。外部へは
+     * 何も送らないので、`redirect_uri` へ飛ぶときに認可 URL が RP へ漏れない
+     * —— 守りたかったのはそちらで、それは保たれる。
+     */
+    expect(response.headers.get("Referrer-Policy")).toBe("same-origin");
+
     const csp = response.headers.get("Content-Security-Policy");
 
     expect(csp).toContain("script-src 'self'");

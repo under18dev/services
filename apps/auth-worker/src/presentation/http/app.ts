@@ -15,7 +15,23 @@ export type { AppBindings } from "./types";
 export function createApp() {
   const app = new Hono<AppBindings>();
 
-  app.use("*", secureHeaders());
+  // **`Referrer-Policy` を既定（`no-referrer`）のままにしない。**
+  //
+  // Fetch 仕様では、referrer policy が参照元を落とすとき**ナビゲーション
+  // 要求の `Origin` も `null` になる**。自分のページから出した form 送信が
+  // `Origin: null` で届き、Origin 検証（`http/origin.ts`）に落ちる。
+  //
+  // **本番で JS 無しの form 経路が全滅していた** —— ログイン・新規登録・
+  // ログアウトのすべてで「操作を受け付けられませんでした」になっていた。
+  //
+  // `same-origin` なら同一オリジンへの要求にだけ参照元が載る。外部サイトへは
+  // 何も送らないので、`redirect_uri` へ飛ぶときに認可 URL が RP へ漏れること
+  // はない —— 守りたかったのはそちらで、それは保たれる。
+  //
+  // **ここが効く場所である。** 画面側（`@u18/web-ui` の
+  // `pageSecurityHeaders`）に書いても、この全体ミドルウェアが後から上書き
+  // するので効かない。実際にそちらへ書いて効かず、テストで気づいた。
+  app.use("*", secureHeaders({ referrerPolicy: "same-origin" }));
 
   // **キャッシュさせないのを既定にする（#125 / RR-10）。**
   //

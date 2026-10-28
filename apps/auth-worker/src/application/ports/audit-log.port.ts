@@ -124,6 +124,17 @@ export const AUDIT_EVENTS = [
    * セキュリティイベントだから**。別に持つと、片方だけ改名する事故が起きる。
    */
   "rate_limit.exceeded",
+  /**
+   * form の CSRF 検証に落ちた。**`audit_logs` には書かず Workers のログへ出す**
+   * （`presentation/http/ui/csrf.ts`）。`rate_limit.exceeded` と同じ理由で、
+   * 弾いたリクエスト 1 本ごとに D1 へ書くと攻撃者が書き込みを誘発できる。
+   *
+   * 画面には理由を出さない（出し分けると何を直せばよいか教えることになる）。
+   * **ログに出ないと調べようがない** —— 本番で「どのメールアドレスを入れても
+   * 操作を受け付けられない」という報告が出たとき、`wrangler tail` で生の
+   * ヘッダを見るまで `Origin: null` だと分からなかった。
+   */
+  "csrf.rejected",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENTS)[number];
@@ -219,6 +230,11 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * この名前の行が現れることは無い。
    */
   "rate_limit.exceeded": "standard",
+  /**
+   * `rate_limit.exceeded` と同じく**この行は実際には使われない**（ログへ出す
+   * だけで `audit_logs` に行が現れない）。`Record` の網羅のために置いている。
+   */
+  "csrf.rejected": "standard",
 };
 
 /**
