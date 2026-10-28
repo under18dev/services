@@ -4,6 +4,7 @@ import { createIdentityDatabase, users } from "@u18/db";
 import { newId } from "@u18/domain";
 import { aUser } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
+import { OtpPolicy } from "../src/domain/services/token-lifetime";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 import { DrizzleEmailChallengeRepository } from "../src/infrastructure/persistence/drizzle-email-challenge.repository";
 import { resetDatabase } from "./helpers";
@@ -244,6 +245,92 @@ describe("アカウントの有無を漏らさない", () => {
     const repository = new DrizzleEmailChallengeRepository(createIdentityDatabase(env.IDENTITY_DB));
     const active = await repository.findActive(REGISTERED, "signup", new Date());
     expect(active).toBeNull();
+  });
+});
+
+/**
+ * 送信総量が尽きたとき、画面が何を言うか（#247）。
+ *
+ * **黙って「お送りしました」と出さない。** 以前は正常系と同じ応答を
+ * 返していて、メールは永久に来なかった。利用者は自分の入力か迷惑メールかを
+ * 探すことになる。レート制限と同じ文言なら、サービス側の事情として読める。
+ *
+ * ここでしか確かめられないのは、**use case の失敗が画面として何になるか**
+ * である（`otp-global-cap.test.ts` は `err("rate_limited")` までしか見ない）。
+ */
+describe("送信総量が尽きたとき", () => {
+  /** signup の枠を使い切る。form を 30 回叩くより速く、同じ状態になる。 */
+  async function fillSignupCap(): Promise<void> {
+    const repository = new DrizzleEmailChallengeRepository(createIdentityDatabase(env.IDENTITY_DB));
+    for (let i = 0; i < OtpPolicy.globalMaxSends.signup; i += 1) {
+      await repository.create({
+        id: newId("emc"),
+        userId: null,
+        email: `filler${i}@example.test`,
+        codeHash: "f".repeat(64),
+        purpose: "signup",
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        maxAttempts: 5,
+        sentAt: new Date(),
+      });
+    }
+  }
+
+  it("429 を画面で返す", async () => {
+    await fillSignupCap();
+    const page = await openSignupPage();
+
+    const response = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS, csrf_token: page.csrf },
+      { cookie: page.cookie },
+    );
+
+    // **400 ではない。** 混んでいることと入力が悪いことは別の話で、
+    // ブラウザの再送・中間プロキシ・外形監視がどれも区別して扱う。
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Content-Type")).toContain("text/html");
+
+    const html = await response.text();
+    expect(html).toContain("混み合っています");
+    // 登録画面のまま返す（ログイン画面に飛ばさない）。
+    expect(html).toContain('action="/signup/start"');
+    // **コード入力の画面へ進めない。** それがこの issue の本体 ——
+    // 以前はここで「確認コードをお送りしました」の画面が出て、
+    // メールは永久に来なかった。
+    //
+    // 文言ではなく **form の宛先**で見る。入力画面のほうにも
+    // 「確認コードをメールでお送りします」という説明があるので、
+    // 文字列で判定すると**説明文に引っかかって常に通る**
+    // （最初にそう書いて、実際に引っかかった）。
+    expect(html).not.toContain('action="/signup/verify"');
+  });
+
+  it("登録済みのアドレスでも同じ応答", async () => {
+    // **これが正直にできる条件そのもの。** 判定がアドレスを見ていたら、
+    // 打ち止め中は「登録済み → 正常系 / 未登録 → 429」となって
+    // **アカウントの有無が読める。**
+    await seedRegisteredUser();
+    await fillSignupCap();
+    const page = await openSignupPage();
+
+    const forNew = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS, csrf_token: page.csrf },
+      { cookie: page.cookie },
+    );
+    const forExisting = await submit(
+      "/signup/start",
+      { email: REGISTERED, csrf_token: page.csrf },
+      { cookie: page.cookie },
+    );
+
+    expect(forExisting.status).toBe(forNew.status);
+
+    const normalize = (html: string, email: string): string => html.split(email).join("<EMAIL>");
+    expect(normalize(await forExisting.text(), REGISTERED)).toBe(
+      normalize(await forNew.text(), NEW_ADDRESS),
+    );
   });
 });
 

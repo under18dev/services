@@ -55,6 +55,53 @@ export class StartEmailOtpUseCase {
     const now = this.deps.clock.now();
     const cooldownSeconds = Math.ceil(OtpPolicy.resendCooldownMs / 1000);
 
+    // 用途ごとの総量（#236）。**ここは IP にもアドレスにも依らない。**
+    //
+    // `maxResends` はアドレス単位なので宛先を変えれば外れ、
+    // `RateLimitPolicy.email_start` は IP 単位なうえ近似で数倍が通る。
+    // **宛先を変えながら送る攻撃は 2 つを同時に外す。** そこを押さえる。
+    //
+    // ## なぜ「混み合っています」と正直に返すのか（#247）
+    //
+    // 以前はここが `shouldSend` の内側にあり、**打ち止め中も正常系と同じ
+    // 応答を返していた。** 画面には「確認コードをお送りしました」が出て、
+    // メールは永久に来ない。利用者は自分の入力か迷惑メールかを探すことに
+    // なる。**レート制限と同じ文言なら、サービス側の事情として読める。**
+    //
+    // ## なぜ正直にできるのか
+    //
+    // **この判定がアドレスを見ないから。** `shouldSend` の内側に置いたまま
+    // 正直にすると、打ち止め中は「登録済み → 正常系の応答 / 未登録 →
+    // 打ち止めの応答」となり、**応答の差からアカウントの有無が読める。**
+    // 外に出せば全員が同じ応答になるので口が開かない。
+    //
+    // **下の `maxResends` は同じことができない。** あちらはアドレス単位
+    // なので、打ち止めを正直に返した時点でそのアドレスの実在が漏れる。
+    // だから `ok` を返し続ける。**2 つの扱いが違うのは、判定が何を見て
+    // いるかの違いであって、方針がぶれているのではない。**
+    //
+    // 枠を消費するのは `create()` が走ったときだけなので、ここを外に
+    // 出しても「送られない要求は枠を消費しない」は変わらない。
+    const caps: Record<OtpPurpose, number> = OtpPolicy.globalMaxSends;
+    const sentForPurpose = await this.deps.challenges.countSentSinceForPurpose(
+      command.purpose,
+      new Date(now.getTime() - OtpPolicy.globalSendWindowMs),
+    );
+    if (sentForPurpose >= caps[command.purpose]) {
+      await settleSideEffects(
+        "otp.start",
+        this.deps.audit.record({
+          event: "otp.start",
+          outcome: "failure",
+          reason: "global_send_cap",
+        }),
+      );
+      // **`Retry-After` に載せる値を持っていない。** 窓が明けるのは
+      // 「いちばん古い行が 1 時間を過ぎたとき」で、それは要求ごとに違う。
+      // 嘘の秒数を返すくらいなら返さない（presentation 側も付けない）。
+      return err("rate_limited", "send cap reached for this purpose");
+    }
+
     // 直近の送信から間が空いていなければ、新しいコードを出さない。
     const active = await this.deps.challenges.findActive(address.value, command.purpose, now);
     if (active?.lastSentAt != null) {
@@ -103,44 +150,6 @@ export class StartEmailOtpUseCase {
     const shouldSend = command.purpose === "signup" ? user === null : user?.isActive === true;
 
     if (shouldSend) {
-      // 用途ごとの総量（#236）。**ここは IP にもアドレスにも依らない。**
-      //
-      // 上の `maxResends` はアドレス単位なので宛先を変えれば外れ、
-      // `RateLimitPolicy.email_start` は IP 単位なうえ近似で数倍が通る。
-      // **宛先を変えながら送る攻撃は 2 つを同時に外す。** そこを押さえる。
-      //
-      // **枠を消費するのは「行を作ったとき」だけである。** 数えている
-      // のは `email_challenges` の行数なので、送らない経路（登録済みの
-      // アドレスへの signup など）は何回叩いても枠に入らない。存在しない
-      // アドレスを並べて本物の送信を止める、はできない。
-      //
-      // **これは判定の位置ではなく、数え方から来ている。** この判定を
-      // `shouldSend` の外へ出しても挙動は変わらない（実際に動かして
-      // 確かめた）。内側に置いてあるのは、送らないと決まっている要求で
-      // count を走らせないためで、安全のためではない。
-      //
-      // **数える対象を「要求」に変えるなら、位置が意味を持ちはじめる。**
-      // そのときは上の性質が消えるので、test/otp-global-cap.test.ts の
-      // 「送られない要求は枠を消費しない」から先に壊れる。
-      const caps: Record<OtpPurpose, number> = OtpPolicy.globalMaxSends;
-      const sentForPurpose = await this.deps.challenges.countSentSinceForPurpose(
-        command.purpose,
-        new Date(now.getTime() - OtpPolicy.globalSendWindowMs),
-      );
-      if (sentForPurpose >= caps[command.purpose]) {
-        // **応答は変えない。** ここで様子が変わると、上の再送上限と同じく
-        // 「このアドレスは実在する」が読めてしまう。正常系と同じ値を返す。
-        await settleSideEffects(
-          "otp.start",
-          this.deps.audit.record({
-            event: "otp.start",
-            outcome: "failure",
-            reason: "global_send_cap",
-          }),
-        );
-        return ok({ retryAfterSeconds: cooldownSeconds });
-      }
-
       const code = this.deps.tokens.generateNumericCode(OtpPolicy.codeLength);
 
       // 新しいコードを出す前に古いものを潰す。残しておくと、
