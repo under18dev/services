@@ -51,6 +51,23 @@ jobs:
       - name: Check route patterns
         run: pnpm check:routes
 
+      # `set -e` の下で、一致ゼロの `grep` を変数に取る形を落とす（#231）。
+      #
+      #   var="$(... | grep foo)"
+      #
+      # 一致が無いと `grep` が 1 で終わり、代入ごとスクリプトが落ちる。
+      # **落ちること自体は正しい。問題は何も言わずに落ちること** ——
+      # 直後に書いた `::error::` に届かないので、デプロイが赤いのに理由が
+      # 1 行も出ない。
+      #
+      # **このリポジトリで 4 回入っている**（preflight の `grep -c`、
+      # smoke-form-probe の 2 箇所、そして codeql 照合は `|| true` 付きで
+      # 書けていた）。うち 2 件は私が書き、3 セッションのレビューを通って
+      # いる。「気をつける」では止まらないことが分かっている形なので、
+      # 人ではなく機械に見させる。
+      - name: Check shell exit-status traps
+        run: pnpm check:shell
+
       # github/codeql-action の init と analyze は同一バージョンでなければ
       # ならない。Dependabot 側は #71 でグループ化したので割れた PR は
       # 作られないが、手で編集してずらすことは依然できる。

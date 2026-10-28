@@ -18,6 +18,7 @@
     "check:bindings": "node scripts/check-service-bindings.mjs",
     "check:routes": "node scripts/check-route-patterns.mjs",
     "check:deadlines": "node scripts/check-deadlines.mjs",
+    "check:shell": "node scripts/check-shell-exit-status.mjs",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "test": "pnpm -r test && pnpm test:scripts",
