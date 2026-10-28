@@ -186,6 +186,60 @@ describe("PATCH /api/me", () => {
     expect(await readProfile()).toMatchObject({ displayName: user.displayName });
   });
 
+  /**
+   * `Origin: null` の救済が、**トークンの無い JSON API にも効いている**。
+   *
+   * form 側（`/login/*` `/signup/*`）は CSRF トークンが残るので、緩むのは
+   * 二重の片方だけ。**ここにはトークンが無く、Origin 検証が唯一の防御**
+   * である（`ui/csrf.ts` 冒頭の「既存の JSON API は isAllowedOrigin() だけで
+   * 守っている」）。
+   *
+   * 安全だと考える根拠は **`Sec-Fetch-Site` が禁止ヘッダ名でスクリプトから
+   * 書けない**ことと、**sandbox した iframe は不透明オリジンなので
+   * `cross-site` になる**ことだが、**どちらもブラウザの性質で、こちらの
+   * コードには無い**。#226 で踏んだのがまさに「ブラウザがこう振る舞うはず」
+   * に寄りかかって確かめていなかった形なので、ここで固定する。
+   */
+  it("Origin: null でも Sec-Fetch-Site が same-origin なら通す", async () => {
+    const response = await patchProfile(
+      { displayName: "新しい名前" },
+      { Origin: "null", "Sec-Fetch-Site": "same-origin" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readProfile()).toMatchObject({ displayName: "新しい名前" });
+  });
+
+  it("Origin: null で Sec-Fetch-Site が無ければ拒否する", async () => {
+    // 送らないブラウザでは Origin 側で判定する。null のままは通さない。
+    const response = await patchProfile({ displayName: "だめ" }, { Origin: "null" });
+
+    expect(response.status).toBe(403);
+    expect(await readProfile()).toMatchObject({ displayName: user.displayName });
+  });
+
+  it("Origin: null で Sec-Fetch-Site が cross-site なら拒否する", async () => {
+    const response = await patchProfile(
+      { displayName: "だめ" },
+      { Origin: "null", "Sec-Fetch-Site": "cross-site" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await readProfile()).toMatchObject({ displayName: user.displayName });
+  });
+
+  it("別オリジンは Sec-Fetch-Site が same-origin でも拒否する", async () => {
+    // **救済は `Origin` が読めないときだけ。** 読めて食い違うなら、
+    // ヘッダの自己申告より Origin を優先する。
+    const response = await patchProfile(
+      { displayName: "だめ" },
+      { Origin: "https://evil.example", "Sec-Fetch-Site": "same-origin" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await readProfile()).toMatchObject({ displayName: user.displayName });
+  });
+
   it("別オリジンからの PATCH を拒否する", async () => {
     const response = await patchProfile(
       { displayName: "だめ" },
