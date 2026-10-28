@@ -86,12 +86,23 @@ function field(form: FormData, name: string): string {
 function rejectCsrf(
   c: Context<AppBindings>,
   returnTo: string | null,
+  /**
+   * どちらの画面から来たか。**既定を `login` にしない。**
+   *
+   * 既定に落とすと、**新規登録で失敗した人がログイン画面に戻されたうえで
+   * 「操作を受け付けられませんでした」と言われる。** 自分が何をしようと
+   * していたのか分からなくなり、やり直す先も変わってしまう。
+   *
+   * 省略できないようにして、足した経路が黙って `login` に落ちるのを防ぐ。
+   */
+  mode: LoginMode,
 ): Response | Promise<Response> {
   return renderLogin(
     c,
     { kind: "email", email: "", error: "操作を受け付けられませんでした。もう一度お試しください。" },
     returnTo,
     403,
+    mode,
   );
 }
 
@@ -134,7 +145,7 @@ uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
 uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "login");
 
   const email = field(form, "email").trim();
 
@@ -169,7 +180,7 @@ uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
 uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "login");
 
   const email = field(form, "email").trim();
   const code = field(form, "code").trim();
@@ -248,7 +259,7 @@ uiRoutes.get("/signup", pageSecurityHeaders, (c) =>
 uiRoutes.post("/signup/start", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "signup");
 
   const email = field(form, "email").trim();
 
@@ -273,7 +284,7 @@ uiRoutes.post("/signup/start", pageSecurityHeaders, async (c) => {
 uiRoutes.post("/signup/verify", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "signup");
 
   const email = field(form, "email").trim();
   const code = field(form, "code").trim();
@@ -325,7 +336,7 @@ uiRoutes.post("/signup/verify", pageSecurityHeaders, async (c) => {
 uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
-  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo);
+  if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "login");
 
   // どの経路でも Cookie は必ず落とす。サーバー側の失効に失敗しても、
   // ブラウザに使えないトークンを残さない（auth.routes.ts と同じ方針）。
