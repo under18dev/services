@@ -12,6 +12,7 @@ import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import { LoginPage, type LoginMode, type LoginView } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
+import { enforceIpRateLimit } from "../rate-limit";
 import {
   loginUrlWithReturnTo,
   RETURN_TO_FIELD,
@@ -106,6 +107,32 @@ function rejectCsrf(
   );
 }
 
+/**
+ * form 経路の IP レート制限。
+ *
+ * **JSON の 429 をそのまま返さない。** form 送信の応答は画面なので、
+ * 生の JSON が出ると利用者には何が起きたか分からない。`enforceIpRateLimit`
+ * が立てた `Retry-After` はコンテキストに載っているので、本文だけ
+ * 画面に差し替える。
+ *
+ * **入口ごとに守りが違う状態を残さない。** 同じ `StartEmailOtpUseCase` を
+ * 呼ぶ入口が form と JSON の 2 つあり、鍵が掛かっていたのは JSON 側だけ
+ * だった。`signup` は未登録のアドレスへ送るので、1 IP から宛先を変えながら
+ * 無制限に送れていた（`login` は登録済みにしか送らないので無害だったが、
+ * **無害である理由が `shouldSend` の実装に依存している**ので同じく掛ける）。
+ */
+async function enforceFormRateLimit(
+  c: Context<AppBindings>,
+  scope: Parameters<typeof enforceIpRateLimit>[1],
+  view: LoginView,
+  returnTo: string | null,
+  mode: LoginMode,
+): Promise<Response | Promise<Response> | null> {
+  const limited = await enforceIpRateLimit(c, scope);
+  if (limited === null) return null;
+  return renderLogin(c, view, returnTo, 429, mode);
+}
+
 uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
   const returnTo = readReturnTo(c);
   const token = readSessionCookie(c);
@@ -147,6 +174,21 @@ uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
   const returnTo = readReturnTo(c, form);
   if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "login");
 
+  // **CSRF の後、入力を読む前に掛ける。** CSRF に落ちる要求で枠を消費させると、
+  // 攻撃者が正規の利用者を締め出せる。
+  const throttled = await enforceFormRateLimit(
+    c,
+    "email_start",
+    {
+      kind: "email",
+      email: field(form, "email").trim(),
+      error: "ただいま混み合っています。しばらくしてからお試しください。",
+    },
+    returnTo,
+    "login",
+  );
+  if (throttled !== null) return throttled;
+
   const email = field(form, "email").trim();
 
   const result = await c.get("container").useCases.startEmailOtp.execute({
@@ -181,6 +223,21 @@ uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
   if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "login");
+
+  // **CSRF の後、入力を読む前に掛ける。** CSRF に落ちる要求で枠を消費させると、
+  // 攻撃者が正規の利用者を締め出せる。
+  const throttled = await enforceFormRateLimit(
+    c,
+    "email_verify",
+    {
+      kind: "code",
+      email: field(form, "email").trim(),
+      error: "ただいま混み合っています。しばらくしてからお試しください。",
+    },
+    returnTo,
+    "login",
+  );
+  if (throttled !== null) return throttled;
 
   const email = field(form, "email").trim();
   const code = field(form, "code").trim();
@@ -261,6 +318,21 @@ uiRoutes.post("/signup/start", pageSecurityHeaders, async (c) => {
   const returnTo = readReturnTo(c, form);
   if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "signup");
 
+  // **CSRF の後、入力を読む前に掛ける。** CSRF に落ちる要求で枠を消費させると、
+  // 攻撃者が正規の利用者を締め出せる。
+  const throttled = await enforceFormRateLimit(
+    c,
+    "email_start",
+    {
+      kind: "email",
+      email: field(form, "email").trim(),
+      error: "ただいま混み合っています。しばらくしてからお試しください。",
+    },
+    returnTo,
+    "signup",
+  );
+  if (throttled !== null) return throttled;
+
   const email = field(form, "email").trim();
 
   const result = await c.get("container").useCases.startEmailOtp.execute({
@@ -285,6 +357,21 @@ uiRoutes.post("/signup/verify", pageSecurityHeaders, async (c) => {
   const form = await readForm(c);
   const returnTo = readReturnTo(c, form);
   if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) return rejectCsrf(c, returnTo, "signup");
+
+  // **CSRF の後、入力を読む前に掛ける。** CSRF に落ちる要求で枠を消費させると、
+  // 攻撃者が正規の利用者を締め出せる。
+  const throttled = await enforceFormRateLimit(
+    c,
+    "email_verify",
+    {
+      kind: "code",
+      email: field(form, "email").trim(),
+      error: "ただいま混み合っています。しばらくしてからお試しください。",
+    },
+    returnTo,
+    "signup",
+  );
+  if (throttled !== null) return throttled;
 
   const email = field(form, "email").trim();
   const code = field(form, "code").trim();
