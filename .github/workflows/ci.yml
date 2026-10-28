@@ -51,17 +51,6 @@ jobs:
       - name: Check route patterns
         run: pnpm check:routes
 
-      # 残課題を条件（「必要になったら」「#106 が直るまで」）で書くと、
-      # **条件を誰も監視しない**。#234 では、解決済みの issue を指す断り書きが
-      # 4 日残り、**その下に足した検査が赤くなっても「既知」で流れる**状態に
-      # なっていた。日付で書けば機械が見られる —— ただし見る者がいなければ
-      # 同じなので、ここが見る。
-      #
-      # 期限が 1 つも見つからない場合も落とす。全部片付いたのか書き方が
-      # 変わったのか、出力からは区別できないため（#217 の 0 件ガードと同じ）。
-      - name: Check deadlines
-        run: pnpm check:deadlines
-
       # github/codeql-action の init と analyze は同一バージョンでなければ
       # ならない。Dependabot 側は #71 でグループ化したので割れた PR は
       # 作られないが、手で編集してずらすことは依然できる。
@@ -89,6 +78,26 @@ jobs:
           fi
 
           echo "All codeql-action references are pinned to the same commit."
+
+  deadlines:
+    # **独立したジョブにしてある。**
+    #
+    # この検査は**差分と無関係に落ちる** —— 記録された期限が来た日から、
+    # 誰がどんな PR を出しても赤くなる。`Lint & format` の中に混ぜると
+    # 「自分の変更が lint に落ちた」に見えて、踏んだ人が原因を自分の差分に
+    # 探す。ジョブ名が `Deadlines` なら、チェック一覧を見た時点で
+    # **自分のせいではない**と分かる。
+    #
+    # これを曖昧にすると、#234 とは逆向きの事故が起きる —— 赤を消すために
+    # 期限だけ伸ばす、が定着する。それは条件に戻すのと同じことである。
+    name: Deadlines
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+      - name: Check deadlines
+        run: pnpm check:deadlines
 
   typecheck:
     name: Typecheck
@@ -231,12 +240,13 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, build]
+    needs: [lint, deadlines, typecheck, test, build]
     if: always()
     steps:
       - name: Check results
         run: |
           echo "lint=${{ needs.lint.result }}"
+          echo "deadlines=${{ needs.deadlines.result }}"
           echo "typecheck=${{ needs.typecheck.result }}"
           echo "test=${{ needs.test.result }}"
           echo "build=${{ needs.build.result }}"

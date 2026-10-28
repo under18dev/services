@@ -53,9 +53,33 @@ for (const d of result.upcoming) {
 }
 
 if (result.passed.length > 0) {
+  // **踏んだ人は、たいてい無関係な PR を出しただけである。**
+  //
+  // 期限が来た日から、誰がどんな変更を出しても赤くなる。原因を自分の差分に
+  // 探させないために、まず「あなたのせいではない」と「何をすれば緑になるか」
+  // を書く。これが伝わらないと、#234 とは逆向きに**赤を消すために期限だけ
+  // 伸ばす**が定着する —— それは条件に戻すのと同じことである。
+  console.error("");
+  console.error("This failure is NOT caused by the change in this pull request.");
+  console.error(
+    "A deadline recorded in the docs has arrived. It fails on every pull request until the decision is recorded.",
+  );
+  console.error("");
+  console.error("To make it green, do one of these -- in this order of preference:");
+  console.error(
+    "  1. Record the decision where the deadline points (usually the issue named next to it), then remove the marker.",
+  );
+  console.error(
+    "  2. Move the date out ONLY together with a written reason for the new date, in the same paragraph.",
+  );
+  console.error(
+    "Moving the date with no reason turns it back into the condition it replaced, which nobody monitors (#234).",
+  );
+  console.error("");
+
   for (const d of result.passed) {
     console.error(
-      `::error file=${d.path},line=${d.line}::Deadline ${d.date} has arrived and the decision is still not recorded: ${d.text}`,
+      `::error file=${d.path},line=${d.line}::Deadline ${d.date} has arrived and the decision is still not recorded: ${d.text}. This is unrelated to your change -- see the job log for what to do.`,
     );
   }
   process.exit(1);
