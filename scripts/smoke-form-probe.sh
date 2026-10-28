@@ -79,8 +79,20 @@ fi
 
 # **原因そのものを名指しで押さえる。** 下の POST が通れば結果としては
 # 足りているが、`no-referrer` に戻ったことを直接言えたほうが直す側が速い。
+# **ヘッダ名の綴りに依存しない。** HTTP/2 は小文字で届くが、HTTP/1.1 は
+# `Referrer-Policy` と大文字で届く。awk の `IGNORECASE` は gawk 拡張で、
+# macOS の awk も ubuntu の mawk も無視する —— 本番が HTTP/2 なので CI では
+# たまたま当たっていただけで、HTTP/1.1 の相手には**健全でも「ヘッダが無い」
+# と報告していた**（`wrangler dev` に当てると再現する）。`grep -i` は POSIX。
+#
+# **`|| true` を外さない。** 代入文の終了コードはコマンド置換の終了コードで、
+# ヘッダが無いと `grep` が 1 で終わる。`pipefail` がそれを拾い、`set -e` が
+# **その場で**落とすので、下の「ヘッダが無い」分岐に届かない。デプロイは
+# 赤くなるが理由が 1 行も出ず、当番は URL を手で叩き直すところから始める。
+# awk 版が無言で済んでいたのは、awk が一致しなくても 0 で終わるため。
 referrer_policy="$(tr -d '\r' < "$head_file" \
-  | awk 'BEGIN{IGNORECASE=1} /^referrer-policy:/{sub(/^[^:]*:[ ]*/,""); print; exit}')"
+  | grep -i '^referrer-policy:' | head -1 \
+  | cut -d: -f2- | tr 'A-Z' 'a-z' | tr -d '[:space:]' || true)"
 if [ "$referrer_policy" = "no-referrer" ]; then
   note "$base/login sends 'Referrer-Policy: no-referrer'. Browsers then send 'Origin: null' on same-origin form posts and every form route breaks (#226)."
 elif [ -z "$referrer_policy" ]; then
@@ -91,7 +103,10 @@ fi
 # ブラウザが POST に載せるのは **hidden input のほう**なので、そちらを使う。
 # Cookie 側とも突き合わせる: 片方だけ更新される壊れ方だと全利用者が 403 に
 # なるが、hidden input だけ見ていると「値はあった」で素通りする。
-token="$(grep -o 'name="csrf_token" value="[^"]*"' "$body" | head -1 | sed 's/.*value="//; s/"$//')"
+# ここも `|| true` が要る。hidden input が無いと `grep -o` が 1 で終わり、
+# 下の「rendered no csrf_token hidden input」に届かずに無言で死ぬ。
+# **ログイン画面そのものが壊れたときに一番読みたい 1 行**がそれである。
+token="$(grep -o 'name="csrf_token" value="[^"]*"' "$body" | head -1 | sed 's/.*value="//; s/"$//' || true)"
 cookie_token="$(awk -F'\t' '$6 ~ /(^|-)u18_csrf$/ {print $7}' "$jar" | head -1)"
 
 if [ -z "$token" ]; then
