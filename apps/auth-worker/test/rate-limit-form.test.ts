@@ -197,3 +197,76 @@ describe("form からの OTP 送信にも IP 制限が掛かる", () => {
     expect(victim.status, "1 人が詰まらせても他を巻き込まない").toBe(200);
   });
 });
+
+/**
+ * 制限が CSRF の**後ろ**にあること。
+ *
+ * ## なぜ別に書くのか
+ *
+ * 4 つのハンドラに「CSRF の後、入力を読む前に掛ける」とコメントがあるが、
+ * **その順序を確かめているテストが 1 本も無かった。** 順序を前へ動かしても
+ * 落ちるのは `signup.ui.test.ts` の 2 本だけで、しかもそれは**偶然**である
+ * —— あのファイルは `CF-Connecting-IP` を設定しないので全テストが既定の IP を
+ * 共有していて、CSRF に落ちる要求が枠を食い尽くすから落ちていた。
+ *
+ * 偶然であることの何が悪いかというと、**壊したときに出るメッセージが
+ * `expected 429 to be 403` になる。** これを読んだ人は「レート制限のテストが
+ * 干渉している」と解釈して、`freshIp()` を足して直してしまう。
+ * **正しい直し方に見えるものが、唯一の固定を消す。**
+ *
+ * （この PR で `signup.ui.test.ts` 側は実際に `freshIp()` に揃えた。
+ * 偶然の支えを外したので、ここが唯一の固定になる。）
+ *
+ * ## 順序が逆だと何が起きるか
+ *
+ * 制限を CSRF より前に置くと、**攻撃者は被害者を締め出せる。** クロスサイトの
+ * form 送信はトークンを持てないので必ず 403 になるが、それでも枠は消費される
+ * —— そして枠は **IP 単位**で、クロスサイト要求は**被害者のブラウザから、
+ * 被害者の IP で**飛ぶ。被害者に 1 日 1 回どこかのページを踏ませるだけで、
+ * その人はログインできなくなる。
+ *
+ * ## ランブック §13.2 と矛盾しないのか
+ *
+ * §13.2 は「制限は高価な処理の前に」と書いている。両立する: **高価な処理の
+ * 前に、かつ「攻撃者の要求と被害者の要求を見分ける検査」の後ろに**置く。
+ * CSRF はその検査にあたる。`/oauth/token` のクライアント認証はそうではない
+ * （叩いているのは RP のサーバで、認証に落ちる要求は攻撃者自身の枠を食う）
+ * ので、あちらは前に置いてよい。
+ */
+describe("CSRF に落ちる要求は枠を消費しない", () => {
+  const cases = [
+    { path: "/login/start", page: "/login", scope: "email_start", legit: 200 },
+    { path: "/signup/start", page: "/signup", scope: "email_start", legit: 200 },
+    { path: "/login/verify", page: "/login", scope: "email_verify", legit: 400 },
+    { path: "/signup/verify", page: "/signup", scope: "email_verify", legit: 400 },
+  ] as const;
+
+  it.each(cases)("$path", async ({ path, page: pagePath, scope, legit }) => {
+    const { limit } = RateLimitPolicy[scope];
+    const ip = freshIp();
+    const page = await openPage(pagePath);
+
+    // 上限より多く撃つ。トークンを付けないので、どれも CSRF で落ちる。
+    for (let i = 0; i < limit + 3; i += 1) {
+      const rejected = await submit(
+        path,
+        // code は検証側だけが見る。付けておいても開始側の判断は変わらない。
+        { email: `attacker${i}@example.test`, code: "123456" },
+        page.cookie,
+        ip,
+      );
+      // **429 が 1 つでも混ざったら順序が逆**。403 のままであることが、
+      // 拒否した要求を数えていないことの証拠になる。
+      expect(rejected.status, `${i + 1} 回目は CSRF で 403（429 なら順序が逆）`).toBe(403);
+    }
+
+    // 同じ IP から正規の要求。枠が残っていれば通る。
+    const victim = await submit(
+      path,
+      { email: "victim@example.test", code: "123456", csrf_token: page.csrf },
+      page.cookie,
+      ip,
+    );
+    expect(victim.status, "被害者の枠が攻撃者に消費されていない").toBe(legit);
+  });
+});
