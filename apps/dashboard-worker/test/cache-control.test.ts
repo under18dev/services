@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import {
   GRANTS_PATH,
+  ISLAND_PATH,
   OVERVIEW_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
@@ -16,9 +17,14 @@ import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
  * プロフィール・セッション一覧・同意済みアプリで、中間プロキシやブラウザに
  * 残ると共用端末で前の利用者の情報が戻る。
  *
- * **例外は `/account/ui/u18.css` ただ 1 つ。** 全利用者に同じ CSS で、
- * 個人情報を 1 文字も含まない。増やすときは、ここの「例外はこれ 1 つ」を
- * 更新したうえで、なぜ個人情報が含まれないのかを書くこと。
+ * **例外は 2 つ** —— ハッシュ付きのスタイルシートとアイランド JS。
+ * どちらも全利用者に同じ中身で、個人情報を 1 文字も含まない。増やすときは
+ * ここの数を更新したうえで、なぜ個人情報が含まれないのかを書くこと。
+ *
+ * **長らく「例外は `/account/ui/u18.css` ただ 1 つ」と書いてあった。**
+ * アイランド JS は最初から同じ扱いだったのに、この文も下の検査も
+ * スタイルシートしか見ていない。**「例外はこれだけ」と宣言しながら、
+ * その片方を一度も確かめていなかった。**
  */
 describe("全経路に no-store が付く", () => {
   const identity = {
@@ -82,51 +88,47 @@ describe("全経路に no-store が付く", () => {
   });
 });
 
-describe("キャッシュしてよい経路はスタイルシートだけ", () => {
-  it("スタイルシートは immutable で返る", async () => {
-    // ここだけ既定の no-store を上書きしている。全利用者に同じ CSS で、
+describe("キャッシュしてよいのはハッシュ付きのアセットだけ", () => {
+  /** 例外として扱う経路。**増やしたらここに足す。** */
+  const assets = [
+    ["スタイルシート", STYLESHEET_PATH, `${ACCOUNT_BASE_PATH}/ui/u18.css`],
+    ["アイランド JS", ISLAND_PATH, `${ACCOUNT_BASE_PATH}/ui/account-island.js`],
+  ] as const;
+
+  const get = (path: string, headers: HeadersInit = {}) =>
+    createApp().fetch(
+      new Request(`${ORIGIN}${path}`, { headers }),
+      envWith({} as never),
+      executionContext(),
+    );
+
+  it.each(assets)("%s は immutable で返る", async (_label, path) => {
+    // ここだけ既定の no-store を上書きしている。全利用者に同じ中身で、
     // 個人情報を含まない。毎回取り直させる理由が無い。
     //
     // **`immutable` にできるのは URL に内容ハッシュが入っているから**
     // （#211）。中身が変われば URL が変わるので、古いものを掴んだ
     // ブラウザと新しいサーバーが重なる窓が無い。
-    const response = await createApp().fetch(
-      new Request(`${ORIGIN}${STYLESHEET_PATH}`),
-      envWith({} as never),
-      executionContext(),
-    );
+    const response = await get(path);
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe(IMMUTABLE_ASSET_CACHE_CONTROL);
   });
 
-  it("ハッシュの無い古い URL は 404 になる", async () => {
+  it.each(assets)("%s のハッシュ無しの古い URL は 404 になる", async (_label, _path, legacy) => {
     // **これは正しい挙動である。** デプロイ前の URL を掴んだブラウザは
     // 新しいサーバーから取れない —— 代わりに、新しいページが新しい URL を
     // 指しているので、ページを読めば必ず新しいものを取りに行く。
     // ここが 200 を返すなら、古い URL も生かしていることになり、
     // #211 で消したはずの「古いものが使われ続ける窓」が戻る。
-    const response = await createApp().fetch(
-      new Request(`${ORIGIN}${ACCOUNT_BASE_PATH}/ui/u18.css`),
-      envWith({} as never),
-      executionContext(),
-    );
-
-    expect(response.status).toBe(404);
+    expect((await get(legacy)).status).toBe(404);
   });
 
-  it("Cookie を送っても応答が変わらない", async () => {
+  it.each(assets)("%s は Cookie を送っても応答が変わらない", async (_label, path) => {
     // 利用者ごとに違う内容が混ざっていたら、public で配ってはいけない。
     // 「個人情報を含まない」を、説明ではなく振る舞いで確かめる。
-    const fetchCss = (headers: HeadersInit) =>
-      createApp().fetch(
-        new Request(`${ORIGIN}${STYLESHEET_PATH}`, { headers }),
-        envWith({} as never),
-        executionContext(),
-      );
-
-    const anonymous = await (await fetchCss({})).text();
-    const authenticated = await (await fetchCss({ Cookie: "u18_session=someones-token" })).text();
+    const anonymous = await (await get(path)).text();
+    const authenticated = await (await get(path, { Cookie: "u18_session=someones-token" })).text();
 
     expect(authenticated).toBe(anonymous);
   });
