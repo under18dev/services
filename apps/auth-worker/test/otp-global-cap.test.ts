@@ -86,15 +86,49 @@ describe("用途ごとの送信総量", () => {
     expect(ctx.emailSender.sent).toHaveLength(SIGNUP_CAP);
   });
 
-  it("止まっても応答を変えない", async () => {
-    // 打ち止めだと分かると、**攻撃者には「どこまで送れたか」が見え、
-    // 利用者には「自分だけ弾かれている」ように見える。** 送れたときと
-    // 同じ値でなければならない。
-    const first = await ctx.start.execute({ email: "first@example.test", purpose: "signup" });
-    await blast(SIGNUP_CAP + 5);
+  it("止まったことを正直に伝える（#247）", async () => {
+    // **黙って成功を装わない。** 以前は正常系と同じ応答を返していて、
+    // 画面には「確認コードをお送りしました」が出て**メールは永久に
+    // 来なかった。** 利用者は自分の入力か迷惑メールかを探すことになる。
+    // レート制限と同じ文言なら、サービス側の事情として読める。
+    await blast(SIGNUP_CAP + 1);
+
     const blocked = await ctx.start.execute({ email: "late@example.test", purpose: "signup" });
 
-    expect(blocked).toEqual(first);
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) throw new Error("unreachable");
+    expect(blocked.error.code).toBe("rate_limited");
+  });
+
+  it("打ち止め中、登録済みかどうかで応答が変わらない", async () => {
+    // **これが正直にできる条件そのものである。** 判定が `shouldSend` の
+    // 内側にあると、打ち止め中は「登録済み → 正常系 / 未登録 → 打ち止め」
+    // となり、**応答の差からアカウントの有無が読める。** 外に出した以上、
+    // ここが成り立たなければ #247 の変更は穴を 1 つ開けただけになる。
+    ctx.users.seed(aUser({ email: "taro@example.com" }));
+    await blast(SIGNUP_CAP + 1);
+
+    const registered = await ctx.start.execute({
+      email: "taro@example.com",
+      purpose: "signup",
+    });
+    const unknown = await ctx.start.execute({
+      email: "nobody@example.test",
+      purpose: "signup",
+    });
+
+    expect(registered).toEqual(unknown);
+  });
+
+  it("打ち止めでないときは「送った」とだけ返す", async () => {
+    // 正常系まで `rate_limited` に巻き込んでいないこと。**打ち止めの
+    // 応答が増えた以上、正常系と見分けが付くことを別に見る。**
+    const registered = await ctx.start.execute({
+      email: "newcomer@example.test",
+      purpose: "signup",
+    });
+
+    expect(registered.ok).toBe(true);
   });
 
   it("signup を尽くしてもログインは送れる", async () => {

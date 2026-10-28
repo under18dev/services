@@ -104,7 +104,30 @@ export const emailChallenges = sqliteTable(
     createdAt: createdAt(),
   },
   (table) => [
-    index("email_challenges_email_purpose_idx").on(table.email, table.purpose),
+    /**
+     * **`(email, purpose)` はここに無い（#245 で落とした）。**
+     *
+     * このテーブルを email で引く経路（`countSentSince` /
+     * `invalidateActive` / `consume`）は**すべて `lower(email)` を
+     * 掛けている**ので、生の `email` 列の索引は選ばれない。本番の
+     * `EXPLAIN QUERY PLAN` でも 3 クエリとも別の索引を使っていた。
+     *
+     * **`lower()` を外して索引に合わせる、はできない。** `EmailAddress`
+     * （`packages/domain`）はドメイン部だけ小文字化し local 部は残す ——
+     * 「別人のアドレスを同一視しない」という明示的な判断である。一方
+     * ここの `lower()` は、大文字小文字を変えて再送上限を回避されるのを
+     * 防いでいる。**同じリポジトリの 2 箇所が、意図して違う同一視をして
+     * いる。** 片方に寄せると、もう片方の判断が壊れる。
+     *
+     * **式インデックス（`lower(email), purpose`）も足していない。**
+     * プランナは既に `(purpose, created_at)` を選んでおり、乗り換える
+     * 保証が無い。足してから計画を見ないと**使われない索引が 2 本**に
+     * なる。保持期限は 1 時間で行数も少なく、**性能上の問題は観測されて
+     * いない** —— 直したかったのは宣言と実態のずれだけである。
+     *
+     * 足したくなったら、まず `email-challenge.repository.test.ts` の
+     * 「どの索引が効いているか」を読むこと。
+     */
     index("email_challenges_expires_idx").on(table.expiresAt),
     /**
      * 用途ごとの総量を数えるため（#236）。

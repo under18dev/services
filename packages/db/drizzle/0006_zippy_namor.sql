@@ -1,0 +1,1 @@
+DROP INDEX `email_challenges_email_purpose_idx`;
