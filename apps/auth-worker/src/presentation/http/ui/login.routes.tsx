@@ -127,6 +127,22 @@ function rejectCsrf(
  * 無制限に送れていた（`login` は登録済みにしか送らないので無害だったが、
  * **無害である理由が `shouldSend` の実装に依存している**ので同じく掛ける）。
  */
+/**
+ * UseCase の失敗を画面のステータスへ翻訳する。
+ *
+ * **`rate_limited` を 400 で返さない**（#247）。form 経路でも、混んでいる
+ * ことと入力が悪いことは別の話で、ブラウザの再送・中間プロキシ・外形監視が
+ * どれも 400 と 429 を区別して扱う。
+ *
+ * **`Retry-After` は付けない。** 総量の窓が明けるのは「いちばん古い行が
+ * 1 時間を過ぎたとき」で、要求ごとに違う値になる。
+ * `enforceFormRateLimit` のほうは binding が正確な秒数を持っているので
+ * 付けている —— 持っていないところで嘘の秒数を出さない。
+ */
+function statusFor(code: string): 400 | 429 {
+  return code === "rate_limited" ? 429 : 400;
+}
+
 async function enforceFormRateLimit(
   c: Context<AppBindings>,
   scope: Parameters<typeof enforceIpRateLimit>[1],
@@ -223,7 +239,12 @@ uiRoutes.post("/login/start", pageSecurityHeaders, async (c) => {
       result.error.code === "invalid_input"
         ? "メールアドレスの形式をご確認ください。"
         : "ただいま混み合っています。しばらくしてからお試しください。";
-    return renderLogin(c, { kind: "email", email, error: message }, returnTo, 400);
+    return renderLogin(
+      c,
+      { kind: "email", email, error: message },
+      returnTo,
+      statusFor(result.error.code),
+    );
   }
 
   // 成功しても「送った」とは言わない。未登録のアドレスでも同じこの画面を返す。
@@ -367,7 +388,13 @@ uiRoutes.post("/signup/start", pageSecurityHeaders, async (c) => {
       result.error.code === "invalid_input"
         ? "メールアドレスの形式をご確認ください。"
         : "ただいま混み合っています。しばらくしてからお試しください。";
-    return renderLogin(c, { kind: "email", email, error: message }, returnTo, 400, "signup");
+    return renderLogin(
+      c,
+      { kind: "email", email, error: message },
+      returnTo,
+      statusFor(result.error.code),
+      "signup",
+    );
   }
 
   return renderLogin(c, { kind: "code", email, error: null }, returnTo, 200, "signup");
