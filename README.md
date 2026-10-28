@@ -217,9 +217,15 @@ curl http://localhost:8787/health
 curl http://localhost:8787/.well-known/openid-configuration
 curl http://localhost:8787/login   # ログイン画面（HTML）
 
-pnpm lint       # クリーンに通る
-pnpm typecheck  # 6 パッケージすべて通る
-pnpm test       # 617 件（domain 25 / auth-worker 477 / dashboard-worker 26 / nfc-worker 89）
+pnpm check      # CI が見るものを全部（lint + typecheck + test）
+```
+
+**push する前はこれ 1 本でよい。** 内訳を個別に回したいときは:
+
+```bash
+pnpm lint       # CI の `Lint & format` ジョブと同じもの（eslint だけではない）
+pnpm typecheck  # 6 パッケージすべて
+pnpm test       # 全 workspace
 ```
 
 これが現在のグリーンな基準値。手元で落ちたら、自分の変更かセットアップ
@@ -319,9 +325,12 @@ npx wrangler dev --port 8799 \
 | `pnpm dev:nfc`                                | nfc-worker を `wrangler dev` で起動する。8787 / 8788 と衝突するので `--port` を足す              |
 | `pnpm build`                                  | 全 workspace の `build`。Worker は `wrangler deploy --dry-run --outdir dist` でバンドル検証する  |
 | `pnpm typecheck`                              | 全 workspace で `tsc --noEmit`。`cf-typegen` 済みであることが前提                                |
-| `pnpm lint`                                   | ルートから `eslint .`。レイヤ依存ルール（`packages/config/eslint.layers.js`）を含む              |
-| `pnpm lint:fix`                               | 上記を `--fix` 付きで実行する                                                                    |
-| `pnpm format`                                 | Prettier で全体を整形する                                                                        |
+| `pnpm check`                                  | **push 前はこれ。** `lint` + `typecheck` + `test`。CI が見るものと同じ                           |
+| `pnpm lint`                                   | CI の `Lint & format` ジョブと**同じもの**。eslint・prettier・静的検査をまとめて回す             |
+| `pnpm lint:eslint`                            | eslint だけ。レイヤ依存ルール（`packages/config/eslint.layers.js`）を含む                        |
+| `pnpm lint:format`                            | `prettier --check .` だけ                                                                        |
+| `pnpm lint:fix`                               | eslint を `--fix` 付きで実行する                                                                 |
+| `pnpm format`                                 | Prettier で全体を整形する（`--write`）                                                           |
 | `pnpm test`                                   | 全 workspace のテスト。Worker 側は `cloudflareTest()` プラグインで workerd 上の vitest           |
 | `pnpm cf-typegen`                             | `apps/*` で `wrangler types` を実行し `worker-configuration.d.ts` を再生成する                   |
 | `pnpm --filter @u18/auth-worker build:client` | Auth UI のクライアントアイランドだけを esbuild でバンドルする（通常は上記が自動で呼ぶ）          |
