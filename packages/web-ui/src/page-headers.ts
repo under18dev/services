@@ -40,6 +40,24 @@ import { secureHeaders } from "hono/secure-headers";
  *
  * CSP に引っかかったら、ここを緩めるのではなく外部ファイルへ出すこと。
  */
+/**
+ * **`Referrer-Policy` を `no-referrer` のままにしない。**
+ *
+ * `secureHeaders()` の既定は `no-referrer` で、一見するとこれが最も安全に
+ * 見える。ところが Fetch 仕様では、**referrer policy が参照元を落とす場合、
+ * ナビゲーション要求の `Origin` も `null` になる。** その結果:
+ *
+ *   POST /signup/start   Origin: null   Sec-Fetch-Site: same-origin   -> 403
+ *
+ * **自分のページから出した form 送信が、自分で拒否される。** JS 無しで
+ * 成立させている経路（ログイン・新規登録・ログアウト）が実ブラウザで
+ * 全滅していた。本番で踏むまで気づかなかったのは、テストが `Origin` を
+ * 明示的に付けていたため（`origin.ts` の検証はそこを通っていた）。
+ *
+ * `same-origin` にすると、**同一オリジンへの要求にだけ** 参照元が載る。
+ * 外部サイトへは何も送らないので、`redirect_uri` へ飛ぶときに認可 URL が
+ * RP へ漏れることはない —— 守りたかったのはそちらで、それは保たれる。
+ */
 export const pageSecurityHeaders = secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'none'"],

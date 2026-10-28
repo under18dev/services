@@ -77,15 +77,16 @@ async function openSignupPage(): Promise<{ cookie: string; csrf: string; html: s
 function submit(
   path: string,
   fields: Record<string, string>,
-  options: { cookie?: string; origin?: string | null } = {},
+  options: { cookie?: string; origin?: string | null; secFetchSite?: string } = {},
 ): Promise<Response> {
-  const { cookie, origin = ORIGIN } = options;
+  const { cookie, origin = ORIGIN, secFetchSite } = options;
   return SELF.fetch(`${BASE}${path}`, {
     method: "POST",
     redirect: "manual",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       ...(origin === null ? {} : { Origin: origin }),
+      ...(secFetchSite === undefined ? {} : { "Sec-Fetch-Site": secFetchSite }),
       ...(cookie === undefined ? {} : { Cookie: cookie }),
     },
     body: new URLSearchParams(fields).toString(),
@@ -215,6 +216,65 @@ describe("アカウントの有無を漏らさない", () => {
     const repository = new DrizzleEmailChallengeRepository(createIdentityDatabase(env.IDENTITY_DB));
     const active = await repository.findActive(REGISTERED, "signup", new Date());
     expect(active).toBeNull();
+  });
+});
+
+describe("ブラウザが Origin: null を送る場合（本番で踏んだ）", () => {
+  /**
+   * Fetch 仕様では、referrer policy が参照元を落とすとき**ナビゲーション
+   * 要求の `Origin` も `null` になる**。`secureHeaders()` の既定
+   * （`no-referrer`）のままだと、自分のページから出した form 送信が
+   * `Origin: null` で届く。
+   *
+   * **本番で JS 無しの form 経路が全滅していた**（ログイン・新規登録・
+   * ログアウト）。テストが `Origin` を明示的に付けていたため気づけなかった。
+   */
+  it("Sec-Fetch-Site が same-origin なら通す", async () => {
+    const page = await openSignupPage();
+    const response = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS, csrf_token: page.csrf },
+      { cookie: page.cookie, origin: "null", secFetchSite: "same-origin" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("確認コード");
+  });
+
+  it("Sec-Fetch-Site が cross-site なら拒む", async () => {
+    // クロスサイトの攻撃者が送らせた form はこちらになる。
+    const page = await openSignupPage();
+    const response = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS, csrf_token: page.csrf },
+      { cookie: page.cookie, origin: "null", secFetchSite: "cross-site" },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("Sec-Fetch-Site が無ければ拒む（fail-closed）", async () => {
+    // 送らないブラウザでは Origin 側で判定する。null のままは通さない。
+    const page = await openSignupPage();
+    const response = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS, csrf_token: page.csrf },
+      { cookie: page.cookie, origin: "null" },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("Sec-Fetch-Site が same-origin でもトークンが無ければ拒む", async () => {
+    // Origin の救済は**二重の片方**を緩めるだけで、トークンは依然要る。
+    const page = await openSignupPage();
+    const response = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS },
+      { cookie: page.cookie, origin: "null", secFetchSite: "same-origin" },
+    );
+
+    expect(response.status).toBe(403);
   });
 });
 

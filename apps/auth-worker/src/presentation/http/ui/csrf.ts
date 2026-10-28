@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { isAllowedOrigin } from "../origin";
 import type { AppBindings } from "../types";
+import type { AuditEventName } from "../../../application/ports/audit-log.port";
 
 /**
  * form POST 用の CSRF 対策（仕様書 9 CSRF）。
@@ -85,11 +86,44 @@ function buildCsrfCookie(env: Env, token: string): string {
  * Origin とトークンの**両方**を要求する。片方でも欠けたら拒否する。
  */
 export function isValidCsrf(c: Context<AppBindings>, submitted: string | undefined): boolean {
-  if (!isAllowedOrigin(c)) return false;
-
   const expected = getCookie(c, csrfCookieName(c.env));
-  if (expected === undefined || expected.length === 0) return false;
-  if (submitted === undefined || submitted.length === 0) return false;
 
-  return c.get("container").services.comparator.equals(expected, submitted);
+  /**
+   * 落ちた理由を**ログにだけ**出す。
+   *
+   * 画面には書かない —— 「トークンが古い」「Origin が違う」を出し分けると、
+   * 攻撃者に何を直せばよいか教えることになる（`rejectCsrf` の方針）。
+   *
+   * **ログに出ないと調べようがない。** 実際、本番で
+   * 「どのメールアドレスを入れても操作を受け付けられない」という報告が出て、
+   * `wrangler tail` で生のヘッダを見るまで `Origin: null` だと分からなかった。
+   * 理由が 1 行出ていれば、そこで終わっていた。
+   *
+   * **値そのものは出さない。** トークンをログに書くと、ログを読める範囲が
+   * そのまま CSRF を抜ける範囲になる。長さと有無だけで切り分けはつく。
+   */
+  const deny = (reason: string): false => {
+    console.warn(
+      JSON.stringify({
+        // 出力先は違うが名前空間は監査イベントと同じなので、登録簿で縛る
+        // （rate_limit.exceeded と同じ理由。audit-log.port.ts）。
+        event: "csrf.rejected" satisfies AuditEventName,
+        reason,
+        path: new URL(c.req.url).pathname,
+        origin: c.req.header("Origin") ?? null,
+        secFetchSite: c.req.header("Sec-Fetch-Site") ?? null,
+        hasCookie: expected !== undefined && expected.length > 0,
+        submittedLength: submitted?.length ?? 0,
+      }),
+    );
+    return false;
+  };
+
+  if (!isAllowedOrigin(c)) return deny("origin");
+  if (expected === undefined || expected.length === 0) return deny("no_cookie");
+  if (submitted === undefined || submitted.length === 0) return deny("no_token");
+  if (!c.get("container").services.comparator.equals(expected, submitted)) {
+    return deny("token_mismatch");
+  }
+  return true;
 }
