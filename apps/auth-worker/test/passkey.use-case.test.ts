@@ -351,7 +351,7 @@ describe("PasskeyLoginVerifyUseCase", () => {
       challengeId,
       response: credential("registered-credential"),
       userAgent: "vitest",
-      ip: "203.0.113.1",
+      ip: "198.51.100.4",
     });
 
     expect(result.ok).toBe(true);

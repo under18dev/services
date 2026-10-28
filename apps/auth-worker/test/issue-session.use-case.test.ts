@@ -65,7 +65,7 @@ describe("IssueSessionUseCase", () => {
       userId: user.id,
       authMethod: "passkey",
       userAgent: "vitest",
-      ip: "203.0.113.1",
+      ip: "198.51.100.3",
     });
 
     expect(result.ok).toBe(true);
@@ -95,7 +95,7 @@ describe("IssueSessionUseCase", () => {
       userId: user.id,
       authMethod: "passkey",
       userAgent: null,
-      ip: "203.0.113.1",
+      ip: "198.51.100.3",
     });
 
     if (!result.ok) throw new Error("expected success");

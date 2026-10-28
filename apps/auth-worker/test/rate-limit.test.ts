@@ -4,6 +4,7 @@ import { aUser } from "@u18/testing";
 import { count } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
+import { freshIpFactory } from "./fresh-ip";
 import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 
 /**
@@ -37,12 +38,8 @@ import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 const BASE = "http://localhost";
 const ORIGIN = "http://localhost:8787";
 
-let nextIp = 0;
-/** テストごとに重複しない IP を配る。 */
-function freshIp(): string {
-  nextIp += 1;
-  return `203.0.113.${nextIp}`;
-}
+/** テストごとに重複しない IP を配る。割り当ては `fresh-ip.ts`。 */
+const freshIp = freshIpFactory("rate-limit");
 
 /**
  * 窓の**境界を跨がない**位置から始める（#176）。

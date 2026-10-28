@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 import { DrizzleEmailChallengeRepository } from "../src/infrastructure/persistence/drizzle-email-challenge.repository";
 import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import { freshIpFactory } from "./fresh-ip";
 import { resetDatabase } from "./helpers";
 
 /**
@@ -93,12 +94,12 @@ async function openLoginPage(cookie = ""): Promise<Session> {
  *
  * **このファイルは `/login/verify` を何度も叩く。** IP を共有していると
  * `email_verify`（15 / 60 秒）の枠をテスト同士で食い合い、**テストを 1 本
- * 足した人が無関係な 429 で落ちる。** レンジはファイルごとに分けること
- * （ここは `198.51.101.x`、`signup.ui.test.ts` は `192.0.2.x`、
- * `rate-limit-form.test.ts` は `203.0.113.x`）。
+ * 足した人が無関係な 429 で落ちる。**
+ *
+ * **割り当ては `fresh-ip.ts` が 1 箇所で持っている。** ファイルごとに手で
+ * レンジを選ぶ形だと、重なりに気づかないまま足せてしまう。
  */
-let ipCounter = 0;
-const freshIp = (): string => `198.51.101.${(ipCounter += 1) % 250}`;
+const freshIp = freshIpFactory("login-ui");
 
 function form(fields: Record<string, string>): string {
   return new URLSearchParams(fields).toString();
