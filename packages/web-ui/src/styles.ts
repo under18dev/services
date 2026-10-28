@@ -190,6 +190,8 @@ a:focus-visible {
 }
 
 .button:hover { background: #2f6fe0; }
+/* 同じ form に並べるとき（ログイン済み画面の 2 種類のログアウト）。 */
+.button + .button { margin-top: 0.6rem; }
 .button[disabled] { opacity: 0.55; cursor: progress; }
 
 .button-secondary {

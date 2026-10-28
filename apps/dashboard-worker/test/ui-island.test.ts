@@ -131,6 +131,19 @@ describe("JS が無いとできないことを伝える", () => {
     expect(page).toContain("<noscript>");
     expect(page).toContain("JavaScript");
   });
+
+  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])(
+    "%s は代わりにできることへ案内する",
+    async (path) => {
+      // **できないことだけを書くと行き止まりになる**（#208）。全端末の
+      // ログアウトは auth-worker のログイン画面から JS 無しで届くので、
+      // そこへ送る。身に覚えのない端末を見つけた人の手がここで止まるのが
+      // 一番まずい。
+      const page = await html(path);
+      expect(page).toContain('href="/login"');
+      expect(page).toContain("すべての端末からログアウト");
+    },
+  );
 });
 
 describe("空になったときの文言をサーバーと揃える", () => {

@@ -22,9 +22,33 @@ import { loginUrlWithReturnTo, RETURN_TO_FIELD, signupUrlWithReturnTo } from "./
  * （ui/client/login-island.tsx）で、JS が落ちればそこだけが代替表示に戻る。
  */
 
+/**
+ * 「すべての端末からログアウト」ボタンの name/value。
+ *
+ * **描くほうと読むほうで同じ名前を使う。** `CSRF_FIELD_NAME` を csrf.ts に
+ * 置いているのと同じ理由で、片方だけ直されると**ボタンが黙って「この端末
+ * だけ」に戻る** —— 押しても何も言われず、他の端末は生きたままになる。
+ */
+export const LOGOUT_ALL_FIELD = "all";
+export const LOGOUT_ALL_VALUE = "true";
+
 export type LoginView =
   /** 1 段目: メールアドレスの入力。 */
-  | { readonly kind: "email"; readonly email: string; readonly error: string | null }
+  | {
+      readonly kind: "email";
+      readonly email: string;
+      readonly error: string | null;
+      /**
+       * 直前の操作が終わったことだけを伝える文言。
+       *
+       * **呼び出し側が任意の文字列を渡せるが、クエリの値をそのまま入れない
+       * こと。** いまの唯一の出どころは `/login?logout=all` で、見ているのは
+       * `"all"` という固定値だけ、文言はサーバー側の定数である。ここを
+       * 「クエリの文字列を表示する」形にすると、攻撃者が選んだ文を自分の
+       * ログイン画面に出せるようになる（偽の案内を読ませる経路）。
+       */
+      readonly notice?: string | null;
+    }
   /** 2 段目: 届いたコードの入力。 */
   | { readonly kind: "code"; readonly email: string; readonly error: string | null }
   /** 既にログインしている場合。 */
@@ -96,6 +120,12 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
         : "u18 のサービスで使うアカウントにログインします。"}
     </p>
     <ErrorMessage message={view.error} />
+    {view.notice === undefined || view.notice === null ? null : (
+      // 完了の知らせはエラーではないので role="status"（控えめに読み上げる）。
+      <p class="notice" role="status">
+        {view.notice}
+      </p>
+    )}
 
     <form method="post" action={`/${mode}/start`}>
       <CsrfField token={csrfToken} />
@@ -243,12 +273,41 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
       明示して切り替え手段を出す。
     */}
     <p class="lead">別のアカウントでログインする場合は、いったんログアウトしてください。</p>
+    {/*
+      2 つのボタンを**同じ form**に置く。別の form に分けると CSRF トークンと
+      戻り先を 2 組持つことになり、片方だけ直される余地ができる。送る値が
+      違うだけなので、submit の `name`/`value` で分ける。
+    */}
     <form method="post" action="/login/logout">
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
       <button type="submit" class="button button-secondary">
         ログアウトして別のアカウントでログイン
       </button>
+      {/*
+        **全端末のログアウトを JS 無しで届かせるのはここだけである**（#208）。
+        `DELETE /account/api/me/sessions/:id` はアイランド経由、
+        `POST /api/auth/logout?all=true` は 204 を返す JSON API で form からは
+        使えない。アカウント画面は dashboard-worker にあり、auth-worker の
+        CSRF トークンを持てないので、置き場所はこの画面になる。
+
+        **個別のセッション指定は足さない。** それをやると
+        `DELETE .../sessions/:id` と二重になり、§14.1 決定 16 で
+        「書き込み経路を 1 本に保つ」として避けたものがそのまま戻る。
+        「全部切る」は粒度が違うので別物として扱う。
+      */}
+      <button
+        type="submit"
+        name={LOGOUT_ALL_FIELD}
+        value={LOGOUT_ALL_VALUE}
+        class="button button-danger"
+      >
+        すべての端末からログアウト
+      </button>
+      <p class="notice">
+        身に覚えのない端末がある場合は、すべての端末からログアウトしてください。
+        この端末も含めて、いますぐ使えなくなります。
+      </p>
     </form>
   </>
 );
