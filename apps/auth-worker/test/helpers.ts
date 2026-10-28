@@ -43,3 +43,37 @@ export async function expectUniqueViolation(run: () => Promise<unknown>): Promis
   }
   expect(messages.join(" / ")).toMatch(/UNIQUE constraint failed/i);
 }
+
+/**
+ * レート制限の窓の**頭**まで待つ。
+ *
+ * ## なぜ要るのか
+ *
+ * Cloudflare（ここでは miniflare）の Rate Limiting は**壁時計に揃った
+ * 固定窓**で、`epoch = floor(now / period)` で数える。全キーが同じ瞬間に
+ * 一斉にリセットされる。
+ *
+ * 「上限まで送ってから 1 本余計に送る」形のテストは、その途中で窓が
+ * 切り替わるとカウンタが 0 に戻り、**最後の 1 本が通ってしまう。**
+ * 実装は正しいのにテストだけが落ちる（#176）。
+ *
+ * ## なぜ helpers に置くのか
+ *
+ * **ランブック §13.2 に「別のファイルで同じ形を書くときは同じ手当てが
+ * 要る」と書いてあったが、守られなかった。** `rate-limit-form.test.ts`
+ * （#232）がガード無しで入り、#252 の CI を落とした ——
+ * **#252 とは無関係な落ち方**で、原因を追う時間がそのまま失われる。
+ *
+ * 文書に「気をつけて」と書く形は守られない。**import すれば効く**場所に
+ * 置けば、次に書く人は何も覚えていなくてよい。
+ *
+ * 実測でバースト 20 本が 21ms（1 本あたり約 1ms）なので、60 本でも
+ * 70ms 程度。1 秒の余裕は 10 倍以上ある。
+ */
+export async function startOfRateLimitWindow(periodSeconds: number): Promise<void> {
+  const margin = 1_000;
+  const period = periodSeconds * 1_000;
+  const remaining = period - (Date.now() % period);
+  if (remaining >= margin) return;
+  await new Promise((resolve) => setTimeout(resolve, remaining + 50));
+}

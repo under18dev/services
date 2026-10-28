@@ -1,7 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
-import { resetDatabase } from "./helpers";
+import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 
 /**
  * form 経路の IP レート制限。
@@ -76,7 +76,16 @@ function submit(
   });
 }
 
-beforeEach(resetDatabase);
+beforeEach(async () => {
+  await resetDatabase();
+  // **窓の境界を跨がない位置から始める。** 跨ぐとカウンタが 0 に戻り、
+  // 「上限まで送ってから 1 本」の最後の 1 本が通る。実装は正しいのに
+  // テストだけが落ちる（#176 / ランブック §13.2）。
+  //
+  // **このファイルにはこれが無く、#252 の CI を落とした** ——
+  // #252 とは無関係な落ち方なので、原因を追う時間がそのまま失われる。
+  await startOfRateLimitWindow(RateLimitPolicy.email_start.periodSeconds);
+});
 
 describe("form からの OTP 送信にも IP 制限が掛かる", () => {
   const { limit, periodSeconds } = RateLimitPolicy.email_start;
