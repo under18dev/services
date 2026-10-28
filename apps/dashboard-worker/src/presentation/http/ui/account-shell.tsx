@@ -1,6 +1,12 @@
 import { Layout } from "@u18/web-ui";
 import type { Child, FC } from "hono/jsx";
-import { GRANTS_PATH, OVERVIEW_PATH, SESSIONS_PATH, STYLESHEET_PATH } from "./asset-paths";
+import {
+  GRANTS_PATH,
+  LOGIN_PATH,
+  OVERVIEW_PATH,
+  SESSIONS_PATH,
+  STYLESHEET_PATH,
+} from "./asset-paths";
 
 /**
  * アカウント管理画面の外枠。
@@ -74,17 +80,26 @@ export const AccountShell: FC<AccountShellProps> = ({
       JS が無ければそもそも出ない —— 押しても効かないボタンは置かない。
       代わりに、何ができないかをここで言う。
 
-      いまのところ JS 無しで他端末を切る経路は無い。`POST /login/logout`
-      （auth-worker）は**この端末だけ**で、全端末の指定は JSON API
-      （`/api/auth/logout?all=true`）にしか無く、form からは使えない。
-      埋められていない穴なので、**できない旨を書いて終わりにせず
-      issue にしてある。**
+      **ただし「全部切る」だけは JS 無しでもできる**（#208）。auth-worker の
+      ログイン画面に `name="all"` のボタンがあり、ただの form POST で届く。
+      ここから案内するのは、**できないことだけを書いて行き止まりにしない**
+      ため —— 身に覚えのない端末を見つけた人がこの画面に辿り着いて、
+      そこで手が止まるのが一番まずい。
+
+      個別のセッションを選んで切るほうは、いまも JS が要る。`<form>` は
+      GET/POST しか出せず、`DELETE .../sessions/:id` を呼べないため。
+      粒度を落として「全部切る」なら届く、という形になっている。
     */}
     {hasRevokeActions && (
       <noscript>
         <p class="notice">
           この画面での取り消し操作（ログアウト・削除・連携の解除）には JavaScript
           が必要です。一覧の表示は JavaScript 無しでも行えます。
+        </p>
+        <p class="notice">
+          身に覚えのない端末がある場合は、
+          <a href={LOGIN_PATH}>ログイン画面</a>
+          から「すべての端末からログアウト」を行えます。こちらは JavaScript 無しでも使えます。
         </p>
       </noscript>
     )}

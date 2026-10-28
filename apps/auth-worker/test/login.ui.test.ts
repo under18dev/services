@@ -87,6 +87,18 @@ async function openLoginPage(cookie = ""): Promise<Session> {
   return { cookie: cookieHeader(merged), csrf: csrfTokenOf(html), html };
 }
 
+/**
+ * 要求ごとに違う IP を名乗る。
+ *
+ * **このファイルは `/login/verify` を何度も叩く。** IP を共有していると
+ * `email_verify`（15 / 60 秒）の枠をテスト同士で食い合い、**テストを 1 本
+ * 足した人が無関係な 429 で落ちる。** レンジはファイルごとに分けること
+ * （ここは `198.51.101.x`、`signup.ui.test.ts` は `192.0.2.x`、
+ * `rate-limit-form.test.ts` は `203.0.113.x`）。
+ */
+let ipCounter = 0;
+const freshIp = (): string => `198.51.101.${(ipCounter += 1) % 250}`;
+
 function form(fields: Record<string, string>): string {
   return new URLSearchParams(fields).toString();
 }
@@ -102,11 +114,29 @@ function submit(
     redirect: "manual",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
+      "CF-Connecting-IP": freshIp(),
       ...(origin === null ? {} : { Origin: origin }),
       ...(cookie === undefined ? {} : { Cookie: cookie }),
     },
     body: form(fields),
   });
+}
+
+/**
+ * ログインを 1 回通してセッション Cookie を得る。
+ *
+ * **呼ぶたびに別のセッションが 1 つ増える。** 「別の端末」を作るのに使う
+ * （#208 の全端末ログアウト）。`seedRegisteredUser()` が済んでいること。
+ */
+async function login(): Promise<string> {
+  const session = await openLoginPage();
+  await seedOtpChallenge(REGISTERED, "123456");
+  const verified = await submit(
+    "/login/verify",
+    { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
+    { cookie: session.cookie },
+  );
+  return cookieHeader(cookiePairs(verified));
 }
 
 describe("GET /login の描画", () => {
@@ -366,17 +396,6 @@ describe("ログイン済みの状態で GET /login", () => {
     await seedRegisteredUser();
   });
 
-  async function login(): Promise<string> {
-    const session = await openLoginPage();
-    await seedOtpChallenge(REGISTERED, "123456");
-    const verified = await submit(
-      "/login/verify",
-      { csrf_token: session.csrf, email: REGISTERED, code: "123456" },
-      { cookie: session.cookie },
-    );
-    return cookieHeader(cookiePairs(verified));
-  }
-
   it("ログイン済みであることを示し、ログイン form を出さない", async () => {
     const cookie = await login();
     const response = await SELF.fetch(`${BASE}/login`, { headers: { Cookie: cookie } });
@@ -412,6 +431,138 @@ describe("ログイン済みの状態で GET /login", () => {
       headers: { Cookie: cookieHeader(cookiePairs(response)) },
     });
     expect(me.status).toBe(401);
+  });
+});
+
+/**
+ * すべての端末からログアウトする（#208）。
+ *
+ * ## なぜこの画面に置くのか
+ *
+ * アカウント画面のセッション一覧は dashboard-worker にあり、**auth-worker の
+ * CSRF トークンを持てない**。失効の経路は 3 つあるが、
+ *
+ * | 経路 | 対象 | form から使えるか |
+ * | --- | --- | --- |
+ * | `DELETE /account/api/me/sessions/:id` | 指定したセッション | **いいえ**（form は GET/POST のみ） |
+ * | `POST /api/auth/logout?all=true` | 全端末 | **いいえ**（204 を返す JSON API） |
+ * | `POST /login/logout` | この端末だけ（固定だった） | はい |
+ *
+ * **「全端末」と「form から使える」が両立する経路が無かった。** JS が
+ * 動かない環境では「身に覚えのない端末がある」と気づいても何もできない。
+ *
+ * ## 個別のセッション指定は足さない
+ *
+ * `DELETE .../sessions/:id` と二重になり、§14.1 決定 16 で避けたものが戻る。
+ * 「全部切る」は粒度が違うので別物として扱う。
+ */
+describe("すべての端末からログアウトする（JS 無し）", () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedRegisteredUser();
+  });
+
+  /** その Cookie がまだ通るか。 */
+  async function stillValid(cookie: string): Promise<boolean> {
+    const response = await SELF.fetch(`${BASE}/api/me`, { headers: { Cookie: cookie } });
+    return response.status === 200;
+  }
+
+  it("all=true なら他の端末のセッションも切れる", async () => {
+    const other = await login();
+    const here = await login();
+    // 前提: 2 つとも生きている。ここが崩れていると、あとの expect が
+    // 「元から切れていた」を見ているだけになる。
+    expect(await stillValid(other), "もう 1 台のセッションが作れていない").toBe(true);
+
+    const page = await openLoginPage(here);
+    const response = await submit(
+      "/login/logout",
+      { csrf_token: page.csrf, all: "true" },
+      { cookie: page.cookie },
+    );
+
+    expect(response.status).toBe(303);
+    expect(await stillValid(other), "他の端末が切れていない").toBe(false);
+  });
+
+  it("all が無ければ他の端末は生きたまま", async () => {
+    // **既定を変えていないことの確認。** ボタンを押していない利用者の
+    // セッションまで切れると、「別のアカウントでログインし直す」が
+    // 全端末ログアウトになる。
+    const other = await login();
+    const here = await login();
+
+    const page = await openLoginPage(here);
+    await submit("/login/logout", { csrf_token: page.csrf }, { cookie: page.cookie });
+
+    expect(await stillValid(other)).toBe(true);
+  });
+
+  it("all が true 以外なら他の端末は生きたまま", async () => {
+    // `field()` は未指定で空文字を返す。「真っぽい値」を広く受けると、
+    // **押していないほうが起きうる。**
+    const other = await login();
+    const here = await login();
+
+    const page = await openLoginPage(here);
+    await submit("/login/logout", { csrf_token: page.csrf, all: "1" }, { cookie: page.cookie });
+
+    expect(await stillValid(other)).toBe(true);
+  });
+
+  it("CSRF トークンが無ければ全端末ログアウトも受け付けない", async () => {
+    // **クロスサイトから `all=true` を送れると、他人のセッションを
+    // 全部切れる**（被害者のブラウザが Cookie を付けて送るため）。
+    const other = await login();
+    const here = await login();
+
+    const page = await openLoginPage(here);
+    const response = await submit("/login/logout", { all: "true" }, { cookie: page.cookie });
+
+    expect(response.status).toBe(403);
+    expect(await stillValid(other), "拒否したのに切れている").toBe(true);
+  });
+
+  it("ログイン済み画面にボタンがある", async () => {
+    // 経路が動いていても、押す手段が描かれていなければ届かない。
+    const cookie = await login();
+    const html = await (await SELF.fetch(`${BASE}/login`, { headers: { Cookie: cookie } })).text();
+
+    expect(html).toContain('name="all"');
+    expect(html).toContain("すべての端末からログアウト");
+    // 同じ form に置く（CSRF トークンと戻り先を 2 組持たない）。
+    expect(html.match(/action="\/login\/logout"/g) ?? []).toHaveLength(1);
+  });
+
+  it("終わったことを伝える", async () => {
+    // **他の端末の話なので、この画面には何も変化が現れない。** 知らせが
+    // 無いと、JS 無しの利用者は効いたか分からず何度も押す。
+    const cookie = await login();
+    const page = await openLoginPage(cookie);
+    const response = await submit(
+      "/login/logout",
+      { csrf_token: page.csrf, all: "true" },
+      { cookie: page.cookie },
+    );
+
+    const location = response.headers.get("Location") ?? "";
+    expect(location).toBe("/login?logout=all");
+
+    const html = await (await SELF.fetch(`${BASE}${location}`)).text();
+    expect(html).toContain("すべての端末からログアウトしました");
+  });
+
+  it("クエリの文字列をそのまま画面へ出さない", async () => {
+    // **固定値だけを見て、文言はサーバー側の定数。** ここをクエリの
+    // 文字列を出す形にすると、攻撃者が選んだ文を本物のログイン画面に
+    // 表示させられる（偽の案内を読ませる経路）。
+    const html = await (
+      await SELF.fetch(`${BASE}/login?logout=${encodeURIComponent("パスワードを入力してください")}`)
+    ).text();
+
+    expect(html).not.toContain("パスワードを入力してください");
+    expect(html).not.toContain("ログアウトしました");
   });
 });
 

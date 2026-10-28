@@ -10,7 +10,13 @@ import {
 import type { AppBindings } from "../types";
 import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
-import { LoginPage, type LoginMode, type LoginView } from "./login-page";
+import {
+  LoginPage,
+  LOGOUT_ALL_FIELD,
+  LOGOUT_ALL_VALUE,
+  type LoginMode,
+  type LoginView,
+} from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
 import { enforceIpRateLimit } from "../rate-limit";
 import {
@@ -133,6 +139,10 @@ async function enforceFormRateLimit(
   return renderLogin(c, view, returnTo, 429, mode);
 }
 
+/** ログアウト完了をログイン画面へ伝えるクエリ。**値は固定、文言はサーバー側。** */
+const LOGGED_OUT_PARAM = "logout";
+const LOGGED_OUT_ALL = "all";
+
 uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
   const returnTo = readReturnTo(c);
   const token = readSessionCookie(c);
@@ -159,7 +169,17 @@ uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
     }
   }
 
-  return renderLogin(c, { kind: "email", email: "", error: null }, returnTo);
+  // 全端末ログアウトの直後だけ、終わったことを伝える。
+  //
+  // **見るのは `"all"` という固定値だけで、文言はここの定数である。**
+  // クエリの文字列を画面に出す形にすると、攻撃者が選んだ文を本物の
+  // ログイン画面に表示させられる（偽の案内を読ませる経路になる）。
+  const notice =
+    c.req.query(LOGGED_OUT_PARAM) === LOGGED_OUT_ALL
+      ? "すべての端末からログアウトしました。"
+      : null;
+
+  return renderLogin(c, { kind: "email", email: "", error: null, notice }, returnTo);
 });
 
 /**
@@ -430,15 +450,31 @@ uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
   c.header("Set-Cookie", buildClearedSessionCookie(c.env), { append: true });
   rotateCsrfToken(c);
 
+  // **どの端末を切るかは、押されたボタンが決める**（#208）。
+  //
+  // `<button name="all" value="true">` が送られたときだけ全端末。既存の
+  // CSRF トークン付き form をそのまま使うので、入口は 1 つのままである。
+  // 値を厳密に `"true"` と比べるのは、`field()` が未指定で空文字を返す以上、
+  // 「真っぽい値」を広く受けると**押していないほうが起きうる**ため。
+  const allDevices = field(form, LOGOUT_ALL_FIELD) === LOGOUT_ALL_VALUE;
+
   const token = readSessionCookie(c);
   if (token !== null) {
-    await c.get("container").useCases.logout.execute({ sessionToken: token, allDevices: false });
+    await c.get("container").useCases.logout.execute({ sessionToken: token, allDevices });
   }
 
   // 戻り先は保持したままログイン画面へ戻す。認可の途中で「別のアカウントで
   // ログインし直す」を選んだ利用者が、ログイン後に元の認可要求へ戻れるように
   // するため。ここで戻り先を捨てると、アプリ側からやり直すしかなくなる。
-  return c.redirect(loginUrlWithReturnTo(returnTo), 303);
+  const destination = loginUrlWithReturnTo(returnTo);
+  if (!allDevices) return c.redirect(destination, 303);
+
+  // **この端末だけなら画面が「ログイン済み」から入力欄に変わるので、
+  // 起きたことは見てわかる。全端末は他の端末の話なので、何も変わらない。**
+  // JS 無しの利用者が「効いたのか分からず何度も押す」ことになるので、
+  // 終わったことだけ伝える。
+  const separator = destination.includes("?") ? "&" : "?";
+  return c.redirect(`${destination}${separator}${LOGGED_OUT_PARAM}=${LOGGED_OUT_ALL}`, 303);
 });
 
 /**
