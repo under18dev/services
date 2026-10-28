@@ -38,9 +38,18 @@ const ORIGIN = "http://localhost:8787";
  * `expected 429 to be 403` なので、読んだ人は順序ではなく干渉を疑う。
  * 順序そのものを見るテストを `rate-limit-form.test.ts` に置いたので、
  * こちらは本来の形に戻してよい。
+ *
+ * ## レンジはファイルごとに分ける
+ *
+ * **巡回する IP を使うファイルが同じレンジを踏むと、同じ食い合いが
+ * ファイルをまたいで戻る。** しかも今度は 1 ファイルを読んでも分からない。
+ * ここは `192.0.2.x`、`rate-limit-form.test.ts` は `203.0.113.x`、
+ * `helpers.oauth.ts` は `198.51.100.x` を使う。固定の IP を置いている
+ * ファイル（`audit-request-context` / `audit-secrets`）も `198.51.100.x`
+ * なので、巡回はそこを避ける。
  */
 let ipCounter = 0;
-const freshIp = (): string => `198.51.100.${(ipCounter += 1) % 250}`;
+const freshIp = (): string => `192.0.2.${(ipCounter += 1) % 250}`;
 
 const REGISTERED = "taro@example.com";
 const NEW_ADDRESS = "newcomer@example.com";
