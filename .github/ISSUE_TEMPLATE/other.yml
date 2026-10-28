@@ -1,0 +1,35 @@
+name: その他
+description: バグ報告にも機能要望にも当てはまらないもの（質問・運用・ドキュメントなど）
+title: "[misc] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        分類に迷う場合はこちらで構いません。あとで付け替えられます。
+
+        > [!CAUTION]
+        > 認証バイパス、トークン漏洩、権限昇格など**セキュリティ上の脆弱性は、この issue に書かないでください。**
+        > [非公開の報告フォーム](https://github.com/under18dev/services/security/advisories/new)からお願いします。
+        >
+        > **本リポジトリは public です。** ここへ書いた内容は、直すより先に誰でも読めます。
+        > 報告フォームなら、修正が出るまで報告者とメンテナ以外には見えません。
+
+        報告に Secret、アクセストークン、ID Token、OTP コード、Cookie の値、
+        他の利用者のメールアドレスを含めないでください。ログはマスクしてください。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 内容
+      description: 何について相談・報告したいかを書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景・経緯
+      description: |
+        そう考えた理由、試したこと、関連する issue や PR、仕様書の該当箇所があれば書いてください。
+    validations:
+      required: false
