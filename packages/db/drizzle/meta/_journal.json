@@ -43,6 +43,13 @@
       "when": 1793205233072,
       "tag": "0005_magical_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793209833374,
+      "tag": "0006_zippy_namor",
+      "breakpoints": true
     }
   ]
 }
