@@ -89,6 +89,15 @@ export class InMemoryEmailChallengeRepository implements EmailChallengeRepositor
     ).length;
   }
 
+  async countSentSinceForPurpose(purpose: OtpPurpose, since: Date): Promise<number> {
+    // **アドレスで絞らない。** ここを `countSentSince` と同じ形に
+    // 書き写してアドレスの条件を残すと、fake だけが総量を数えなくなり、
+    // 宛先を変える攻撃がテストを素通りする（#236）。
+    return this.store.filter(
+      (r) => r.purpose === purpose && r.createdAt.getTime() > since.getTime(),
+    ).length;
+  }
+
   /**
    * 保持期限による掃除を再現する。
    *

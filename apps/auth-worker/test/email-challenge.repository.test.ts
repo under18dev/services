@@ -119,4 +119,113 @@ describe("DrizzleEmailChallengeRepository", () => {
     // 行のどの列にも平文のコードが現れないこと。
     expect(JSON.stringify(rows)).not.toContain("123456");
   });
+
+  describe("countSentSinceForPurpose（#236）", () => {
+    /**
+     * **本物の D1 で数える。** 総量の層は in-memory の fake でも固定して
+     * あるが（`otp-global-cap.test.ts`）、#88 で痛い目を見たとおり
+     * **fake と本物がずれていると、fake だけが穴を塞いでいる状態になる。**
+     * ここでしか分からないのは「SQL が実際にその行を数えるか」である。
+     */
+    /**
+     * **`created_at` を指定したいので `repo.create()` は使えない。**
+     * あちらは挿入時刻を自動で入れる（schema の `createdAt()`）。窓の
+     * 外側にある行を作るには直接入れるしかない。
+     */
+    const seedFor = async (
+      email: string,
+      purpose: "login" | "signup",
+      createdAt: Date,
+    ): Promise<void> => {
+      await db
+        .insert(emailChallenges)
+        .values({
+          id: `emc_${Math.random().toString(36).slice(2, 10)}`,
+          userId: null,
+          email,
+          codeHash: "f".repeat(64),
+          purpose,
+          expiresAt: new Date(createdAt.getTime() + 5 * 60 * 1000),
+          maxAttempts: 5,
+          lastSentAt: createdAt,
+          createdAt,
+        })
+        .run();
+    };
+
+    it("宛先が違っても同じ用途なら数える", async () => {
+      // **これが `countSentSince` との違い。** あちらはアドレスで絞るので、
+      // 宛先を変える攻撃は 1 件ずつに散って上限に届かない。
+      await seedFor("a@example.test", "signup", NOW);
+      await seedFor("b@example.test", "signup", NOW);
+      await seedFor("c@example.test", "signup", NOW);
+
+      const since = new Date(NOW.getTime() - 1000);
+      expect(await repo.countSentSinceForPurpose("signup", since)).toBe(3);
+    });
+
+    it("用途が違えば数えない", async () => {
+      await seedFor("a@example.test", "signup", NOW);
+      await seedFor("b@example.test", "login", NOW);
+
+      const since = new Date(NOW.getTime() - 1000);
+      expect(await repo.countSentSinceForPurpose("signup", since)).toBe(1);
+      expect(await repo.countSentSinceForPurpose("login", since)).toBe(1);
+    });
+
+    it("窓より前の行は数えない", async () => {
+      const old = new Date(NOW.getTime() - 60 * 60 * 1000);
+      await seedFor("a@example.test", "signup", old);
+      await seedFor("b@example.test", "signup", NOW);
+
+      expect(await repo.countSentSinceForPurpose("signup", new Date(NOW.getTime() - 1000))).toBe(1);
+    });
+
+    it("消費済み・期限切れも数える", async () => {
+      // `countSentSince` と同じ理由。**数えているのは「送った事実」**で、
+      // 行が使えるかどうかは関係ない。除外すると invalidateActive() が
+      // 送信履歴を消してしまい、上限が効かなくなる（#88 の原形）。
+      await seedFor("a@example.test", "signup", NOW);
+      await repo.invalidateActive("a@example.test", "signup", LATER);
+      await seedFor("b@example.test", "signup", NOW);
+
+      expect(await repo.countSentSinceForPurpose("signup", new Date(NOW.getTime() - 1000))).toBe(2);
+    });
+
+    it("インデックスだけで閉じる", async () => {
+      /**
+       * **インデックスは「速い」と宣言するが、効いているかは何も言わない。**
+       * 足しても使われないことがあり（`lower()` を掛ければ外れる）、
+       * そのとき**答えは正しいまま遅くなるだけ**なので、ふつうのテストでは
+       * 永久に捕まらない。実際このテーブルには、使われていないインデックスが
+       * 既に 1 本ある（`countSentSince` が `lower(email)` を掛けているため
+       * `(email, purpose)` が効かない）。
+       *
+       * そこでプランそのものを見る。**この層がいちばん重くなるのは
+       * 大量送信が起きている最中**で、そこでフルスキャンに落ちていると
+       * 守りたい状況で守りが重くなる。
+       *
+       * プランは統計にも依存しうるので、`SCAN` でないことと索引名の 2 点だけ
+       * 見る。実行計画の文言そのものを固定はしない。
+       */
+      const plan = await env.IDENTITY_DB.prepare(
+        "EXPLAIN QUERY PLAN SELECT count(*) FROM email_challenges WHERE purpose = ? AND created_at > ?",
+      )
+        .bind("signup", 0)
+        .all<{ detail: string }>();
+
+      const detail = plan.results.map((row) => row.detail).join(" | ");
+      expect(detail).toContain("email_challenges_purpose_created_idx");
+      expect(detail, "フルスキャンに落ちている").not.toContain("SCAN");
+    });
+
+    it("大文字小文字の違う宛先もまとめて数える", async () => {
+      // アドレスを見ないので当然そうなるが、**ここが「当然」でなくなる
+      // 変更**（`lower()` を足すなど）が入ったら止める。
+      await seedFor("A@Example.test", "signup", NOW);
+      await seedFor("a@example.test", "signup", NOW);
+
+      expect(await repo.countSentSinceForPurpose("signup", new Date(NOW.getTime() - 1000))).toBe(2);
+    });
+  });
 });

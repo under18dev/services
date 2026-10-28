@@ -106,6 +106,19 @@ export const emailChallenges = sqliteTable(
   (table) => [
     index("email_challenges_email_purpose_idx").on(table.email, table.purpose),
     index("email_challenges_expires_idx").on(table.expiresAt),
+    /**
+     * 用途ごとの総量を数えるため（#236）。
+     *
+     * `WHERE purpose = ? AND created_at > ?` の count がこれだけで閉じる。
+     * 上の `(email, purpose)` は**先頭列が email なので purpose 単独の
+     * 絞り込みには効かない。**
+     *
+     * **これでも消えない性質がある。** 数えるのは「直近 1 時間に作られた
+     * 行」なので、**大量送信が起きている最中ほどスキャンするエントリが
+     * 増える。** いちばん重くなってほしくないときにいちばん重い。
+     * インデックスが改善するのは定数倍だけで、そこは引き受けている。
+     */
+    index("email_challenges_purpose_created_idx").on(table.purpose, table.createdAt),
   ],
 );
 
