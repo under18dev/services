@@ -62,13 +62,15 @@ describe("設定不備の影響範囲", () => {
   it("IP をハッシュ化しようとした時点で失敗する", async () => {
     const container = createContainer(envWith(brokenProd));
 
-    await expect(container.services.ipHasher.hash("203.0.113.1")).rejects.toThrow(/not configured/);
+    await expect(container.services.ipHasher.hash("198.51.100.1")).rejects.toThrow(
+      /not configured/,
+    );
   });
 
   it("development では既定値で動く", async () => {
     const container = createContainer(envWith({ ENVIRONMENT: "development", EMAIL: undefined }));
 
-    await expect(container.services.ipHasher.hash("203.0.113.1")).resolves.toMatch(
+    await expect(container.services.ipHasher.hash("198.51.100.1")).resolves.toMatch(
       /^[0-9a-f]{64}$/,
     );
   });

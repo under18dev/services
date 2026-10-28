@@ -1,6 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
+import { freshIpFactory } from "./fresh-ip";
 import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 
 /**
@@ -41,8 +42,7 @@ import { resetDatabase, startOfRateLimitWindow } from "./helpers";
 const BASE = "http://localhost";
 const ORIGIN = "http://localhost:8787";
 
-let ipCounter = 0;
-const freshIp = (): string => `203.0.113.${(ipCounter += 1) % 250}`;
+const freshIp = freshIpFactory("rate-limit-form");
 
 /** `/signup` を開いて Cookie と CSRF トークンを取る。 */
 async function openPage(path: string): Promise<{ cookie: string; csrf: string }> {

@@ -277,7 +277,7 @@ describe("VerifyEmailOtpUseCase", () => {
       code,
       purpose: "login",
       userAgent: "vitest",
-      ip: "203.0.113.1",
+      ip: "198.51.100.2",
     });
 
     expect(result.ok).toBe(true);

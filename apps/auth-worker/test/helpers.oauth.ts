@@ -11,6 +11,7 @@ import { newClientId, newSessionId } from "@u18/domain";
 import { aUser } from "@u18/testing";
 import { exportJWK, generateKeyPair } from "jose";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
+import { freshIpFactory } from "./fresh-ip";
 import { createApp } from "../src/presentation/http/app";
 
 /**
@@ -256,11 +257,7 @@ export async function fetchApp(request: Request, workerEnv: Env): Promise<Respon
  * 呼び出しごとに別の IP を配ることで、順序にも本数にも依存しなくなる。
  * 本番ではブラウザごと・サーバごとに別 IP なので、こちらのほうが実態に近い。
  */
-let nextProbeIp = 0;
-export function freshClientIp(): string {
-  nextProbeIp += 1;
-  return `198.51.100.${nextProbeIp % 254}`;
-}
+export const freshClientIp = freshIpFactory("oauth-helpers");
 
 export type AuthorizeQuery = Record<string, string | undefined>;
 

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { OtpPolicy } from "../src/domain/services/token-lifetime";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 import { DrizzleEmailChallengeRepository } from "../src/infrastructure/persistence/drizzle-email-challenge.repository";
+import { freshIpFactory } from "./fresh-ip";
 import { resetDatabase } from "./helpers";
 
 /**
@@ -44,13 +45,9 @@ const ORIGIN = "http://localhost:8787";
  *
  * **巡回する IP を使うファイルが同じレンジを踏むと、同じ食い合いが
  * ファイルをまたいで戻る。** しかも今度は 1 ファイルを読んでも分からない。
- * ここは `192.0.2.x`、`rate-limit-form.test.ts` は `203.0.113.x`、
- * `helpers.oauth.ts` は `198.51.100.x` を使う。固定の IP を置いている
- * ファイル（`audit-request-context` / `audit-secrets`）も `198.51.100.x`
- * なので、巡回はそこを避ける。
+ * **割り当ては `fresh-ip.ts` が 1 箇所で持っている。**
  */
-let ipCounter = 0;
-const freshIp = (): string => `192.0.2.${(ipCounter += 1) % 250}`;
+const freshIp = freshIpFactory("signup-ui");
 
 const REGISTERED = "taro@example.com";
 const NEW_ADDRESS = "newcomer@example.com";
