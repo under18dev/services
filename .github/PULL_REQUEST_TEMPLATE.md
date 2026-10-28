@@ -98,9 +98,7 @@ u18 Identityは未成年ユーザーの認証を扱うため、すべてのPRで
 
 ## テスト
 
-- [ ] `pnpm typecheck` が通る
-- [ ] `pnpm lint` が通る
-- [ ] `pnpm test` が通る
+- [ ] `pnpm check` が通る（`lint` + `typecheck` + `test`。CI が見るものと同じ）
 - [ ] 追加・変更した挙動に対するテストを書いた（異常系・認可失敗系を含む）
 
 実行したテスト・手動確認の内容:

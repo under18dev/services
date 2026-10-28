@@ -256,7 +256,7 @@ Domain から外向きの矢印が 1 本も引けないようにしている。
 
 ブロック 3 は机上の規約ではない。`health.routes.ts` は当初、疎通確認のために
 `import { sql } from "drizzle-orm"` して `container.db.run(sql\`select 1\`)` を
-直接呼んでおり、`pnpm lint` がこれを弾いた。
+直接呼んでおり、`pnpm lint:eslint` がこれを弾いた。
 
 「ヘルスチェックくらい例外にしてよいのでは」と思える違反だが、ここを許すと
 Presentation が `container.db`（Drizzle のハンドル）を触ってよい前例になり、
@@ -689,7 +689,7 @@ sequenceDiagram
 
 ## 9. 仕様書との差分・注意点
 
-`pnpm lint` / `pnpm typecheck` / `pnpm test` はいずれも現在グリーン。
+`pnpm check`（`lint` + `typecheck` + `test`）は現在グリーン。
 そのうえで、実装を進めるときに把握しておくべき、仕様書 (v0.2.0) と現状コードのずれ。
 
 1. **`packages/contracts` と RPC は Phase 2 の項目だが、既に実装されている**（仕様書 12）。
