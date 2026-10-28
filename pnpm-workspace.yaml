@@ -12,5 +12,41 @@ allowBuilds:
 strictPeerDependencies: false
 autoInstallPeers: true
 
+# 公開から 7 日（分で指定）経っていない版はインストールしない（#101）。
+#
+# **依存は package.json と pnpm-lock.yaml で固定しているので、普段の
+# install には効かない。** 効くのは**バージョンが上がる瞬間**で、ここは
+# Dependabot が自動で PR を開く経路になっている。
+#
+# npm アカウントの乗っ取りで悪意ある版が publish されたとき、発覚から
+# unpublish までは数時間〜数日である。**待つだけで大半を避けられる。**
+# このリポジトリでは Dependabot の PR 3 本が CI 無しで main にマージされた
+# ことがあり（#58）、人間のレビューだけが歯止めになっている現状では
+# 機械的な時間差の価値が相対的に大きい。
+#
+# **以前はこの行が無く、下の除外リストだけがあった。** 何からも除外されて
+# いない除外リスト、という状態で、インストールは通り CI も緑だった。
+# `scripts/lib/release-age.test.mjs` が同じ状態を二度と作らせない。
+minimumReleaseAge: 10080
+
+# **ここに書いたものには時間差が掛からない。** 守りがゼロになるので、
+# 増やすときは理由を書くこと。
+#
+# Cloudflare 系の 4 つは、**本番基盤そのものの公式ツールで、リリースが
+# 速い。** `@cloudflare/workers-types` は日付入りの版を高頻度で publish
+# するので、7 日待つと workerd の型が常に古くなる。`wrangler` /
+# `miniflare` / `@cloudflare/vitest-plugin` も同じ周期で動く。
+#
+# **バージョンを書かない。** 書くと上げるたびにここも直すことになり、
+# 忘れるとインストールが止まる。pnpm はバレ名での除外を受け付ける
+# （pnpm 12.15.0 で実測）。
+#
+# **ここが穴であることは引き受けている。** wrangler は npm で最も広く
+# 使われるパッケージの 1 つで、乗っ取られたときの影響は大きい。それでも
+# 除外するのは、7 日遅れた wrangler で本番をデプロイするほうが現実的に
+# 危ないからである（Workers の挙動変更に追従できない）。
 minimumReleaseAgeExclude:
-  - "@cloudflare/workers-types@5.20261023.1"
+  - "@cloudflare/workers-types"
+  - "@cloudflare/vitest-plugin"
+  - "wrangler"
+  - "miniflare"

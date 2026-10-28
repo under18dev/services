@@ -148,12 +148,20 @@ wrangler  4.124.0 / 4.152.0             →  4.152.0 のみ
 
 ### その他
 
-- `@cloudflare/workers-types` は `pnpm-workspace.yaml` の
-  `minimumReleaseAgeExclude` に入れてある。Cloudflare のランタイム型は
-  `compatibility_date` に追従して頻繁に出るため、公開直後でも取得できるようにする意図。
-  ただし **`minimumReleaseAge` 本体がまだ設定されていないので、現状この除外は
-  何も除外していない**（#101）。意図と実態がずれている状態で、
-  `minimumReleaseAge` を有効にするのは依存ツリーが成熟してから。
+- `minimumReleaseAge` は **7 日**（`pnpm-workspace.yaml`、#101）。公開から
+  7 日経っていない版はインストールしない。npm アカウントの乗っ取りで悪意ある
+  版が publish されたとき、**発覚から unpublish までは数時間〜数日**なので、
+  待つだけで大半を避けられる。効くのは Dependabot が新しい版を提案した瞬間で、
+  普段の `pnpm install` は lockfile の固定版を取るだけなので関係ない。
+- 除外は Cloudflare 系の 4 つ（`@cloudflare/workers-types` /
+  `@cloudflare/vitest-plugin` / `wrangler` / `miniflare`）。**本番基盤そのものの
+  公式ツールで、リリースが速い。** 7 日遅れた wrangler で本番をデプロイするほうが
+  現実的に危ないので、そちらを選んでいる。**除外したものには時間差が掛からない**
+  ので、増やすときは `pnpm-workspace.yaml` に理由を書くこと。
+- **以前は除外リストだけがあり、`minimumReleaseAge` 本体が無かった**（#101）。
+  何からも除外されていない除外リスト、という状態で、インストールは通り CI も
+  緑だった。`scripts/lib/release-age.test.mjs` が同じ状態を二度と作らせない
+  （設定が消えたら落ちる / 使っていない除外が残ったら落ちる）。
 - `allowBuilds` は `esbuild` と `workerd` のみ。ネイティブバイナリの取得に
   postinstall が必要なのはこの 2 つだけで、それ以外のビルドスクリプトは実行しない。
 - `packages/config/tsconfig.lib.json`（Worker ではないパッケージ用）は
@@ -390,7 +398,7 @@ services/
 ├── docs/                         仕様書・アーキテクチャ・脅威モデル・Runbook
 ├── eslint.config.js              ルート ESLint。末尾でレイヤ境界ルールを展開する
 ├── tsconfig.base.json            strict 系オプションの基点
-└── pnpm-workspace.yaml           workspace 定義、peer 設定、allowBuilds、minimumReleaseAgeExclude
+└── pnpm-workspace.yaml           workspace 定義、peer 設定、allowBuilds、minimumReleaseAge
 ```
 
 ---
