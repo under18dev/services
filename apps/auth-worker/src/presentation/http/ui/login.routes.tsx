@@ -1,4 +1,4 @@
-import { pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
+import { IMMUTABLE_ASSET_CACHE_CONTROL, UI_STYLESHEET, pageSecurityHeaders } from "@u18/web-ui";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Context } from "hono";
@@ -483,11 +483,11 @@ uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
  * Workers Assets ではなく通常のルートで返す。理由は scripts/build-client.mjs の
  * コメントと README を参照。
  *
- * `Cache-Control` を短くしているのは、URL に内容ハッシュを含めていないため。
- * デプロイ後に古い JS が残る窓を 5 分に抑える。長く持たせたくなったら、
- * 先にファイル名へハッシュを入れること。
+ * **URL に内容ハッシュが入っている**（#211、`asset-paths.ts`）ので
+ * `immutable` で永久に持たせてよい。中身が変われば URL が変わるため、
+ * デプロイ直後に古い JS を掴んだブラウザと新しいサーバーが重なる窓が無い。
  */
-const ASSET_CACHE_CONTROL = "public, max-age=300";
+const ASSET_CACHE_CONTROL = IMMUTABLE_ASSET_CACHE_CONTROL;
 
 uiRoutes.get(STYLESHEET_PATH, (c) =>
   c.body(UI_STYLESHEET, 200, {

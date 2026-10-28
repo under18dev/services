@@ -1,3 +1,5 @@
+import { IMMUTABLE_ASSET_CACHE_CONTROL } from "@u18/web-ui";
+import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { SELF, createExecutionContext, env } from "cloudflare:test";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
@@ -45,8 +47,12 @@ describe("既定で no-store が付く", () => {
 describe("意図的に違う値を使う経路は既定に飲まれない", () => {
   it.each([
     ["/.well-known/openid-configuration", "public, max-age=300"],
-    ["/ui/u18.css", "public, max-age=300"],
-    ["/ui/login-island.js", "public, max-age=300"],
+    // アセットは URL に内容ハッシュが入るので永久に持たせてよい（#211）。
+    // **パスを書き写さず `asset-paths.ts` から取る** —— 書き写すと
+    // ハッシュが変わるたびに 404 を見ることになり、キャッシュの値を
+    // 見るつもりの検査が「パスが合っているか」の検査に化ける。
+    [STYLESHEET_PATH, IMMUTABLE_ASSET_CACHE_CONTROL],
+    [LOGIN_ISLAND_PATH, IMMUTABLE_ASSET_CACHE_CONTROL],
   ])("%s は %s", async (path, expected) => {
     const response = await SELF.fetch(`${BASE}${path}`);
 

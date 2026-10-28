@@ -1,5 +1,6 @@
 import { loginUrlWithReturnTo, returnToForCurrentRequest, sessionCookieName } from "@u18/contracts";
-import { pageSecurityHeaders } from "@u18/web-ui";
+import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
+import { STYLESHEET_PATH } from "./asset-paths";
 import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppBindings } from "../types";
@@ -24,6 +25,24 @@ import { CardsPage } from "./cards-page";
  * 見せても利用者にできることが無い**。`/login` へ送る。
  */
 export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): void {
+  /**
+   * 共有スタイルシート。
+   *
+   * **auth-worker から借りるのをやめた**（#211）。理由は
+   * `ui/asset-paths.ts` に書いてある。URL に内容ハッシュが入っているので
+   * `immutable` で配信してよい。
+   *
+   * この画面が返す HTML は `no-store` のままである（カードの状態は
+   * 所有者固有）。ここだけが例外で、**中身は全利用者に同じ CSS で、
+   * 個人情報を 1 文字も含まない。**
+   */
+  app.get(STYLESHEET_PATH, (c) =>
+    c.body(UI_STYLESHEET, 200, {
+      "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
+    }),
+  );
+
   app.get(path, pageSecurityHeaders, async (c) => {
     const result = await c
       .get("container")

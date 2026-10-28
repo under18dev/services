@@ -6,6 +6,7 @@ import { aUser } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 import { DrizzleEmailChallengeRepository } from "../src/infrastructure/persistence/drizzle-email-challenge.repository";
+import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { resetDatabase } from "./helpers";
 
 /**
@@ -154,7 +155,9 @@ describe("GET /login の描画", () => {
     // Passkey のボタン自体はアイランドが描く。サーバーが返すのはマウント先と、
     // JS が動かなかったときに残る代替表示だけ。
     expect(html).toContain('id="passkey-island"');
-    expect(html).toContain('src="/ui/login-island.js"');
+    // **ページが書く URL と配信ルートが一致していること**（#211）。
+    // ハッシュが入るので文字列を書き写さない。
+    expect(html).toContain(`src="${LOGIN_ISLAND_PATH}"`);
   });
 
   it("CSRF トークンを hidden と Cookie の両方に置く", async () => {
@@ -236,16 +239,51 @@ describe("GET /login の描画", () => {
   });
 });
 
+describe("URL に内容ハッシュが入る（#211）", () => {
+  /**
+   * **HTML に実際に書かれた URL を取りに行く。** 定数を 2 回使って
+   * 突き合わせると「定数が自分自身と一致する」しか見ていない。
+   *
+   * ハッシュが外れても画面は動く（URL が固定に戻るだけ）ので、ここが
+   * 唯一それに気づく場所である。外れると `immutable` と組み合わさって、
+   * **内容を変えてもブラウザが 1 年古いものを使い続ける。**
+   */
+  const urlsIn = (page: string): string[] =>
+    [...page.matchAll(/(?:src|href)="(\/ui\/[^"]*)"/g)].map((match) => match[1] ?? "");
+
+  it.each(["/login", "/signup"])("%s が参照する URL", async (path) => {
+    const urls = urlsIn(await (await SELF.fetch(`${BASE}${path}`)).text());
+    expect(urls.length, "アセットを 1 つも参照していない").toBeGreaterThan(0);
+
+    for (const url of urls) {
+      expect(url, `${url} にハッシュが入っていない`).toMatch(/\.[0-9a-f]{16}\./);
+
+      const response = await SELF.fetch(`${BASE}${url}`);
+      expect(response.status, `${url} が引けない`).toBe(200);
+      expect(response.headers.get("Cache-Control")).toContain("immutable");
+    }
+  });
+
+  it("ハッシュの無い古い URL は 404 になる", async () => {
+    // **これは正しい挙動。** デプロイ前の URL を掴んだブラウザは新しい
+    // サーバーから取れない。代わりに、ページを読めば必ず新しい URL を
+    // 指しているので取りに行ける。ここが 200 を返すなら古い URL も
+    // 生かしていることになり、#211 で消した窓が戻る。
+    expect((await SELF.fetch(`${BASE}/ui/u18.css`)).status).toBe(404);
+    expect((await SELF.fetch(`${BASE}/ui/login-island.js`)).status).toBe(404);
+  });
+});
+
 describe("Auth UI のアセット配信", () => {
   it("スタイルシートを返す", async () => {
-    const response = await SELF.fetch(`${BASE}/ui/u18.css`);
+    const response = await SELF.fetch(`${BASE}${STYLESHEET_PATH}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/css");
     expect((await response.text()).length).toBeGreaterThan(100);
   });
 
   it("Passkey アイランドの JS を返す", async () => {
-    const response = await SELF.fetch(`${BASE}/ui/login-island.js`);
+    const response = await SELF.fetch(`${BASE}${LOGIN_ISLAND_PATH}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/javascript");
 
@@ -406,7 +444,7 @@ describe("ログイン済みの状態で GET /login", () => {
     expect(html).toContain(user.displayName);
     expect(html).not.toContain('action="/login/start"');
     // ログイン済み画面に JS は要らない。読み込ませない。
-    expect(html).not.toContain("/ui/login-island.js");
+    expect(html).not.toContain(LOGIN_ISLAND_PATH);
   });
 
   it("ログアウトすると Cookie が落ち、ログイン画面へ戻る", async () => {

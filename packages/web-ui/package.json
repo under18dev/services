@@ -8,12 +8,13 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "echo \"no tests in @u18/web-ui\""
+    "test": "vitest run"
   },
   "dependencies": {
     "hono": "4.13.13"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
   }
 }

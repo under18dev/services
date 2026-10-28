@@ -333,6 +333,30 @@ jobs:
           fi
           scripts/smoke-form-probe.sh "${PRODUCTION_URL%/}"
 
+      # **ページに書いてある URL を、実際に取りに行く（#211）。**
+      #
+      # URL に内容ハッシュを入れたとき、`/ui/u18.css` が 404 になった。
+      # **その CSS を借りていた nfc-worker のカード画面は、何も変えて
+      # いないのにスタイルを失う。** 画面は描かれるので 500 にもならず、
+      # 外形監視にも出ない。両側のテストは自分の Worker の内側に閉じて
+      # いて、どちらもそれを見られなかった。
+      #
+      # ここで見るのは「URL が正しいか」ではなく**本番で引けるか**である。
+      # route の解決も、デプロイの順序も、キャッシュの残りも、ひっくるめて
+      # 外から 1 回通す。#226 の form 経路と同じ理由で、**こちらが書いて
+      # いない部分の振る舞い**は外から通さないと分からない。
+      #
+      # GET しか出さない。認証も要らない。
+      - name: Smoke test the assets the page references
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the asset smoke test."
+            exit 0
+          fi
+          scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}"
+
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
   # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは
   # 互いに依存しないため、並列で構わない。

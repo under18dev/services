@@ -1,4 +1,5 @@
 import { Layout } from "@u18/web-ui";
+import { STYLESHEET_PATH } from "./asset-paths";
 import type { FC } from "hono/jsx";
 import type { CardView } from "../../../application/ports";
 
@@ -64,21 +65,6 @@ const CardBox: FC<{ readonly card: CardView }> = ({ card }) => (
 export type CardsPageProps = {
   readonly cards: readonly CardView[];
 };
-
-/**
- * 読み込むスタイルシート。**auth-worker が配信しているものを借りている。**
- *
- * この画面の本番 route は `auth.under18.dev/account/nfc/*` なので、
- * `/ui/u18.css` は同一オリジンの auth-worker（`auth.under18.dev/*`）へ
- * 当たる。借りられるのはそのためで、**`go.under18.dev` 側には当たらない**
- * （あちらはタップのリダイレクトだけで HTML を返さない）。
- *
- * dashboard-worker は同じ理由で借りられる位置にいるが、借りずに自分で
- * 配信している（理由は `packages/web-ui/src/styles.ts`）。この Worker も
- * 同じ形にするなら `/account/nfc/ui/u18.css` を生やすことになる。
- * **いまは借りたままの挙動を変えていない。**
- */
-const STYLESHEET_PATH = "/ui/u18.css";
 
 export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
   <Layout title="NFC カード" stylesheet={STYLESHEET_PATH}>

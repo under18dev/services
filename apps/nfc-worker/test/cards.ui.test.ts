@@ -133,3 +133,65 @@ describe("カード一覧の画面", () => {
     expect(html).toContain("紛失");
   });
 });
+
+/**
+ * ページが参照するアセットが、この Worker から引けること（#211）。
+ *
+ * ## ここが空いていた
+ *
+ * この画面は長らく auth-worker の `/ui/u18.css` を**借りていた**。
+ * #211 であちらの URL に内容ハッシュが入り、`/ui/u18.css` は 404 に
+ * なった —— **借りている側は何も変えていないので、画面は描かれるが
+ * スタイルが当たらない。** 500 にもならず外形監視にも出ない。
+ *
+ * **そのとき、どちらのテストもそれを見られなかった。** このファイルは
+ * `u18.css` を一度も見ておらず、auth のテストはこの画面が何を参照して
+ * いるかを知らない。**依存が Worker をまたいで HTTP の上にあり、両側の
+ * テストが自分の Worker の内側に閉じていた。**
+ *
+ * だからここで見るのは「スタイルシートの URL が正しいか」ではなく、
+ * **この Worker に投げて返ってくるか**である。借りる関係が戻れば
+ * （= 自分で配信しなくなれば）、ここで落ちる。
+ */
+describe("ページが参照するアセット", () => {
+  const assetUrlsIn = (html: string): string[] =>
+    [...html.matchAll(/(?:href|src)="([^"]*\/ui\/[^"]*)"/g)].map((match) => match[1] ?? "");
+
+  it("参照している URL をこの Worker が返す", async () => {
+    await seedActiveCard("usr_taro", "https://example.com/taro");
+    const urls = assetUrlsIn(await (await open(cookieFor(TARO))).text());
+
+    expect(urls.length, "アセットを 1 つも参照していない").toBeGreaterThan(0);
+
+    for (const url of urls) {
+      // **auth-worker の形（`/ui/...`）ではなく、この Worker の
+      // route 配下（`/account/nfc/ui/...`）であること。** ここが
+      // `/ui/u18.css` に戻ると、本番では auth-worker に当たる。
+      expect(url, `${url} がこの Worker の route 配下にない`).toMatch(/^\/account\/nfc\/ui\//);
+      expect(url, `${url} にハッシュが入っていない`).toMatch(/\.[0-9a-f]{16}\./);
+
+      const response = await createApp({ identity }).fetch(
+        new Request(`${ORIGIN}${url}`),
+        env,
+        executionContext(),
+      );
+      expect(response.status, `${url} が引けない`).toBe(200);
+      expect(response.headers.get("Cache-Control")).toContain("immutable");
+    }
+  });
+
+  it("スタイルシートに個人情報が混ざらない", async () => {
+    // **この Worker で唯一 `no-store` を外す経路である。** 中身が
+    // 全利用者に同じであることが前提なので、そこを固定する。
+    const cardId = await seedActiveCard("usr_taro", "https://example.com/taro");
+    const urls = assetUrlsIn(await (await open(cookieFor(TARO))).text());
+
+    for (const url of urls) {
+      const body = await (
+        await createApp({ identity }).fetch(new Request(`${ORIGIN}${url}`), env, executionContext())
+      ).text();
+      expect(body).not.toContain(cardId);
+      expect(body).not.toContain("usr_taro");
+    }
+  });
+});
