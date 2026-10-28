@@ -1,0 +1,1 @@
+CREATE INDEX `email_challenges_purpose_created_idx` ON `email_challenges` (`purpose`,`created_at`);

@@ -156,6 +156,18 @@ export class DrizzleEmailChallengeRepository implements EmailChallengeRepository
     return row?.count ?? 0;
   }
 
+  async countSentSinceForPurpose(purpose: OtpPurpose, since: Date): Promise<number> {
+    // `email_challenges_purpose_created_idx` がこの 2 条件を覆う（#236）。
+    // アドレスで絞らないので `lower()` が無く、countSentSince と違って
+    // インデックスがそのまま効く。
+    const row = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(emailChallenges)
+      .where(and(eq(emailChallenges.purpose, purpose), gt(emailChallenges.createdAt, since)))
+      .get();
+    return row?.count ?? 0;
+  }
+
   async invalidateActive(email: string, purpose: OtpPurpose, at: Date): Promise<number> {
     const rows = await this.db
       .update(emailChallenges)

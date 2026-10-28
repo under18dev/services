@@ -68,6 +68,19 @@ export interface EmailChallengeRepository {
   countSentSince(email: string, purpose: OtpPurpose, since: Date): Promise<number>;
 
   /**
+   * `since` 以降にその用途で作られた行数を返す。**アドレスで絞らない。**
+   *
+   * 総量の上限に使う（#236）。`countSentSince` と数えているものは同じ
+   * 「送った事実」だが、**守っているものが違う** —— あちらは 1 人の利用者の
+   * 受信箱、こちらは送信経路そのものである。宛先を変えながらの送信は
+   * あちらをすり抜けるので、アドレスを見ない数え方が別に要る。
+   *
+   * `countSentSince` と同じく、`since` は `RetentionPolicy.email_challenges`
+   * より後でなければならない。掃除された行は数えられない。
+   */
+  countSentSinceForPurpose(purpose: OtpPurpose, since: Date): Promise<number>;
+
+  /**
    * 同じメール・用途の未使用チャレンジを無効化する。
    * 新しいコードを出す前に呼び、古いコードが生き残らないようにする。
    */
