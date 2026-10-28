@@ -337,7 +337,28 @@ export function createApp(): Hono<AppBindings> {
   // 同じ指定）と揃える。
   const root = new Hono<AppBindings>({ strict: false });
 
-  root.use("*", secureHeaders());
+  // **`Referrer-Policy` を既定（`no-referrer`）のままにしない（#226 / #228）。**
+  //
+  // Fetch 仕様では、referrer policy が参照元を落とすとき**ナビゲーション
+  // 要求の `Origin` も `null` になる**。自分のページから出した form 送信が
+  // `Origin: null` で届き、Origin 検証に落ちる。auth-worker が本番で
+  // これを踏み、ログイン・新規登録・ログアウトが全滅した（#226）。
+  //
+  // **この Worker にはまだ form POST が無いので、いまは壊れていない。**
+  // それでも揃えるのは、無事である理由が「form がまだ無い」ことだけだから
+  // である。#208（JS 無しで他端末のセッションを切る）を入れた時点で、
+  // 同じ障害を同じ形で踏む。そのとき `@u18/web-ui` の `page-headers.ts` を
+  // 読んだ人は **#226 で直っていると思う** —— あのファイルのコメントは
+  // auth-worker の話で、こちらには効いていない。
+  //
+  // **ここが効く場所である。** 画面側（`pageSecurityHeaders`）に書いても、
+  // この全体ミドルウェアが後から上書きするので効かない（auth-worker の
+  // `app.ts` と同じ。向こうは実際にそれで一度失敗している）。
+  //
+  // `same-origin` なら同一オリジンへの要求にだけ参照元が載る。外部サイトへは
+  // 何も送らない。この Worker は `auth.under18.dev/account/*` だけを受け持ち、
+  // 外部への遷移を持たないので、失うものは無い。
+  root.use("*", secureHeaders({ referrerPolicy: "same-origin" }));
 
   // **キャッシュさせないのを既定にする（#125 / RR-10）。**
   //
