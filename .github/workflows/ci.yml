@@ -79,6 +79,26 @@ jobs:
 
           echo "All codeql-action references are pinned to the same commit."
 
+  deadlines:
+    # **独立したジョブにしてある。**
+    #
+    # この検査は**差分と無関係に落ちる** —— 記録された期限が来た日から、
+    # 誰がどんな PR を出しても赤くなる。`Lint & format` の中に混ぜると
+    # 「自分の変更が lint に落ちた」に見えて、踏んだ人が原因を自分の差分に
+    # 探す。ジョブ名が `Deadlines` なら、チェック一覧を見た時点で
+    # **自分のせいではない**と分かる。
+    #
+    # これを曖昧にすると、#234 とは逆向きの事故が起きる —— 赤を消すために
+    # 期限だけ伸ばす、が定着する。それは条件に戻すのと同じことである。
+    name: Deadlines
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+      - name: Check deadlines
+        run: pnpm check:deadlines
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
@@ -220,12 +240,13 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, build]
+    needs: [lint, deadlines, typecheck, test, build]
     if: always()
     steps:
       - name: Check results
         run: |
           echo "lint=${{ needs.lint.result }}"
+          echo "deadlines=${{ needs.deadlines.result }}"
           echo "typecheck=${{ needs.typecheck.result }}"
           echo "test=${{ needs.test.result }}"
           echo "build=${{ needs.build.result }}"
