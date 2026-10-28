@@ -308,6 +308,31 @@ jobs:
             "${PRODUCTION_URL%/}/.well-known/openid-configuration?cache_bust=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 200 \
             --jq .issuer "${PRODUCTION_URL%/}"
 
+      # **ブラウザが送る形の form を 1 本通す（#226）。**
+      #
+      # 上の 2 つは GET しか出していない。ログイン・新規登録・ログアウトの
+      # すべてが本番で壊れていたとき、この 2 つは緑のままだった。原因は
+      # `Referrer-Policy: no-referrer` で `Origin: null` になることで、
+      # **GET では一度も現れない**（form を POST したときだけ起きる）。
+      #
+      # 単体テストも素通りさせた。テストが `Origin` を明示的に付けていて、
+      # 実ブラウザが送る形を一度も通していなかったため。#216（wrangler が
+      # 何をするか）・#217（Cloudflare の route が何をするか）と同じ形で、
+      # **こちらが書いていない部分の振る舞い**は外から通さないと分からない。
+      #
+      # 宛先は形式不正の文字列で、`EmailAddress.tryCreate` が null を返した
+      # 時点で弾かれる。D1 に行は増えず、誰にもメールは飛ばない
+      # （scripts/smoke-form-probe.sh の冒頭に根拠を書いてある）。
+      - name: Smoke test the no-JS form path
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the form smoke test."
+            exit 0
+          fi
+          scripts/smoke-form-probe.sh "${PRODUCTION_URL%/}"
+
   # nfc-worker も IdentityRPC への Service Binding を持つ（セッション照会）。
   # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは
   # 互いに依存しないため、並列で構わない。
