@@ -251,6 +251,41 @@ describe("画面には CSP が付く", () => {
   });
 });
 
+describe("Referrer-Policy を no-referrer にしない", () => {
+  /**
+   * Fetch 仕様では、referrer policy が参照元を落とすとき**ナビゲーション
+   * 要求の `Origin` も `null` になる**。自分のページから出した form 送信が
+   * `Origin: null` で届き、Origin 検証に落ちる。auth-worker が本番でこれを
+   * 踏み、ログイン・新規登録・ログアウトが全滅した（#226）。
+   *
+   * **この Worker にはまだ form POST が無い。** だからこのテストは
+   * 「いま壊れていること」ではなく、**#208（JS 無しで他端末を切る）を
+   * 入れた瞬間に同じ障害を踏むこと**を防いでいる。そのとき
+   * `@u18/web-ui` の `page-headers.ts` を読んだ人は #226 で直っていると
+   * 思うので、ここで止める以外に気づく機会が無い。
+   */
+  it.each(PAGES)("%s", async (path) => {
+    const response = await withCookie(path, FULL_IDENTITY);
+
+    expect(response.headers.get("Referrer-Policy")).toBe("same-origin");
+  });
+
+  it("401 の応答にも付く", async () => {
+    // 画面だけに付けても、ログインへ誘導する 401 の HTML から出した
+    // form 送信は同じ問題を踏む。全体ミドルウェアで付けている以上
+    // 付いているはずで、経路を 1 つに保てているかの確認でもある。
+    const response = await get(OVERVIEW_PATH, {
+      getUserProfile: () => neverCalled("getUserProfile"),
+      listPasskeys: () => neverCalled("listPasskeys"),
+      listSessions: () => neverCalled("listSessions"),
+      listGrants: () => neverCalled("listGrants"),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Referrer-Policy")).toBe("same-origin");
+  });
+});
+
 describe("0 件のときに空の一覧を出さない", () => {
   it.each([
     [OVERVIEW_PATH, "登録されているパスキーはありません"],

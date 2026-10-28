@@ -20,6 +20,7 @@
 #   検査:
 #     --jq <path> <expected>   JSON の値が一致するか（例: --jq .status ok）
 #     --contains <substring>   本文に含まれるか（JSON でない応答用）
+#     --header <name> <value>  応答ヘッダが一致するか（大文字小文字と前後の空白を無視）
 #
 # 3 つの Worker すべてがこれを使う。curl とリトライを 1 箇所に置くのは、
 # 複数箇所に写すと片方だけ直す事故が起きるため（実際 `|| echo 000` が
@@ -31,7 +32,8 @@ expected_status="${2:?expected status is required}"
 shift 2
 
 body_file="$(mktemp)"
-trap 'rm -f "$body_file"' EXIT
+head_file="$(mktemp)"
+trap 'rm -f "$body_file" "$head_file"' EXIT
 
 echo "Probing $url (expecting HTTP $expected_status)"
 
@@ -51,7 +53,7 @@ for attempt in 1 2 3 4 5; do
   # 呼び出し側で URL を変えてキャッシュキーごと変えること**
   # （deploy.yml の Discovery の例）。
   code="$(curl -sS -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-    -o "$body_file" -w '%{http_code}' --max-time 10 "$url")" || code=000
+    -D "$head_file" -o "$body_file" -w '%{http_code}' --max-time 10 "$url")" || code=000
   [ "$code" = "$expected_status" ] && break
   echo "attempt $attempt: HTTP $code, retrying..."
   sleep 5
@@ -85,6 +87,41 @@ while [ $# -gt 0 ]; do
       fi
       if [ "$got" != "$want" ]; then
         echo "::error::$url: $path is \"$got\", expected \"$want\"."
+        fail=1
+      fi
+      shift 3
+      ;;
+    --header)
+      name="${2:?--header needs a header name}"
+      want="${3:?--header needs an expected value}"
+      # **綴りに依存しない。** HTTP/2 はヘッダ名を小文字で届け、HTTP/1.1 は
+      # `Referrer-Policy` と大文字で届ける。本番だけを見ていると前者しか
+      # 現れないので、`wrangler dev` に当てた途端に健全でも落ちる —— これを
+      # awk の `IGNORECASE`（gawk 拡張）でやって実際に踏んだ（#230）。
+      # `grep -i` は POSIX で、どちらの綴りでも拾う。
+      #
+      # **`|| true` が要る。** 一致が無いと `grep` が 1 で終わり、
+      # `set -euo pipefail` の下では代入ごとスクリプトが落ちて、下の
+      # `::error::` が 1 行も出ないまま終わる（#230 で 2 箇所踏んだ）。
+      lines="$(tr -d '\r' < "$head_file" | grep -i "^${name}:" || true)"
+      # **同じヘッダが 2 本返る場合を黙って片方に寄せない。** 全体の
+      # ミドルウェアと経路側のミドルウェアが両方付けると、どちらが効くかは
+      # 実装の順序で決まる。片方だけ読んで「期待どおり」と言うと、
+      # **ブラウザが見ている値と検査が見ている値が食い違う**（#226 / #228 は
+      # まさにその食い違いだった）。曖昧なら曖昧だと言う。
+      if [ "$(printf '%s' "$lines" | grep -c . || true)" -gt 1 ]; then
+        echo "::error::$url: $name appears more than once; which value applies depends on middleware order."
+        printf '%s\n' "$lines" | sed 's/^/::error::  /'
+        fail=1
+        shift 3
+        continue
+      fi
+      got="$(printf '%s' "$lines" | cut -d: -f2- | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+      if [ -z "$got" ]; then
+        echo "::error::$url: response has no $name header (expected \"$want\")."
+        fail=1
+      elif [ "$got" != "$want" ]; then
+        echo "::error::$url: $name is \"$got\", expected \"$want\"."
         fail=1
       fi
       shift 3

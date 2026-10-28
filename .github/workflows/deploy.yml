@@ -408,6 +408,16 @@ jobs:
       #
       # 401 の本文まで見るのは、正しい Worker が答えていることの確認。
       #
+      # **Referrer-Policy も見る（#228）。** auth-worker は #226 でこの値を
+      # 直したが、**dashboard は直っていなかった** —— 修正のコメントだけが
+      # 共有の `@u18/web-ui` に入り、設定は auth-worker の `app.ts` にしか
+      # 入らなかった。本番の /account はそのあとも `no-referrer` を返し続け、
+      # 単体テストも既存のスモークもそれを見ていなかった。
+      #
+      # この Worker にはまだ form POST が無いので、いまは無害である。
+      # だからこそ**検査が要る** —— 無事である理由が「form がまだ無い」
+      # ことだけで、#208 を入れた瞬間に #226 と同じ障害を踏む。
+      #
       # **このステップは #106 が直るまで落ちる。** dashboard-worker は
       # /api/me を登録しているが本番 route は auth.under18.dev/account/* で、
       # Cloudflare の route は一致した接頭辞を URL から取り除かない。
@@ -423,4 +433,5 @@ jobs:
             exit 0
           fi
           scripts/smoke-probe.sh "${PRODUCTION_URL%/}/account/api/me" 401 \
-            --jq .error unauthenticated
+            --jq .error unauthenticated \
+            --header Referrer-Policy same-origin
