@@ -1,4 +1,12 @@
-blank_issues_enabled: true
+# **空の issue を許さない。**
+#
+# 許すと `/issues/new` から本文が完全に空の issue を立てられ、**テンプレートの
+# 案内も下の contact link も一度も表示されない**。#222 でバグ報告テンプレートの
+# 案内を直したが、塞いだのは「古い案内が読まれる」ほうで、「案内がそもそも
+# 表示されない」経路はここに残っていた。
+#
+# 代わりに「その他」テンプレートを置いてあるので、分類に迷っても行き先はある。
+blank_issues_enabled: false
 contact_links:
   - name: セキュリティ脆弱性の報告（非公開）
     url: https://github.com/under18dev/services/security/advisories/new
