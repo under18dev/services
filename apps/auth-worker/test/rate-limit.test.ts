@@ -4,7 +4,7 @@ import { aUser } from "@u18/testing";
 import { count } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
-import { resetDatabase } from "./helpers";
+import { resetDatabase, startOfWindow } from "./helpers";
 
 /**
  * IP 単位のレート制限（#21、仕様書 9 Abuse）。
@@ -75,15 +75,6 @@ function freshIp(): string {
  * **性質としてはランブック §13 に書いてある**（攻撃者が境界を狙えば
  * 短時間に 2 倍送れる）。
  */
-const WINDOW_MARGIN_MS = 1_000;
-
-async function startOfWindow(periodSeconds: number): Promise<void> {
-  const period = periodSeconds * 1_000;
-  const remaining = period - (Date.now() % period);
-  if (remaining >= WINDOW_MARGIN_MS) return;
-  await new Promise((resolve) => setTimeout(resolve, remaining + 50));
-}
-
 beforeEach(async () => {
   // 全 scope が同じ period を使っている前提（下のテストで固定している）。
   await startOfWindow(RateLimitPolicy.email_start.periodSeconds);

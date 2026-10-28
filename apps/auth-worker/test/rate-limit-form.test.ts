@@ -1,7 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { RateLimitPolicy } from "../src/domain/services/rate-limit-policy";
-import { resetDatabase } from "./helpers";
+import { resetDatabase, startOfWindow } from "./helpers";
 
 /**
  * form 経路の IP レート制限。
@@ -76,7 +76,25 @@ function submit(
   });
 }
 
-beforeEach(resetDatabase);
+/**
+ * **窓の境界を避ける（#176）。** このファイルは「上限まで送ってから 1 本
+ * 余計に送る」形なので、途中で窓が切り替わるとカウンタが 0 に戻り、
+ * 最後の 1 本が通ってしまう。実装は正しいのにテストだけが落ちる。
+ *
+ * ランブック §13.2 に「別のファイルで同じ形を書くときは同じ手当てが要る」
+ * と書いてあるが、**このファイルは手当て無しで入った**（#232）。CI で
+ * `expected 200 to be 429` として出た。
+ *
+ * **余裕は 5 秒にしてある。** 1 件の実測は手元で 78ms、CI では 398ms で、
+ * 既定の 1 秒だと 4 割を使う。CI がもう少し遅い日に跨ぐので、実測の
+ * 10 倍強を取った。60 秒窓に対して 5 秒なので、待つのは 12 回に 1 回程度。
+ */
+const WINDOW_MARGIN_MS = 5_000;
+
+beforeEach(async () => {
+  await resetDatabase();
+  await startOfWindow(RateLimitPolicy.email_start.periodSeconds, WINDOW_MARGIN_MS);
+});
 
 describe("form からの OTP 送信にも IP 制限が掛かる", () => {
   const { limit, periodSeconds } = RateLimitPolicy.email_start;
