@@ -15,6 +15,8 @@
  * 畳んでおけば、権限が立つ瞬間と Passkey が在る瞬間が同じになる。
  */
 
+import type { AuditEventName } from "../../application/ports/audit-log.port";
+
 /**
  * SQL リテラルへ落とす。
  *
@@ -94,7 +96,30 @@ export function revokeNonPasskeySessionsSql(userId: string): string {
 returning id;`;
 }
 
-export type AdminRoleAuditEvent = "ops.admin.granted" | "ops.admin.revoked";
+/**
+ * 付与・剥奪のイベント名。
+ *
+ * **`{ event: "..." }` の形で書いてある理由がある**（#270）。`vitest.config.ts`
+ * の `collectAuditEventNames` が `src/` を走査するとき、拾うのは
+ * プロパティとして書かれた形である。以前はここが型の union だけだったため
+ * **走査に引っかからず、`audit-events.test.ts` の対象外になっていた。**
+ *
+ * 対象外だと何が起きるか —— `AUDIT_EVENT_RETENTION` は
+ * `Record<AuditEventName, _>` なので、登録簿に無いイベントは**区分を
+ * 持てない。** 掃除は既定の境界（180 日）で判定するので、
+ * **管理者権限の付与・剥奪の記録が 180 日で消えていた。**
+ *
+ * 「宣言はあるが発動しない」の変種で、**検査の視野の外にある**ぶん
+ * 見つけにくい。`audit-events.test.ts` は「見えているもの」の中だけで
+ * 整合を取るので、見えていないものは最初から対象外になる。
+ */
+export const ADMIN_ROLE_AUDIT_EVENTS = {
+  granted: { event: "ops.admin.granted" },
+  revoked: { event: "ops.admin.revoked" },
+} as const satisfies Record<string, { event: AuditEventName }>;
+
+export type AdminRoleAuditEvent =
+  (typeof ADMIN_ROLE_AUDIT_EVENTS)[keyof typeof ADMIN_ROLE_AUDIT_EVENTS]["event"];
 
 /**
  * 付与・剥奪を監査ログに残す（仕様書 §9 / runbook §10.6）。

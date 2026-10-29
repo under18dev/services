@@ -180,7 +180,7 @@ async function grant(options) {
   const grantStatement = sql.grantAdminSql(options.userId);
   const revokeSessionsStatement = sql.revokeNonPasskeySessionsSql(options.userId);
   const auditStatement = sql.adminRoleAuditSql({
-    event: "ops.admin.granted",
+    event: sql.ADMIN_ROLE_AUDIT_EVENTS.granted.event,
     userId: options.userId,
     actor: options.actor,
     reason: options.reason ?? "manual_grant",
@@ -230,7 +230,7 @@ async function revoke(options) {
 
   const revokeStatement = sql.revokeAdminSql(options.userId);
   const auditStatement = sql.adminRoleAuditSql({
-    event: "ops.admin.revoked",
+    event: sql.ADMIN_ROLE_AUDIT_EVENTS.revoked.event,
     userId: options.userId,
     actor: options.actor,
     reason: options.reason ?? "manual_revoke",
