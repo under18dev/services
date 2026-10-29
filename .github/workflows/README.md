@@ -52,11 +52,12 @@ gh api repos/<owner>/<repo>/git/tags/<上で得た sha> --jq '.object.sha'
 判断したもので、**検査そのものは正しく動いていた。** 集約して 1 行にする過程で
 意味が変わる。
 
-| 見え方                    | 実態                                                                                                         | 見分け方                                                                                                   |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| **赤**                    | **古い木を見ている。** `pull_request` のチェックは `refs/pull/N/merge` を見るので、base が進むと再計算が要る | **再実行では直らない。** `gh pr update-branch <N>` で追従させる                                            |
-| **チェックが 1 つも無い** | **コンフリクトで run が 1 本も作られていない。** `mergeStateStatus` が `DIRTY`                               | `no checks reported` は「CI 未設定」と**区別が付かない。** `gh pr view <N> --json mergeStateStatus` を見る |
-| **赤（ジョブは全部緑）**  | **古い run が追い越されて `cancelled` になり、集約ジョブだけが `failure` を残している**                      | `gh run view <id> --json jobs` で `cancelled` が並んでいないか見る                                         |
+| 見え方                            | 実態                                                                                                                   | 見分け方                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **赤**                            | **古い木を見ている。** `pull_request` のチェックは `refs/pull/N/merge` を見るので、base が進むと再計算が要る           | **再実行では直らない。** `gh pr update-branch <N>` で追従させる                                            |
+| **チェックが 1 つも無い**         | **コンフリクトで run が 1 本も作られていない。** `mergeStateStatus` が `DIRTY`                                         | `no checks reported` は「CI 未設定」と**区別が付かない。** `gh pr view <N> --json mergeStateStatus` を見る |
+| **赤（ジョブは全部緑）**          | **古い run が追い越されて `cancelled` になり、集約ジョブだけが `failure` を残している**                                | `gh run view <id> --json jobs` で `cancelled` が並んでいないか見る                                         |
+| **同じ名前のチェックが 2 つ並ぶ** | **片方は解析ジョブ、片方は GitHub Advanced Security の集約。** 短いほう（数秒）が集約で、**そちらが alert を報告する** | URL の形で見分ける。`/actions/runs/<run>/job/<job>` は解析ジョブ、`/runs/<id>` は check-run（下記）        |
 
 3 つ目は**同じ PR に両方が並ぶ。** `#300`（マージ済み・全ジョブ緑）の実際の出力:
 
@@ -70,6 +71,57 @@ Typecheck SUCCESS
 ```
 
 **1 行だけを見ると、マージ済みで全ジョブ緑の PR を「赤い」と報告することになる。**
+
+### CodeQL が赤いとき、どちらが赤いのかを見る
+
+**`CodeQL` という名前のチェックは 2 つ出る。** #323 の実際の出力:
+
+```
+CodeQL  fail  5s      https://github.com/under18dev/services/runs/123555323780
+CodeQL  pass  1m17s   https://github.com/under18dev/services/actions/runs/40904275498/job/123554635478
+```
+
+| URL の形                        | 実体                                                  | 何を言っているか                             |
+| ------------------------------- | ----------------------------------------------------- | -------------------------------------------- |
+| `/actions/runs/<run>/job/<job>` | 解析ジョブ                                            | **解析が走ったか**。コードの中身は見ていない |
+| `/runs/<id>`                    | check-run（`app.slug` が `github-advanced-security`） | **この PR の差分に新しい alert があるか**    |
+
+**赤いのは後者である。** 前者は 1 分以上かかって緑、後者は数秒で赤 ——
+**短いほうが本物**という、表の他の行とは逆の見え方になる。
+
+`gh run view <id>` は前者の ID しか受けない。後者を渡すと **404** になる
+（**`gh` が壊れているのではない。** run と check-run は別の資源である）。
+
+```bash
+# 何件あるかと、何の alert かは check-run の output に出る
+gh api repos/<owner>/<repo>/check-runs/<id> -q '.output.title, .output.summary'
+#   1 new alert including 1 high severity security vulnerability
+```
+
+### alert の中身は `refs/pull/<N>/merge` を引く
+
+**ブランチを引いても 0 件が返る。**
+
+```bash
+# これは空
+gh api 'repos/<owner>/<repo>/code-scanning/alerts?ref=refs/heads/<branch>&state=open'
+
+# これで出る
+gh api 'repos/<owner>/<repo>/code-scanning/alerts?ref=refs/pull/<N>/merge&state=open' \
+  -q '.[] | "\(.rule.id) (\(.rule.security_severity_level)) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"'
+#   js/polynomial-redos (high) packages/web-ui/src/asset-hash.ts:140
+```
+
+**`pull_request` の解析は `refs/pull/N/merge`（base と混ぜた木）を見る。**
+ブランチの先端は解析されていないので、そちらに alert は紐づかない。
+**「ブランチに alert が無い」を「問題が無い」と読まないこと。**
+
+### 手元の検査は全部緑でありうる
+
+#323 では `pnpm lint` / `pnpm typecheck` / `pnpm test` が**全部通っていた。**
+CodeQL だけがローカルに無いので、**手元で全部緑でも CI で落ちる経路が
+1 つ残っている。** 落ちたら上の手順で中身まで降りること —— 「CodeQL が
+赤い」だけでは何も直せない。
 
 **押す前に `mergeStateStatus` を見ること。** ただしこれにも 4 つ目の値がある。
 
