@@ -137,8 +137,20 @@ export function hasAssetHash(path: string): boolean {
  * 導線）ので、絞らないと「参照されている」が常に真になる。
  */
 export function collectAssetRefs(html: string): readonly string[] {
-  const refs = [...html.matchAll(/(?:href|src)="([^"]*\/ui\/[^"]*)"/g)].map((m) =>
-    normalizeAssetHash(m[1] as string),
-  );
+  // **`/ui/` を正規表現に入れない。**
+  //
+  // `([^"]*\/ui\/[^"]*)` と書くと `/ui/` の前後が**どちらも無制限**になり、
+  // 閉じ引用符の来ない入力で多項式時間の後戻りが起きる（CodeQL
+  // `js/polynomial-redos`、high）。**理論上の話ではない** —— 195 KiB の
+  // 入力で 6.3 秒かかった（実測。テストに表がある）。この関数は
+  // `@u18/web-ui` から export されているので「ライブラリの入力」として
+  // 扱われる。
+  //
+  // 属性値は `[^"]*` 1 つだけで取り、**絞り込みは JS 側でやる。**
+  // 区切りが前後とも固定の文字なので後戻りが起きない。
+  const refs = [...html.matchAll(/(?:href|src)="([^"]*)"/g)]
+    .map((m) => m[1] as string)
+    .filter((value) => value.includes("/ui/"))
+    .map(normalizeAssetHash);
   return [...new Set(refs)].sort();
 }

@@ -133,3 +133,42 @@ describe("collectAssetRefs", () => {
     expect(collectAssetRefs(html)).toEqual([]);
   });
 });
+
+describe("collectAssetRefs は病的な入力で遅くならない", () => {
+  /**
+   * **CodeQL `js/polynomial-redos`（high）を実際に踏んだ**（#323）。
+   *
+   * 最初は `([^"]*\/ui\/[^"]*)` と書いていた。`/ui/` の前後が**どちらも
+   * 無制限**なので、閉じ引用符の来ない入力で多項式時間の後戻りが起きる。
+   * 実測（Node 26、`"/ui/"` の繰り返し）:
+   *
+   * | 入力     | 旧（`/ui/` を正規表現に） | 新（属性値だけ取り JS で絞る） |
+   * | -------- | ------------------------- | ------------------------------ |
+   * | 20 KiB   | 38 ms                     | 0 ms                           |
+   * | 78 KiB   | **766 ms**                | 0 ms                           |
+   * | 195 KiB  | **6332 ms**               | 0 ms                           |
+   *
+   * **理論上の話ではなかった。** この関数は `@u18/web-ui` から export されて
+   * いるので、CodeQL は「ライブラリの入力」として扱う。
+   *
+   * 閾値はこの実測から決めている —— 新しい形なら 0 ms なので、500 ms は
+   * 十分な余裕がある。**旧の形に戻すと 6 秒かかるので落ちる。**
+   */
+  it("195 KiB の病的な入力を 500ms 以内に処理する", () => {
+    const html = `<img src="/ui/${"/ui/".repeat(50_000)}`;
+
+    const startedAt = Date.now();
+    const refs = collectAssetRefs(html);
+    const elapsed = Date.now() - startedAt;
+
+    // 閉じ引用符が来ないので、拾えるものは無い。**0 件が正しい。**
+    expect(refs).toEqual([]);
+    expect(elapsed, `${elapsed}ms かかった。正規表現が線形でなくなっている`).toBeLessThan(500);
+  });
+
+  it("まともな入力はこれまでどおり拾える", () => {
+    // 上のテストが「常に 0 件」で通らないことの確認。
+    const html = '<link href="/account/ui/u18.1111111111111111.css"/>';
+    expect(collectAssetRefs(html)).toEqual(["/account/ui/u18.<hash>.css"]);
+  });
+});
