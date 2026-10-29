@@ -22,6 +22,7 @@
     "check:bindings": "node scripts/check-service-bindings.mjs",
     "check:routes": "node scripts/check-route-patterns.mjs",
     "check:deadlines": "node scripts/check-deadlines.mjs",
+    "check:issue-refs": "node scripts/check-issue-refs.mjs",
     "check:shell": "node scripts/check-shell-exit-status.mjs",
     "check:codeql": "node scripts/check-codeql-refs.mjs",
     "check:test-ips": "node scripts/check-test-ip-ranges.mjs",
