@@ -383,10 +383,24 @@ jobs:
   # 参照先が無いと起動しないので auth-worker の後。dashboard-worker とは
   # 互いに依存しないため、並列で構わない。
   #
-  # /health は使えない。nfc-worker の本番 route は go.under18.dev/c/* と
-  # auth.under18.dev/account/nfc/* の 2 つだけで、/health はどちらにも
-  # 当たらず外から叩けない（#97）。
-  # 死活確認には既存の応答をそのまま使う。新しい公開面を増やさずに済む。
+  # **死活確認に /health を使わない。** ただし理由は「叩けないから」では
+  # ない —— **実測では叩ける**（#280）。
+  #
+  # route は `go.under18.dev/c/*` ではなく **`go.under18.dev/*`** なので、
+  # この Worker の全パスがそのホストに届く:
+  #
+  #     https://go.under18.dev/health              200
+  #     https://go.under18.dev/account/nfc/cards   401（認証で止まる）
+  #
+  # ここで `/c/*` を使うのは、**正しい Worker が答えていることまで
+  # 見たいから**である。404 を返す主体は他にもいる（route の割り当てを
+  # 間違えれば dashboard や auth の 404 が返る）ので、本文まで確かめる。
+  # `/health` はどの Worker でも似た形を返すので、取り違えを捕まえられない。
+  #
+  # **長らく「/health はどちらの route にも当たらず外から叩けない（#97）」と
+  # 書いてあった。** 結論（/c/* を使う）は変わらないが、**理由が事実では
+  # なかった。** 次に「nfc は /health を公開していない」を前提に何かを
+  # 決めると、その前提が間違っている。
   deploy-nfc-worker:
     name: Deploy nfc-worker
     runs-on: ubuntu-latest
