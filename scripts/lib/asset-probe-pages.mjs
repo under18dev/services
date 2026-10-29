@@ -55,25 +55,55 @@ export const UNPROBEABLE = {
 };
 
 /**
- * `smoke-asset-probe.sh` の既定一覧を読む。`ページ:接頭辞` の組。
+ * `smoke-asset-probe.sh` の宣言（`probe_pages_for` の case）を読む。
  *
- * 接頭辞が欠けている要素があれば `null` を返す —— **組になっていない行を
- * 部分的に受けない。** 受けると「接頭辞を書き忘れたページだけ借用の検査が
- * 無い」状態が、照合側からは見えなくなる。
+ * 返すのは `{ worker: [{ page, prefix }] }`。**Worker 名でキーを取る**ので、
+ * 「アセットを配っているのに宣言が無い Worker」を接頭辞の一致ではなく
+ * **名前の有無**で判定できる。
+ *
+ * 接頭辞が欠けている要素が 1 つでもあれば `null` を返す ——
+ * **組になっていない宣言を部分的に受けない。** 受けると「接頭辞を書き
+ * 忘れた Worker だけ借用の検査が無い」状態が、ここからは見えなくなる。
  */
-export function readProbePages(text) {
-  // 既定を決めている 1 行だけを見る。散文は読まない。
-  const match = /^\s*set -- (.+)$/m.exec(text);
-  if (match === null) return null;
+export function readProbeDeclaration(text) {
+  const body = /probe_pages_for\(\)\s*\{([\s\S]*?)\n\}/.exec(text);
+  if (body === null) return null;
 
-  const specs = match[1].trim().split(/\s+/).filter(Boolean);
-  const pairs = [];
-  for (const spec of specs) {
-    const at = spec.indexOf(":");
-    if (at <= 0 || at === spec.length - 1) return null;
-    pairs.push({ page: spec.slice(0, at), prefix: spec.slice(at + 1) });
+  const arms = [...body[1].matchAll(/^\s*([A-Za-z0-9_-]+)\)\s*echo "([^"]*)"/gm)];
+  if (arms.length === 0) return null;
+
+  /** @type {Record<string, {page: string, prefix: string}[]>} */
+  const declared = {};
+  for (const [, worker, specs] of arms) {
+    const pairs = [];
+    for (const spec of specs.trim().split(/\s+/).filter(Boolean)) {
+      const at = spec.indexOf(":");
+      if (at <= 0 || at === spec.length - 1) return null;
+      pairs.push({ page: spec.slice(0, at), prefix: spec.slice(at + 1) });
+    }
+    if (pairs.length > 0) declared[worker] = pairs;
   }
-  return pairs;
+  return declared;
+}
+
+/**
+ * `deploy.yml` から、どのジョブがどの Worker ぶんを引いているかを読む。
+ *
+ * **宣言があることと、呼ばれることは別**である。`probe_pages_for` に
+ * 書いただけでは 1 回も走らない —— そして走らない検査は、**書いた人には
+ * 書いたように見える。** `pnpm check:asset-pages` が緑なのも変わらない。
+ */
+export function readDeployInvocations(text) {
+  /** @type {Record<string, string>} ワーカー名 -> ジョブ名 */
+  const byWorker = {};
+  let job = "";
+  for (const line of text.split("\n")) {
+    const jobMatch = /^ {2}([a-z][a-z0-9-]*):\s*$/.exec(line);
+    if (jobMatch !== null) job = jobMatch[1];
+    const call = /smoke-asset-probe\.sh\s+\S+\s+([A-Za-z0-9_-]+)/.exec(line);
+    if (call !== null) byWorker[call[1]] = job;
+  }
+  return byWorker;
 }
 
 /** route-inventory からアセット（パスに `/ui/` を含むもの）を拾う。 */
@@ -97,16 +127,16 @@ export function coveredByPrefix(pairs, assetPath) {
  *   ようにしてある** —— 引数の `workers` とモジュール定数を混ぜて見ると、
  *   組み立てた入力に実物が紛れ込む（テストで実際に踏んだ）。
  */
-export function check({ probeText, workers, unprobeable = UNPROBEABLE }) {
+export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployText }) {
   const problems = [];
-  const pages = readProbePages(probeText);
+  const declared = readProbeDeclaration(probeText);
 
-  if (pages === null) {
+  if (declared === null) {
     problems.push(
-      "smoke-asset-probe.sh から既定の一覧を読めませんでした（`set -- ページ:接頭辞 ...` の行が無いか、" +
-        "接頭辞の欠けた要素がある）。書き方を変えたなら readProbePages も直すこと。",
+      "smoke-asset-probe.sh の宣言を読めませんでした（`probe_pages_for` の case が無いか、" +
+        "`ページ:接頭辞` の組になっていない要素がある）。書き方を変えたなら readProbeDeclaration も直すこと。",
     );
-    return { ok: false, problems, pages: [] };
+    return { ok: false, problems, declared: {} };
   }
 
   for (const { name, assets } of workers) {
@@ -120,37 +150,72 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE }) {
       if (reason.trim() === "") {
         problems.push(`${name}: UNPROBEABLE に理由が書かれていません。`);
       }
+      if (Object.prototype.hasOwnProperty.call(declared, name)) {
+        problems.push(
+          `${name}: UNPROBEABLE と probe_pages_for の両方に居ます。どちらか一方にすること ——` +
+            ` 両方にあると「確かめている」と「確かめられない」が同時に成り立つように読めます。`,
+        );
+      }
       continue;
     }
 
-    const uncovered = assets.filter((a) => !coveredByPrefix(pages, a));
+    const pairs = declared[name];
+    if (pairs === undefined) {
+      problems.push(
+        `${name}: ハッシュ付きアセット（${assets.join(", ")}）を配っていますが、` +
+          `smoke-asset-probe.sh の probe_pages_for に宣言がありません。` +
+          `ページと接頭辞を足すか、外から確かめられないなら UNPROBEABLE に理由ごと書くこと。`,
+      );
+      continue;
+    }
+
+    // **宣言した接頭辞が、その Worker の実際のアセットと噛み合っているか。**
+    // 配信パスを変えたときにここが置き去りになると、借用の検査が
+    // **全部の参照を弾く**ようになり、原因が「借用」と報告される。
+    const uncovered = assets.filter((a) => !coveredByPrefix(pairs, a));
     if (uncovered.length > 0) {
       problems.push(
-        `${name}: ハッシュ付きアセット（${uncovered.join(", ")}）を配っていますが、` +
-          `smoke-asset-probe.sh の既定（${pages.map((p) => `${p.page}:${p.prefix}`).join(" ")}）の` +
-          `どの接頭辞にも入りません。ページと接頭辞を足すか、外から確かめられないなら` +
-          ` UNPROBEABLE に理由ごと書くこと。`,
+        `${name}: 宣言した接頭辞（${pairs.map((p) => p.prefix).join(", ")}）に、` +
+          `配っているアセット（${uncovered.join(", ")}）が入りません。配信パスを変えたなら宣言も直すこと。`,
       );
     }
   }
 
-  // 逆向き (1): どの Worker のアセットも入らない接頭辞が残っていないか。
+  // **宣言した Worker が、デプロイから実際に呼ばれているか。**
   //
-  // **配信パスを変えたときに、ここが置き去りになる。** 接頭辞が実物と
-  // ずれたまま残ると、`smoke-asset-probe.sh` の借用検査は**全部の参照を
-  // 弾く**ようになり、原因が「借用」と報告される（実際はパスの変更）。
-  const allAssets = workers.flatMap((w) => w.assets);
-  for (const { page, prefix } of pages) {
-    if (allAssets.length > 0 && !allAssets.some((a) => a.startsWith(prefix))) {
-      problems.push(
-        `${page}:${prefix} の接頭辞に入るアセットが、どの route-inventory にもありません。` +
-          `配信パスを変えたなら既定の一覧も直すこと。`,
-      );
+  // `deployText` が渡されたときだけ見る（単体テストでは省ける）。
+  if (deployText !== undefined) {
+    const invoked = readDeployInvocations(deployText);
+    for (const name of Object.keys(declared)) {
+      if (!Object.prototype.hasOwnProperty.call(invoked, name)) {
+        problems.push(
+          `${name}: probe_pages_for に宣言がありますが、deploy.yml のどのジョブからも呼ばれていません。` +
+            `宣言しただけでは 1 回も走りません。`,
+        );
+      }
+    }
+    // **自分のジョブから呼ばれているか。** 隣のジョブから呼ぶと、
+    // まだデプロイされていない Worker を引くことになる（#310 で実際に起きた）。
+    for (const [name, job] of Object.entries(invoked)) {
+      const expected = `deploy-${name}`;
+      if (job !== expected) {
+        problems.push(
+          `${name} ぶんの検査が ${job} から呼ばれています（${expected} であるべき）。` +
+            `隣のジョブから引くと、まだデプロイされていない Worker を見ることになります。`,
+        );
+      }
     }
   }
 
-  // 逆向き (2): UNPROBEABLE に、もうアセットを配っていない Worker が残っていないか。
+  // 逆向き: もうアセットを配っていない Worker が宣言に残っていないか。
   const withAssets = new Set(workers.filter((w) => w.assets.length > 0).map((w) => w.name));
+  for (const name of Object.keys(declared)) {
+    if (!withAssets.has(name)) {
+      problems.push(
+        `${name}: probe_pages_for に宣言がありますが、アセットを配っていません。消すこと。`,
+      );
+    }
+  }
   for (const name of Object.keys(unprobeable)) {
     if (!withAssets.has(name)) {
       problems.push(
@@ -160,12 +225,13 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE }) {
     }
   }
 
-  return { ok: problems.length === 0, problems, pages };
+  return { ok: problems.length === 0, problems, declared };
 }
 
 /** リポジトリを読んで `check` に渡す形にする。 */
 export function collect(root = ROOT) {
   const probeText = readFileSync(join(root, "scripts/smoke-asset-probe.sh"), "utf8");
+  const deployText = readFileSync(join(root, ".github/workflows/deploy.yml"), "utf8");
   const appsDir = join(root, "apps");
   const workers = readdirSync(appsDir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
@@ -180,5 +246,5 @@ export function collect(root = ROOT) {
       }
       return { name: e.name, assets: readAssetRoutes(text), hasInventory: true };
     });
-  return { probeText, workers };
+  return { probeText, deployText, workers };
 }
