@@ -56,6 +56,27 @@ test("ラベルが 1 つの RP_ID を落とす（接尾辞ではあるが登録�
   assert.match(problems.join("\n"), /登録可能なドメインではない/);
 });
 
+test("IP リテラルの RP_ID を落とす（ラベル数では覆えない 2 件目）", () => {
+  // `203.0.113.5` はラベルが 4 つあるので 1 ラベル判定を抜け、
+  // `host === rpId` なので接尾辞判定も抜ける。**両方の番人を素通りする。**
+  for (const [rpId, origin] of [
+    ["203.0.113.5", "https://203.0.113.5"],
+    ["192.0.2.1", "https://192.0.2.1:8443"],
+  ]) {
+    const problems = checkWebAuthnVars({ RP_ID: rpId, WEBAUTHN_ORIGIN: origin });
+    assert.match(problems.join("\n"), /IP アドレスである/, rpId);
+  }
+});
+
+test("IP に見えるだけのドメインは落とさない", () => {
+  // 数字とドットだけでも、最後のラベルが数字でなければ TLD になりうる。
+  // ここで落とすと正しい設定を弾く。
+  assert.deepEqual(
+    checkWebAuthnVars({ RP_ID: "1.2.3.dev", WEBAUTHN_ORIGIN: "https://auth.1.2.3.dev" }),
+    [],
+  );
+});
+
 test("localhost は 1 ラベルでも通る（host と一致するため）", () => {
   assert.deepEqual(
     checkWebAuthnVars({ RP_ID: "localhost", WEBAUTHN_ORIGIN: "http://localhost:8787" }),

@@ -108,6 +108,23 @@ export function checkWebAuthnVars(vars) {
 
   const host = url.hostname;
 
+  // **IP リテラルは rpId になれない。**
+  //
+  // WebAuthn の `rpId` は domain string でなければならず、**ブラウザは
+  // IP アドレスを拒む。** ところが `203.0.113.5` はラベルが 4 つあるので
+  // 下の 1 ラベル判定を抜け、`host === rpId` なら接尾辞判定も抜ける。
+  // **`RP_ID: "dev"` とまったく同じ壊れ方**（SecurityError で、登録も
+  // 認証も 1 件も成立しない）を、両方の番人が素通りさせる（指摘: 94）。
+  //
+  // IPv6 は `new URL()` が `hostname` を角括弧付きで返すので、そこも見る。
+  if (/^\d+(\.\d+)*$/.test(rpId) || rpId.startsWith("[")) {
+    problems.push(
+      `RP_ID "${rpId}" は IP アドレスである。rpId は domain string でなければならず、` +
+        `ブラウザが SecurityError で拒むため、登録も認証も 1 件も成立しない`,
+    );
+    return problems;
+  }
+
   // **ラベルが 1 つの RP_ID は、host が一致する場合しか許さない。**
   //
   // `RP_ID: "dev"` は `auth.under18.dev` の接尾辞なので下の判定を通るが、
@@ -117,7 +134,11 @@ export function checkWebAuthnVars(vars) {
   //
   // **完全な Public Suffix の判定はしない**（`co.uk` のような 2 ラベルの
   // public suffix は通る）。PSL を抱え込むと更新の責任が増えるわりに、
-  // この構成で起こりうる形は 1 ラベルに尽きる。
+  // 守れる範囲がほとんど広がらない。
+  //
+  // **「起こりうる形は 1 ラベルに尽きる」と書いていたが、尽きていなかった**
+  // —— IP リテラルが上にある。`registrable ではない` という同じクラスの
+  // 別の形で、ラベル数では覆えない。
   //
   // `localhost` は `host === rpId` の側を通るので影響しない。
   if (host !== rpId && !rpId.includes(".")) {
