@@ -46,6 +46,34 @@ gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object.sha'
 gh api repos/<owner>/<repo>/git/tags/<上で得た sha> --jq '.object.sha'
 ```
 
+## チェック一覧の 1 行を信じない
+
+**2026-10-29 に 3 種類の誤読が起きた。** どれも `gh pr checks` の出力だけを見て
+判断したもので、**検査そのものは正しく動いていた。** 集約して 1 行にする過程で
+意味が変わる。
+
+| 見え方                    | 実態                                                                                                         | 見分け方                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| **赤**                    | **古い木を見ている。** `pull_request` のチェックは `refs/pull/N/merge` を見るので、base が進むと再計算が要る | **再実行では直らない。** `gh pr update-branch <N>` で追従させる                                            |
+| **チェックが 1 つも無い** | **コンフリクトで run が 1 本も作られていない。** `mergeStateStatus` が `DIRTY`                               | `no checks reported` は「CI 未設定」と**区別が付かない。** `gh pr view <N> --json mergeStateStatus` を見る |
+| **赤（ジョブは全部緑）**  | **古い run が追い越されて `cancelled` になり、集約ジョブだけが `failure` を残している**                      | `gh run view <id> --json jobs` で `cancelled` が並んでいないか見る                                         |
+
+3 つ目は**同じ PR に両方が並ぶ。** `#300`（マージ済み・全ジョブ緑）の実際の出力:
+
+```
+$ gh pr view 300 --json statusCheckRollup ...
+CI FAILURE      <- 追い越された古い run
+CI SUCCESS      <- 本番の run
+Typecheck CANCELLED
+Typecheck SUCCESS
+...（全ジョブが二重）
+```
+
+**1 行だけを見ると、マージ済みで全ジョブ緑の PR を「赤い」と報告することになる。**
+
+**押す前に `mergeStateStatus` を見ること。** `CLEAN` なら緑、`BLOCKED` なら理由を
+run まで辿る、`DIRTY` ならコンフリクトで**何も走っていない。**
+
 ## ワークフロー構成
 
 | ファイル       | 契機                                   | 内容                                                                                                  |
