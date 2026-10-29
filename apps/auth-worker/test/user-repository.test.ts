@@ -150,8 +150,13 @@ describe("DrizzleUserRepository.touchLastActive", () => {
     // `update-profile.use-case.ts` が「同じ値なら書き込まない」理由と
     // 同じで、**列ごとの例外ではなく、既にある規則に揃えている。**
     //
-    // drizzle の `update()` は `$onUpdateFn` が必ず触るので、ここは
-    // 生の SQL で書いてある。**この検査がその実装を固定する。**
+    // `$onUpdateFn` は**その列が渡されていないとき**にだけ走るので、
+    // 実装は `updatedAt` に現在値を明示して入れ直している。
+    // **この検査がその実装を固定する。**
+    //
+    // 生の SQL も試したが、**SQLite の UPDATE は `set` 側に修飾付きの
+    // 列名を許さない**（`"users"."last_active_at"` で落ちた）。列名は
+    // drizzle に解決させている。
     const before = (await rowOf(user.id))?.updatedAt;
 
     await repo.touchLastActive(user.id, new Date("2026-10-29T08:00:00.000Z"));
