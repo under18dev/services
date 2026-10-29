@@ -240,6 +240,31 @@ describe("GET /login の描画", () => {
   });
 });
 
+describe("CSP が許していないものを画面が使っていない", () => {
+  /**
+   * **ヘッダ側しか見ていなかった。** 上の CSP のテストは
+   * `'unsafe-inline'` が**混ざっていない**ことを見る。混ざっていないのに
+   * **使っている**側は誰も見ておらず、dashboard-worker がパネルの間隔を
+   * `style` 属性で付けたまま本番へ出た（ブラウザが属性を捨て、枠線が
+   * 密着した）。
+   *
+   * `style` 属性には CSP3 の `style-src-attr` が掛かり、無ければ
+   * `style-src` へ落ちる。`style-src 'self'` なので属性ごと捨てられる。
+   * **HTML も状態コードも正しいまま見た目だけが崩れる**ので、応答を
+   * 見ているテストでは気づけない。
+   *
+   * ここは dashboard と**同じ CSP・同じスタイルシート**を使う側なので、
+   * 片方にだけ検査を置くと、もう片方で同じことが起きる
+   * （`apps/dashboard-worker/test/ui-pages.test.ts` に対の検査がある）。
+   */
+  it.each(["/login", "/signup"])("%s に style 属性も <style> も無い", async (path) => {
+    const html = await (await SELF.fetch(`${BASE}${path}`)).text();
+
+    expect(html, `${path} にインラインの style 属性がある`).not.toContain('style="');
+    expect(html, `${path} に <style> がある`).not.toContain("<style");
+  });
+});
+
 describe("URL に内容ハッシュが入る（#211）", () => {
   /**
    * **HTML に実際に書かれた URL を取りに行く。** 定数を 2 回使って

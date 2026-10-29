@@ -123,6 +123,20 @@ describe("カード一覧の画面", () => {
     expect(html).not.toContain("<script");
   });
 
+  it("インラインの style も使わない", async () => {
+    // **ヘッダに `'unsafe-inline'` が無いことと、画面が使っていないことは
+    // 別である。** `style` 属性は CSP3 の `style-src-attr` が無ければ
+    // `style-src` へ落ち、`'self'` なのでブラウザが属性ごと捨てる。HTML は
+    // 正しく返るので、ヘッダだけ見ていると見た目が崩れたまま本番へ出る
+    // （dashboard-worker がこれを踏んだ）。この Worker も同じ
+    // `pageSecurityHeaders` と同じスタイルシートを使う。
+    await seedActiveCard("usr_taro", "https://example.com/taro");
+
+    const html = await (await open(cookieFor(TARO))).text();
+    expect(html).not.toContain('style="');
+    expect(html).not.toContain("<style");
+  });
+
   it("無効化済みのカードも所有者には見える", async () => {
     const cardId = await seedActiveCard("usr_taro", "https://example.com/taro");
     await repository().disable(cardId, "usr_taro", "紛失", new Date());

@@ -256,6 +256,29 @@ describe("画面には CSP が付く", () => {
   });
 });
 
+describe("CSP が許していないものを画面が使っていない", () => {
+  /**
+   * **ヘッダ側しか見ていなかった。** 1 つ上の describe は
+   * `'unsafe-inline'` が CSP に**混ざっていない**ことを見る。混ざって
+   * いないのに**使っている**側は誰も見ておらず、ホームがパネルの間隔を
+   * `style` 属性で付けたまま本番へ出た（パネル同士が枠線で密着した）。
+   *
+   * `style` 属性には CSP3 の `style-src-attr` が掛かり、無ければ
+   * `style-src` へ落ちる。`style-src 'self'` なので**ブラウザが属性ごと
+   * 捨てる**。HTML も状態コードも正しいまま見た目だけが崩れるので、
+   * 応答を見ているテストでは気づけない。同じ理由で `<style>` も使えない。
+   *
+   * 間隔や寄せが要るときは `@u18/web-ui` の `styles.ts` へクラスを足す
+   * （CSP を緩めない、という `page-headers.ts` の方針）。
+   */
+  it.each(PAGES)("%s に style 属性も <style> も無い", async (path) => {
+    const html = await (await withCookie(path, FULL_IDENTITY)).text();
+
+    expect(html, `${path} にインラインの style 属性がある`).not.toContain('style="');
+    expect(html, `${path} に <style> がある`).not.toContain("<style");
+  });
+});
+
 describe("Referrer-Policy を no-referrer にしない", () => {
   /**
    * Fetch 仕様では、referrer policy が参照元を落とすとき**ナビゲーション

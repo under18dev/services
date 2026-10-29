@@ -14,6 +14,13 @@ import { DashboardShell } from "./dashboard-shell";
  * メール OTP しか手段が無く、受信箱を失うと復旧できない。一覧を開かないと
  * 分からない形にすると、**危ない状態の人ほど気づかない。**
  *
+ * ## 間隔は入れ物のクラスが持つ
+ *
+ * パネルの間隔を style 属性（margin-top）で付けていて、**本番で枠線が
+ * 密着していた。** この画面には style-src 'self' の CSP が掛かっており、
+ * style 属性は style-src-attr が無ければ style-src へ落ちる（CSP3）ので、
+ * ブラウザが属性ごと捨てる。間隔は .stack が持つ（@u18/web-ui）。
+ *
  * ## 「未読」や「お知らせ」をまだ置かない
  *
  * 置く中身が無い。**空の枠を先に作ると、埋まっていないことが画面から
@@ -48,66 +55,68 @@ export const HomePage: FC<HomePageProps> = ({
       lead="u18 Identity のアカウントと、連携しているアプリを管理できます。"
       current="home"
     >
-      <div class="cards cards-3">
-        {tiles.map((tile) => (
-          <div key={tile.href} class="panel">
-            <a class="stat" href={tile.href}>
-              <span class="stat-value">{tile.value}</span>
-              <span class="stat-label">{tile.label}</span>
-            </a>
-          </div>
-        ))}
-      </div>
+      <div class="stack">
+        <div class="cards cards-3">
+          {tiles.map((tile) => (
+            <div key={tile.href} class="panel">
+              <a class="stat" href={tile.href}>
+                <span class="stat-value">{tile.value}</span>
+                <span class="stat-label">{tile.label}</span>
+              </a>
+            </div>
+          ))}
+        </div>
 
-      {passkeyCount === 0 && (
-        <div class="panel" style="margin-top:1.25rem">
+        {passkeyCount === 0 && (
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">パスキーを登録してください</h2>
+              <p class="panel-desc">
+                いまログインできる手段はメールに届くコードだけです。受信箱を使えなくなると、
+                アカウントに入れなくなります。
+              </p>
+            </div>
+            <div class="panel-body">
+              <a class="button button-secondary button-small" href={PASSKEYS_PATH}>
+                パスキーの設定へ
+              </a>
+            </div>
+          </div>
+        )}
+
+        <div class="panel">
           <div class="panel-header">
-            <h2 class="panel-title">パスキーを登録してください</h2>
-            <p class="panel-desc">
-              いまログインできる手段はメールに届くコードだけです。受信箱を使えなくなると、
-              アカウントに入れなくなります。
-            </p>
+            <h2 class="panel-title">アカウント</h2>
+            <p class="panel-desc">登録情報の確認と、ログイン手段の管理。</p>
           </div>
           <div class="panel-body">
-            <a class="button button-secondary button-small" href={PASSKEYS_PATH}>
-              パスキーの設定へ
-            </a>
+            <ul class="list">
+              <li>
+                <div class="item-main">
+                  <div class="item-title">
+                    <a href={PROFILE_PATH}>プロフィール</a>
+                  </div>
+                  <p class="item-meta">表示名・ユーザー名・メールアドレス</p>
+                </div>
+              </li>
+              <li>
+                <div class="item-main">
+                  <div class="item-title">
+                    <a href={SESSIONS_PATH}>ログイン中の端末</a>
+                  </div>
+                  <p class="item-meta">身に覚えのない端末を切る</p>
+                </div>
+              </li>
+              <li>
+                <div class="item-main">
+                  <div class="item-title">
+                    <a href={GRANTS_PATH}>連携アプリ</a>
+                  </div>
+                  <p class="item-meta">アクセスを許可したアプリと、その権限</p>
+                </div>
+              </li>
+            </ul>
           </div>
-        </div>
-      )}
-
-      <div class="panel" style="margin-top:1.25rem">
-        <div class="panel-header">
-          <h2 class="panel-title">アカウント</h2>
-          <p class="panel-desc">登録情報の確認と、ログイン手段の管理。</p>
-        </div>
-        <div class="panel-body">
-          <ul class="list">
-            <li>
-              <div class="item-main">
-                <div class="item-title">
-                  <a href={PROFILE_PATH}>プロフィール</a>
-                </div>
-                <p class="item-meta">表示名・ユーザー名・メールアドレス</p>
-              </div>
-            </li>
-            <li>
-              <div class="item-main">
-                <div class="item-title">
-                  <a href={SESSIONS_PATH}>ログイン中の端末</a>
-                </div>
-                <p class="item-meta">身に覚えのない端末を切る</p>
-              </div>
-            </li>
-            <li>
-              <div class="item-main">
-                <div class="item-title">
-                  <a href={GRANTS_PATH}>連携アプリ</a>
-                </div>
-                <p class="item-meta">アクセスを許可したアプリと、その権限</p>
-              </div>
-            </li>
-          </ul>
         </div>
       </div>
     </DashboardShell>
