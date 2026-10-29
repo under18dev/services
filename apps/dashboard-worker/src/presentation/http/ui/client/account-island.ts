@@ -1,10 +1,21 @@
-import type { AccountApiErrorCode } from "@u18/contracts";
+// **規則を書き写さないために domain を引いている。** ユーザー名の判定は
+// `packages/domain` の 1 箇所にしかなく、サーバーも同じ VO を通る。
+// 純粋な TS なので esbuild がブラウザ向けに畳める（node に触れていない）。
+import { Username } from "@u18/domain";
 import {
   supportsPasskey,
   toCreationOptions,
   toResponseJson,
 } from "@u18/web-ui/client/webauthn-json";
 import { createApiClient } from "./api-client";
+import {
+  messageFor,
+  PROFILE_FALLBACK,
+  PROFILE_MESSAGES,
+  REVOKE_FALLBACK,
+  REVOKE_MESSAGES,
+  USERNAME_REASONS,
+} from "./messages";
 import { isRemoved } from "./outcome";
 
 /**
@@ -63,47 +74,6 @@ type ApiResponse = {
   readonly status: number;
   readonly json: () => Promise<unknown>;
 };
-
-/**
- * 失敗したときに出す文言。
- *
- * **`Record<AccountApiErrorCode, string>` にしてある。** 契約側
- * （`packages/contracts/src/errors.ts`）にコードを 1 つ足すと、ここが
- * ビルドで落ちて文言を書くまで通らない。実行時に「知らないコードが来た」で
- * 既定の文言に落ちるのではなく、**足した人の手元で止まる。**
- *
- * auth-worker の `message` は受け取っていない（決定: 文言は表示側の責務）。
- * 英語で利用者向けに書かれていないうえ、通すと「UI が知らなくても何か出る
- * から気づかない」経路ができる。
- */
-const MESSAGES: Record<AccountApiErrorCode, string> = {
-  unauthenticated: "ログインの有効期限が切れました。ログインし直してください。",
-  forbidden: "この操作は許可されていません。",
-  // `forbidden` と同じ 403 だが、利用者の次の行動が違う。
-  reauthentication_required: "安全のため、もう一度ログインしてからお試しください。",
-  conflict: "いまの状態では取り消せません。画面を更新してお試しください。",
-  // **この画面では出ない**（404 は成功として扱う。`outcome.ts`）。
-  // 契約の網羅を保つために残してある —— 消すと `Record` が埋まらない。
-  not_found: "すでに取り消されています。画面を更新してください。",
-  invalid_input: "操作を受け付けられませんでした。画面を更新してお試しください。",
-  identity_unavailable: "いま処理できません。しばらく待ってからお試しください。",
-};
-
-const FALLBACK = "取り消せませんでした。しばらく待ってからお試しください。";
-
-/** 応答の本文から文言を決める。本文が読めなくても必ず何か返す。 */
-async function messageFor(response: ApiResponse): Promise<string> {
-  try {
-    const body = await response.json();
-    const code = (body as { error?: unknown } | null)?.error;
-    if (typeof code === "string" && code in MESSAGES) {
-      return MESSAGES[code as AccountApiErrorCode];
-    }
-  } catch {
-    // 本文が JSON でない（502 の HTML など）。下の既定に落とす。
-  }
-  return FALLBACK;
-}
 
 /**
  * 取り消しの種類。
@@ -204,13 +174,13 @@ function attach(item: HTMLElement, kind: string, action: Action): void {
           removeItem(item);
           return;
         }
-        showError(item, await messageFor(response));
+        showError(item, await messageFor(response, REVOKE_MESSAGES, REVOKE_FALLBACK));
         button.disabled = false;
         button.textContent = original;
       })
       .catch(() => {
         // 通信そのものが失敗した。応答が無いので種類を分けようがない。
-        showError(item, FALLBACK);
+        showError(item, REVOKE_FALLBACK);
         button.disabled = false;
         button.textContent = original;
       });
@@ -377,3 +347,172 @@ function attachRegister(mount: HTMLElement): void {
 
 const registerMount = document.querySelector<HTMLElement>("[data-passkey-register]");
 if (registerMount !== null && supportsPasskey()) attachRegister(registerMount);
+
+/**
+ * プロフィールの編集（#312、`PATCH /api/me`）。
+ *
+ * **長らく読むだけだった。** `UpdateProfileUseCase` も BFF の
+ * `PATCH /api/me` も実装済みで、**呼ぶ入口だけが無かった** ——
+ * #306（パスキーの登録 UI）とまったく同じ形である。
+ *
+ * ## 現在値は `<dd>` から読む
+ *
+ * `data-*` に同じ値をもう一度載せない。載せると**表示している値と送る値が
+ * 2 箇所**になり、片方だけ直す事故が起きる（このリポジトリが繰り返して
+ * いる形。#88 / #96 / #122 / #164）。
+ */
+
+/** `<dd data-profile-field>` の現在値。無ければ空文字。 */
+function currentField(name: string): string {
+  return (
+    document.querySelector<HTMLElement>(`[data-profile-field="${name}"]`)?.textContent?.trim() ?? ""
+  );
+}
+
+/** 保存後に表示を差し替える。再読み込みしない（取り消し・登録と同じ方針）。 */
+function showField(name: string, value: string): void {
+  const node = document.querySelector<HTMLElement>(`[data-profile-field="${name}"]`);
+  if (node !== null) node.textContent = value;
+}
+
+/** ラベル付きの入力欄を 1 つ作る。 */
+function field(label: string, name: string, value: string): [HTMLLabelElement, HTMLInputElement] {
+  const wrapper = document.createElement("label");
+  wrapper.className = "field";
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.name = name;
+  input.value = value;
+  // **`maxlength` を置かない。** 上限の数値をここに書くと規則が 2 箇所に
+  // なり、`Username` を変えたときに**画面が黙って切り詰める**側になる。
+  // 長すぎる入力は `Username.reasonFor` が `too_long` として返す。
+  wrapper.append(caption, input);
+  return [wrapper, input];
+}
+
+function attachProfileEdit(mount: HTMLElement): void {
+  const panel = document.createElement("div");
+  panel.className = "panel";
+  const header = document.createElement("div");
+  header.className = "panel-header";
+  const title = document.createElement("h2");
+  title.className = "panel-title";
+  title.textContent = "変更する";
+  const desc = document.createElement("p");
+  desc.className = "panel-desc";
+  desc.textContent = "ユーザー名の変更には、最近のログインが必要です。";
+  header.append(title, desc);
+
+  const body = document.createElement("div");
+  body.className = "panel-body";
+
+  // **`<form>` にする。** Enter で送れるようにするためで、送信先は持たない
+  // （`PATCH` は form では送れない）。`submit` を止めて fetch に回す。
+  const form = document.createElement("form");
+  const [displayNameField, displayNameInput] = field(
+    "表示名",
+    "displayName",
+    currentField("displayName"),
+  );
+  const [usernameField, usernameInput] = field("ユーザー名", "username", currentField("username"));
+
+  const button = document.createElement("button");
+  button.type = "submit";
+  button.className = "button";
+  button.textContent = "保存";
+
+  const status = document.createElement("p");
+  status.className = "item-meta";
+
+  const say = (text: string, failed: boolean): void => {
+    status.className = failed ? "item-error" : "item-meta";
+    if (failed) status.setAttribute("role", "alert");
+    else status.removeAttribute("role");
+    status.textContent = text;
+  };
+
+  const settle = (text: string, failed: boolean): void => {
+    say(text, failed);
+    button.disabled = false;
+    button.textContent = "保存";
+  };
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+
+    const displayName = displayNameInput.value.trim();
+    const username = usernameInput.value.trim();
+
+    const changes: { displayName?: string; username?: string } = {};
+    if (displayName !== currentField("displayName")) changes.displayName = displayName;
+    // **大文字小文字だけの違いは変更ではない。** サーバーが小文字へ正規化し、
+    // 一意索引も `lower()` なので、この 2 つは同じ名前を指している
+    // （`update-profile.use-case.ts` が同じ判定をしている）。
+    if (username.toLowerCase() !== currentField("username").toLowerCase()) {
+      changes.username = username;
+    }
+
+    const changed = Object.keys(changes);
+    if (changed.length === 0) {
+      // **送らない。** サーバーも「同じ値なら書き込まない」で守っているが
+      // （`update-profile.use-case.ts`、OIDC の `updated_at` クレームが理由なく
+      // 進むのを防ぐため。#298 で本番が実際に踏んだ）、**こちらは無駄な
+      // 往復を出さないための配慮**である。意味が違うので、片方を消しても
+      // もう片方は要る。
+      say("変更はありません。", false);
+      return;
+    }
+
+    if (changes.username !== undefined) {
+      const reason = Username.reasonFor(changes.username);
+      if (reason !== null) {
+        say(USERNAME_REASONS[reason], true);
+        return;
+      }
+    }
+    if (changes.displayName !== undefined && changes.displayName.length === 0) {
+      say("表示名を入力してください。", true);
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "保存中…";
+    say("", false);
+
+    void client.account.api.me
+      .$patch({ json: changes })
+      .then(async (response) => {
+        if (!response.ok) {
+          settle(await messageFor(response, PROFILE_MESSAGES, PROFILE_FALLBACK), true);
+          return;
+        }
+        // **表示はサーバーが返した値に合わせる。** 送った文字列ではなく、
+        // 正規化後（ユーザー名は小文字）が本当の現在値である。
+        const body = (await response.json()) as { profile?: { [key: string]: unknown } };
+        const profile = body.profile ?? {};
+        if (typeof profile.displayName === "string") {
+          showField("displayName", profile.displayName);
+          displayNameInput.value = profile.displayName;
+        }
+        if (typeof profile.username === "string") {
+          showField("username", profile.username);
+          usernameInput.value = profile.username;
+        }
+        settle("保存しました。", false);
+      })
+      .catch(() => {
+        // 通信が落ちた・応答が読めない。区別が付かない。
+        settle(PROFILE_FALLBACK, true);
+      });
+  });
+
+  form.append(displayNameField, usernameField, button, status);
+  body.append(form);
+  panel.append(header, body);
+  mount.append(panel);
+}
+
+const profileMount = document.querySelector<HTMLElement>("[data-profile-edit]");
+if (profileMount !== null) attachProfileEdit(profileMount);
