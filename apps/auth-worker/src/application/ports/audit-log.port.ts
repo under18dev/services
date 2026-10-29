@@ -104,6 +104,24 @@ export const AUDIT_EVENTS = [
   "ops.admin.revoked",
   /** displayName / username の変更。 */
   "profile.updated",
+  /**
+   * 管理者向けの操作を、管理者でないセッションが叩いた（#308）。
+   *
+   * **このイベントは `audit_logs` に書かない。** `rate_limit.exceeded` と
+   * 同じ理由で、有効なセッションさえ持てば誰でも呼べる経路なので、
+   * 拒否のたびに D1 へ 1 行書くと**弾くこと自体が書き込みに変換される**。
+   * RPC 経路にレート制限は無く、しかも `security` 区分なら 2 年残る。
+   * Workers の observability へ構造化ログとして出す
+   * （`application/use-cases/admin-access.ts`、ランブック §13.5）。
+   *
+   * 名前をここに置いているのは、**出力先が違っても同じ名前空間の
+   * セキュリティイベントだから**（`rate_limit.exceeded` と同じ扱い）。
+   *
+   * 応答は `not_found` に畳むので、**叩かれたことはこのログにしか
+   * 現れない。** 何を登録しようとしたかは出さない（呼び出し元が決めた
+   * 文字列をログへ流さないため）。
+   */
+  "admin.denied",
 
   // --- OAuth / OIDC ---
   /** client_id から公開情報を解決した（認可画面の表示前）。 */
@@ -118,9 +136,10 @@ export const AUDIT_EVENTS = [
    * 「コードを受け取ってよい場所」が増える。しかも効くのは特定の利用者に
    * 対してではなく、その `client_id` で認可を通す全員に対してである。
    *
-   * 失敗（outcome: failure）も残す。**管理者でないセッションからの呼び出しは
-   * ここにしか現れない** —— 応答は `not_found` に畳むので、画面にも
-   * 呼び出し元 Worker にも痕跡が残らない。
+   * **この名前で行が書かれるのは、管理者まで通った呼び出しだけ**
+   * （成功と、再認証切れ・不正な `redirect_uri`・重複などの失敗）。
+   * 管理者でないセッションからの呼び出しは `admin.denied` として
+   * Workers のログへ出し、ここには書かない —— 理由は `admin.denied`。
    */
   "oauth.client.created",
   /**
@@ -246,8 +265,9 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * OAuth クライアントの登録（#308）。**認可コードの宛先が増えた記録**で、
    * `ops.admin.granted` と同じく支配権が変わる操作にあたる。
    *
-   * 量は運用者が登録した数と、管理機能を叩こうとした回数の合計。
-   * リクエストごとに増えるものではない。
+   * **量は管理者の操作回数で頭打ちになる。** 管理者でない呼び出しは
+   * ここに来ない（`admin.denied` として Workers のログへ出る）ので、
+   * 「弾いた回数ぶん行が増える」形にはならない。
    */
   "oauth.client.created": "security",
   /** 失効。正規のクライアントを止める手口でもあるので、登録と同じだけ残す。 */
@@ -300,6 +320,14 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * だけで `audit_logs` に行が現れない）。`Record` の網羅のために置いている。
    */
   "csrf.rejected": "standard",
+  /**
+   * こちらも**実際には使われない行**。`admin.denied` は `audit_logs` に
+   * 書かず Workers のログへ出す（#308）。`Record` の網羅のために置いている。
+   *
+   * 仮に書くことにしたとしても `security` には入れない —— 外から誘発できる
+   * イベントを 2 年側へ置くと、掃除が効かないまま行が伸びる。
+   */
+  "admin.denied": "standard",
 };
 
 /**

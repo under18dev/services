@@ -40,14 +40,25 @@
 
   "observability": { "enabled": true },
 
-  // auth-worker の IdentityRPC だけを束縛する。
+  // auth-worker の Entrypoint を束縛する。
   // D1 の binding は意図的に持たない —— 認証 DB の書き込み権限は
   // auth-worker に集約する（仕様書 2.2）。
+  //
+  // **IDENTITY_ADMIN を分けてあるのは、Service Binding がメソッド単位で
+  // 絞れないため**（#308）。管理用の 3 メソッドを IdentityRPC へ足すと、
+  // 同じ Entrypoint を束縛している nfc-worker からも呼べることになる。
+  // あちらは管理者のセッショントークンを扱う Worker なので、分けている
+  // （脅威モデル RR-21 / check-service-bindings.mjs が静的に検査する）。
   "services": [
     {
       "binding": "IDENTITY",
       "service": "u18-auth",
       "entrypoint": "IdentityRPC",
+    },
+    {
+      "binding": "IDENTITY_ADMIN",
+      "service": "u18-auth",
+      "entrypoint": "IdentityAdminRPC",
     },
   ],
 
@@ -73,6 +84,12 @@
           // しまうので採らない。
           "service": "u18-auth-production",
           "entrypoint": "IdentityRPC",
+        },
+        {
+          // 管理用（#308）。development と同じ理由で Entrypoint を分ける。
+          "binding": "IDENTITY_ADMIN",
+          "service": "u18-auth-production",
+          "entrypoint": "IdentityAdminRPC",
         },
       ],
       // auth-worker と同一ホストの /account/* だけを受け持つ（#33）。

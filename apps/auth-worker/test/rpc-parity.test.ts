@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { newId } from "@u18/domain";
 import { SELF, createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { IdentityAdminRPC } from "../src/presentation/rpc/identity-admin.entrypoint";
 import { IdentityRPC } from "../src/presentation/rpc/identity.entrypoint";
 import { appEnv, db, seedLoggedInUser, sessionCookie, type SeededUser } from "./helpers.oauth";
 import { resetDatabase } from "./helpers";
@@ -34,10 +35,17 @@ const ORIGIN = BASE;
 const STALE = new Date(Date.now() - 60 * 60 * 1000);
 
 let rpc: IdentityRPC;
+/**
+ * 管理用は**別の Entrypoint**（#308）。Service Binding はメソッド単位で
+ * 絞れないので、束縛を分けること自体が境界になっている ——
+ * `IdentityRPC` を束縛している nfc-worker からは、こちらが見えない。
+ */
+let adminRpc: IdentityAdminRPC;
 
 beforeEach(async () => {
   await resetDatabase();
   rpc = new IdentityRPC(createExecutionContext(), appEnv());
+  adminRpc = new IdentityAdminRPC(createExecutionContext(), appEnv());
 });
 
 async function seedPasskey(user: SeededUser, id = newId("pk")): Promise<string> {
@@ -221,11 +229,11 @@ describe("無効なセッションは両方の入口で拒否される", () => {
     // #308 の管理用 3 メソッド。**HTTP の対になる経路はまだ無い**
     // （画面は dashboard-worker 側で、auth-worker にルートを足していない）。
     // 入口が RPC しかないからこそ、ここが唯一の固定になる。
-    ["listOAuthClients", () => rpc.listOAuthClients({ sessionToken: "x".repeat(40) })],
+    ["listOAuthClients", () => adminRpc.listOAuthClients({ sessionToken: "x".repeat(40) })],
     [
       "createOAuthClient",
       () =>
-        rpc.createOAuthClient({
+        adminRpc.createOAuthClient({
           sessionToken: "x".repeat(40),
           clientId: "u18-x",
           name: "x",
@@ -235,7 +243,7 @@ describe("無効なセッションは両方の入口で拒否される", () => {
     ],
     [
       "disableOAuthClient",
-      () => rpc.disableOAuthClient({ sessionToken: "x".repeat(40), clientId: "u18-x" }),
+      () => adminRpc.disableOAuthClient({ sessionToken: "x".repeat(40), clientId: "u18-x" }),
     ],
   ])("%s は unauthenticated を返す", async (_name, invoke) => {
     const result = await invoke();
@@ -261,7 +269,7 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
   it("一般利用者には not_found を返す（forbidden ではない）", async () => {
     const user = await seedLoggedInUser();
 
-    const result = await rpc.listOAuthClients({
+    const result = await adminRpc.listOAuthClients({
       sessionToken: user.sessionToken,
       caller: "dashboard-worker",
     });
@@ -276,7 +284,7 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
     const admin = await seedLoggedInUser({ authTime: STALE });
     await db().update(users).set({ isAdmin: true }).where(eq(users.id, admin.userId)).run();
 
-    const result = await rpc.createOAuthClient({
+    const result = await adminRpc.createOAuthClient({
       sessionToken: admin.sessionToken,
       caller: "dashboard-worker",
       clientId: "u18-stale",
@@ -292,7 +300,7 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
     const user = await seedLoggedInUser();
     await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
 
-    const result = await rpc.listOAuthClients({
+    const result = await adminRpc.listOAuthClients({
       sessionToken: user.sessionToken,
       caller: "dashboard-worker",
     });

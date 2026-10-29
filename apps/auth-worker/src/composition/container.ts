@@ -460,7 +460,7 @@ export function createContainer(
       }),
       // #308: OAuth クライアント管理。**管理者のセッションでしか通らない**
       // （判定は UseCase の中。`application/use-cases/admin-access.ts`）。
-      listOAuthClients: new ListOAuthClientsUseCase({ getSession, audit, clients: oauthClients }),
+      listOAuthClients: new ListOAuthClientsUseCase({ getSession, clients: oauthClients }),
       createOAuthClient: new CreateOAuthClientUseCase({
         getSession,
         audit,
