@@ -84,3 +84,61 @@ export function hashedFileName(fileName: string, content: string): string {
  * 条件付き要求が飛ぶ）。
  */
 export const IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/**
+ * ハッシュ部分を `<hash>` へ伏せる（#313）。
+ *
+ * ## なぜ生成側と同じファイルに置くのか
+ *
+ * 以前この正規化は **4 箇所に重複**していた —— auth / dashboard / nfc の
+ * `route-inventory.test.ts` に 1 つずつと、nfc の中にもう 1 つ。どれも
+ * `/\.[0-9a-f]{16}\./g` を直書きしていた。
+ *
+ * **桁数は `assetHash` が決める。** 直書きすると、あちらを変えたときに
+ * 全部を直さなければならない。しかも**直し忘れた側で起きることが違う** ——
+ * 一覧の突き合わせは「一致しない」で落ちるが、参照の収集
+ * （`collectAssetRefs`）は**「参照されていない」と誤報する。**
+ * 落ちる側と黙る側が混ざるので、生成側の隣に 1 つだけ置く。
+ *
+ * ## 桁数を書かない
+ *
+ * `assetHash("")` の長さから作っている。**`assetHash` を変えれば
+ * ここも付いてくる**ので、片方だけ古くなることが起きない。
+ */
+const HASH_PATTERN = new RegExp(`\\.[0-9a-f]{${assetHash("").length}}\\.`, "g");
+
+/**
+ * `u18.592e97128030c640.css` -> `u18.<hash>.css`
+ *
+ * **ハッシュの塊だけを伏せる。** パス全体を潰すと `/account/ui/` と
+ * `/ui/` の違いまで消える —— 借用の検査
+ * （`scripts/smoke-asset-probe.sh`）がまさにそこを見ているので、
+ * ここで消してはいけない。
+ */
+export function normalizeAssetHash(path: string): string {
+  return path.replace(HASH_PATTERN, ".<hash>.");
+}
+
+/**
+ * パスに内容ハッシュが入っているか。
+ *
+ * **桁数を直書きしないため。** これも `assetHash` の長さから導いている。
+ */
+export function hasAssetHash(path: string): boolean {
+  // `HASH_PATTERN` は `g` 付きなので `lastIndex` を持つ。使い回すと
+  // 2 回目以降の結果が変わるので、判定には毎回新しく作る。
+  return new RegExp(HASH_PATTERN.source).test(path);
+}
+
+/**
+ * HTML が参照しているアセットを、正規化して返す（重複は畳む）。
+ *
+ * **`/ui/` を含むものだけ。** 画面は他にもリンクを持つ（ナビ、ログイン
+ * 導線）ので、絞らないと「参照されている」が常に真になる。
+ */
+export function collectAssetRefs(html: string): readonly string[] {
+  const refs = [...html.matchAll(/(?:href|src)="([^"]*\/ui\/[^"]*)"/g)].map((m) =>
+    normalizeAssetHash(m[1] as string),
+  );
+  return [...new Set(refs)].sort();
+}

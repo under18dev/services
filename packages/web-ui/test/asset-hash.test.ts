@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { assetHash, hashedFileName, IMMUTABLE_ASSET_CACHE_CONTROL } from "../src/asset-hash";
+import {
+  assetHash,
+  collectAssetRefs,
+  hashedFileName,
+  IMMUTABLE_ASSET_CACHE_CONTROL,
+  normalizeAssetHash,
+} from "../src/asset-hash";
 
 /**
  * アセットの内容ハッシュ（#211）。
@@ -77,5 +83,53 @@ describe("IMMUTABLE_ASSET_CACHE_CONTROL", () => {
     // 入っている以上、条件付き要求を飛ばす理由が無い。
     expect(IMMUTABLE_ASSET_CACHE_CONTROL).toContain("immutable");
     expect(IMMUTABLE_ASSET_CACHE_CONTROL).toContain("public");
+  });
+});
+
+describe("normalizeAssetHash", () => {
+  it("ハッシュの塊だけを伏せる", () => {
+    expect(normalizeAssetHash("/account/ui/u18.592e97128030c640.css")).toBe(
+      "/account/ui/u18.<hash>.css",
+    );
+  });
+
+  it("接頭辞は消さない", () => {
+    // **借用の検査（smoke-asset-probe.sh）がここを見ている。**
+    // `/account/ui/` と `/ui/` が同じになると、隣から借りていても通る。
+    expect(normalizeAssetHash("/ui/u18.592e97128030c640.css")).toBe("/ui/u18.<hash>.css");
+    expect(normalizeAssetHash("/account/nfc/ui/u18.592e97128030c640.css")).toBe(
+      "/account/nfc/ui/u18.<hash>.css",
+    );
+  });
+
+  it("桁数が違うものは伏せない", () => {
+    expect(normalizeAssetHash("/ui/u18.592e9712.css")).toBe("/ui/u18.592e9712.css");
+  });
+
+  it("実際に生成したハッシュを伏せられる", () => {
+    // **桁数を直書きしていないことの確認。** `assetHash` を変えても、
+    // このテストは直さなくても通り続ける。
+    const name = hashedFileName("u18.css", "body { color: red }");
+    expect(normalizeAssetHash(`/ui/${name}`)).toBe("/ui/u18.<hash>.css");
+  });
+});
+
+describe("collectAssetRefs", () => {
+  it("href と src の両方を拾い、重複を畳む", () => {
+    const html =
+      '<link rel="stylesheet" href="/account/ui/u18.592e97128030c640.css"/>' +
+      '<script src="/account/ui/account-island.7905200446a6b1ba.js"></script>' +
+      '<link href="/account/ui/u18.592e97128030c640.css"/>';
+    expect(collectAssetRefs(html)).toEqual([
+      "/account/ui/account-island.<hash>.js",
+      "/account/ui/u18.<hash>.css",
+    ]);
+  });
+
+  it("アセット以外のリンクは拾わない", () => {
+    // 絞らないと「参照されている」が常に真になる。
+    const html =
+      '<a href="/login?return_to=%2Faccount">ログイン</a><a href="/account/sessions">端末</a>';
+    expect(collectAssetRefs(html)).toEqual([]);
   });
 });

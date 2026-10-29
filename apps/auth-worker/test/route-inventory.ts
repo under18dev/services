@@ -103,6 +103,25 @@ export const OAUTH_ROUTES: readonly Route[] = [
 ];
 
 /** 実行時に登録されているべきもの全部。 */
+/** ハッシュ付きアセット。`PUBLIC_ROUTES` から導く（別に書かない）。 */
+export const ASSET_ROUTES: readonly Route[] = PUBLIC_ROUTES.filter((route) =>
+  route.path.includes("/ui/"),
+);
+
+/**
+ * **本番のアセット検査が引くページ**（`scripts/smoke-asset-probe.sh` の
+ * `probe_pages_for`）。
+ *
+ * **あちらと一致していなければならない。** `check-asset-probe-pages.mjs` が
+ * 両者を突き合わせている。参照の有無をレンダリングで確かめられるのは
+ * Worker のテスト側だけで（workerd 上のテストからリポジトリのファイルは
+ * 読めない。実測）、そちらがこの一覧を見ているため。
+ *
+ * `/login` 1 枚で CSS とアイランドの両方を参照している
+ * （`asset-coverage.test.ts` が確かめる）。
+ */
+export const PROBE_PAGES: readonly string[] = ["/login"];
+
 export const EXPECTED_ROUTES: readonly Route[] = [
   ...PUBLIC_ROUTES,
   ...SESSION_ROUTES,

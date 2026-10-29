@@ -106,6 +106,22 @@ export function readDeployInvocations(text) {
   return byWorker;
 }
 
+/**
+ * route-inventory の `PROBE_PAGES` を読む。
+ *
+ * **シェル側の一覧と一致していなければならない。** 参照の有無を
+ * レンダリングで確かめられるのは Worker のテスト側だけで、そちらは
+ * この `PROBE_PAGES` を見ている。ずれると**本番が引くページと、
+ * 参照を確かめたページが別物になる。**
+ *
+ * 宣言が無ければ `null`（「空の一覧」と区別する）。
+ */
+export function readProbePagesDeclaration(text) {
+  const match = /export const PROBE_PAGES[^=]*=\s*\[([^\]]*)\]/.exec(text);
+  if (match === null) return null;
+  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
 /** route-inventory からアセット（パスに `/ui/` を含むもの）を拾う。 */
 export function readAssetRoutes(text) {
   return [...text.matchAll(/path:\s*"([^"]*\/ui\/[^"]*)"/g)].map((m) => m[1]);
@@ -139,7 +155,7 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
     return { ok: false, problems, declared: {} };
   }
 
-  for (const { name, assets } of workers) {
+  for (const { name, assets, probePages: inventoryPages } of workers) {
     if (assets.length === 0) continue;
 
     const reason = Object.prototype.hasOwnProperty.call(unprobeable, name)
@@ -167,6 +183,27 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
           `ページと接頭辞を足すか、外から確かめられないなら UNPROBEABLE に理由ごと書くこと。`,
       );
       continue;
+    }
+
+    // **シェル側の一覧と `PROBE_PAGES` が一致しているか。**
+    //
+    // ずれると、本番が引くページと「参照を確かめたページ」が別物になる。
+    // どちらも単体では緑のままなので、ここで突き合わせるしかない。
+    const declaredPages = pairs.map((p) => p.page).sort();
+    if (inventoryPages === null) {
+      problems.push(
+        `${name}: route-inventory.ts に PROBE_PAGES がありません。` +
+          `smoke-asset-probe.sh と同じ一覧を置き、Worker 側のテストでレンダリングして確かめること。`,
+      );
+    } else {
+      const fromInventory = [...inventoryPages].sort();
+      if (JSON.stringify(declaredPages) !== JSON.stringify(fromInventory)) {
+        problems.push(
+          `${name}: smoke-asset-probe.sh（${declaredPages.join(" ")}）と ` +
+            `route-inventory.ts の PROBE_PAGES（${fromInventory.join(" ")}）が一致しません。` +
+            `本番が引くページと、参照を確かめたページが別物になります。`,
+        );
+      }
     }
 
     // **宣言した接頭辞が、その Worker の実際のアセットと噛み合っているか。**
@@ -242,9 +279,14 @@ export function collect(root = ROOT) {
         text = readFileSync(inventory, "utf8");
       } catch {
         // route-inventory を持たない Worker。アセットの有無はここでは分からない。
-        return { name: e.name, assets: [], hasInventory: false };
+        return { name: e.name, assets: [], probePages: null, hasInventory: false };
       }
-      return { name: e.name, assets: readAssetRoutes(text), hasInventory: true };
+      return {
+        name: e.name,
+        assets: readAssetRoutes(text),
+        probePages: readProbePagesDeclaration(text),
+        hasInventory: true,
+      };
     });
   return { probeText, deployText, workers };
 }

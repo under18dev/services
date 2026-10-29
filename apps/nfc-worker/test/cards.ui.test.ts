@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { hasAssetHash } from "@u18/web-ui";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CARDS_UI_PATH, createApp } from "../src/presentation/http/app";
 import {
@@ -182,7 +183,7 @@ describe("ページが参照するアセット", () => {
       // route 配下（`/account/nfc/ui/...`）であること。** ここが
       // `/ui/u18.css` に戻ると、本番では auth-worker に当たる。
       expect(url, `${url} がこの Worker の route 配下にない`).toMatch(/^\/account\/nfc\/ui\//);
-      expect(url, `${url} にハッシュが入っていない`).toMatch(/\.[0-9a-f]{16}\./);
+      expect(hasAssetHash(url), `${url} にハッシュが入っていない`).toBe(true);
 
       const response = await createApp({ identity }).fetch(
         new Request(`${ORIGIN}${url}`),
