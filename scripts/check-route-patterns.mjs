@@ -24,51 +24,7 @@
  * ホスト全体（`host/*`）は対象外 —— あれは `https://host/` が `/` として
  * 届くので、裸の接頭辞という概念が無い。
  */
-import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
-import { readdirSync, existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-
-const repoRoot = path.resolve(import.meta.dirname, "..");
-const appsDir = path.join(repoRoot, "apps");
-
-function findWorkerConfigs() {
-  if (!existsSync(appsDir)) return [];
-  return readdirSync(appsDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => ({ app: e.name, config: path.join(appsDir, e.name, "wrangler.jsonc") }))
-    .filter((e) => existsSync(e.config));
-}
-
-async function loadWrangler(appDir) {
-  const require = createRequire(pathToFileURL(path.join(appDir, "_")).href);
-  return import(pathToFileURL(require.resolve("wrangler")).href);
-}
-
-/**
- * 設定ファイルに書かれている env の名前を拾う。
- *
- * **`unstable_readConfig` は env 解決済みの形しか返さない**（`config.env`
- * は空）。どの env があるかは生のファイルからしか分からない。列挙を
- * ハードコードすると env が増えたとき黙って対象から漏れるので、
- * ここで見つける（`check-service-bindings.mjs` が Worker を列挙せず
- * 走査しているのと同じ理由）。
- */
-function envNamesOf(configPath) {
-  const text = readFileSync(configPath, "utf8");
-  // jsonc のコメントと末尾カンマを落として JSON として読む。
-  const json = text
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1")
-    .replace(/,(\s*[}\]])/g, "$1");
-  try {
-    return Object.keys(JSON.parse(json).env ?? {});
-  } catch {
-    // 読めなければ env 無しとして扱う。既定 env は別途必ず見るので、
-    // ここで落とさずに済む。pattern が 1 つも見つからなければ下で落ちる。
-    return [];
-  }
-}
+import { eachWorkerEnv, findWorkerConfigs } from "./lib/wrangler-configs.mjs";
 
 /** 解決済みの設定から route の pattern を集める。 */
 function patternsOf(config) {
@@ -77,9 +33,7 @@ function patternsOf(config) {
     .filter((p) => typeof p === "string");
 }
 
-const workers = findWorkerConfigs();
-
-if (workers.length === 0) {
+if (findWorkerConfigs().length === 0) {
   console.error(
     "::error::No apps/*/wrangler.jsonc found, so no route pattern was checked. This is a bug in the check, not a clean repository.",
   );
@@ -88,13 +42,8 @@ if (workers.length === 0) {
 
 /** 全 Worker の pattern を 1 つの集合にする。裸の接頭辞は別の Worker が持っていてもよい。 */
 const all = new Set();
-for (const { app, config } of workers) {
-  const { unstable_readConfig } = await loadWrangler(path.join(appsDir, app));
-  // 既定 env と、ファイルに書かれている env すべて。
-  for (const env of [undefined, ...envNamesOf(config)]) {
-    const resolved = unstable_readConfig(env === undefined ? { config } : { config, env });
-    for (const pattern of patternsOf(resolved)) all.add(pattern);
-  }
+for await (const { config } of eachWorkerEnv()) {
+  for (const pattern of patternsOf(config)) all.add(pattern);
 }
 
 if (all.size === 0) {
