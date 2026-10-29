@@ -4,10 +4,15 @@ import {
   emailChallenges,
   oauthAuthorizationCodes,
   oauthClients,
+  oauthGrants,
+  oauthTokens,
+  schema,
   sessions,
   users,
   webauthnChallenges,
 } from "@u18/db";
+import { getTableColumns, getTableName, is } from "drizzle-orm";
+import { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { FixedClock, aUser } from "@u18/testing";
 import { createExecutionContext, createScheduledController, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -228,6 +233,94 @@ describe("DrizzleExpiredRecordPurger", () => {
 
       expect(result.deleted).toBe(0);
       expect(await idsIn(emailChallenges)).toEqual(["emc_live"]);
+    });
+  });
+
+  describe("oauth_tokens", () => {
+    const grantId = "grt_retention";
+
+    const putToken = (id: string, expiresAt: Date, revokedAt: Date | null = null) =>
+      db
+        .insert(oauthTokens)
+        .values({
+          id,
+          tokenHash: `hash_${id}`,
+          tokenType: "access",
+          grantId,
+          clientId: clientRowId,
+          userId: user.id,
+          scope: "openid",
+          expiresAt,
+          revokedAt,
+        })
+        .run();
+
+    beforeEach(async () => {
+      // `grant_id` は notNull の外部キー。同意が無いトークンは作れない。
+      await db
+        .insert(oauthGrants)
+        .values({
+          id: grantId,
+          userId: user.id,
+          clientId: clientRowId,
+          grantedScopes: "openid",
+          grantedAt: ago(1 * DAY),
+        })
+        .run();
+    });
+
+    it("保持期間を過ぎた期限切れトークンだけを消す", async () => {
+      // 有効なトークン。これが消えると、使用中の RP が突然 401 になる。
+      await putToken("tok_live", new Date(now.getTime() + TokenLifetime.accessTokenMs));
+      // 期限切れだが保持期間（30 日）の内側。失効後の再提示を調べる窓。
+      await putToken("tok_recent", ago(3 * DAY));
+      // 保持期間を過ぎた期限切れ。
+      await putToken("tok_stale", ago(31 * DAY));
+
+      const result = await purger.purge({
+        target: "oauth_tokens",
+        deadBefore: cutoff("oauth_tokens"),
+        limit: 100,
+      });
+
+      expect(result.deleted).toBe(1);
+      expect(result.reachedLimit).toBe(false);
+      const rows = await db.select({ id: oauthTokens.id }).from(oauthTokens).all();
+      expect(rows.map((r) => r.id).sort()).toEqual(["tok_live", "tok_recent"]);
+    });
+
+    it("とうに期限切れでも、失効が最近なら残す", async () => {
+      // **同意の取り消しは、期限切れのトークンにも失効印を付ける。**
+      // 期限だけを見て消すと、「取り消した直後に、取り消した記録ごと
+      // 行が消える」が起きる。`sessions` が `revoked_at` を見ているのと
+      // 同じ理由で、ここでも見る。
+      await putToken("tok_revoked_recently", ago(31 * DAY), ago(1 * DAY));
+
+      const result = await purger.purge({
+        target: "oauth_tokens",
+        deadBefore: cutoff("oauth_tokens"),
+        limit: 100,
+      });
+
+      expect(result.deleted).toBe(0);
+      const rows = await db.select({ id: oauthTokens.id }).from(oauthTokens).all();
+      expect(rows.map((r) => r.id)).toEqual(["tok_revoked_recently"]);
+    });
+
+    it("同意は消さない", async () => {
+      // `oauth_grants` は掃除対象ではない（期限を持たない継続中の状態）。
+      // トークンを消したついでに同意まで外れると、利用者が次に使うとき
+      // 身に覚えのない同意画面が出る。
+      await putToken("tok_stale", ago(31 * DAY));
+
+      await purger.purge({
+        target: "oauth_tokens",
+        deadBefore: cutoff("oauth_tokens"),
+        limit: 100,
+      });
+
+      const grants = await db.select({ id: oauthGrants.id }).from(oauthGrants).all();
+      expect(grants.map((r) => r.id)).toEqual([grantId]);
     });
   });
 
@@ -544,7 +637,7 @@ describe("PurgeExpiredRecordsUseCase", () => {
 
   const silentAudit = { record: async (): Promise<void> => {} };
 
-  it("1 回の実行で 5 テーブルすべてを、テーブルごとの保持期間で見る", async () => {
+  it("1 回の実行で 6 テーブルすべてを、テーブルごとの保持期間で見る", async () => {
     const purger = new RecordingPurger();
     const useCase = new PurgeExpiredRecordsUseCase({
       purger,
@@ -558,6 +651,7 @@ describe("PurgeExpiredRecordsUseCase", () => {
     expect(purger.requests.map((r) => r.target)).toEqual([
       "sessions",
       "oauth_authorization_codes",
+      "oauth_tokens",
       "email_challenges",
       "webauthn_challenges",
       "audit_logs",
@@ -608,7 +702,9 @@ describe("PurgeExpiredRecordsUseCase", () => {
     const result = await useCase.execute({ limit: 10 });
 
     expect(result.ok && result.value.failed).toEqual(["sessions"]);
-    expect(purger.requests).toHaveLength(5);
+    // 対象が増えても古びないよう、件数は `RetentionPolicy` から引く。
+    // ここで見たいのは「全テーブルを試したか」であって個数そのものではない。
+    expect(purger.requests).toHaveLength(Object.keys(RetentionPolicy).length);
   });
 
   it("退避先が無いと audit_logs だけが止まり、他のテーブルは掃除される", async () => {
@@ -755,5 +851,77 @@ describe("scheduled ハンドラ", () => {
       deleted: 3,
       byTarget: { sessions: 1, webauthn_challenges: 1, audit_logs: 1 },
     });
+  });
+});
+
+/**
+ * 保持期限の**網羅**（#273）。
+ *
+ * ## なぜ 1 件直すだけでは済まないのか
+ *
+ * `oauth_tokens` は `RetentionTarget` に無く、掃除されないまま残っていた。
+ * `oauth_tokens_expires_idx` という索引まであったので、**期限で引く想定は
+ * あったのに掃除だけが無い**形だった。
+ *
+ * 見落とせた理由は、このファイルの他のテストが**列挙されたものを 1 つずつ
+ * 確かめる**作りだからである。実在しないテーブルを `RetentionTarget` に
+ * 足せば落ちるが、**テーブルがあるのに足していないことは検出されない。**
+ * #270（`ops.admin.*` が登録簿に無く保持区分が付かなかった）と同じ向きで、
+ * **検査が「列挙されたもの」の中だけで整合を取ると、列挙されていないものは
+ * 最初から対象外になる。**
+ *
+ * そこで向きを逆にする —— **スキーマのほうから数える。**
+ * `expires_at` を持つテーブルは「いつか用済みになる行」を持つということなので、
+ * 保持期間が決まっていなければならない。決まっていない = 無期限（#174）。
+ *
+ * ## 件数を表に出す
+ *
+ * 0 件を検査して通る検査は、合格と沈黙が同じ形で出てくる。実際このリポジトリで
+ * 何度か踏んでいるので、**何件見たか**を明示して、空振りを空振りとして読める
+ * ようにしておく。
+ */
+describe("保持期限の網羅", () => {
+  /**
+   * スキーマに含まれる全テーブル。`@u18/db` は名前空間ごと公開している。
+   *
+   * **`unknown[]` を経由する。** 名前空間はテーブル以外（`timestampMs` などの
+   * 列ヘルパー関数）も公開しているので、戻り値の合併型に関数が混ざる。
+   * そのまま型述語で絞ると「述語の型が引数の型に代入できない」と言われる。
+   */
+  const allTables: SQLiteTable[] = [];
+  for (const value of Object.values(schema) as unknown[]) {
+    if (is(value, SQLiteTable)) allTables.push(value);
+  }
+
+  /** `expires_at` 列を持つテーブル＝「いつか用済みになる行」を持つテーブル。 */
+  const withExpiry = allTables
+    .filter((table) => Object.values(getTableColumns(table)).some((c) => c.name === "expires_at"))
+    .map((table) => getTableName(table))
+    .sort();
+
+  it("スキーマを実際に走査できている", () => {
+    // **この検査が空振りしていないこと自体を先に固定する。** 走査が 0 件を
+    // 返すと、下のテストは「すべて網羅されている」と報告して通ってしまう。
+    expect(allTables.length).toBeGreaterThan(5);
+    expect(withExpiry.length).toBeGreaterThan(0);
+  });
+
+  it("expires_at を持つテーブルはすべて保持期間が決まっている", () => {
+    const covered = Object.keys(RetentionPolicy);
+    const missing = withExpiry.filter((name) => !covered.includes(name));
+
+    expect(
+      missing,
+      `${withExpiry.length} 件の期限付きテーブルを見た。保持期間が無いもの: ${missing.join(", ") || "なし"}`,
+    ).toEqual([]);
+  });
+
+  it("保持期間が決まっているテーブルはスキーマに実在する", () => {
+    // 逆向き。消したテーブルの名前が `RetentionPolicy` に残ると、掃除は
+    // 毎回そのテーブルで失敗し、`failed` に入り続ける。
+    const names = allTables.map((table) => getTableName(table));
+    const ghosts = Object.keys(RetentionPolicy).filter((target) => !names.includes(target));
+
+    expect(ghosts).toEqual([]);
   });
 });
