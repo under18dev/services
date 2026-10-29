@@ -239,6 +239,9 @@ importers:
       '@u18/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@u18/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@u18/web-ui':
         specifier: workspace:*
         version: link:../../packages/web-ui
