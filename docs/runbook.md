@@ -2828,6 +2828,10 @@ node scripts/purge-user.mjs purge --user-id usr_xxx \
 
 **途中で止まっても「いつ・誰が・なぜ落としたか」は残る。** 残りの文は手で流し直せばよい（`--dry-run` で出した SQL をそのまま使える）。個人情報は既に消えているので、**やり直しても二度目は 0 行で返る。**
 
+**慌てなくてよい。** `status = 'deleted'` にした時点で**支配権は止まっている** —— `get-session` / `get-user-info` / `authorize-request` / `exchange-authorization-code` / `issue-session` / `passkey-login-verify` / `start-email-otp` の**7 つすべてが `user.isActive` を見ており**、`isActive` は `status` と `deleted_at` の両方を見る（#51）。既存セッションも発行済みトークンも、期限内であっても拒否される。
+
+**失効の 5 本はその二重化である。** 上の保証は「7 つすべてが `isActive` を見続けること」に依存しているので、失効印も付けておく。流し直す順序は**失効 → メール削除**で、`--dry-run` の出力もその並びになっている。
+
 #### 落としたあと
 
 `audit_logs` に `user.purged` が残る（保持区分は `security` = 2 年、R2 退避と合わせて約 4 年）。**行そのものは残るが中身は置き換わっているので、何が起きたかの手がかりはこの記録だけになる。**

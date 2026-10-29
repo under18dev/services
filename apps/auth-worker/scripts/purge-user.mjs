@@ -183,9 +183,35 @@ async function purge(options) {
     actor: options.actor,
     reason: options.reason,
   });
+  /**
+   * **失効を先に流す**（66 の指摘 / #265）。
+   *
+   * ## 支配権を止めているのは、実は失効ではない
+   *
+   * `status = 'deleted'` にした時点で**7 つの use case がすべて止まる** ——
+   * `get-session` / `get-user-info` / `authorize-request` /
+   * `exchange-authorization-code` / `issue-session` /
+   * `passkey-login-verify` / `start-email-otp` のどれもが
+   * `user.isActive` を見ており、`isActive` は `status` と `deleted_at` の
+   * 両方を見る（#51 で `deleted_at` だけ立てた論理削除でログインできた
+   * 不具合を直したときの形）。
+   *
+   * **だから「失効が流れないと支配権が残る」は成り立たない。**
+   * 1 つ目の UPDATE が通った時点で、既存セッションも発行済みトークンも
+   * 期限内であっても拒否される。
+   *
+   * ## それでも失効を先に流す
+   *
+   * **その保証は「7 つすべてが `isActive` を見続けること」に依存している。**
+   * 1 つでも外れれば、そこだけ生き残る。失効を先に流しておけば、
+   * **`status` の判定と失効印の二重になる** —— 片方が外れても止まる。
+   *
+   * メールアドレスの行が消えるかどうかより、**支配権に関わるもののほうが
+   * 先**である。
+   */
   const cleanupStatements = [
-    sql.deleteUserEmailsSql(options.userId),
     ...sql.revokeEverythingSql(options.userId),
+    sql.deleteUserEmailsSql(options.userId),
   ];
   const statements = [purgeStatement, auditStatement, ...cleanupStatements];
 
