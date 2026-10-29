@@ -1,8 +1,10 @@
 name: Security
 
 on:
+  # **`branches` は base のフィルタ**なので、`pull_request` 側には書かない
+  # （#329。理由は ci.yml に詳述）。base が main でない PR に run が
+  # 1 本も作られず、**0 件が「落ちていない」と見分けが付かない。**
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   schedule:

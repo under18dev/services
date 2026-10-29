@@ -1,8 +1,33 @@
 name: CI
 
 on:
+  # **`pull_request` に `branches` を書かない。**
+  #
+  # あのフィルタは **head ではなく base** に効く（#329）。`branches: [main]`
+  # だと、`feat/x` を base にした PR は条件に当たらず、**落ちるのではなく
+  # run が 1 本も作られない。** 2026-10-30 に 4 本同時に踏んだ。
+  #
+  # **0 件は「落ちていない」と見分けが付かない。** `mergeStateStatus` は
+  # `DIRTY` ではなく `BLOCKED` を返すので、**永久に来ないものを
+  # 「必須チェック待ち」として待つ**ことになる。`gh run list` が空なのが
+  # 唯一の手がかりだが、空は「まだ始まっていない」とも読める（#305）。
+  #
+  # 依存のある変更を積むのは普通の形なので、**積めること自体は塞がない。**
+  # 代わりに、どの base でも CI が走るようにする。
+  #
+  # **`push` 側の `branches: [main]` は残す。** あちらは head のフィルタで、
+  # 外すと全ブランチの push ごとに CI が二重に走る（PR があれば
+  # `pull_request` 側で既に走っている）。
+  #
+  # 影響範囲を確かめてある:
+  #   - `deploy.yml` は `push` しか持たないので影響を受けない（本番の
+  #     認証情報に触れるのはあちらだけ）
+  #   - `concurrency` は `ci-${{ github.ref }}` で PR 単位。本数が増えても
+  #     打ち切りの挙動は変わらない
+  #   - フォークからの PR は以前から main 宛で走っていた。`pull_request`
+  #     は fork に secrets を渡さず、`permissions` も `contents: read` の
+  #     ままなので、**走る範囲が広がっても渡すものは増えない**
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
