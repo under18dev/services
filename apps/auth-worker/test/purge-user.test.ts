@@ -191,6 +191,20 @@ describe("個人情報を落とす（purge-user.sql）", () => {
     expect(JSON.stringify(after.results)).toContain("deleted");
   });
 
+  it("active のアカウントにも当たる", async () => {
+    // **凍結を経由していなくても落とせる。** 削除要求に応えるのに先に
+    // 凍結する手順を強いる理由が無い。**どちらとも読める状態にしない**
+    // ため、ここで固定する（運用としては凍結を先にするのがよい、という
+    // のは別の話でランブック §11.6 に書いてある）。
+    const live = aUser({ id: "usr_live", email: "live@example.com", username: "live" });
+    await insertUser(live);
+
+    const result = await run(purgeUserSql(live.id));
+
+    expect(result.results).toHaveLength(1);
+    expect((await readUser(live.id))?.status).toBe("deleted");
+  });
+
   it("ID に ' が入っていても文が壊れない", async () => {
     // SQL 注入。値は運用者の手元からしか来ないが、サポート窓口のチケットや
     // 他システムの出力から貼られるもので、**文が壊れるのではなく意味が変わる。**
