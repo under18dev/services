@@ -120,6 +120,18 @@
  * これまで `scripts/oauth-client.mjs` からしかできなかった登録・失効を、
  * **管理者のセッションでだけ**画面から行えるようにする。
  *
+ * **`IdentityRpcContract` には足していない。** 別の契約
+ * （`IdentityAdminRpcContract` / `identity-admin.ts`）と別の Entrypoint
+ * （`IdentityAdminRPC`）になっている —— Service Binding はメソッド単位で
+ * 絞れないので、同じ Entrypoint に置くと **nfc-worker からも呼べる**。
+ * 束縛を分けることがそのまま境界になる。
+ *
+ * **デプロイ順に新しい注意が 1 つある。** dashboard-worker の
+ * `wrangler.jsonc` は `IDENTITY_ADMIN`（`entrypoint: "IdentityAdminRPC"`）を
+ * 束縛する。**束縛先の Entrypoint が存在しないと workerd は起動に失敗する**
+ * ので、ここでも **auth-worker が先**。逆順にすると dashboard-worker が
+ * 起動せず、管理領域だけでなく**画面全部が落ちる**。
+ *
  * **これはメソッドの追加であると同時に、緩和策の置き換えである。**
  * 「運用者の手元からしか叩けない」を「管理者だけが叩ける」に替えており、
  * 弱くなる方向の変更にあたる（`docs/threat-model.md` RR-21）。契約の形で

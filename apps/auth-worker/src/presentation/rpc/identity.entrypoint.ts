@@ -1,10 +1,7 @@
 import {
   closeAccountInputSchema,
-  createOAuthClientInputSchema,
   deletePasskeyInputSchema,
-  disableOAuthClientInputSchema,
   getSessionInputSchema,
-  listOAuthClientsInputSchema,
   getUserProfileInputSchema,
   listGrantsInputSchema,
   listPasskeysInputSchema,
@@ -16,12 +13,8 @@ import {
   rpcOk,
   type CloseAccountInput,
   type CloseAccountResult,
-  type CreateOAuthClientInput,
-  type CreateOAuthClientResult,
   type DeletePasskeyInput,
   type DeletePasskeyResult,
-  type DisableOAuthClientInput,
-  type DisableOAuthClientResult,
   type GetSessionInput,
   type GetSessionResult,
   type GetUserProfileInput,
@@ -29,13 +22,10 @@ import {
   type IdentityRpcContract,
   type ListGrantsInput,
   type ListGrantsResult,
-  type ListOAuthClientsInput,
-  type ListOAuthClientsResult,
   type ListPasskeysInput,
   type ListPasskeysResult,
   type ListSessionsInput,
   type ListSessionsResult,
-  type OAuthClientSummary,
   type PingResult,
   type RevokeGrantInput,
   type RevokeGrantResult,
@@ -47,7 +37,6 @@ import {
 } from "@u18/contracts";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createContainer, type RequestContext } from "../../composition/container";
-import type { OAuthClient } from "../../domain/entities/oauth-client";
 
 /**
  * UseCase のエラーコードを RPC の語彙へ写す。
@@ -64,7 +53,7 @@ import type { OAuthClient } from "../../domain/entities/oauth-client";
  * 知らないコードは `internal` に倒す。**`not_found` には倒さない** ——
  * 「存在しない」と言い切るのは、存在するかどうかを確かめた場合だけにする。
  */
-function toRpcCode(code: string): RpcErrorCode {
+export function toRpcCode(code: string): RpcErrorCode {
   switch (code) {
     case "unauthenticated":
       return "unauthenticated";
@@ -81,31 +70,6 @@ function toRpcCode(code: string): RpcErrorCode {
     default:
       return "internal";
   }
-}
-
-/**
- * `OAuthClient`（Domain）を契約の DTO へ写す（#308）。
- *
- * **内部 ID（`oauth_clients.id`）を載せない。** 外へ出すと、ダッシュボードの
- * HTML に内部識別子が載り、以後それを受け付ける API を消せなくなる
- * （`GrantListItem.clientId` と同じ理由）。失効の引数も公開 `client_id` の側。
- *
- * `client_secret_hash` は**そもそも `OAuthClient` が持っていない**ので、
- * ここで落とす判断すら要らない（`DrizzleOAuthClientRepository.toDomain` が
- * 行型から写す時点で切ってある）。
- */
-function toClientSummary(client: OAuthClient): OAuthClientSummary {
-  return {
-    clientId: client.clientId,
-    name: client.name,
-    clientType: client.clientType,
-    isFirstParty: client.isFirstParty,
-    logoUrl: client.logoUrl,
-    redirectUris: [...client.redirectUris],
-    scopes: [...client.allowedScopes],
-    createdAt: client.createdAt.toISOString(),
-    disabledAt: client.disabledAt?.toISOString() ?? null,
-  };
 }
 
 /**
@@ -416,99 +380,6 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       closed: result.value.closed,
       revokedSessions: result.value.revokedSessions,
     });
-  }
-
-  /**
-   * OAuth クライアントの一覧（#308）。**管理者のみ。**
-   *
-   * **`client_secret_hash` を返さない。** 契約の `OAuthClientSummary` に
-   * そのフィールドが無いうえ、`OAuthClient`（Domain）もハッシュを持たない
-   * ので、ここで詰め忘れても漏れようがない（`listPasskeys` と同じ形。RR-13）。
-   *
-   * 管理者でないセッションは `not_found` になる。判定は UseCase の中なので、
-   * この入口を迂回しても同じに効く。
-   */
-  async listOAuthClients(input: ListOAuthClientsInput): Promise<ListOAuthClientsResult> {
-    const parsed = listOAuthClientsInputSchema.safeParse(input);
-    if (!parsed.success) return rpcErr("invalid_input", "sessionToken is malformed");
-
-    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
-    const result = await container.useCases.listOAuthClients.execute({
-      sessionToken: parsed.data.sessionToken,
-    });
-    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
-
-    return rpcOk(result.value.map(toClientSummary));
-  }
-
-  /**
-   * OAuth クライアントを登録する（#308）。**管理者のみ。**
-   *
-   * **平文の `client_secret` はこの応答にしか現れない。** DB に入るのは
-   * ハッシュだけで、取り損ねたら再発行するしかない（`oauth-client.mjs` が
-   * 端末へ 1 度だけ出しているのと同じ性質）。
-   *
-   * **再認証が要る**（`reauthentication_required`）。決めているのは
-   * 認可コードの宛先なので、盗んだ Cookie 1 枚で通ってよい操作ではない
-   * —— 通ると Redirect URI の完全一致検証を**登録の側から迂回**できる。
-   * 判定は UseCase の中なので、RPC 越しでも同じに効く
-   * （`deletePasskey` と同じ形。`test/rpc-parity.test.ts`）。
-   *
-   * **`is_first_party` は指定できない。** 契約の入力に項目が無く、
-   * 登録されるクライアントは必ず同意画面を出す。一次パーティの登録は
-   * `scripts/oauth-client.mjs --first-party` だけに残っている（RR-21）。
-   *
-   * `redirect_uri` の検証も `client_id` の重複判定も UseCase の中にある。
-   * **ここで先に弾かない** —— 入口ごとに判定を書くと、CLI で通した URI が
-   * 認可時に弾かれる形のずれが起きる。
-   */
-  async createOAuthClient(input: CreateOAuthClientInput): Promise<CreateOAuthClientResult> {
-    const parsed = createOAuthClientInputSchema.safeParse(input);
-    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
-
-    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
-    const result = await container.useCases.createOAuthClient.execute({
-      sessionToken: parsed.data.sessionToken,
-      clientId: parsed.data.clientId,
-      name: parsed.data.name,
-      clientType: parsed.data.clientType,
-      redirectUris: parsed.data.redirectUris,
-      scopes: parsed.data.scopes,
-      logoUrl: parsed.data.logoUrl,
-    });
-    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
-
-    return rpcOk({
-      client: toClientSummary(result.value.client),
-      clientSecret: result.value.clientSecret,
-    });
-  }
-
-  /**
-   * OAuth クライアントを失効させる（#308）。**管理者のみ。**冪等。
-   *
-   * 2 度目は `disabled: false` になり、最初の `disabled_at` は動かない。
-   * 未登録の `client_id` も同じ応答になる（登録済みかを総当たりで
-   * 調べさせない）。**登録と同じく再認証が要る** —— 失効は正規の
-   * クライアントを黙って止める手口でもある。
-   *
-   * **発行済みの Access Token は止まらない。** 止まるのは以後の認可だけで、
-   * いま動いているアクセスを切るには `revokeGrant` が要る
-   * （`DisableOAuthClientUseCase` の JSDoc）。呼び出し元は
-   * 「アクセスを停止しました」と書かないこと。
-   */
-  async disableOAuthClient(input: DisableOAuthClientInput): Promise<DisableOAuthClientResult> {
-    const parsed = disableOAuthClientInputSchema.safeParse(input);
-    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
-
-    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
-    const result = await container.useCases.disableOAuthClient.execute({
-      sessionToken: parsed.data.sessionToken,
-      clientId: parsed.data.clientId,
-    });
-    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
-
-    return rpcOk({ disabled: result.value.disabled });
   }
 
   /**

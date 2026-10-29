@@ -162,7 +162,12 @@ export default defineConfig({
               "'stub worker - you meant to inject a fake IdentityRpcContract into app.fetch()'," +
               " { status: 599 }) };" +
               // RPC entrypoint 名も wrangler.jsonc に書かれているので形だけ用意する。
-              "export class IdentityRPC {}",
+              // **wrangler.jsonc で束縛している Entrypoint は全部要る。**
+              // 1 つでも欠けると workerd は "no such named entrypoint" で
+              // 起動に失敗し、**テストが 1 件も走らない**（#47 と同じ形）。
+              // 管理用は別 Entrypoint に分けてある（#308）。
+              "export class IdentityRPC {}" +
+              "export class IdentityAdminRPC {}",
           },
         ],
       },

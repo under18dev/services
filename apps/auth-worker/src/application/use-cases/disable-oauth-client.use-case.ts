@@ -65,6 +65,14 @@ export type DisableOAuthClientDeps = AdminAccessDeps & {
  * 判断）。管理者しか通らない経路ではあるが、**応答の形を理由に
  * 「管理者だから良い」と緩めると、その緩さは入口が増えたときに残る。**
  *
+ * ## 一次パーティは止められない
+ *
+ * `is_first_party` のクライアントには `conflict` を返す。**登録の側で
+ * 同意画面の省略を受け取らないのと対称**にしてある —— この入口から
+ * 作れないものを、この入口から止められてよい理由が無い。`u18-dashboard`
+ * は一次パーティなので、止められると u18 全サービスのログインが落ちる。
+ * 止める経路は `scripts/oauth-client.mjs disable` に残してある。
+ *
  * ## 失効は即座に効く
  *
  * `findByClientId` は失効済みの行も返すが、`OAuthClient.isDisabled` を見る
@@ -78,26 +86,28 @@ export class DisableOAuthClientUseCase {
   async execute(
     command: DisableOAuthClientCommand,
   ): Promise<UseCaseResult<DisableOAuthClientOutput>> {
-    const admin = await requireAdminSession(
-      this.deps,
-      command.sessionToken,
-      "oauth.client.disabled",
-    );
+    const admin = await requireAdminSession(this.deps, command.sessionToken, "disableOAuthClient");
     if (!admin.ok) return admin;
 
     const now = this.deps.clock.now();
     if (!hasFreshAuthentication(admin.value.session, now)) {
-      await settleSideEffects(
-        "oauth.client.disabled",
-        this.deps.audit.record({
-          event: "oauth.client.disabled",
-          userId: admin.value.userId,
-          outcome: "failure",
-          reason: "stale_authentication",
-          metadata: { clientId: command.clientId },
-        }),
-      );
+      await this.record(admin.value.userId, "failure", command.clientId, "stale_authentication");
       return err("reauthentication_required", "recent authentication is required");
+    }
+
+    // **一次パーティは止めさせない。** 作れないものを止められる形にすると、
+    // 管理者 1 人で `u18-dashboard` を失効させ、u18 全サービスのログインを
+    // 落とせる（登録の側で `is_first_party` を受け取らないのと対称）。
+    //
+    // 存在しない client_id と区別がつくのは承知のうえ。ここまで来られるのは
+    // 一覧で `isFirstParty` を読める管理者だけなので、新しく漏れる事実が無い。
+    const target = await this.deps.clients.findByClientId(command.clientId);
+    if (target !== null && target.isFirstParty) {
+      await this.record(admin.value.userId, "failure", command.clientId, "first_party");
+      return err(
+        "conflict",
+        "first-party clients can only be disabled with scripts/oauth-client.mjs",
+      );
     }
 
     const disabled = await this.deps.clients.disable(command.clientId, now);
@@ -105,17 +115,36 @@ export class DisableOAuthClientUseCase {
     // 何も起きなかった呼び出しも残す。失効済みに対する再実行と、
     // 存在しない client_id の指定は、応答では区別しないが記録では分かる
     // （`reason` を見れば「2 度目だった」ことが追える）。
+    await this.record(
+      admin.value.userId,
+      disabled ? "success" : "failure",
+      command.clientId,
+      disabled ? undefined : "already_disabled_or_unknown",
+    );
+
+    return ok({ disabled });
+  }
+
+  /**
+   * 監査ログ。**ここへ来るのは管理者まで通った呼び出しだけ**なので、
+   * 件数は管理者の操作回数で頭打ちになる。管理者でない呼び出しは
+   * `admin.denied` として Workers のログへ出る（`admin-access.ts`）。
+   */
+  private async record(
+    userId: string,
+    outcome: "success" | "failure",
+    clientId: string,
+    reason?: string,
+  ): Promise<void> {
     await settleSideEffects(
       "oauth.client.disabled",
       this.deps.audit.record({
         event: "oauth.client.disabled",
-        userId: admin.value.userId,
-        outcome: disabled ? "success" : "failure",
-        ...(disabled ? {} : { reason: "already_disabled_or_unknown" }),
-        metadata: { clientId: command.clientId },
+        userId,
+        outcome,
+        ...(reason === undefined ? {} : { reason }),
+        metadata: { clientId },
       }),
     );
-
-    return ok({ disabled });
   }
 }

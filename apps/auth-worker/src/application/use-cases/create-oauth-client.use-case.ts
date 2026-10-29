@@ -1,5 +1,6 @@
 import { newClientId } from "@u18/domain";
 import type { OAuthClient, OAuthClientType } from "../../domain/entities/oauth-client";
+import { validateLogoUrl } from "../../domain/services/logo-url";
 import { hasFreshAuthentication } from "../../domain/services/reauthentication";
 import { validateRedirectUriForRegistration } from "../../domain/services/redirect-uri";
 import { formatScope, unsupportedScopes } from "../../domain/services/scope";
@@ -120,11 +121,7 @@ export class CreateOAuthClientUseCase {
   async execute(
     command: CreateOAuthClientCommand,
   ): Promise<UseCaseResult<CreateOAuthClientOutput>> {
-    const admin = await requireAdminSession(
-      this.deps,
-      command.sessionToken,
-      "oauth.client.created",
-    );
+    const admin = await requireAdminSession(this.deps, command.sessionToken, "createOAuthClient");
     if (!admin.ok) return admin;
 
     const { session, userId } = admin.value;
@@ -160,6 +157,20 @@ export class CreateOAuthClientUseCase {
       validated.push(result.uri);
     }
 
+    // ロゴは認可コードの宛先ではないが、**同意画面と管理画面に描かれる**。
+    // `https:` 以外を入れさせない（`domain/services/logo-url.ts`）。
+    const logoUrl = command.logoUrl ?? null;
+    if (logoUrl !== null) {
+      const logo = validateLogoUrl(logoUrl);
+      if (!logo.ok) {
+        await this.record(userId, "failure", command.clientId, {
+          reason: "invalid_logo_url",
+          metadata: { rejection: logo.reason },
+        });
+        return err("invalid_input", `logo_url is not acceptable (${logo.reason})`);
+      }
+    }
+
     const scopes = command.scopes ?? DEFAULT_SCOPES;
     const unsupported = unsupportedScopes(scopes);
     if (unsupported.length > 0) {
@@ -191,7 +202,7 @@ export class CreateOAuthClientUseCase {
       // 読む人に見せるため —— `command.isFirstParty === true` のような
       // 書き方だと「渡せば立つ」と読める。
       isFirstParty: false,
-      logoUrl: command.logoUrl ?? null,
+      logoUrl,
       redirectUris: validated,
     });
 

@@ -2,13 +2,21 @@ import { createContainer } from "./composition/container";
 import { createApp } from "./presentation/http/app";
 
 export { IdentityRPC } from "./presentation/rpc/identity.entrypoint";
+/**
+ * OAuth クライアント管理（#308）。**`IdentityRPC` とは別の Entrypoint。**
+ *
+ * Service Binding はメソッド単位で絞れないので、束縛を分けること自体が
+ * 境界になる。`IdentityRPC` を束縛している nfc-worker にここは見えない
+ * （`presentation/rpc/identity-admin.entrypoint.ts` のクラスコメント）。
+ */
+export { IdentityAdminRPC } from "./presentation/rpc/identity-admin.entrypoint";
 
 /**
  * auth-worker のエントリポイント。
  *
  * 公開 HTTP（OIDC + アカウント API）と、Service Binding 経由の内部 RPC
- * （`IdentityRPC` の named export）、そして Cron Trigger（`scheduled`）の
- * 3 つの入口を持つ（仕様書 2.1）。
+ * （`IdentityRPC` / `IdentityAdminRPC` の named export）、そして
+ * Cron Trigger（`scheduled`）の 3 種類の入口を持つ（仕様書 2.1）。
  */
 const app = createApp();
 

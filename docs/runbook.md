@@ -2228,6 +2228,7 @@ MVP に公開 Developer Portal は無い（仕様書 1.2）。登録を誰でも
 
 - **再認証が要る。** 最後にログインしてから 5 分を過ぎていると `reauthentication_required` で断られる（登録・失効の両方）。利用者側の手順は「ログインし直してからやり直す」
 - **一次パーティ（`is_first_party`）を指定できない。** 画面から登録したクライアントは必ず同意画面を出す。**同意を省略させたいときは CLI から登録する**
+- **一次パーティのクライアントを失効させられない**（`conflict` が返る）。`u18-dashboard` を止めると u18 全サービスのログインが落ちるので、止めるのは CLI（`oauth-client.mjs disable`）からだけにしてある
 - **`http://localhost` を登録できない**（CLI の `--allow-loopback-http` に当たるものが無い）
 - `client_secret` の平文は登録の応答にしか出ない
 - 登録・失効は `oauth.client.created` / `oauth.client.disabled` として 2 年保持で監査に残る（**管理者でない利用者が叩いた記録も残る**）
