@@ -2789,6 +2789,36 @@ where owner_user_id = '<USER_ID>' and status = 'disabled'
 
 **BAN したい相手に対してこの手順を使わないこと。** 落とすと再登録できるようになる。
 
+#### 先に NFC のカードを解除する（#276）
+
+**`purge-user.mjs` は `u18-identity` しか触らない。** `u18-nfc` は別の D1 で、同じ `wrangler d1 execute` の対象にならない。
+
+`nfc_cards.owner_user_id` は **Identity の userId をそのまま持っている**（外部キーは別 D1 なので張れない）。**落としたあとも、そのカードには userId が残る。**
+
+```bash
+cd ../nfc-worker
+
+# そのユーザーが持っているカードを確かめる
+npx wrangler d1 execute u18-nfc --remote --env production \
+  --command "select card_id, status from nfc_cards where owner_user_id = 'usr_xxx';"
+```
+
+**ここから先の手順はまだ決まっていない（#276）。**
+
+アプリの解除（`DrizzleCardRepository.release`）は `owner_user_id` を null にするだけでなく、**`target_url` を消し、新しい紐づけコードを発行して `status` を `issued` に戻す** —— つまり「次の人が使えるカード」にする操作である。**purge の文脈で要るのは所有者の情報を消すことだけ**で、カードを再利用可能にするかは別の判断になる。
+
+| 決めること        | 選択肢                                                    |
+| ----------------- | --------------------------------------------------------- |
+| `status`          | `issued`（再利用可）か `disabled`（カードごと止める）か   |
+| `claim_code_hash` | 新しいコードを発行するか、null にして紐づけ不能にするか   |
+| `target_url`      | **消す**（持ち主が居ないカードが URL を配り続けないため） |
+
+**手で SQL を書かないこと。** 列の組み合わせを間違えると、**紐づけコードが無いのに `issued` のカード**のような、どの経路からも扱えない行ができる。#276 で CLI を用意するまでは、**NFC 側に所有者が残ることを承知のうえで Identity 側だけを落とす**か、**カードの解除を利用者自身に依頼する**かのどちらかにする。
+
+**`nfc_card_events.actor_user_id` は残る。** `NfcRetention` が掃除するが最長 2 年である（`apps/nfc-worker/src/domain/services/retention-policy.ts`）。**ここは「落とした」の範囲外**として扱っている —— Identity 側の `audit_logs` を残すのと同じ判断（§11.7）。
+
+**なぜ 1 コマンドにしないのか。** 2 つの D1 に跨がる不可逆操作を 1 つにすると、**片方だけ成功した状態**が作れる。§12.3 が「2 つの D1 の間に整合を保証する仕組みが無い」と書いているとおりで、**順序を人が守るほうが、失敗したときの状態が読める。**
+
 #### 手順
 
 ```bash
