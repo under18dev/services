@@ -211,9 +211,16 @@ export class DrizzleUserRepository implements UserRepository {
   /**
    * 最後にログインした時刻を記録する（#286）。
    *
-   * **`updated_at` は動かさない。** あれは「行が書き換わった時刻」で、
-   * ログインのたびに動かすと §11.6 の `deleted_at is null` の議論と同じで
-   * 「何の時刻か」が読めなくなる。`last_active_at` だけを書く。
+   * **`updated_at` も一緒に動く。** `_shared.ts` の `updatedAt()` が
+   * `$onUpdateFn` を持っているので、drizzle の `update()` は必ず触る。
+   * **止めない** —— 行は実際に書き換わっており、列ごとに例外を作るほうが
+   * 読む側に意外である。
+   *
+   * ただし結果として、**`users.updated_at` はログインのたびに動く。**
+   * 保持期間の起点に `updated_at` を使ってはいけない理由（「利用とは
+   * 関係ない時刻」）は、この変更で**半分だけ崩れた** —— 管理操作でも
+   * 動くことは変わらないので、**依然として起点には使えない。**
+   * 起点は `last_active_at` だけである。
    */
   async touchLastActive(id: string, at: Date): Promise<void> {
     await this.db.update(users).set({ lastActiveAt: at }).where(eq(users.id, id)).run();

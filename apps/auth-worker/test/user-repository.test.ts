@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { createIdentityDatabase, users } from "@u18/db";
 import { aUser, type UserFixture } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -89,5 +90,78 @@ describe("DrizzleUserRepository.updateProfile", () => {
 
     expect(outcome.kind).toBe("updated");
     if (outcome.kind === "updated") expect(outcome.user.username).toBe(owner.username);
+  });
+});
+
+/**
+ * `touchLastActive` を**実際のマイグレーション越しに**確かめる（#286）。
+ *
+ * **use-case のテストは `InMemoryUserRepository` を使う。** あちらは
+ * `touchLastActive` を Map に入れるだけなので、**列名を間違えていても
+ * drizzle の対応がずれていても緑になる。** 保持期間の起点は
+ * 「1 年後に読めること」が全てなので、**本当に行に入るか**をここで見る。
+ */
+describe("DrizzleUserRepository.touchLastActive", () => {
+  let repo: DrizzleUserRepository;
+  let user: UserFixture;
+
+  beforeEach(async () => {
+    await resetDatabase();
+    repo = new DrizzleUserRepository(createIdentityDatabase(env.IDENTITY_DB));
+    user = aUser({ username: "active_one" });
+    await createIdentityDatabase(env.IDENTITY_DB)
+      .insert(users)
+      .values({
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        primaryEmail: user.email,
+        emailVerified: user.emailVerified,
+      })
+      .run();
+  });
+
+  async function rowOf(id: string) {
+    return await createIdentityDatabase(env.IDENTITY_DB)
+      .select({ lastActiveAt: users.lastActiveAt, updatedAt: users.updatedAt })
+      .from(users)
+      .where(eq(users.id, id))
+      .get();
+  }
+
+  it("入れた直後は NULL（洗い出しに拾われない側）", async () => {
+    expect((await rowOf(user.id))?.lastActiveAt).toBeNull();
+  });
+
+  it("書いた時刻が行に残る", async () => {
+    const at = new Date("2026-10-29T08:00:00.000Z");
+
+    await repo.touchLastActive(user.id, at);
+
+    expect((await rowOf(user.id))?.lastActiveAt).toEqual(at);
+  });
+
+  it("updated_at も一緒に動く（止めていない）", async () => {
+    // **最初「動かさない」と書いて、この検査に落とされた。**
+    // `_shared.ts` の `updatedAt()` が `$onUpdateFn` を持っているので、
+    // drizzle の `update()` は必ず触る。止めないことにした —— 行は実際に
+    // 書き換わっており、列ごとに例外を作るほうが読む側に意外である。
+    //
+    // **結果として `users.updated_at` はログインのたびに動く。** 起点に
+    // 使ってはいけない理由（管理操作でも動く）は変わらないので、
+    // **起点は `last_active_at` だけ**である。ここはその事実を固定する。
+    const before = (await rowOf(user.id))?.updatedAt;
+
+    await repo.touchLastActive(user.id, new Date("2026-10-29T08:00:00.000Z"));
+
+    const after = (await rowOf(user.id))?.updatedAt;
+    expect(after?.getTime()).toBeGreaterThanOrEqual(before?.getTime() ?? 0);
+    expect(after).not.toBeNull();
+  });
+
+  it("居ないユーザーでも落ちない", async () => {
+    // 副作用として `settleSideEffects` から呼ばれるので、例外を投げると
+    // ログインのログに毎回エラーが出る。
+    await expect(repo.touchLastActive("usr_missing", new Date())).resolves.toBeUndefined();
   });
 });
