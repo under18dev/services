@@ -341,6 +341,14 @@ jobs:
       # 外形監視にも出ない。両側のテストは自分の Worker の内側に閉じて
       # いて、どちらもそれを見られなかった。
       #
+      # **auth-worker だけでは足りない。** ハッシュ付きアセットを配る Worker は
+      # 3 つあり（auth / dashboard / nfc）、**それぞれが自分でバンドルを生成して
+      # 自分でハッシュを決めている。** 以前この検査は `/login` だけを見ていて、
+      # dashboard-worker のアセットは誰も本番で確かめていなかった ——
+      # 上に書いた失敗が、Worker 1 つ隣で再発できる状態だった。
+      # 既定のページ一覧はスクリプトが持ち、`pnpm check:asset-pages` が
+      # 「配っている Worker が全部そこに居るか」を突き合わせる。
+      #
       # ここで見るのは「URL が正しいか」ではなく**本番で引けるか**である。
       # route の解決も、デプロイの順序も、キャッシュの残りも、ひっくるめて
       # 外から 1 回通す。#226 の form 経路と同じ理由で、**こちらが書いて
@@ -355,6 +363,9 @@ jobs:
             echo "::warning::PRODUCTION_URL repository variable is not set, skipping the asset smoke test."
             exit 0
           fi
+          # ページは渡さない。**既定の一覧はスクリプト側が持つ** ——
+          # ここに書くと、`check:asset-pages` が突き合わせる相手が
+          # 2 箇所になる（ワークフローとスクリプト）。
           scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}"
 
       # **Passkey の options 側だけ本番で踏む。**
