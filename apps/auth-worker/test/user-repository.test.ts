@@ -141,22 +141,22 @@ describe("DrizzleUserRepository.touchLastActive", () => {
     expect((await rowOf(user.id))?.lastActiveAt).toEqual(at);
   });
 
-  it("updated_at も一緒に動く（止めていない）", async () => {
-    // **最初「動かさない」と書いて、この検査に落とされた。**
-    // `_shared.ts` の `updatedAt()` が `$onUpdateFn` を持っているので、
-    // drizzle の `update()` は必ず触る。止めないことにした —— 行は実際に
-    // 書き換わっており、列ごとに例外を作るほうが読む側に意外である。
+  it("updated_at を進めない（OIDC の公開クレームである）", async () => {
+    // **`users.updated_at` は内部の記録ではない。** `User.toClaims()` が
+    // OIDC の標準クレームとして外へ出し、**RP はこれを見てプロフィールを
+    // 取り直すかを決める。** ログインのたびに進めると、何も変わって
+    // いないのに取り直させることになる。
     //
-    // **結果として `users.updated_at` はログインのたびに動く。** 起点に
-    // 使ってはいけない理由（管理操作でも動く）は変わらないので、
-    // **起点は `last_active_at` だけ**である。ここはその事実を固定する。
+    // `update-profile.use-case.ts` が「同じ値なら書き込まない」理由と
+    // 同じで、**列ごとの例外ではなく、既にある規則に揃えている。**
+    //
+    // drizzle の `update()` は `$onUpdateFn` が必ず触るので、ここは
+    // 生の SQL で書いてある。**この検査がその実装を固定する。**
     const before = (await rowOf(user.id))?.updatedAt;
 
     await repo.touchLastActive(user.id, new Date("2026-10-29T08:00:00.000Z"));
 
-    const after = (await rowOf(user.id))?.updatedAt;
-    expect(after?.getTime()).toBeGreaterThanOrEqual(before?.getTime() ?? 0);
-    expect(after).not.toBeNull();
+    expect((await rowOf(user.id))?.updatedAt).toEqual(before);
   });
 
   it("居ないユーザーでも落ちない", async () => {
