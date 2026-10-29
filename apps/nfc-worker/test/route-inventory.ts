@@ -100,6 +100,18 @@ export const CARD_ASSET_ROUTES: readonly Route[] = [
 ];
 
 /** カード管理に属するもの全部。一覧の突き合わせに使う。 */
+/**
+ * **本番のアセット検査には載っていない**（`UNPROBEABLE`）。
+ *
+ * カード画面 `/account/nfc` は未ログインで 302 を返すので、外から参照を
+ * 読めない。理由は `scripts/lib/asset-probe-pages.mjs` の `UNPROBEABLE`。
+ *
+ * **そのぶん `asset-coverage.test.ts` が代わりを務める。** あちらは
+ * テスト内でレンダリングするのでセッションを作れる —— **外からの検査では
+ * 閉じられなかった穴が、この向きだと閉じる**（#313）。
+ */
+export const PROBE_PAGES: readonly string[] = [];
+
 export const CARD_ROUTES: readonly Route[] = [
   ...CARD_PAGE_ROUTES,
   ...CARD_ASSET_ROUTES,

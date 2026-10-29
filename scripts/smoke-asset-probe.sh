@@ -66,8 +66,19 @@ shift 2
 # だから**各ジョブが自分の Worker ぶんだけを引く。** 既存の他のスモークも
 # その形で揃っている。
 #
-# **増やしたら scripts/check-asset-probe-pages.mjs も見ること。** あちらが
-# 「アセットを配る Worker が全部ここに居るか」を突き合わせている。
+# **ここを変えたら `apps/<worker>/test/route-inventory.ts` の `PROBE_PAGES`
+# も変えること。** `check-asset-probe-pages.mjs` が両者の一致を見ている ——
+# あちらだけが「このページが本当にそのアセットを参照しているか」を
+# レンダリングして確かめられる（workerd 上のテストからはこのファイルを
+# 読めない。実測）。
+#
+# **ここで確かめられるのは「未認証で引いたときに参照されるもの」だけ。**
+# dashboard の画面は未認証だと全部 401 でログイン導線を返すので、
+# **アイランドはどのページを引いても外からは見えない**（本番で実測）。
+# その旨は `route-inventory.ts` の `EXTERNALLY_UNVERIFIABLE_ASSETS` に
+# 理由ごと書いてあり、ログイン後の参照は Worker 側のテストが確かめる。
+#
+# あちらは「アセットを配る Worker が全部ここに居るか」も突き合わせている。
 probe_pages_for() {
   case "$1" in
     auth-worker) echo "/login:/ui/" ;;

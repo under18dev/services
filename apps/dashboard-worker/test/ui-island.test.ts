@@ -1,5 +1,6 @@
 import { DEV_SESSION_COOKIE_NAME, rpcOk } from "@u18/contracts";
 import type { GrantListItem, PasskeySummary, SessionListItem, UserProfile } from "@u18/contracts";
+import { hasAssetHash } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import {
@@ -183,7 +184,7 @@ describe("URL に内容ハッシュが入る（#211）", () => {
     expect(urls.length, "アセットを 1 つも参照していない").toBeGreaterThan(0);
 
     for (const url of urls) {
-      expect(url, `${url} にハッシュが入っていない`).toMatch(/\.[0-9a-f]{16}\./);
+      expect(hasAssetHash(url), `${url} にハッシュが入っていない`).toBe(true);
 
       const response = await createApp().fetch(
         new Request(`${ORIGIN}${url}`),

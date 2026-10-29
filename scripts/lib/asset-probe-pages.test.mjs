@@ -8,6 +8,7 @@ import {
   readAssetRoutes,
   readDeployInvocations,
   readProbeDeclaration,
+  readProbePagesDeclaration,
 } from "./asset-probe-pages.mjs";
 
 /**
@@ -38,8 +39,18 @@ const DEPLOY = `
 `;
 
 const WORKERS = [
-  { name: "auth-worker", assets: ["/ui/u18.<hash>.css"], hasInventory: true },
-  { name: "dashboard-worker", assets: ["/account/ui/u18.<hash>.css"], hasInventory: true },
+  {
+    name: "auth-worker",
+    assets: ["/ui/u18.<hash>.css"],
+    probePages: ["/login"],
+    hasInventory: true,
+  },
+  {
+    name: "dashboard-worker",
+    assets: ["/account/ui/u18.<hash>.css"],
+    probePages: ["/account"],
+    hasInventory: true,
+  },
 ];
 
 test("宣言を Worker 名でキーを取って読む", () => {
@@ -93,7 +104,10 @@ test("揃っていれば通る", () => {
 test("配っているのに宣言が無ければ落ちる", () => {
   const result = check({
     probeText: PROBE,
-    workers: [...WORKERS, { name: "nfc-worker", assets: ["/x/ui/a.css"], hasInventory: true }],
+    workers: [
+      ...WORKERS,
+      { name: "nfc-worker", assets: ["/x/ui/a.css"], probePages: [], hasInventory: true },
+    ],
     unprobeable: {},
     deployText: DEPLOY,
   });
@@ -104,7 +118,7 @@ test("配っているのに宣言が無ければ落ちる", () => {
 test("アセットを配っていない Worker は無視する", () => {
   const result = check({
     probeText: PROBE,
-    workers: [...WORKERS, { name: "plain", assets: [], hasInventory: true }],
+    workers: [...WORKERS, { name: "plain", assets: [], probePages: [], hasInventory: true }],
     unprobeable: {},
     deployText: DEPLOY,
   });
@@ -115,7 +129,10 @@ test("UNPROBEABLE の理由が空なら落ちる", () => {
   // 空で通すと「確かめられない」が「確かめなくてよい」にすり替わる。
   const result = check({
     probeText: PROBE,
-    workers: [...WORKERS, { name: "w", assets: ["/x/ui/a.css"], hasInventory: true }],
+    workers: [
+      ...WORKERS,
+      { name: "w", assets: ["/x/ui/a.css"], probePages: [], hasInventory: true },
+    ],
     unprobeable: { w: "   " },
     deployText: DEPLOY,
   });
@@ -213,4 +230,45 @@ test("実物のリポジトリで通る", () => {
     Object.keys(readDeployInvocations(deployText)).length >= 2,
     "deploy.yml からの呼び出しが 2 件未満。読み取りが効いていない",
   );
+});
+
+test("PROBE_PAGES の宣言を読む", () => {
+  const text = 'export const PROBE_PAGES: readonly string[] = ["/account/passkeys", "/x"];';
+  assert.deepEqual(readProbePagesDeclaration(text), ["/account/passkeys", "/x"]);
+});
+
+test("PROBE_PAGES が空でも読める（宣言が無いのと区別する）", () => {
+  // `[]` は「本番検査に載せない」という宣言。無いのとは意味が違う。
+  assert.deepEqual(
+    readProbePagesDeclaration("export const PROBE_PAGES: readonly string[] = [];"),
+    [],
+  );
+  assert.equal(readProbePagesDeclaration("何も無い"), null);
+});
+
+test("シェルの一覧と PROBE_PAGES がずれたら落ちる", () => {
+  // ずれると、本番が引くページと「参照を確かめたページ」が別物になる。
+  // どちらも単体では緑のまま。
+  const result = check({
+    probeText: PROBE,
+    workers: [
+      { ...WORKERS[0] },
+      { ...WORKERS[1], probePages: ["/account/passkeys"] }, // シェルは /account
+    ],
+    unprobeable: {},
+    deployText: DEPLOY,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /一致しません/);
+});
+
+test("PROBE_PAGES の宣言そのものが無ければ落ちる", () => {
+  const result = check({
+    probeText: PROBE,
+    workers: [{ ...WORKERS[0] }, { ...WORKERS[1], probePages: null }],
+    unprobeable: {},
+    deployText: DEPLOY,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /PROBE_PAGES がありません/);
 });

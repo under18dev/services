@@ -1,3 +1,4 @@
+import { normalizeAssetHash } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import { env } from "cloudflare:test";
@@ -23,13 +24,12 @@ import { STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
  */
 describe("公開面の一覧", () => {
   /** アセットの URL には内容ハッシュが入る（#211）。16 進 16 文字を伏せる。 */
-  const normalize = (path: string): string => path.replace(/\.[0-9a-f]{16}\./g, ".<hash>.");
 
   const actual = [
     ...new Set(
       createApp()
         .routes.filter((route) => route.method !== "ALL")
-        .map((route) => `${route.method} ${normalize(route.path)}`),
+        .map((route) => `${route.method} ${normalizeAssetHash(route.path)}`),
     ),
   ];
 
@@ -138,7 +138,7 @@ describe("区分どおりの応答が返る", () => {
   it("CARD_ASSET_ROUTES の一覧が実パスと対応している", () => {
     // 上の検査は `STYLESHEET_PATH` を直接使うので、**一覧側が間違っていても
     // 200 になる。** 伏せ字に直した形が一覧と一致することを別途見る。
-    const normalized = STYLESHEET_PATH.replace(/\.[0-9a-f]{16}\./g, ".<hash>.");
+    const normalized = normalizeAssetHash(STYLESHEET_PATH);
     expect(CARD_ASSET_ROUTES.map((route) => route.path)).toContain(normalized);
   });
 });

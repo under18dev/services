@@ -87,6 +87,51 @@ export const PAGE_ROUTES = [
 ] as const;
 
 /** 実行時に登録されているべきもの全部。 */
+/**
+ * ハッシュ付きアセット。`PAGE_ROUTES` から導く（別に書かない）。
+ */
+export const ASSET_ROUTES = PAGE_ROUTES.filter((route) => route.path.includes("/ui/"));
+
+/** HTML を返す画面。アセット以外の `PAGE_ROUTES`。 */
+export const HTML_PAGE_ROUTES = PAGE_ROUTES.filter((route) => !route.path.includes("/ui/"));
+
+/**
+ * **本番のアセット検査が引くページ**（`scripts/smoke-asset-probe.sh` の
+ * `probe_pages_for`）。**あちらと一致していなければならない** ——
+ * `check-asset-probe-pages.mjs` が突き合わせている。
+ *
+ * `/account` はこの Worker の入口で、未ログインでも 401 と一緒に画面を返す。
+ */
+export const PROBE_PAGES: readonly string[] = ["/account"];
+
+/**
+ * **外からは確かめられないアセット**と、その理由（#313）。
+ *
+ * ## なぜ要るのか
+ *
+ * 本番のアセット検査は**未認証で**ページを引く。この Worker の画面は
+ * **未認証だと全部 401 でログイン導線を返す**（実測。`/account` も
+ * `/account/passkeys` も `/account/sessions` も、参照するのは CSS だけ）。
+ *
+ * **つまりアイランドは、どのページを引いても外からは見えない。**
+ * ログインして初めて参照されるものなので、ページの選び方では解決しない ——
+ * 最初これを `/account/passkeys` への差し替えで直せると考えたが、
+ * **本番で引いて確かめたら何も変わっていなかった。**
+ *
+ * ## 黙って外れるのと、宣言して外れるのは違う
+ *
+ * ここに書かないと「外から確かめられていないアセット」が一覧から消える。
+ * 書いてあれば、**アイランドの配信が壊れても本番検査は気づかない**ことが
+ * 読んだ人に伝わる。代わりに `asset-coverage.test.ts` が、**ログインした
+ * 状態でレンダリングして**参照されていることを確かめている。
+ */
+export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
+  "/account/ui/account-island.<hash>.js":
+    "アイランドを読むのはログイン後の画面だけ。未認証では全ページが 401 で" +
+    "ログイン導線を返し、参照するのは CSS だけである（本番で実測）。" +
+    "ページの選び方では外から見えるようにできない。",
+};
+
 export const EXPECTED_ROUTES = [...API_ROUTES, ...PAGE_ROUTES];
 
 /** **チェーンに乗るべき**パス（重複を畳んだ union）。型側の突き合わせに使う。 */

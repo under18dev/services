@@ -1,3 +1,4 @@
+import { normalizeAssetHash } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import { EXPECTED_ROUTES, OAUTH_ROUTES, PUBLIC_ROUTES, SESSION_ROUTES } from "./route-inventory";
@@ -14,7 +15,6 @@ describe("公開面の一覧", () => {
    * 一覧側は `<hash>` と書いてある。**16 進 16 文字の塊だけを伏せる**ので、
    * ハッシュが入らなくなればここで一致しなくなる。
    */
-  const normalize = (path: string): string => path.replace(/\.[0-9a-f]{16}\./g, ".<hash>.");
 
   // `ALL /*` はミドルウェア。見たいのはエンドポイントだけ。
   //
@@ -25,7 +25,7 @@ describe("公開面の一覧", () => {
     ...new Set(
       createApp()
         .routes.filter((route) => route.method !== "ALL")
-        .map((route) => `${route.method} ${normalize(route.path)}`),
+        .map((route) => `${route.method} ${normalizeAssetHash(route.path)}`),
     ),
   ];
 
