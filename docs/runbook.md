@@ -3238,6 +3238,43 @@ $ node scripts/backup-d1.mjs list --prefix ""
 **3 つに分けてある。** 以前は全部が `[ ]` で並んでいて、**済んだものと判断待ちのものが
 混ざり、本当に未了のものが埋もれていた。**
 
+#### (0) 本番で 1 往復させる —— 利用者の経路が一度も動いていない
+
+**公開しているのに、利用者が通る経路は本番で一度も成立していない。** 2026-10-29 時点の本番の件数:
+
+|                                | 件数  |
+| ------------------------------ | ----- |
+| `users`                        | 1     |
+| `passkeys`                     | **0** |
+| `oauth_tokens`                 | **0** |
+| `audit_logs` の `user.created` | **0** |
+
+**「使われていないから壊れていない」** という状態である。テストは全部通っていて、入口（拒否される側）は実測で確かめてある —— PKCE 無し・`plain`・未登録 `client_id`・違う `redirect_uri`・存在しない `code`・失効後は、すべて本番で正しく落ちることを見た。**成功する側だけが未確認である。**
+
+**サインアップを 1 回通すと 3 つ同時に確定する。** 実在の受信箱に届く 6 桁コードが要るので、ここは運用者にしか実行できない。
+
+- [ ] **① 新規登録の成功分岐** —— `https://auth.under18.dev/login` でコードを受け取り、アカウント作成まで進む。確認は `audit_logs` に `user.created` が 1 件増えること
+- [ ] **② ログイン後の token 交換（OIDC の後半）** —— 下の手順で `code` → `access_token` / `id_token` まで通す
+- [ ] **③ 実機での Passkey 署名** —— `/account` から Passkey を 1 本登録し、サインアウトして Passkey でログインし直す。`RP_ID` / `WEBAUTHN_ORIGIN` の本番値が実機で通るのはここで初めて分かる（`check:webauthn` は噛み合いしか見ない）
+
+##### ② の手順（検証用クライアントを使う）
+
+**MVP に公開 Developer Portal は無い**ので、OIDC を外から通すには検証用のクライアントを 1 つ登録する。**使い終わったら必ず失効させる。**
+
+```sh
+# 登録（public クライアント。client_secret を持たない）
+node apps/auth-worker/scripts/oauth-client.mjs create   --client-id u18-oidc-probe --name "OIDC probe" --type public   --redirect-uri https://auth.under18.dev/account/callback --remote
+
+# …… /authorize → /token → /userinfo を通す ……
+
+# 終わったら必ず
+node apps/auth-worker/scripts/oauth-client.mjs disable --client-id u18-oidc-probe --remote
+```
+
+**`--dry-run` で SQL を確認してから当てること。** 登録した時点で**公開面が 1 つ増える**（任意の相手がこの `client_id` で `/authorize` を叩ける）ので、**失効まで含めて 1 回の作業にする。**
+
+確定したら ① ②（`oauth_tokens` に行が 1 件できる）③ をこのチェックリストで閉じ、§13 の「本番で未確認」の記述も直すこと。
+
 #### (1) 実行が要る —— リハーサル用の D1 で行う。本番では行わない
 
 - [ ] **Time Travel の復元を一度実行して検証する。** `u18-identity` と `u18-nfc` の**両方**で行う。本番 DB では行わない（§6.4 のリハーサル用 DB を使う）。少なくとも次を実測して §12.2 の「未確認」欄を埋める:
