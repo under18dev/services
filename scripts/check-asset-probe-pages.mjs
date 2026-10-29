@@ -9,13 +9,13 @@
 
 import { check, collect } from "./lib/asset-probe-pages.mjs";
 
-const { probeText, workers } = collect();
-const result = check({ probeText, workers });
+const { probeText, deployText, workers } = collect();
+const result = check({ probeText, workers, deployText });
 
 const withAssets = workers.filter((w) => w.assets.length > 0);
 console.log(
   `check-asset-probe-pages: アセットを配る Worker ${withAssets.length} 個、` +
-    `既定ページ ${result.pages.length} 件を突き合わせました。`,
+    `宣言 ${Object.keys(result.declared).length} 件を突き合わせました。`,
 );
 
 if (!result.ok) {

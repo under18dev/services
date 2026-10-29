@@ -6,36 +6,74 @@ import {
   collect,
   coveredByPrefix,
   readAssetRoutes,
-  readProbePages,
+  readDeployInvocations,
+  readProbeDeclaration,
 } from "./asset-probe-pages.mjs";
 
 /**
  * アセット検査のカバレッジ照合（`check-asset-probe-pages.mjs`）。
  *
  * **実物のリポジトリに対しても 1 回走らせている**（最後のテスト）。
- * 単体で組み立てた入力だけだと、`collect` の読み取り（ファイル名、
- * 正規表現）が実物と合っているかを確かめられない。
+ * 組み立てた入力だけだと、読み取り（ファイル名・正規表現）が実物と
+ * 合っているかを確かめられない。
  */
 
-test("既定の一覧を ページ:接頭辞 の組として読む", () => {
-  assert.deepEqual(readProbePages("x\n  set -- /login:/ui/ /account:/account/ui/\ny"), [
-    { page: "/login", prefix: "/ui/" },
-    { page: "/account", prefix: "/account/ui/" },
-  ]);
+const PROBE = `
+probe_pages_for() {
+  case "$1" in
+    auth-worker) echo "/login:/ui/" ;;
+    dashboard-worker) echo "/account:/account/ui/" ;;
+    *) echo "" ;;
+  esac
+}
+`;
+
+const DEPLOY = `
+  deploy-auth-worker:
+    steps:
+          scripts/smoke-asset-probe.sh "\${PRODUCTION_URL%/}" auth-worker
+  deploy-dashboard-worker:
+    steps:
+          scripts/smoke-asset-probe.sh "\${PRODUCTION_URL%/}" dashboard-worker
+`;
+
+const WORKERS = [
+  { name: "auth-worker", assets: ["/ui/u18.<hash>.css"], hasInventory: true },
+  { name: "dashboard-worker", assets: ["/account/ui/u18.<hash>.css"], hasInventory: true },
+];
+
+test("宣言を Worker 名でキーを取って読む", () => {
+  assert.deepEqual(readProbeDeclaration(PROBE), {
+    "auth-worker": [{ page: "/login", prefix: "/ui/" }],
+    "dashboard-worker": [{ page: "/account", prefix: "/account/ui/" }],
+  });
 });
 
 test("接頭辞の欠けた要素があれば null（部分的に受けない）", () => {
-  // 受けると「接頭辞を書き忘れたページだけ借用の検査が無い」状態が、
+  // 受けると「接頭辞を書き忘れた Worker だけ借用の検査が無い」状態が、
   // 照合側から見えなくなる。
-  assert.equal(readProbePages("  set -- /login:/ui/ /account"), null);
-  assert.equal(readProbePages("  set -- :/ui/"), null);
-  assert.equal(readProbePages("  set -- /login:"), null);
+  assert.equal(readProbeDeclaration(PROBE.replace("/login:/ui/", "/login")), null);
+  assert.equal(readProbeDeclaration(PROBE.replace("/login:/ui/", ":/ui/")), null);
+  assert.equal(readProbeDeclaration(PROBE.replace("/login:/ui/", "/login:")), null);
 });
 
-test("`set --` の行が無ければ null（黙って 0 件にしない）", () => {
-  // 0 件を返すと「ページが 1 つも無い」と区別が付かず、全 Worker が
-  // 未カバー扱いになる。読めなかったことを別に伝える。
-  assert.equal(readProbePages('PAGES="/login"; set -- $PAGES'), null);
+test("`probe_pages_for` が無ければ null（黙って 0 件にしない）", () => {
+  assert.equal(readProbeDeclaration('PAGES="/login:/ui/"'), null);
+});
+
+test("deploy.yml から ワーカー -> ジョブ を読む", () => {
+  assert.deepEqual(readDeployInvocations(DEPLOY), {
+    "auth-worker": "deploy-auth-worker",
+    "dashboard-worker": "deploy-dashboard-worker",
+  });
+});
+
+test("接頭辞は厳密に比べる", () => {
+  const pairs = [{ page: "/account", prefix: "/account/ui/" }];
+  assert.equal(coveredByPrefix(pairs, "/account/ui/u18.css"), true);
+  // **ここが肝。** `/account/nfc/ui/...` は `/account/` でも始まるので、
+  // 緩く見ると dashboard が nfc のものを借りても通ってしまう。
+  assert.equal(coveredByPrefix(pairs, "/account/nfc/ui/u18.css"), false);
 });
 
 test("route-inventory からアセットだけ拾う", () => {
@@ -47,40 +85,28 @@ test("route-inventory からアセットだけ拾う", () => {
   assert.deepEqual(readAssetRoutes(text), ["/account/ui/u18.<hash>.css"]);
 });
 
-test("接頭辞は厳密に比べる", () => {
-  const pairs = [
-    { page: "/login", prefix: "/ui/" },
-    { page: "/account", prefix: "/account/ui/" },
-  ];
-  assert.equal(coveredByPrefix(pairs, "/ui/u18.css"), true);
-  assert.equal(coveredByPrefix(pairs, "/account/ui/u18.css"), true);
-
-  // **ここが肝。** `/account/nfc/ui/...` は `/account/` でも始まるので、
-  // 緩く見ると dashboard が nfc のものを借りても通ってしまう。
-  assert.equal(coveredByPrefix(pairs, "/account/nfc/ui/u18.css"), false);
+test("揃っていれば通る", () => {
+  const result = check({ probeText: PROBE, workers: WORKERS, unprobeable: {}, deployText: DEPLOY });
+  assert.deepEqual(result.problems, []);
 });
 
-const PROBE = "  set -- /login:/ui/ /account:/account/ui/\n";
-
-test("配っているのに触られない Worker があれば落ちる", () => {
+test("配っているのに宣言が無ければ落ちる", () => {
   const result = check({
-    probeText: "  set -- /login:/ui/\n",
-    workers: [{ name: "dash", assets: ["/account/ui/u18.css"], hasInventory: true }],
+    probeText: PROBE,
+    workers: [...WORKERS, { name: "nfc-worker", assets: ["/x/ui/a.css"], hasInventory: true }],
+    unprobeable: {},
+    deployText: DEPLOY,
   });
   assert.equal(result.ok, false);
-  assert.match(result.problems[0], /dash/);
+  assert.match(result.problems.join("\n"), /nfc-worker: ハッシュ付きアセット/);
 });
 
 test("アセットを配っていない Worker は無視する", () => {
-  // 接頭辞の逆向き検査が鳴らないよう、実在のアセットを 1 つ持つ Worker も渡す。
   const result = check({
     probeText: PROBE,
-    workers: [
-      { name: "plain", assets: [], hasInventory: true },
-      { name: "a", assets: ["/ui/x.css"], hasInventory: true },
-      { name: "d", assets: ["/account/ui/x.css"], hasInventory: true },
-    ],
+    workers: [...WORKERS, { name: "plain", assets: [], hasInventory: true }],
     unprobeable: {},
+    deployText: DEPLOY,
   });
   assert.deepEqual(result.problems, []);
 });
@@ -89,27 +115,74 @@ test("UNPROBEABLE の理由が空なら落ちる", () => {
   // 空で通すと「確かめられない」が「確かめなくてよい」にすり替わる。
   const result = check({
     probeText: PROBE,
-    workers: [{ name: "w", assets: ["/nowhere/ui/x.css"], hasInventory: true }],
+    workers: [...WORKERS, { name: "w", assets: ["/x/ui/a.css"], hasInventory: true }],
     unprobeable: { w: "   " },
+    deployText: DEPLOY,
   });
   assert.equal(result.ok, false);
-  assert.match(result.problems[0], /理由が書かれていません/);
+  assert.match(result.problems.join("\n"), /理由が書かれていません/);
 });
 
-test("理由が書いてあれば通す", () => {
-  // 宣言された接頭辞に入るアセットを持つ Worker も渡す。**渡さないと
-  // 「接頭辞に入るアセットが無い」のほうが鳴る** —— UNPROBEABLE の
-  // Worker のアセットは、どの接頭辞にも入らないのが正常なので。
+test("宣言と UNPROBEABLE の両方に居たら落ちる", () => {
+  // 「確かめている」と「確かめられない」が同時に成り立つように読める。
   const result = check({
     probeText: PROBE,
-    workers: [
-      { name: "w", assets: ["/nowhere/ui/x.css"], hasInventory: true },
-      { name: "a", assets: ["/ui/x.css"], hasInventory: true },
-      { name: "d", assets: ["/account/ui/x.css"], hasInventory: true },
-    ],
-    unprobeable: { w: "未ログインでは 302 を返すため、外から参照を読めない" },
+    workers: WORKERS,
+    unprobeable: { "dashboard-worker": "外から読めない理由がここに書いてある" },
+    deployText: DEPLOY,
   });
-  assert.deepEqual(result.problems, []);
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /両方に居ます/);
+});
+
+test("宣言した接頭辞が実物と噛み合わなければ落ちる", () => {
+  const result = check({
+    probeText: PROBE.replace("/account:/account/ui/", "/account:/account/assets/"),
+    workers: WORKERS,
+    unprobeable: {},
+    deployText: DEPLOY,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /配信パスを変えたなら宣言も直すこと/);
+});
+
+test("宣言しても deploy から呼ばれていなければ落ちる", () => {
+  // **宣言があることと、呼ばれることは別。** 走らない検査は、書いた人には
+  // 書いたように見える。
+  const result = check({
+    probeText: PROBE,
+    workers: WORKERS,
+    unprobeable: {},
+    deployText: DEPLOY.replace(/.*dashboard-worker\n/, ""),
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /どのジョブからも呼ばれていません/);
+});
+
+test("隣のジョブから呼ばれていたら落ちる", () => {
+  // まだデプロイされていない Worker を引くことになる（#310 で実際に起きた）。
+  const result = check({
+    probeText: PROBE,
+    workers: WORKERS,
+    unprobeable: {},
+    deployText: DEPLOY.replace(
+      "  deploy-dashboard-worker:\n    steps:\n",
+      "  deploy-auth-worker:\n    steps:\n",
+    ),
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /であるべき/);
+});
+
+test("もう配っていない Worker が宣言や UNPROBEABLE に残っていたら落ちる", () => {
+  const result = check({
+    probeText: PROBE,
+    workers: [],
+    unprobeable: { gone: "理由" },
+    deployText: DEPLOY,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /消すこと/);
 });
 
 test("実物の UNPROBEABLE には全部理由が書いてある", () => {
@@ -119,36 +192,25 @@ test("実物の UNPROBEABLE には全部理由が書いてある", () => {
   }
 });
 
-test("もうアセットを配っていない Worker が UNPROBEABLE に残っていたら落ちる", () => {
-  const result = check({ probeText: PROBE, workers: [], unprobeable: { gone: "理由" } });
-  assert.equal(result.ok, false);
-  assert.match(result.problems.join("\n"), /消すこと/);
-});
-
 test("実物のリポジトリで通る", () => {
   // **ここが本題。** 組み立てた入力だけだと、`collect` のファイル名や
   // 正規表現が実物とずれていても全部通る。
-  const { probeText, workers } = collect();
-  const result = check({ probeText, workers });
+  const { probeText, deployText, workers } = collect();
+  const result = check({ probeText, workers, deployText });
   assert.deepEqual(result.problems, []);
 
   // 読み取りが成立していること自体も見る。0 個なら、拾えていないだけかも
   // しれない —— 「問題なし」と区別が付かない。
   assert.ok(
     workers.filter((w) => w.assets.length > 0).length >= 2,
-    "アセットを配る Worker が 2 個未満。route-inventory の読み取りが効いていない可能性がある",
+    "アセットを配る Worker が 2 個未満。route-inventory の読み取りが効いていない",
   );
-  assert.ok(result.pages.length >= 2, "既定ページが 2 件未満");
-});
-
-test("どの Worker のアセットも入らない接頭辞が残っていたら落ちる", () => {
-  // 配信パスを変えたときにここが置き去りになる。残ると借用の検査が
-  // **全部の参照を弾く**ようになり、原因が「借用」と報告される。
-  const result = check({
-    probeText: "  set -- /login:/ui/ /account:/old-path/ui/\n",
-    workers: [{ name: "a", assets: ["/ui/x.css"], hasInventory: true }],
-    unprobeable: {},
-  });
-  assert.equal(result.ok, false);
-  assert.match(result.problems.join("\n"), /\/old-path\/ui\/ の接頭辞に入るアセットが/);
+  assert.ok(
+    Object.keys(readProbeDeclaration(probeText) ?? {}).length >= 2,
+    "宣言が 2 件未満。probe_pages_for の読み取りが効いていない",
+  );
+  assert.ok(
+    Object.keys(readDeployInvocations(deployText)).length >= 2,
+    "deploy.yml からの呼び出しが 2 件未満。読み取りが効いていない",
+  );
 });
