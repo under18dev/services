@@ -113,5 +113,31 @@
  * （§11.7 の応対原則）。`deleted` を立てると `purgeUserSql` の
  * `status <> 'deleted'` に弾かれ、**管理者が二度と落とせなくなる。**
  */
-export const CONTRACT_VERSION = "1.5.0" as const;
+/**
+ * ## 1.5.0 → 1.6.0（#308: OAuth クライアント管理を RPC へ出す）
+ *
+ * `listOAuthClients` / `createOAuthClient` / `disableOAuthClient` を足した。
+ * これまで `scripts/oauth-client.mjs` からしかできなかった登録・失効を、
+ * **管理者のセッションでだけ**画面から行えるようにする。
+ *
+ * **これはメソッドの追加であると同時に、緩和策の置き換えである。**
+ * 「運用者の手元からしか叩けない」を「管理者だけが叩ける」に替えており、
+ * 弱くなる方向の変更にあたる（`docs/threat-model.md` RR-21）。契約の形で
+ * 効かせているのは 2 点 —— `OAuthClientSummary` に `client_secret_hash` を
+ * 置かないこと、平文の `client_secret` を `createOAuthClient` の応答に
+ * しか置かないこと。**認可の判定は契約では表現できない**ので、
+ * auth-worker の UseCase の中に置いてある。
+ *
+ * **後方互換な追加**なので MINOR。デプロイ順は従来どおり auth-worker が先。
+ * 逆順にすると、新しい dashboard-worker がまだメソッドを持たない
+ * auth-worker を呼び、`RpcIdentityGateway.call()` が
+ * `identity_unavailable` へ畳む —— 画面は 503 で済むが、管理領域だけが
+ * 無言で壊れた状態がデプロイ完了まで続く。
+ *
+ * **番号は 1.6.0 である。** この変更を書いたときは 1.5.0 のつもりだったが、
+ * 先に #318（退会）が 1.5.0 を取って main へ入った。リベースで繰り上げた
+ * ——  **同じ番号に 2 つの意味が付くと、`CONTRACT_VERSION` を見ても
+ * どちらが入っているか分からなくなる。**
+ */
+export const CONTRACT_VERSION = "1.6.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

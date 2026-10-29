@@ -48,6 +48,19 @@ export interface OAuthClientRepository {
   listRedirectUris(clientId: string): Promise<readonly string[]>;
 
   /**
+   * 登録済みのクライアントをすべて返す（管理画面の一覧、#308）。
+   *
+   * **失効済みも含める。** `findByClientId` が `disabled_at` の立った行も
+   * 返すのと同じ理由で、Repository は事実を返し、可否は呼び出し側が決める。
+   * 一覧から失効済みを落とすと、運用者は画面で失効させた直後に行が消え、
+   * 「失効したのか、消えたのか」を区別できなくなる。
+   *
+   * **認可フローからは呼ばない。** 全件を読む唯一のメソッドなので、
+   * 使ってよいのは管理操作だけである。
+   */
+  listAll(): Promise<readonly OAuthClient[]>;
+
+  /**
    * confidential クライアントの `client_secret` を照合する。
    *
    * 平文を受け取り、ハッシュ化と**定時間比較**まで実装側で完結させる。
