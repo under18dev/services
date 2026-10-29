@@ -80,6 +80,34 @@ export const GRANTS_ROUTE = "/grants";
 export const GRANTS_PATH = `${ACCOUNT_BASE_PATH}${GRANTS_ROUTE}` as const;
 
 /**
+ * u18 Identity で使えるアプリの一覧（#308）。
+ *
+ * **`/account/grants` とは別物である。** あちらは「あなたが同意した RP」、
+ * こちらは「u18 で使えるアプリとして**運用側が載せたもの**」のカタログ。
+ * 前者は利用者ごとに中身が変わり、後者は全員に同じものが出る。
+ * **一方だけを見て「連携しているアプリ」と読むと、必ずどちらかを
+ * 取り違える**ので、画面の見出しでも「連携アプリ」と「アプリ」を
+ * 言い分けている。
+ *
+ * **「繋がっているアプリ全部」ではない。** 載せるかどうかは運用の判断で
+ * （`app-catalog.ts`）、`oauth_clients` の全件とは一致しない。
+ */
+export const APPS_ROUTE = "/apps";
+export const APPS_PATH = `${ACCOUNT_BASE_PATH}${APPS_ROUTE}` as const;
+
+/**
+ * NFC カードの管理画面。**この Worker は配信しない** —— nfc-worker が
+ * `auth.under18.dev/account/nfc` で持っている（#31、あちらの
+ * `wrangler.jsonc` の production routes が `/account/*` より長いので、
+ * 両方に一致するこのパスは nfc-worker へ届く）。
+ *
+ * **`ACCOUNT_BASE_PATH` から組み立てないこと。** 接頭辞が同じなのは
+ * たまたまで、持ち主が違う。ここを導出にすると「dashboard の画面を 1 つ
+ * 増やした」ように読めてしまう。
+ */
+export const NFC_CARDS_PATH = "/account/nfc";
+
+/**
  * ログイン画面。**この Worker は配信しない** —— auth-worker が
  * `auth.under18.dev/login` で持っている（仕様書 §14.1 決定 1 により
  * 同一オリジン）。
