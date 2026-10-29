@@ -524,3 +524,79 @@ describe("/health は Identity まで確かめる（#44）", () => {
     expect(response.status).toBe(200);
   });
 });
+
+/**
+ * 本人の退会（#318、`DELETE /api/me`）。
+ *
+ * **「削除」ではない。** auth-worker が `status` を `suspended` にするだけで、
+ * 氏名相当とメールアドレスは残る（落とすのは管理者の §11.6）。この Worker は
+ * 結果を翻訳して Cookie を落とすだけである。
+ */
+describe("退会", () => {
+  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
+  const ok = { closeAccount: async () => rpcOk({ closed: true, revokedSessions: 3 }) };
+
+  it("Cookie が無ければ RPC を呼ばない", async () => {
+    const response = await request(
+      "/api/me",
+      envWith({ closeAccount: () => neverCalled("closeAccount") } as never),
+      { method: "DELETE", headers: { Origin: ORIGIN } },
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("別オリジンからは拒否する", async () => {
+    // **不可逆に近い操作なので、ここを緩めない。**
+    const response = await request(
+      "/api/me",
+      envWith({ closeAccount: () => neverCalled("closeAccount") } as never),
+      { method: "DELETE", headers: { Cookie: cookie, Origin: "https://evil.example" } },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("成功したら Cookie を必ず落とす", async () => {
+    // **`revokeSession` と違い「自分だったら」の判定が要らない。** 退会は
+    // 全セッションを失効させるので、自分の Cookie も必ず死んでいる。
+    const response = await request("/api/me", envWith(ok), {
+      method: "DELETE",
+      headers: { Cookie: cookie, Origin: ORIGIN },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ closed: true, revokedSessions: 3 });
+    expect(response.headers.get("Set-Cookie")).toBe(
+      `${DEV_SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
+    );
+  });
+
+  it("再認証の要求は 403 で、本文で区別できる", async () => {
+    // ステータスだけでは `forbidden` と区別が付かない。利用者の次の行動は
+    // 「もう一度ログインする」で、まったく違う。
+    const response = await request(
+      "/api/me",
+      envWith({
+        closeAccount: async () => rpcErr("reauthentication_required", "recent auth required"),
+      }),
+      { method: "DELETE", headers: { Cookie: cookie, Origin: ORIGIN } },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "reauthentication_required" });
+    // **閉じていないので Cookie は落とさない。** 落とすと、ログインし直せば
+    // 通る状況なのに「ログアウトされた」と読める。
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("既に無効なら 409", async () => {
+    const response = await request(
+      "/api/me",
+      envWith({ closeAccount: async () => rpcErr("conflict", "account is not active") }),
+      { method: "DELETE", headers: { Cookie: cookie, Origin: ORIGIN } },
+    );
+
+    expect(response.status).toBe(409);
+  });
+});

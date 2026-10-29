@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { createIdentityDatabase, users } from "@u18/db";
+import { purgeUserSql } from "../src/infrastructure/persistence/purge-user.sql";
 import { aUser, type UserFixture } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DrizzleUserRepository } from "../src/infrastructure/persistence/drizzle-user.repository";
@@ -168,5 +169,76 @@ describe("DrizzleUserRepository.touchLastActive", () => {
     // 副作用として `settleSideEffects` から呼ばれるので、例外を投げると
     // ログインのログに毎回エラーが出る。
     await expect(repo.touchLastActive("usr_missing", new Date())).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * 退会したあとも管理者が個人情報を落とせること（#318 / ランブック §11.6）。
+ *
+ * **これが #318 の設計の全部である。** 本人の退会で `status` を `deleted` に
+ * すると、`purgeUserSql` のガード `status <> 'deleted'` がこの行に当たらず、
+ * **氏名相当とメールアドレスが落ちないまま、管理者が二度と落とせなくなる。**
+ * しかも `returning` が 0 行を返すので、運用者からは「既に落とした」と
+ * 区別が付かない —— **正常と異常が同じ観測値になる。**
+ *
+ * `InMemoryUserRepository` では噛み合わせのほうが写らないので、ここで
+ * **実物の D1 に両方の文を流す。**
+ */
+describe("退会したアカウントを、管理者が落とせる", () => {
+  let repo: DrizzleUserRepository;
+  let user: UserFixture;
+
+  beforeEach(async () => {
+    await resetDatabase();
+    repo = new DrizzleUserRepository(createIdentityDatabase(env.IDENTITY_DB));
+    user = aUser({ username: "leaving_one" });
+    await createIdentityDatabase(env.IDENTITY_DB)
+      .insert(users)
+      .values({
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        primaryEmail: user.email,
+        emailVerified: user.emailVerified,
+      })
+      .run();
+  });
+
+  async function statusOf(id: string): Promise<string | undefined> {
+    const row = await createIdentityDatabase(env.IDENTITY_DB)
+      .select({ status: users.status })
+      .from(users)
+      .where(eq(users.id, id))
+      .get();
+    return row?.status;
+  }
+
+  it("退会は suspended にする", async () => {
+    expect(await repo.closeAccount(user.id)).toBe(true);
+    expect(await statusOf(user.id)).toBe("suspended");
+  });
+
+  it("退会したあとで purge が当たる", async () => {
+    await repo.closeAccount(user.id);
+
+    const purged = await env.IDENTITY_DB.prepare(purgeUserSql(user.id)).all();
+
+    // **ここが本体。** 0 行なら、個人情報は落ちないまま回収不能になっている。
+    expect(purged.results).toHaveLength(1);
+    expect(await statusOf(user.id)).toBe("deleted");
+  });
+
+  it("active でない行には当たらない（BAN を塗り替えない）", async () => {
+    await repo.closeAccount(user.id);
+
+    // 2 回目。既に `suspended` なので当たらない。
+    expect(await repo.closeAccount(user.id)).toBe(false);
+  });
+
+  it("purge 済みの行を退会で触らない", async () => {
+    await env.IDENTITY_DB.prepare(purgeUserSql(user.id)).all();
+
+    expect(await repo.closeAccount(user.id)).toBe(false);
+    expect(await statusOf(user.id)).toBe("deleted");
   });
 });

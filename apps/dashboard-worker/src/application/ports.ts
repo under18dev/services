@@ -32,6 +32,15 @@ export interface IdentityGateway {
     sessionToken: string,
     passkeyId: string,
   ): Promise<IdentityOutcome<{ deleted: boolean; remaining: number }>>;
+  /**
+   * 本人の退会（#318）。**冪等でない**ので adapter は自動リトライしない。
+   *
+   * **「削除」ではない。** `status` が `suspended` になりログインが塞がる
+   * だけで、氏名相当とメールアドレスは残る（落とすのは管理者の §11.6）。
+   */
+  closeAccount(
+    sessionToken: string,
+  ): Promise<IdentityOutcome<{ closed: boolean; revokedSessions: number }>>;
   revokeSession(
     sessionToken: string,
     targetSessionId: string,

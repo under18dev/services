@@ -87,6 +87,19 @@ export const AUDIT_EVENTS = [
    * 手がかり**になる（`users` の行は残るが、中身は置き換わっている）。
    */
   "user.purged",
+  /**
+   * 本人が退会した（#318 / ランブック §11.7）。
+   *
+   * **`status` では BAN と区別が付かない。** 本人の退会も不正利用者の
+   * BAN も `suspended` になる —— `deleted` は「個人情報が落ちている」
+   * ことを指す名前で、落とさずに立てると `purgeUserSql` の
+   * `status <> 'deleted'` に弾かれ、**管理者が二度と落とせなくなる**
+   * （しかも `returning` が 0 行なので「既に落とした」と区別が付かない）。
+   *
+   * そこで**理由はここで分ける。** 退会した人に §11.6 を回すのと、
+   * BAN した相手の個人情報を残すのとでは、次にやることが逆になる。
+   */
+  "account.closed",
 
   // --- 運用者が wrangler 越しに書くもの（`ops.` 接頭辞） ---
   //
@@ -227,6 +240,11 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * R2 への退避（730 日）と合わせて約 4 年になる（決定 14）。
    */
   "user.purged": "security",
+  /**
+   * 本人の退会。**アカウントの支配権が変わる操作**で、しかもこれが
+   * 「個人情報を落としてよい」の起点になる（§11.6）。
+   */
+  "account.closed": "security",
   /** 管理権限の付与。**アカウントの支配権が変わる操作そのもの**（#270）。 */
   "ops.admin.granted": "security",
   /** 剥奪。締め出しの手口でもあるので、付与と同じだけ残す。 */
