@@ -47,9 +47,29 @@ export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}`;
 export const ISLAND_ROUTE = `/ui/${hashedFileName("account-island.js", ACCOUNT_ISLAND_JS)}`;
 export const ISLAND_PATH = `${ACCOUNT_BASE_PATH}${ISLAND_ROUTE}`;
 
-/** アカウント概要（プロフィールと Passkey）。 */
+/**
+ * ダッシュボードのホーム（#308）。
+ *
+ * **以前はここがプロフィールとパスキーの本体だった。** いまは各ページへの
+ * 導線と件数だけを置く。中身は `/account/profile` と `/account/passkeys` へ
+ * 移した。
+ */
 export const OVERVIEW_ROUTE = "/";
 export const OVERVIEW_PATH = ACCOUNT_BASE_PATH;
+
+/**
+ * プロフィール（#308）。
+ *
+ * **概要から切り出した。** 以前は `/account` が「プロフィール + パスキー」
+ * の 2 節を持っていたが、サイドバーを置くと**どの項目が現在地か**を
+ * 1 つに決められない。1 画面 1 主題にする。
+ */
+export const PROFILE_ROUTE = "/profile";
+export const PROFILE_PATH = `${ACCOUNT_BASE_PATH}${PROFILE_ROUTE}` as const;
+
+/** パスキー（#308 で概要から切り出した）。 */
+export const PASSKEYS_ROUTE = "/passkeys";
+export const PASSKEYS_PATH = `${ACCOUNT_BASE_PATH}${PASSKEYS_ROUTE}` as const;
 
 /** ログイン中の端末。 */
 export const SESSIONS_ROUTE = "/sessions";

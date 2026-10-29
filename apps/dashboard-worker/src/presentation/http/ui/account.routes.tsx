@@ -6,15 +6,19 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { IdentityOutcome } from "../../../application/ports";
 import type { AppBindings } from "../types";
-import { AccountPage } from "./account-page";
+import { HomePage } from "./home-page";
 import {
   GRANTS_ROUTE,
   ISLAND_ROUTE,
   OVERVIEW_ROUTE,
+  PASSKEYS_ROUTE,
+  PROFILE_ROUTE,
   SESSIONS_ROUTE,
   STYLESHEET_ROUTE,
 } from "./asset-paths";
 import { GrantsPage } from "./grants-page";
+import { PasskeysPage } from "./passkeys-page";
+import { ProfilePage } from "./profile-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
 import { SessionsPage } from "./sessions-page";
 import { returnToForCurrentRequest } from "@u18/contracts";
@@ -56,27 +60,64 @@ const ASSET_CACHE_CONTROL = IMMUTABLE_ASSET_CACHE_CONTROL;
 
 export const accountUiRoutes = new Hono<AppBindings>()
   /**
-   * アカウント概要。プロフィールと Passkey を 1 ページに出す。
+   * ダッシュボードのホーム（#308）。
    *
-   * 2 本の RPC を**並行**で呼ぶ。直列にすると往復が 2 回分になり、
-   * どちらも同じセッションで同じ auth-worker を叩くので待つ意味が無い。
+   * **4 本の RPC を並行で呼ぶ。** 直列にすると往復が 4 回分になり、
+   * どれも同じセッションで同じ auth-worker を叩くので待つ意味が無い。
+   *
+   * ここは件数しか出さないが、**件数を出すには一覧を引くしかない** ——
+   * `IdentityRPC` に「数だけ返す」口を足すと、同じ問いに入口が 2 つできる
+   * （件数と一覧がずれる形は、このリポジトリが繰り返し踏んでいる）。
+   * 行数が小さいうちは一覧を引いて数える。
    */
   .get(OVERVIEW_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
     const identity = c.get("identity");
-    const [profile, passkeys] = await Promise.all([
+    const [profile, passkeys, sessions, grants] = await Promise.all([
       identity.getProfile(token),
       identity.listPasskeys(token),
+      identity.listSessions(token),
+      identity.listGrants(token),
     ]);
 
     if (!profile.ok) return renderFailure(c, profile);
-    // セッションが無効なら、Passkey の結果がどうであれログインからやり直し。
+    // セッションが無効なら、他の結果がどうであれログインからやり直し。
     if (profile.value === null) return signInRequired(c);
     if (!passkeys.ok) return renderFailure(c, passkeys);
+    if (!sessions.ok) return renderFailure(c, sessions);
+    if (!grants.ok) return renderFailure(c, grants);
 
-    return c.html(<AccountPage profile={profile.value} passkeys={passkeys.value} />);
+    return c.html(
+      <HomePage
+        displayName={profile.value.displayName}
+        passkeyCount={passkeys.value.length}
+        sessionCount={sessions.value.length}
+        grantCount={grants.value.length}
+      />,
+    );
+  })
+
+  .get(PROFILE_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const profile = await c.get("identity").getProfile(token);
+    if (!profile.ok) return renderFailure(c, profile);
+    if (profile.value === null) return signInRequired(c);
+
+    return c.html(<ProfilePage profile={profile.value} />);
+  })
+
+  .get(PASSKEYS_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const passkeys = await c.get("identity").listPasskeys(token);
+    if (!passkeys.ok) return renderFailure(c, passkeys);
+
+    return c.html(<PasskeysPage passkeys={passkeys.value} />);
   })
 
   .get(SESSIONS_ROUTE, pageSecurityHeaders, async (c) => {
