@@ -38,4 +38,12 @@ export interface UserRepository {
     changes: { displayName?: string; username?: string },
   ): Promise<UpdateProfileOutcome>;
   markEmailVerified(id: string, email: string): Promise<void>;
+  /**
+   * 最後にログインした時刻を記録する（#286）。
+   *
+   * **`sessions.touch()` とは別物である。** あちらは認証付き要求が届く
+   * たびに動き、30 日で掃除される。こちらは**ログインが成立した瞬間**
+   * だけで、保持期間（最終利用から 1 年）の起点として 1 年を越えて残る。
+   */
+  touchLastActive(id: string, at: Date): Promise<void>;
 }

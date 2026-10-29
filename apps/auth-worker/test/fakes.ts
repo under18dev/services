@@ -92,6 +92,24 @@ export class InMemoryUserRepository implements UserRepository {
     if (!existing) return;
     this.store.set(id, { ...existing, email, emailVerified: true, updatedAt: new Date() });
   }
+
+  /**
+   * `last_active_at`（#286）。
+   *
+   * **`UserProps` には持たせない。** application 側はこの値を一度も
+   * 読まない（保持期間の洗い出しは運用者が SQL で引く）ので、
+   * ドメインの entity に生やすと「読まれない項目」が増える。
+   * テストから見たいだけなので、ここで別に持つ。
+   */
+  private readonly lastActive = new Map<string, Date>();
+
+  async touchLastActive(id: string, at: Date): Promise<void> {
+    this.lastActive.set(id, at);
+  }
+
+  lastActiveAtOf(id: string): Date | undefined {
+    return this.lastActive.get(id);
+  }
 }
 
 export class InMemorySessionRepository implements SessionRepository {

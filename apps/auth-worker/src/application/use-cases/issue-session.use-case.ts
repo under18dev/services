@@ -110,6 +110,14 @@ export class IssueSessionUseCase {
     // `RequestScopedAuditLogger` が全イベントに付けるようになった。
     // ここだけ手で渡し続けると、**同じ値を 2 つの経路が決めることになり**、
     // 片方を直したときにイベントごとに食い違う。
+    // `last_active_at` は保持期間（最終利用から 1 年）の起点である（#286）。
+    // **ここでしか書かない** —— `sessions.touch()` は認証付き要求が届く
+    // たびに動き、`SameSite=Lax` なので他サイトからのトップレベル遷移でも
+    // 更新される。あれは「本人が使った」を測っていない。
+    //
+    // 監査ログと同じく本筋ではない。書けなくてもログインは成立させる
+    // （書けなければ起点が古いままになり、**洗い出しの対象に入る側**へ
+    // 倒れる。消す前に人が見るので、黙って消えることはない）。
     await settleSideEffects(
       "session.issue",
       this.deps.audit.record({
@@ -118,6 +126,7 @@ export class IssueSessionUseCase {
         outcome: "success",
         metadata: { authMethod: command.authMethod, sessionId: session.id },
       }),
+      this.deps.users.touchLastActive(user.id, now),
     );
 
     return ok({ session, token });

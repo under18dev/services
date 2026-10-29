@@ -3,7 +3,7 @@
 - Status: **本番稼働中**（`auth.under18.dev` / `go.under18.dev`）
 - Version: 0.1.0
 - Date: 2026-10-29
-- 対象: `apps/auth-worker` / `apps/dashboard-worker`
+- 対象: `apps/auth-worker` / `apps/dashboard-worker` / `apps/nfc-worker`
 - 前提仕様書: `docs/u18-identity-spec.md`
 
 ## 0. このドキュメントの読み方
@@ -2781,7 +2781,23 @@ where owner_user_id = '<USER_ID>' and status = 'disabled'
 
 **どちらも手で実行する。** 自動で落とす経路は作っていない（2026-10-28 の方針。§11.7 の囲み）。1 年は**対象を洗い出す基準**であって、cron が勝手に消す期限ではない。
 
-**洗い出しはまだ実装していない。** 「最終利用」を判定できる列が無いため —— `sessions.last_seen_at` は 30 日で掃除され、`audit_logs` の `session.issue` は `standard` 区分で 180 日しか残らない。**1 年前の利用は、どちらにももう無い。** #286 で扱う。
+**起点は `users.last_active_at`**（#286）。`IssueSessionUseCase` が**ログインが成立した瞬間だけ**書く列で、掃除の対象に入れていないので 1 年を越えて残る。
+
+```sql
+-- 1 年以上ログインが無いアカウントを洗い出す（消しはしない）
+SELECT id, username, primary_email, status,
+       datetime(last_active_at / 1000, 'unixepoch') AS last_active
+FROM users
+WHERE status <> 'deleted'
+  AND last_active_at < (unixepoch() - 365 * 24 * 60 * 60) * 1000
+ORDER BY last_active_at;
+```
+
+**`NULL` は拾われない。** この列が入る前から居るアカウントと、一度もログインしていないアカウントが該当する。**判定できないものを消す側に倒さない** —— §11.6 は元に戻せないため。該当者を消したいなら、`last_active_at IS NULL AND created_at < ...` を**別の判断として**明示的に引くこと。
+
+**なぜ `sessions.last_seen_at` を使わないか。** あれは 30 日で掃除されるうえ、**認証付き要求が届いたこと**しか測っていない（`GetSessionUseCase` が成功のたびに `touch()` を予約する）。セッション Cookie は `SameSite=Lax` なので、**他サイトからのトップレベル遷移でも更新される** —— リンクを踏ませるだけで「最終利用」を 1 年後ろへずらせる。`audit_logs` の `session.issue` は意味としては正しいが `standard` 区分で 180 日しか残らない。**測りたいものが残らず、残っているものは測りたいものではない**という形だったので、列を足した。
+
+**停止中（`suspended`）のアカウントでも起点は進まない。** `IssueSessionUseCase` は発行を断る前に落ちるので、BAN されたアカウントが自力で洗い出しを逃れることはない（`issue-session.use-case.test.ts` が固定している）。
 
 #### `suspended` と `deleted` を使い分ける
 
