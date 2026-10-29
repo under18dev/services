@@ -1,6 +1,7 @@
 import { Layout } from "@u18/web-ui";
 import type { Child, FC } from "hono/jsx";
 import {
+  APPS_PATH,
   GRANTS_PATH,
   LOGIN_PATH,
   OVERVIEW_PATH,
@@ -24,12 +25,18 @@ import {
  *
  * ## 中身の無いカテゴリを先に置かない
  *
- * 「サービス」は NFC（#31）が完成してから足す。**押しても何も無いリンクを
- * 置かない** —— パスキーの登録ボタンが「API はあるのに入口が無い」まま
- * 残っていた #306 と、向きは逆だが同じ種類の嘘になる。
+ * **押しても何も無いリンクを置かない** —— パスキーの登録ボタンが
+ * 「API はあるのに入口が無い」まま残っていた #306 と、向きは逆だが
+ * 同じ種類の嘘になる。
+ *
+ * 「サービス」は長らくこの理由で空のまま置いていなかった。いまは
+ * `/account/apps`（アプリのカタログ）という押せる行き先ができたので
+ * 置いている。**「開発」はまだ無い** —— OAuth クライアントの管理画面
+ * （#308 の 3 番目）が入ってから足すこと。
  */
 
-export type DashboardNavKey = "home" | "profile" | "passkeys" | "sessions" | "grants" | "clients";
+export type DashboardNavKey =
+  "home" | "profile" | "passkeys" | "sessions" | "grants" | "apps" | "clients";
 
 type NavItem = { readonly key: DashboardNavKey; readonly href: string; readonly label: string };
 type NavGroup = { readonly label: string; readonly items: readonly NavItem[] };
@@ -42,6 +49,24 @@ const ACCOUNT_GROUP: NavGroup = {
     { key: "sessions", href: SESSIONS_PATH, label: "ログイン中の端末" },
     { key: "grants", href: GRANTS_PATH, label: "連携アプリ" },
   ],
+};
+
+/**
+ * 「サービス」グループ（#308）。
+ *
+ * **「アカウント」と分ける。** あちらは「自分の設定をいじる」場所、
+ * こちらは「u18 でログインして使う別のアプリへ行く」場所である。
+ * 用事が違うものを同じ並びに置くと、どちらを探しているのか決めてから
+ * でないと読めない一覧になる。
+ *
+ * **中身があるので作れる。** シェルの冒頭に書いたとおり、このグループは
+ * NFC（#31）が終わるまで空だった。いまは `/account/apps` という押せる
+ * 行き先が 1 つあるので置いている —— **空のグループを先に作らない**のと、
+ * 中身ができたら作るのは同じ規則の表裏である。
+ */
+const SERVICE_GROUP: NavGroup = {
+  label: "サービス",
+  items: [{ key: "apps", href: APPS_PATH, label: "アプリ" }],
 };
 
 export type DashboardShellProps = {
@@ -70,7 +95,7 @@ const Sidebar: FC<{ readonly current: DashboardNavKey }> = ({ current }) => (
     <a class="side-brand" href={OVERVIEW_PATH}>
       u18 Identity
     </a>
-    {[ACCOUNT_GROUP].map((group) => (
+    {[ACCOUNT_GROUP, SERVICE_GROUP].map((group) => (
       <div key={group.label} class="side-group">
         <p class="side-group-label">{group.label}</p>
         <ul class="side-links">
