@@ -110,6 +110,26 @@ export const AUDIT_EVENTS = [
   "oauth.client.resolve",
   /** client_secret による認証。失敗はクライアントのなりすまし試行を意味する。 */
   "oauth.client.authenticate",
+  /**
+   * 管理者が OAuth クライアントを登録した（#308）。
+   *
+   * **`ops.admin.*` と同じ「支配権が変わる操作」である。** 登録された
+   * `redirect_uri` は認可コードの宛先そのもので、1 行増えるたびに
+   * 「コードを受け取ってよい場所」が増える。しかも効くのは特定の利用者に
+   * 対してではなく、その `client_id` で認可を通す全員に対してである。
+   *
+   * 失敗（outcome: failure）も残す。**管理者でないセッションからの呼び出しは
+   * ここにしか現れない** —— 応答は `not_found` に畳むので、画面にも
+   * 呼び出し元 Worker にも痕跡が残らない。
+   */
+  "oauth.client.created",
+  /**
+   * 管理者が OAuth クライアントを失効させた（#308）。
+   *
+   * 付与と同じだけ残す（`ops.admin.revoked` と同じ理由）——
+   * 失効は正規のクライアントを黙って止める手口でもある。
+   */
+  "oauth.client.disabled",
   /** 認可リクエストの受理・拒否。 */
   "oauth.authorize.decided",
   /** 認可コードの発行。 */
@@ -222,6 +242,16 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
   "profile.updated": "security",
   /** 同意の取り消し。第三者アプリの常設アクセスが切れた時点。 */
   "oauth.grant.revoked": "security",
+  /**
+   * OAuth クライアントの登録（#308）。**認可コードの宛先が増えた記録**で、
+   * `ops.admin.granted` と同じく支配権が変わる操作にあたる。
+   *
+   * 量は運用者が登録した数と、管理機能を叩こうとした回数の合計。
+   * リクエストごとに増えるものではない。
+   */
+  "oauth.client.created": "security",
+  /** 失効。正規のクライアントを止める手口でもあるので、登録と同じだけ残す。 */
+  "oauth.client.disabled": "security",
   /** 本人によるセッション失効。「いつ気づいたか」の起点になる。 */
   "session.revoke": "security",
   /** ログアウト（全デバイス失効を含む）。乗っ取り後の後始末か本人かを後から分ける。 */

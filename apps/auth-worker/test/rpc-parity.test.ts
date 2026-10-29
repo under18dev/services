@@ -218,9 +218,68 @@ describe("無効なセッションは両方の入口で拒否される", () => {
     ["updateProfile", () => rpc.updateProfile({ sessionToken: "x".repeat(40), displayName: "a" })],
     ["listPasskeys", () => rpc.listPasskeys({ sessionToken: "x".repeat(40) })],
     ["deletePasskey", () => rpc.deletePasskey({ sessionToken: "x".repeat(40), passkeyId: "pk_x" })],
+    // #308 の管理用 3 メソッド。**HTTP の対になる経路はまだ無い**
+    // （画面は dashboard-worker 側で、auth-worker にルートを足していない）。
+    // 入口が RPC しかないからこそ、ここが唯一の固定になる。
+    ["listOAuthClients", () => rpc.listOAuthClients({ sessionToken: "x".repeat(40) })],
+    [
+      "createOAuthClient",
+      () =>
+        rpc.createOAuthClient({
+          sessionToken: "x".repeat(40),
+          clientId: "u18-x",
+          name: "x",
+          clientType: "public",
+          redirectUris: ["https://app.example/cb"],
+        }),
+    ],
+    [
+      "disableOAuthClient",
+      () => rpc.disableOAuthClient({ sessionToken: "x".repeat(40), clientId: "u18-x" }),
+    ],
   ])("%s は unauthenticated を返す", async (_name, invoke) => {
     const result = await invoke();
     expect(!result.ok && result.error.code).toBe("unauthenticated");
+  });
+});
+
+/**
+ * OAuth クライアント管理は**管理者のセッションでしか通らない**（#308）。
+ *
+ * ## なぜこのファイルにも置くか
+ *
+ * 判定は `application/use-cases/admin-access.ts` にあり、詳しい検査は
+ * `oauth-client-admin.rpc.test.ts` が持っている。ここに置くのは
+ * **「入口が増えたときに判定が素通りする」形を見張るのがこのファイルの
+ * 役目**だからで、`updateProfile` の再認証と同じ位置づけになる。
+ *
+ * この 3 つは**登録経路を CLI から管理者へ広げる**変更にあたる
+ * （脅威モデル RR-21）。判定が Presentation 層へ移っていないことを、
+ * 契約の入口から 1 回通して確かめる。
+ */
+describe("OAuth クライアント管理は管理者のセッションでしか通らない", () => {
+  it("一般利用者には not_found を返す（forbidden ではない）", async () => {
+    const user = await seedLoggedInUser();
+
+    const result = await rpc.listOAuthClients({
+      sessionToken: user.sessionToken,
+      caller: "dashboard-worker",
+    });
+
+    // 「権限がありません」と答えると、管理機能の存在が一般利用者に漏れる。
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("管理者なら通る", async () => {
+    const user = await seedLoggedInUser();
+    await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
+
+    const result = await rpc.listOAuthClients({
+      sessionToken: user.sessionToken,
+      caller: "dashboard-worker",
+    });
+
+    expect(result.ok).toBe(true);
   });
 });
 

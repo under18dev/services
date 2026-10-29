@@ -189,6 +189,50 @@ describe("DrizzleOAuthClientRepository", () => {
     expect(await repo.listRedirectUris("nope")).toEqual([]);
   });
 
+  it("listAll は失効済みも含めて登録順に返す", async () => {
+    // 失効済みを落とすと、管理画面から失効させた直後に行が消える
+    // （#308）。Repository は事実を返し、可否は呼び出し側が決める。
+    await repo.create(await aClientInput({ clientId: "u18-first" }));
+    await repo.create(
+      await aClientInput({ clientId: "u18-second", redirectUris: ["https://b.example/cb"] }),
+    );
+    await repo.disable("u18-second", new Date("2026-10-29T03:00:00.000Z"));
+
+    const all = await repo.listAll();
+
+    expect(all.map((client) => client.clientId)).toEqual(["u18-first", "u18-second"]);
+    expect(all[0]?.isDisabled).toBe(false);
+    expect(all[1]?.isDisabled).toBe(true);
+    // join で行が増えても、クライアントは 1 つに畳まれて URI だけが集まる。
+    expect(all[0]?.redirectUris).toEqual(["https://app.example/cb"]);
+    expect(all[1]?.redirectUris).toEqual(["https://b.example/cb"]);
+  });
+
+  it("listAll は Redirect URI を持たない行も返す", async () => {
+    // left join を inner join にすると、ここだけが静かに消える。
+    await repo.create(await aClientInput({ redirectUris: [] }));
+
+    const all = await repo.listAll();
+
+    expect(all).toHaveLength(1);
+    expect(all[0]?.redirectUris).toEqual([]);
+  });
+
+  it("listAll は client_secret のハッシュを Domain まで運ばない", async () => {
+    const secret = "correct-horse-battery-staple";
+    await repo.create(await aClientInput({ clientSecretHash: await hasher.hash(secret) }));
+
+    const all = await repo.listAll();
+
+    // `OAuthClient` に hash のフィールドが無いので、snapshot を走査しても
+    // 出てこない（型だけでなく値でも確かめる。RR-13 と同じ方針）。
+    expect(JSON.stringify(all[0]?.snapshot())).not.toContain(await hasher.hash(secret));
+  });
+
+  it("1 件も無ければ空配列", async () => {
+    expect(await repo.listAll()).toEqual([]);
+  });
+
   it("クライアントを削除すると Redirect URI も消える", async () => {
     await repo.create(await aClientInput());
 
