@@ -571,6 +571,18 @@ body.page-dash {
 .cards { display: grid; gap: 1.25rem; }
 .cards-3 { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
 
+/*
+ * パネルを縦に積む入れ物。**間隔は入れ物が持つ**（.cards と同じ考え方）。
+ *
+ * ここが無かったあいだ、ホームはパネルごとに style 属性で margin-top を
+ * 付けていて、**本番で枠線が密着していた。** 画面には style-src 'self' の
+ * CSP が掛かっており、style 属性は style-src-attr が無ければ style-src へ
+ * 落ちる（CSP3）ので、ブラウザが属性ごと捨てる。
+ *
+ * 直し方は CSP を緩めることではなく、こちら側へ出すこと（page-headers.ts）。
+ */
+.stack { display: grid; gap: 1.25rem; }
+
 .panel {
   background: var(--card);
   border: 1px solid var(--border);

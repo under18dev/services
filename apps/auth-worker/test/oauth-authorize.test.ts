@@ -504,6 +504,15 @@ describe("CSP（ログイン画面と同じ定義を共有する）", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("form-action 'self'");
     expect(csp).not.toContain("unsafe-inline");
+
+    // **ヘッダに無いことと、画面が使っていないことは別である。**
+    // `style` 属性は CSP3 の `style-src-attr` が無ければ `style-src` へ
+    // 落ち、`'self'` なのでブラウザが属性ごと捨てる。HTML は正しく返る
+    // ので、ヘッダだけ見ていると見た目が崩れたまま本番へ出る
+    // （dashboard-worker がこれを踏んだ）。
+    const html = await response.text();
+    expect(html, "同意画面にインラインの style 属性がある").not.toContain('style="');
+    expect(html, "同意画面に <style> がある").not.toContain("<style");
   });
 });
 
