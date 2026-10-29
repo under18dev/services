@@ -1,9 +1,11 @@
 import { DEV_SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
 import { scopeLabel } from "@u18/web-ui";
 import type { GrantListItem, PasskeySummary, SessionListItem, UserProfile } from "@u18/contracts";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import {
+  APPS_PATH,
   GRANTS_PATH,
   OVERVIEW_PATH,
   PASSKEYS_PATH,
@@ -11,6 +13,15 @@ import {
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
+import type { AppCatalogEntry, AppCatalogView } from "../src/presentation/http/ui/app-catalog";
+import {
+  APP_CATALOG,
+  APP_CATEGORIES,
+  buildAppCatalog,
+  isAllowedUrl,
+  isExternalUrl,
+} from "../src/presentation/http/ui/app-catalog";
+import { AppsPage } from "../src/presentation/http/ui/apps-page";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
 
 /**
@@ -53,9 +64,9 @@ const FULL_IDENTITY = {
   listGrants: async () => rpcOk([] as GrantListItem[]),
 };
 
-const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH];
+const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH, APPS_PATH];
 
-describe("3 つの画面が HTML を返す", () => {
+describe("画面が HTML を返す", () => {
   it.each(PAGES)("%s", async (path) => {
     const response = await withCookie(path, FULL_IDENTITY);
 
@@ -478,4 +489,284 @@ describe("実装側の語を画面に出さない", () => {
     // 何を許可しているか分からないものが画面から消える。
     expect(html).toContain("wallet:write");
   });
+});
+
+/**
+ * u18 Identity で使えるアプリのカタログ（`/account/apps`、#308）。
+ *
+ * **`/account/grants` と取り違えやすい。** あちらは「自分が同意した RP」、
+ * こちらは「u18 で使えるアプリとして**運用側が載せたもの**」の案内
+ * （`oauth_clients` の全件ではない）。ここで確かめるのは、
+ * **カタログの中身がどうであれ画面が成立すること**と、**「連携済み」が
+ * `listGrants` の結果だけから決まること**である。
+ *
+ * ## 実物を見るテストが空振りしないこと
+ *
+ * `APP_CATALOG` は 0 件になりうる設計なので、`for (const e of APP_CATALOG)`
+ * と書くと**カタログが空になった日にアサーション 0 件で緑になる。**
+ * さらに `toContain("サービス")` は**サイドバーの見出しにも当たる**ので、
+ * カタログ本体が空の画面でも通ってしまう。
+ *
+ * **実物を見るテストは `panel-title">` で絞り、0 件の側も明示的に
+ * 検査する**（下の `it("実物のカタログを端から端まで描く")`）。
+ */
+describe("アプリのカタログ（#308）", () => {
+  /**
+   * カタログを差し替えて画面だけを描く。
+   *
+   * **本物のカタログ（`APP_CATALOG`）は 1 件しか無く、しかも RP ではない**
+   * ので、`/account/apps` を引くだけでは「0 件」も「連携済み」も踏めない。
+   * `AppsPage` に直接 props を渡して、カタログが変わったときの形を見る。
+   */
+  async function renderApps(view: AppCatalogView): Promise<string> {
+    const probe = new Hono().get("/", (c) => c.html(AppsPage({ view }) as never));
+    return await (await probe.request("/")).text();
+  }
+
+  /** `client_id` は OIDC の公開識別子。内部 ID（`cli_*`）の形にしない。 */
+  const GRANT: GrantListItem = {
+    clientId: "u18-example-app",
+    clientName: "Example App",
+    logoUrl: null,
+    scopes: ["openid"],
+    grantedAt: "2026-10-24T00:00:00.000Z",
+  };
+
+  const EXTERNAL: AppCatalogEntry = {
+    id: "example",
+    name: "Example App",
+    description: "説明",
+    url: "https://app.example/",
+    category: "service",
+    clientId: "u18-example-app",
+  };
+
+  const SAME_ORIGIN: AppCatalogEntry = {
+    id: "nfc",
+    name: "NFC カード",
+    description: "説明",
+    url: "/account/nfc",
+    category: "service",
+  };
+
+  function labelOf(key: AppCatalogEntry["category"]): string {
+    const category = APP_CATEGORIES.find((c) => c.key === key);
+    if (category === undefined) throw new Error(`未知のカテゴリ: ${key}`);
+    return category.label;
+  }
+
+  it("実物のカタログを端から端まで描く", async () => {
+    const html = await (await withCookie(APPS_PATH, FULL_IDENTITY)).text();
+
+    // **0 件も正当な状態なので、両方を明示的に見る。** `for` を回すだけだと
+    // 空になった日に 0 周で緑になり、このテストは何も守らなくなる。
+    if (APP_CATALOG.length === 0) {
+      expect(html).toContain("まだありません");
+      return;
+    }
+
+    for (const entry of APP_CATALOG) {
+      expect(html, `${entry.name} が出ていない`).toContain(entry.name);
+      expect(html, `${entry.name} の説明が出ていない`).toContain(entry.description);
+      // `href` に入っているので、内部・外部のどちらでも必ず現れる。
+      expect(html, `${entry.name} の行き先が出ていない`).toContain(`href="${entry.url}"`);
+    }
+
+    // **カテゴリ名はサイドバーにも同じ語がある。** パネルの見出しで絞らないと、
+    // 一覧が空の画面でも通る。
+    for (const key of new Set(APP_CATALOG.map((entry) => entry.category))) {
+      expect(html, `${labelOf(key)} の見出しが panel に無い`).toContain(
+        `panel-title">${labelOf(key)}`,
+      );
+    }
+
+    expect(html).not.toContain("まだありません");
+  });
+
+  it("いま載せているもの", () => {
+    // **増減を黙って通さない。** 上のテストは「載っているものが描けるか」を
+    // 見るだけなので、1 件減っても緑のまま。何が載っているかはここで固定する。
+    expect(APP_CATALOG.map((entry) => `${entry.category}:${entry.id}`)).toEqual([
+      "service:nfc-cards",
+    ]);
+  });
+
+  it("載せた行き先は https に解決できる", () => {
+    // `javascript:` や平文 http を落とす関門（`isAllowedUrl`）に、
+    // **実物が通ること**を確かめる。0 件だと空振りするので件数も見る。
+    expect(APP_CATALOG.length).toBeGreaterThan(0);
+    for (const entry of APP_CATALOG) {
+      expect(isAllowedUrl(entry.url), `${entry.name} の url が ${entry.url}`).toBe(true);
+    }
+  });
+
+  it("カタログが 0 件でも画面が壊れない", async () => {
+    // **枠だけ作って埋まっているように見せない**（#306）。載せられるものが
+    // 無いことは、それ自体が伝えたい状態である。
+    expect(buildAppCatalog([], []).groups).toEqual([]);
+
+    const html = await renderApps(buildAppCatalog([], []));
+
+    expect(html).toContain("まだありません");
+    // 見出しだけ残ると「読み込みに失敗した」に見える。
+    expect(html).not.toContain('panel-title">サービス');
+  });
+
+  it("中身の無いカテゴリを出さない", () => {
+    expect(buildAppCatalog([SAME_ORIGIN], []).groups.map((g) => g.category.key)).toEqual([
+      "service",
+    ]);
+  });
+
+  it("出せない url の行は落とす", () => {
+    // いまは手書きなので実害が無いが、カタログを D1 へ移すと
+    // `url` は運用者が画面から入れた文字列になる。
+    const bad: AppCatalogEntry = { ...SAME_ORIGIN, id: "bad", url: "javascript:alert(1)" };
+    const html = buildAppCatalog([bad], []);
+
+    expect(html.groups).toEqual([]);
+  });
+
+  describe("「連携済み」は listGrants の結果と一致する", () => {
+    it("grants に同じ client_id があれば連携済み", async () => {
+      const view = buildAppCatalog([EXTERNAL], [GRANT]);
+
+      expect(view.groups[0]?.items[0]?.connected).toBe(true);
+      expect(await renderApps(view)).toContain("連携済み");
+    });
+
+    it("grants に無ければバッジを出さない", async () => {
+      const view = buildAppCatalog([EXTERNAL], []);
+
+      expect(view.groups[0]?.items[0]?.connected).toBe(false);
+      expect(await renderApps(view)).not.toContain("連携済み");
+    });
+
+    it("別の client_id の grant では連携済みにしない", () => {
+      const other = buildAppCatalog([EXTERNAL], [{ ...GRANT, clientId: "u18-other" }]);
+
+      expect(other.groups[0]?.items[0]?.connected).toBe(false);
+    });
+
+    it("client_id を持たないアプリは、連携の有無を一切出さない", async () => {
+      // 同一オリジンでセッション Cookie を直接読むアプリ（NFC）は OAuth を
+      // 通らない。**「未連携」と出すと嘘になる。** `false` ではなく `null`。
+      const view = buildAppCatalog([SAME_ORIGIN], [GRANT]);
+
+      expect(view.groups[0]?.items[0]?.connected).toBe(null);
+
+      const html = await renderApps(view);
+      expect(html).not.toContain("連携済み");
+      expect(html).not.toContain("未連携");
+    });
+  });
+
+  describe("listGrants が取れなくても一覧を出す", () => {
+    /**
+     * **この画面はダッシュボードで唯一「RPC が失敗しても出せる中身がある」。**
+     * 他の 5 枚は一覧そのものが RPC の戻り値だが、こちらは本体がコードの
+     * 中にあり、RPC はバッジのためだけに呼んでいる。
+     */
+    it("503 にせず 200 で描く", async () => {
+      const response = await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcErr("internal", "sqlite: no such table: oauth_grants"),
+      });
+
+      expect(response.status).toBe(200);
+
+      const html = await response.text();
+      for (const entry of APP_CATALOG) expect(html).toContain(entry.name);
+      // auth-worker 側の事情を画面へ出さない。
+      expect(html).not.toContain("sqlite");
+    });
+
+    it("確認できていないことを黙らない", async () => {
+      // 黙ってバッジを消すと、連携しているのにしていないように見える。
+      const html = await (
+        await withCookie(APPS_PATH, {
+          ...FULL_IDENTITY,
+          listGrants: async () => rpcErr("internal", "boom"),
+        })
+      ).text();
+
+      expect(html).toContain("連携状況を確認できません");
+    });
+
+    it("grants が null なら connected は false ではなく null", () => {
+      // `false`（まだ同意していない）に畳むと、「未連携」と読める情報を
+      // 出せてしまう。
+      const view = buildAppCatalog([EXTERNAL], null);
+
+      expect(view.grantsKnown).toBe(false);
+      expect(view.groups[0]?.items[0]?.connected).toBe(null);
+    });
+
+    it("取れたときは余計なことを言わない", async () => {
+      const html = await (await withCookie(APPS_PATH, FULL_IDENTITY)).text();
+
+      expect(html).not.toContain("連携状況を確認できません");
+    });
+
+    it("セッションが切れていれば 401 にする", async () => {
+      // 一覧を出しても、サイドバーの行き先が全部 401 になる。
+      const response = await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcErr("unauthenticated", "session expired"),
+      });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  describe("外部サイトへのリンク", () => {
+    it("別ホストへ出すリンクには rel が付く", async () => {
+      const html = await renderApps(buildAppCatalog([EXTERNAL], []));
+
+      expect(html).toContain('rel="noopener noreferrer"');
+    });
+
+    it("同一オリジンのリンクには付けない", async () => {
+      // 付けても害は無いが、**付いていることが「外部だ」の合図でなくなる。**
+      const html = await renderApps(buildAppCatalog([SAME_ORIGIN], []));
+
+      expect(html).not.toContain('rel="noopener noreferrer"');
+    });
+
+    it.each([
+      ["//evil.example/", "プロトコル相対"],
+      ["/\\evil.example/", "バックスラッシュ（特別スキームでは / として読まれる）"],
+      ["https://app.example/", "ふつうの絶対 URL"],
+    ])("%s を外部と判定する（%s）", (url) => {
+      // **文字列の形で判定していたら取りこぼす形。** `new URL()` に
+      // 解決させてオリジンを比べている。
+      expect(isExternalUrl(url)).toBe(true);
+    });
+
+    it("同一オリジンの絶対パスは内部と判定する", () => {
+      expect(isExternalUrl("/account/nfc")).toBe(false);
+    });
+
+    it("出て行くリンクだけ URL を併記する", async () => {
+      // 押す前にどこへ行くのか分かる必要があるのは外部だけ。内部にも出すと
+      // パスと全体 URL が同じ見た目で並び、どれが外部なのか読めなくなる。
+      const external = await renderApps(buildAppCatalog([EXTERNAL], []));
+      const internal = await renderApps(buildAppCatalog([SAME_ORIGIN], []));
+
+      expect(external).toContain('class="item-raw">https://app.example/');
+      expect(internal).not.toContain('class="item-raw"');
+    });
+  });
+
+  it("この画面は JavaScript を要求しない", async () => {
+    // 読むだけの画面なので `<script>` を出さない。
+    const html = await (await withCookie(APPS_PATH, FULL_IDENTITY)).text();
+
+    expect(html).not.toContain("<script");
+  });
+
+  // **インラインの `style` を書かないことはここで見ない。** #320 が
+  // `PAGES` 全体を見る検査を足しており（上の「CSP が許していないものを
+  // 画面が使っていない」）、`APPS_PATH` はそこに入っている。こちらにも
+  // 書くと、同じことを 2 箇所で見て片方だけ古くなる。
 });

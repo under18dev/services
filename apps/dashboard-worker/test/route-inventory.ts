@@ -74,6 +74,11 @@ export const PAGE_ROUTES = [
   { method: "GET", path: "/account/passkeys" },
   { method: "GET", path: "/account/sessions" },
   { method: "GET", path: "/account/grants" },
+  // u18 Identity で使えるアプリのカタログ（#308）。**`/account/grants` とは
+  // 別物** —— あちらは「自分が同意した RP」、こちらは「運用側が載せた
+  // アプリ」の案内（全件ではない）。中身はコードに持っているが
+  // （`ui/app-catalog.ts`）、公開面としては画面が 1 枚増えている。
+  { method: "GET", path: "/account/apps" },
   // **ハッシュは手で書けないので `<hash>` と書く**（#211）。突き合わせる
   // 側が実際のパスを正規化してから比べる。**ハッシュが入らなくなったら、
   // 正規化しても `<hash>` にならないのでここで落ちる。**
