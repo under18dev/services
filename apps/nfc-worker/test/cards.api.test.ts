@@ -534,6 +534,24 @@ describe("/health", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ status: "ok", service: "u18-nfc" });
+    // **`toMatchObject` ではなく `toEqual`。** 部分一致だと、構成情報を
+    // 足しても緑のままになる —— 実際 `environment` が長らく入っていて、
+    // この検査は何も言わなかった（RR-18）。
+    expect(await response.json()).toEqual({ status: "ok", service: "u18-nfc" });
+  });
+
+  it("構成情報を含めない（RR-18）", async () => {
+    const response = await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}/health`),
+      env,
+      executionContext(),
+    );
+
+    // **未認証で叩ける**（`go.under18.dev/health` が 200。#280）ので、
+    // ここに置いたものは全部公開である。
+    const body = (await response.json()) as Record<string, unknown>;
+    for (const key of ["environment", "issuer", "version"]) {
+      expect(Object.keys(body), `${key} が公開されている`).not.toContain(key);
+    }
   });
 });
