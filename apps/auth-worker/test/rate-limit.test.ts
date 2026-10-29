@@ -1,5 +1,5 @@
 import { SELF, env } from "cloudflare:test";
-import { auditLogs, createIdentityDatabase, users } from "@u18/db";
+import { auditLogs, createIdentityDatabase, users, webauthnChallenges } from "@u18/db";
 import { aUser } from "@u18/testing";
 import { count } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -246,6 +246,75 @@ describe("OTP 検証の IP レート制限", () => {
     }
 
     expect((await verify()).status).toBe(429);
+  });
+});
+
+/**
+ * Passkey の options（#264）。
+ *
+ * ## この経路は「読み取り」に見えて、行を作る
+ *
+ * 入力を 1 つも取らず、アカウントの有無も漏らさない（仕様書 §14.1 決定 13 が
+ * そこを強調している）ので、**安全に見えるが `webauthn_challenges` に 1 行ずつ
+ * 増える。** 保持は 24 時間で Cron が掃除するが、掃除は 1 回 1,000 件 ×
+ * 15 分おき = 1 日およそ 96,000 行までで、**作る速度がそれを超えると
+ * 溜まり続ける。**
+ *
+ * ## `login_verify` の枠を共有している
+ *
+ * 正常利用は options → verify の 1 往復なので、同じ枠から 2 回消費する。
+ * 20 / 60 秒なら 10 往復でき、**同じ利用者の同じ操作に別々の枠を持たせる
+ * 理由がない。** binding も増えない。
+ */
+describe("Passkey の options の IP レート制限", () => {
+  const options = (ip: string) =>
+    SELF.fetch(`${BASE}/api/auth/passkeys/login/options`, {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json", "CF-Connecting-IP": ip },
+    });
+
+  it("上限を超えると 429 になる", async () => {
+    const ip = freshIp();
+    const { limit } = RateLimitPolicy.login_verify;
+
+    for (let i = 0; i < limit; i += 1) {
+      expect((await options(ip)).status, `${i + 1} 回目`).not.toBe(429);
+    }
+
+    expect((await options(ip)).status).toBe(429);
+  });
+
+  it("止めた要求は行を作らない", async () => {
+    // **これが目的である。** 429 を返していても、その前に行を作っていたら
+    // 止めた意味が無い（#264 が止めたいのは応答ではなく行数）。
+    const ip = freshIp();
+    const { limit } = RateLimitPolicy.login_verify;
+    for (let i = 0; i < limit; i += 1) await options(ip);
+
+    const db = createIdentityDatabase(env.IDENTITY_DB);
+    const [before] = await db.select({ n: count() }).from(webauthnChallenges).all();
+
+    expect((await options(ip)).status).toBe(429);
+
+    const [after] = await db.select({ n: count() }).from(webauthnChallenges).all();
+    expect(after?.n).toBe(before?.n);
+  });
+
+  it("verify と枠を共有する", async () => {
+    // **別々の枠だと、この並びで 429 にならない。** 共有していることを
+    // 見ないと、「options にも制限が付いた」だけで止まってしまう。
+    const ip = freshIp();
+    const { limit } = RateLimitPolicy.login_verify;
+
+    for (let i = 0; i < limit; i += 1) await options(ip);
+
+    const verify = await SELF.fetch(`${BASE}/api/auth/passkeys/login/verify`, {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json", "CF-Connecting-IP": ip },
+      body: JSON.stringify({ challengeId: "wac_x", response: { id: "x" } }),
+    });
+
+    expect(verify.status).toBe(429);
   });
 });
 
