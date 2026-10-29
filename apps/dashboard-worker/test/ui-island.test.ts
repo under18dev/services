@@ -6,6 +6,7 @@ import {
   GRANTS_PATH,
   ISLAND_PATH,
   PASSKEYS_PATH,
+  PROFILE_PATH,
   SESSIONS_PATH,
 } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, envWith, executionContext } from "./helpers";
@@ -98,6 +99,34 @@ describe("アイランドが掴む目印が出ている", () => {
     expect(page).toContain("data-passkey-register");
   });
 
+  it("プロフィールの編集の置き場所が出ている（#312）", async () => {
+    // **#306 と同じ形だった。** `UpdateProfileUseCase` も BFF の
+    // `PATCH /api/me` も実装済みで、**呼ぶ入口だけが無かった。**
+    expect(await html(PROFILE_PATH)).toContain("data-profile-edit");
+  });
+
+  it("現在値がアイランドから読める形で出ている（#312）", async () => {
+    // **アイランドはここから現在値を読む。** `data-*` に同じ値をもう一度
+    // 載せると、表示している値と送る値が 2 箇所になる。
+    const page = await html(PROFILE_PATH);
+    expect(page).toContain('data-profile-field="displayName"');
+    expect(page).toContain('data-profile-field="username"');
+    // 目印だけ出て中身が空、を弾く。
+    expect(page).toContain(PROFILE.displayName);
+    expect(page).toContain(PROFILE.username);
+  });
+
+  it("編集は見出しごとアイランドが作る（#312）", async () => {
+    // **サーバーは「変更する」を描かない。** 見出しだけ先に出すと、
+    // JS が落ちたときに中身の無い囲いが残る（`<noscript>` も出ない ——
+    // あれは JS が無効なときにしか出ない）。
+    const page = await html(PROFILE_PATH);
+    expect(page).not.toContain("変更する");
+    // JS が無効な人には、できないことを伝える。
+    expect(page).toContain("<noscript>");
+    expect(page).toContain("表示名とユーザー名の変更には JavaScript が必要です");
+  });
+
   it("自分自身のセッションが区別できる", async () => {
     // 自分を切るとサーバーが Cookie を落とすので、アイランドは
     // 一覧を触らずログイン画面へ送る必要がある。区別が付かないと
@@ -112,7 +141,7 @@ describe("アイランドが掴む目印が出ている", () => {
 });
 
 describe("JS を読み込む画面と、その配信", () => {
-  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH])(
+  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH, PROFILE_PATH])(
     "%s が参照する JS が引ける",
     async (path) => {
       const page = await html(path);
