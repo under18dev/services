@@ -3263,7 +3263,7 @@ $ node scripts/backup-d1.mjs list --prefix ""
 
 ```sh
 # 登録（public クライアント。client_secret を持たない）
-node apps/auth-worker/scripts/oauth-client.mjs create   --client-id u18-oidc-probe --name "OIDC probe" --type public   --redirect-uri https://auth.under18.dev/account/callback --remote
+node apps/auth-worker/scripts/oauth-client.mjs create   --client-id u18-oidc-probe --name "OIDC probe" --type public   --redirect-uri https://auth.under18.dev/oauth-probe/callback --remote
 
 # …… /authorize → /token → /userinfo を通す ……
 
@@ -3272,6 +3272,8 @@ node apps/auth-worker/scripts/oauth-client.mjs disable --client-id u18-oidc-prob
 ```
 
 **`--dry-run` で SQL を確認してから当てること。** 登録した時点で**公開面が 1 つ増える**（任意の相手がこの `client_id` で `/authorize` を叩ける）ので、**失効まで含めて 1 回の作業にする。**
+
+**redirect_uri は `auth.under18.dev/oauth-probe/callback` にする**（2026-10-29 に実際に使った値）。**`/account/*` を宛先にしない** —— あちらは dashboard-worker が答えるので、`code` が別 Worker のログに乗る。しかも `/account/*` は画面が増える側なので、いつか実在のパスと衝突しうる。`/oauth-probe/*` は auth-worker 自身の 404 で、受け取る実装が無いのが要点である（`code` はブラウザのアドレスバーから読む）。
 
 確定したら ① ②（`oauth_tokens` に行が 1 件できる）③ をこのチェックリストで閉じ、§13 の「本番で未確認」の記述も直すこと。
 
