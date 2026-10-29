@@ -211,11 +211,48 @@ export class DrizzleUserRepository implements UserRepository {
   /**
    * 最後にログインした時刻を記録する（#286）。
    *
-   * **`updated_at` は動かさない。** あれは「行が書き換わった時刻」で、
-   * ログインのたびに動かすと §11.6 の `deleted_at is null` の議論と同じで
-   * 「何の時刻か」が読めなくなる。`last_active_at` だけを書く。
+   * **`updated_at` を進めない。** `_shared.ts` の `$onUpdateFn` は
+   * 「その列が渡されていないとき」にだけ走るので、**現在値を明示して
+   * 入れ直す。**
+   *
+   * ## 列ごとの例外ではなく、既にある規則に揃えている
+   *
+   * `users.updated_at` は内部の記録ではない —— **OIDC の標準クレーム**
+   * として外へ出る（`User.toClaims()`）。意味は「End-User の情報が最後に
+   * 更新された時刻」で、**RP はこれを見てプロフィールを取り直すかを
+   * 決める。**
+   *
+   * 同じことを避ける決定が既にある:
+   *
+   *     // update-profile.use-case.ts
+   *     // updatedAt を動かすと OIDC の `updated_at` claim が理由なく進み、
+   *     // 監査ログにも「何も変わっていない変更」が積もる。
+   *     if (changedFields.length === 0) return ok({ user, changedFields });
+   *
+   * **同じ値を送り直したときに書き込まないのは、このクレームを守るため**
+   * である。ログインのたびに進めると、**プロフィールは何も変わって
+   * いないのに RP が取り直す。** `update-profile` が正面から避けている
+   * ものを、別の入口から入れることになる（指摘: 66）。
+   *
+   * ## いま実害は出ていない
+   *
+   * 本番に RP は 1 つも居ない（`oauth_grants` 0 件）。**だからこそ
+   * 「使われていないから壊れていない」の棚に乗る** —— 最初の RP が
+   * 繋がった日に動き出す。
+   *
+   * **2026-10-29 に本番で実際に起きた。** 初めてのログインで
+   * `users.updated_at` が `last_active_at` と同じ時刻へ進んだ
+   * （どちらも `12:46:26`）。プロフィールは何も変わっていない。
    */
   async touchLastActive(id: string, at: Date): Promise<void> {
-    await this.db.update(users).set({ lastActiveAt: at }).where(eq(users.id, id)).run();
+    await this.db
+      .update(users)
+      // **`updatedAt` を明示して現在値を入れ直す。** `$onUpdateFn` は
+      // 「その列が渡されていないとき」にだけ走るので、こう書くと動かない。
+      // 生の SQL で書くより、列名を drizzle に解決させるほうが安全である
+      // （SQLite の UPDATE は `set` 側に修飾付きの列名を許さない）。
+      .set({ lastActiveAt: at, updatedAt: sql`${users.updatedAt}` })
+      .where(eq(users.id, id))
+      .run();
   }
 }

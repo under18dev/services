@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { createIdentityDatabase, users } from "@u18/db";
 import { aUser, type UserFixture } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -89,5 +90,78 @@ describe("DrizzleUserRepository.updateProfile", () => {
 
     expect(outcome.kind).toBe("updated");
     if (outcome.kind === "updated") expect(outcome.user.username).toBe(owner.username);
+  });
+});
+
+/**
+ * `touchLastActive` を**実際のマイグレーション越しに**確かめる（#286）。
+ *
+ * **use-case のテストは `InMemoryUserRepository` を使う。** あちらは
+ * `touchLastActive` を Map に入れるだけなので、**列名を間違えていても
+ * drizzle の対応がずれていても緑になる。** 保持期間の起点は
+ * 「1 年後に読めること」が全てなので、**本当に行に入るか**をここで見る。
+ */
+describe("DrizzleUserRepository.touchLastActive", () => {
+  let repo: DrizzleUserRepository;
+  let user: UserFixture;
+
+  beforeEach(async () => {
+    await resetDatabase();
+    repo = new DrizzleUserRepository(createIdentityDatabase(env.IDENTITY_DB));
+    user = aUser({ username: "active_one" });
+    await createIdentityDatabase(env.IDENTITY_DB)
+      .insert(users)
+      .values({
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        primaryEmail: user.email,
+        emailVerified: user.emailVerified,
+      })
+      .run();
+  });
+
+  async function rowOf(id: string) {
+    return await createIdentityDatabase(env.IDENTITY_DB)
+      .select({ lastActiveAt: users.lastActiveAt, updatedAt: users.updatedAt })
+      .from(users)
+      .where(eq(users.id, id))
+      .get();
+  }
+
+  it("入れた直後は NULL（洗い出しに拾われない側）", async () => {
+    expect((await rowOf(user.id))?.lastActiveAt).toBeNull();
+  });
+
+  it("書いた時刻が行に残る", async () => {
+    const at = new Date("2026-10-29T08:00:00.000Z");
+
+    await repo.touchLastActive(user.id, at);
+
+    expect((await rowOf(user.id))?.lastActiveAt).toEqual(at);
+  });
+
+  it("updated_at を進めない（OIDC の公開クレームである）", async () => {
+    // **`users.updated_at` は内部の記録ではない。** `User.toClaims()` が
+    // OIDC の標準クレームとして外へ出し、**RP はこれを見てプロフィールを
+    // 取り直すかを決める。** ログインのたびに進めると、何も変わって
+    // いないのに取り直させることになる。
+    //
+    // `update-profile.use-case.ts` が「同じ値なら書き込まない」理由と
+    // 同じで、**列ごとの例外ではなく、既にある規則に揃えている。**
+    //
+    // drizzle の `update()` は `$onUpdateFn` が必ず触るので、ここは
+    // 生の SQL で書いてある。**この検査がその実装を固定する。**
+    const before = (await rowOf(user.id))?.updatedAt;
+
+    await repo.touchLastActive(user.id, new Date("2026-10-29T08:00:00.000Z"));
+
+    expect((await rowOf(user.id))?.updatedAt).toEqual(before);
+  });
+
+  it("居ないユーザーでも落ちない", async () => {
+    // 副作用として `settleSideEffects` から呼ばれるので、例外を投げると
+    // ログインのログに毎回エラーが出る。
+    await expect(repo.touchLastActive("usr_missing", new Date())).resolves.toBeUndefined();
   });
 });
