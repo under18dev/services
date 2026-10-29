@@ -54,12 +54,26 @@ export const UNPROBEABLE = {
     "セッション無しでは成立しない。",
 };
 
-/** `smoke-asset-probe.sh` の既定ページ一覧を読む。 */
+/**
+ * `smoke-asset-probe.sh` の既定一覧を読む。`ページ:接頭辞` の組。
+ *
+ * 接頭辞が欠けている要素があれば `null` を返す —— **組になっていない行を
+ * 部分的に受けない。** 受けると「接頭辞を書き忘れたページだけ借用の検査が
+ * 無い」状態が、照合側からは見えなくなる。
+ */
 export function readProbePages(text) {
   // 既定を決めている 1 行だけを見る。散文は読まない。
   const match = /^\s*set -- (.+)$/m.exec(text);
   if (match === null) return null;
-  return match[1].trim().split(/\s+/).filter(Boolean);
+
+  const specs = match[1].trim().split(/\s+/).filter(Boolean);
+  const pairs = [];
+  for (const spec of specs) {
+    const at = spec.indexOf(":");
+    if (at <= 0 || at === spec.length - 1) return null;
+    pairs.push({ page: spec.slice(0, at), prefix: spec.slice(at + 1) });
+  }
+  return pairs;
 }
 
 /** route-inventory からアセット（パスに `/ui/` を含むもの）を拾う。 */
@@ -68,14 +82,14 @@ export function readAssetRoutes(text) {
 }
 
 /**
- * ページ一覧が、そのアセットを配る Worker をカバーしているか。
+ * そのアセットを配る Worker が、宣言された接頭辞のどれかに収まっているか。
  *
- * **接頭辞で判定する。** `/account/ui/...` を配る Worker は `/account` か
- * その下のページで確かめられる。
+ * **接頭辞は厳密に比べる。** `/account/nfc/ui/x.css` は `/account/` でも
+ * 始まるので、緩く見ると dashboard が nfc のものを借りても通ってしまう
+ * （`smoke-asset-probe.sh` に実測を書いた）。
  */
-export function coversAsset(pages, assetPath) {
-  const dir = assetPath.slice(0, assetPath.indexOf("/ui/")) || "/";
-  return pages.some((page) => page === dir || page.startsWith(`${dir}/`) || dir === "/");
+export function coveredByPrefix(pairs, assetPath) {
+  return pairs.some(({ prefix }) => assetPath.startsWith(prefix));
 }
 
 /**
@@ -89,8 +103,8 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE }) {
 
   if (pages === null) {
     problems.push(
-      "smoke-asset-probe.sh から既定のページ一覧を読めませんでした（`set -- ...` の行が見つからない）。" +
-        "書き方を変えたなら readProbePages も直すこと。",
+      "smoke-asset-probe.sh から既定の一覧を読めませんでした（`set -- ページ:接頭辞 ...` の行が無いか、" +
+        "接頭辞の欠けた要素がある）。書き方を変えたなら readProbePages も直すこと。",
     );
     return { ok: false, problems, pages: [] };
   }
@@ -109,17 +123,33 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE }) {
       continue;
     }
 
-    const uncovered = assets.filter((a) => !coversAsset(pages, a));
+    const uncovered = assets.filter((a) => !coveredByPrefix(pages, a));
     if (uncovered.length > 0) {
       problems.push(
         `${name}: ハッシュ付きアセット（${uncovered.join(", ")}）を配っていますが、` +
-          `smoke-asset-probe.sh の既定ページ（${pages.join(" ")}）がどれも触りません。` +
-          `ページを足すか、外から確かめられないなら UNPROBEABLE に理由ごと書くこと。`,
+          `smoke-asset-probe.sh の既定（${pages.map((p) => `${p.page}:${p.prefix}`).join(" ")}）の` +
+          `どの接頭辞にも入りません。ページと接頭辞を足すか、外から確かめられないなら` +
+          ` UNPROBEABLE に理由ごと書くこと。`,
       );
     }
   }
 
-  // 逆向き: UNPROBEABLE に、もうアセットを配っていない Worker が残っていないか。
+  // 逆向き (1): どの Worker のアセットも入らない接頭辞が残っていないか。
+  //
+  // **配信パスを変えたときに、ここが置き去りになる。** 接頭辞が実物と
+  // ずれたまま残ると、`smoke-asset-probe.sh` の借用検査は**全部の参照を
+  // 弾く**ようになり、原因が「借用」と報告される（実際はパスの変更）。
+  const allAssets = workers.flatMap((w) => w.assets);
+  for (const { page, prefix } of pages) {
+    if (allAssets.length > 0 && !allAssets.some((a) => a.startsWith(prefix))) {
+      problems.push(
+        `${page}:${prefix} の接頭辞に入るアセットが、どの route-inventory にもありません。` +
+          `配信パスを変えたなら既定の一覧も直すこと。`,
+      );
+    }
+  }
+
+  // 逆向き (2): UNPROBEABLE に、もうアセットを配っていない Worker が残っていないか。
   const withAssets = new Set(workers.filter((w) => w.assets.length > 0).map((w) => w.name));
   for (const name of Object.keys(unprobeable)) {
     if (!withAssets.has(name)) {
