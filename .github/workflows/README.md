@@ -69,16 +69,30 @@ gh api repos/<owner>/<repo>/git/tags/<上で得た sha> --jq '.object.sha'
 
 ### なぜ 3 つで叩く先が違うのか
 
-Worker ごとに本番の route が違い、**外から叩けるパスが 1 つずつしか無い**ため。
+| Worker    | 叩く先                                             | 期待                                                            |
+| --------- | -------------------------------------------------- | --------------------------------------------------------------- |
+| auth      | `$PRODUCTION_URL/health`                           | 200 / `status=ok`・`checks.database=ok`・`checks.signingKey=ok` |
+| auth      | `$PRODUCTION_URL/.well-known/openid-configuration` | 200 / `issuer=$PRODUCTION_URL`（`--env production` の付け忘れ） |
+| auth      | `$PRODUCTION_URL/login` への form 送信             | JS 無しの経路が通ること（#226）                                 |
+| auth      | 画面が参照するアセット                             | ハッシュ付き URL が 200・旧 URL が 404（#211）                  |
+| auth      | `$PRODUCTION_URL/api/auth/passkeys/login/options`  | `rpId`・`userVerification`・`allowCredentials` 無し（#262）     |
+| dashboard | `$PRODUCTION_URL/account/api/me`（Cookie 無し）    | 401 / `error=unauthenticated`・`Referrer-Policy=same-origin`    |
+| nfc       | `$NFC_SHORT_URL/c/deploy_smoke_probe`              | 404 / `このカードは利用できません。`                            |
 
-| Worker    | 叩く先                                          | 期待                                                              |
-| --------- | ----------------------------------------------- | ----------------------------------------------------------------- |
-| auth      | `$PRODUCTION_URL/health`                        | 200 / `status=ok`・`checks.database=ok`・`environment=production` |
-| dashboard | `$PRODUCTION_URL/account/api/me`（Cookie 無し） | 401 / `error=unauthenticated`                                     |
-| nfc       | `$NFC_SHORT_URL/c/deploy_smoke_probe`           | 404 / `このカードは利用できません。`                              |
+**dashboard と nfc に `/health` を使わないのは、叩けないからではない。** 3 つとも外から叩ける（実測、2026-10-29）:
 
-dashboard と nfc に `/health` を使わないのは、**どちらの `/health` も本番 route に当たらず外から叩けない**ため（#97）。`auth.under18.dev/health` は最長一致で auth-worker に入る。新しい route を増やさずに済むよう、既存の応答をそのまま死活確認に使っている。
+```
+auth.under18.dev/health          200  {"status":"ok","service":"u18-auth","checks":{...}}
+auth.under18.dev/account/health  200  {"status":"ok","service":"u18-dashboard","checks":{"identity":"ok"},...}
+go.under18.dev/health            200  {"status":"ok","service":"u18-nfc"}
+```
 
-いずれもステータスだけでなく**本文を検証する**。ステータスだけだと「別の Worker が同じステータスを返している」を見逃す。route の割り当てを間違えたときにまさにそれが起きる。
+理由は**見ている範囲**である。`/health` は依存先に触れずに答えると決めてあるので（どの Worker も同じ方針）、**その Worker が起動したことしか言わない。** `/account/api/me` は認証まで、`/c/*` はカードの解決（D1 の読み）まで通る。auth だけ `/health` を使っているのは、あちらが `checks.database` / `checks.signingKey` を自分で確かめているからである。
+
+> **「どちらの `/health` も本番 route に当たらず外から叩けない（#97）」と書いてあった。** nfc の route は `go.under18.dev/c/*` ではなく `go.under18.dev/*` で、dashboard は `auth.under18.dev/account/*` に載っている。**どちらも届く。** 同じ主張が `deploy.yml` にもあり #282 / #283 で直したが、**ここが残っていた。** 結論（`/health` を使わない）は変わらず、理由が事実でなかった。
+
+いずれもステータスだけでなく**本文を検証する**。ステータスだけだと「別の Worker が同じステータスを返している」を見逃す。route の割り当てを間違えたときにまさにそれが起きる。`/health` の本文は `service` で Worker を名乗るので、**取り違えは `/health` でも捕まえられる** —— 使わない理由は範囲であって、名乗らないことではない。
+
+**`environment` は読んでいない。** かつて auth の `/health` から `environment=production` を読んで `--env production` の付け忘れを見ていたが、**未認証で叩ける endpoint に構成情報を置くのをやめた**（脅威モデル RR-18）。同じ付け忘れは Discovery の `issuer` で検出できる（付け忘れると `ISSUER` も既定値のまま乗る）うえ、`issuer` は OIDC が公開を必須にしているので公開面が増えない。
 
 curl とリトライの実体は `scripts/smoke-probe.sh` にある。3 つの Worker が同じものを使う。複数箇所に写すと片方だけ直す事故が起きるため。
