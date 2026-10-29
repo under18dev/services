@@ -80,6 +80,19 @@ export const UI_STYLESHEET = `
   /* 失敗の表示。彩度を上げると "colorful UI" になるので赤は 1 段落とす。 */
   --danger: #f87171;
 
+  /*
+   * ダッシュボード（#308 / #309）で足した段階。
+   *
+   * **既存の --bg / --card / --border は動かしていない。** ログイン画面と
+   * 同意画面が同じスタイルシートを読んでいるので、基調を変えると
+   * 「別のサイトに来た」ように見える。足りなかったのは**段階**のほうで、
+   * 境界が 1 種類しか無いと、面が重なったときに奥行きが出ない。
+   */
+  --border-strong: #2e2e2e;
+  --surface: #0f0f0f;
+  --radius: 0.625rem;
+  --radius-sm: 0.375rem;
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Hiragino Sans", "Noto Sans JP", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -447,4 +460,166 @@ body.page-shell {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
+
+/* ------------------------------------------------------------------ *
+ * ダッシュボード（#308 / #309）
+ *
+ * 1 枚のカードに収まる画面（ログイン・同意）と、節が縦に伸びる画面
+ * （アカウント設定）に続く 3 つ目の骨格。**左にサイドバー、右に本文。**
+ *
+ * ## なぜ横並びのナビでは足りなくなったか
+ *
+ * .nav は 3 項目を横に並べるだけで足りていた。入れる先が「アカウント」
+ * だけだったからである。ここへ**カテゴリ**（開発・サービス）が入ると、
+ * 横一列では「どれが同じ仲間か」を示す場所が無い。縦に積んで見出しを
+ * 付けられる形にする。
+ *
+ * ## JS を使わずに畳む
+ *
+ * 狭い画面ではサイドバーを**上端の横スクロール**に変える。開閉ボタンに
+ * すると JS が要り、**JS が落ちた端末でナビごと消える。** 一覧が読める
+ * ことだけは JS 無しで成立させる、という既存の方針（決定 4 / 16）に揃える。
+ * ------------------------------------------------------------------ */
+
+body.page-dash {
+  display: block;
+  padding: 0;
+  background: var(--bg);
+}
+
+.dash {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.dash-side {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 1.5rem 1rem;
+}
+
+.dash-main {
+  min-width: 0;
+  padding: 2.5rem 2.5rem 5rem;
+}
+
+/* 本文の読み幅。広い画面で 1 行が長くなりすぎると目が戻れない。 */
+.dash-inner { width: 100%; max-width: 46rem; }
+
+.side-brand {
+  display: block;
+  margin: 0 0 1.75rem;
+  padding: 0 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-deep);
+  text-decoration: none;
+}
+
+.side-brand:hover { color: var(--muted); }
+
+.side-group { margin: 0 0 1.5rem; }
+
+.side-group-label {
+  margin: 0 0 0.4rem;
+  padding: 0 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-deep);
+}
+
+.side-links { margin: 0; padding: 0; list-style: none; }
+
+.side-link {
+  display: block;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+  transition:
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease);
+}
+
+.side-link:hover { background: var(--bg-secondary); color: var(--fg); }
+
+/*
+ * 現在地。**背景だけで示さない** —— 色覚特性によっては差が出ないので、
+ * 左の縦線と文字色を併用する（.nav で下線を併用しているのと同じ理由）。
+ */
+.side-link[aria-current="page"] {
+  background: var(--bg-secondary);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.page-head { margin: 0 0 2rem; }
+.page-head h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
+.page-head p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.875rem; }
+
+/*
+ * カード。.section と形は似ているが、**見出しと本文の間に境界を引く**
+ * ぶん、節が複数ある画面で区切りが読みやすい。.section は既存の画面が
+ * 使っているので残してある。
+ */
+.cards { display: grid; gap: 1.25rem; }
+.cards-3 { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.panel-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); }
+.panel-title { margin: 0; font-size: 1rem; font-weight: 600; }
+.panel-desc { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.8125rem; }
+.panel-body { padding: 1.25rem 1.5rem; }
+.panel-footer {
+  padding: 0.9rem 1.5rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* ホームの数値タイル。数を先に、意味を後に読ませる。 */
+.stat { display: block; padding: 1.25rem 1.5rem; text-decoration: none; color: inherit; }
+.stat:hover { background: var(--bg-secondary); }
+.stat-value { display: block; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; }
+.stat-label { display: block; margin-top: 0.15rem; color: var(--muted); font-size: 0.8125rem; }
+
+.badge-muted {
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+@media (max-width: 52rem) {
+  .dash { grid-template-columns: minmax(0, 1fr); }
+
+  .dash-side {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 1rem;
+    overflow-x: auto;
+  }
+
+  .side-brand { margin-bottom: 0.75rem; }
+
+  /* カテゴリ名は畳む。横並びになると見出しと項目の区別が付かない。 */
+  .side-group { display: inline-block; margin: 0 1rem 0 0; vertical-align: top; }
+  .side-group-label { display: none; }
+  .side-links { display: flex; gap: 0.25rem; }
+  .side-link { white-space: nowrap; }
+  .side-link[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--accent); }
+
+  .dash-main { padding: 1.75rem 1.25rem 4rem; }
+}
 `;

@@ -5,7 +5,7 @@ import { createApp } from "../src/presentation/http/app";
 import {
   GRANTS_PATH,
   ISLAND_PATH,
-  OVERVIEW_PATH,
+  PASSKEYS_PATH,
   SESSIONS_PATH,
 } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, envWith, executionContext } from "./helpers";
@@ -74,7 +74,7 @@ async function html(path: string, identity: object = IDENTITY): Promise<string> 
 
 describe("アイランドが掴む目印が出ている", () => {
   it.each([
-    [OVERVIEW_PATH, 'data-passkey-id="pk_1"'],
+    [PASSKEYS_PATH, 'data-passkey-id="pk_1"'],
     [SESSIONS_PATH, 'data-session-id="ses_1"'],
     [GRANTS_PATH, 'data-grant-client-id="cli_1"'],
   ])("%s", async (path, marker) => {
@@ -87,13 +87,13 @@ describe("アイランドが掴む目印が出ている", () => {
     // 相手にしたテストも通っていたのに、**呼ぶ UI がどこにも無かった。**
     // 本番の `passkeys` が 0 件だったのは、誰も登録しなかったからではなく
     // **登録できなかったから**である。
-    expect(await html(OVERVIEW_PATH)).toContain("data-passkey-register");
+    expect(await html(PASSKEYS_PATH)).toContain("data-passkey-register");
   });
 
   it("パスキーが 0 件でも登録ボタンの置き場所は出る（#306）", async () => {
     // **ここを一覧の中に置くと、0 件のとき `<p class=\"empty\">` に
     // 差し替わって消える。** 1 本も無い人こそ登録したい。
-    const page = await html(OVERVIEW_PATH, { ...IDENTITY, listPasskeys: async () => rpcOk([]) });
+    const page = await html(PASSKEYS_PATH, { ...IDENTITY, listPasskeys: async () => rpcOk([]) });
     expect(page).toContain("登録されているパスキーはありません。");
     expect(page).toContain("data-passkey-register");
   });
@@ -112,7 +112,7 @@ describe("アイランドが掴む目印が出ている", () => {
 });
 
 describe("JS を読み込む画面と、その配信", () => {
-  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])(
+  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH])(
     "%s が参照する JS が引ける",
     async (path) => {
       const page = await html(path);
@@ -149,7 +149,7 @@ describe("URL に内容ハッシュが入る（#211）", () => {
   const urlsIn = (page: string): string[] =>
     [...page.matchAll(/(?:src|href)="([^"]*\/ui\/[^"]*)"/g)].map((match) => match[1] ?? "");
 
-  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])("%s が参照する URL", async (path) => {
+  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH])("%s が参照する URL", async (path) => {
     const urls = urlsIn(await html(path));
     expect(urls.length, "アセットを 1 つも参照していない").toBeGreaterThan(0);
 
@@ -171,19 +171,19 @@ describe("サーバーの HTML にボタンを置かない", () => {
   // **押しても効かないボタンを作らないため**（`client/account-island.ts`）。
   // サーバー側で描いて JS で有効化する形だと、読み込み失敗のときだけ
   // 死んだボタンが残る。`<noscript>` はそのとき出ない。
-  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])("%s", async (path) => {
+  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH])("%s", async (path) => {
     expect(await html(path)).not.toContain("<button");
   });
 });
 
 describe("JS が無いとできないことを伝える", () => {
-  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])("%s に noscript がある", async (path) => {
+  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH])("%s に noscript がある", async (path) => {
     const page = await html(path);
     expect(page).toContain("<noscript>");
     expect(page).toContain("JavaScript");
   });
 
-  it.each([OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH])(
+  it.each([PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH])(
     "%s は代わりにできることへ案内する",
     async (path) => {
       // **できないことだけを書くと行き止まりになる**（#208）。全端末の
@@ -202,7 +202,7 @@ describe("空になったときの文言をサーバーと揃える", () => {
   // そこがサーバーの「ありません」と違うと、**操作の前後で文言が変わる。**
   // アイランドに日本語を持たせず属性で渡しているのはそのため。
   it.each([
-    [OVERVIEW_PATH, { ...IDENTITY, listPasskeys: async () => rpcOk([] as PasskeySummary[]) }],
+    [PASSKEYS_PATH, { ...IDENTITY, listPasskeys: async () => rpcOk([] as PasskeySummary[]) }],
     [SESSIONS_PATH, { listSessions: async () => rpcOk([] as SessionListItem[]) }],
     [GRANTS_PATH, { listGrants: async () => rpcOk([] as GrantListItem[]) }],
   ])("%s", async (path, emptyIdentity) => {
