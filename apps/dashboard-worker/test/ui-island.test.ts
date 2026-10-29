@@ -81,6 +81,23 @@ describe("アイランドが掴む目印が出ている", () => {
     expect(await html(path)).toContain(marker);
   });
 
+  it("パスキーの登録ボタンの置き場所が出ている（#306）", async () => {
+    // **長らく無かった。** 一覧と削除はあるのに登録だけ入口が無く、
+    // API（`/api/auth/passkeys/register/*`）は実装済みで本物の認証器を
+    // 相手にしたテストも通っていたのに、**呼ぶ UI がどこにも無かった。**
+    // 本番の `passkeys` が 0 件だったのは、誰も登録しなかったからではなく
+    // **登録できなかったから**である。
+    expect(await html(OVERVIEW_PATH)).toContain("data-passkey-register");
+  });
+
+  it("パスキーが 0 件でも登録ボタンの置き場所は出る（#306）", async () => {
+    // **ここを一覧の中に置くと、0 件のとき `<p class=\"empty\">` に
+    // 差し替わって消える。** 1 本も無い人こそ登録したい。
+    const page = await html(OVERVIEW_PATH, { ...IDENTITY, listPasskeys: async () => rpcOk([]) });
+    expect(page).toContain("登録されているパスキーはありません。");
+    expect(page).toContain("data-passkey-register");
+  });
+
   it("自分自身のセッションが区別できる", async () => {
     // 自分を切るとサーバーが Cookie を落とすので、アイランドは
     // 一覧を触らずログイン画面へ送る必要がある。区別が付かないと

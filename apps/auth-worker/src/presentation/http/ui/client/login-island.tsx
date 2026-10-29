@@ -1,5 +1,11 @@
 /** @jsxImportSource hono/jsx/dom */
 import { render, useState } from "hono/jsx/dom";
+// 変換は `@u18/web-ui` に出した（登録側と同じものを使う。#306）。
+import {
+  supportsPasskey,
+  toRequestOptions,
+  toResponseJson,
+} from "@u18/web-ui/client/webauthn-json";
 
 /**
  * ログイン画面の Passkey アイランド（仕様書 14-1 の決定 4）。
@@ -38,67 +44,10 @@ type Phase =
   /** 失敗の理由は持たない。表示を分岐させる材料をそもそも作らない。 */
   | { readonly kind: "failed" };
 
-/** 認証器が使えない端末。ボタンを出しても押せないので最初から出さない。 */
-const supportsPasskey = (): boolean =>
-  typeof window.PublicKeyCredential === "function" && navigator.credentials !== undefined;
-
-function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
-  const padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function bytesToBase64Url(buffer: ArrayBuffer): string {
-  let binary = "";
-  for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
 type LoginOptionsResponse = {
   readonly challengeId: string;
   readonly options: Record<string, unknown>;
 };
-
-/**
- * サーバーが返す JSON を `navigator.credentials.get()` の引数へ写す。
- *
- * `PublicKeyCredential.parseRequestOptionsFromJSON` があればそれを使う。
- * まだ持たないブラウザのために手書きの変換も残している（base64url →
- * ArrayBuffer は WebAuthn JSON と WebAuthn API の間の形式差でしかない）。
- */
-function toRequestOptions(json: Record<string, unknown>): PublicKeyCredentialRequestOptions {
-  const parse = window.PublicKeyCredential.parseRequestOptionsFromJSON;
-  if (typeof parse === "function") {
-    return parse(json as unknown as PublicKeyCredentialRequestOptionsJSON);
-  }
-  const { challenge, ...rest } = json as { challenge: string };
-  return {
-    ...(rest as unknown as PublicKeyCredentialRequestOptions),
-    challenge: base64UrlToBytes(challenge),
-  };
-}
-
-/** 認証器の応答を WebAuthn JSON へ写す。`toJSON()` が無い環境向けの手書き版を併置する。 */
-function toResponseJson(credential: PublicKeyCredential): Record<string, unknown> {
-  if (typeof credential.toJSON === "function") {
-    return credential.toJSON() as unknown as Record<string, unknown>;
-  }
-  const response = credential.response as AuthenticatorAssertionResponse;
-  return {
-    id: credential.id,
-    rawId: bytesToBase64Url(credential.rawId),
-    type: credential.type,
-    clientExtensionResults: credential.getClientExtensionResults(),
-    response: {
-      clientDataJSON: bytesToBase64Url(response.clientDataJSON),
-      authenticatorData: bytesToBase64Url(response.authenticatorData),
-      signature: bytesToBase64Url(response.signature),
-      userHandle: response.userHandle === null ? null : bytesToBase64Url(response.userHandle),
-    },
-  };
-}
 
 /**
  * 既存の認証 API をそのまま叩く。

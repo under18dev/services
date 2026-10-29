@@ -4,5 +4,9 @@
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "vitest.config.ts"]
+  // **`src/client/**` は入れない。** あそこはブラウザでしか動かず DOM 型が要る。
+  // この package は Worker 側からも読まれるので、DOM を lib に足すと
+  // サーバーのコードが `window` を触れるようになる。型検査は各アプリの
+  // `tsconfig.client.json`（DOM を持つ）が行う。
+  "include": ["src/*.ts", "src/*.tsx", "test/**/*.ts", "vitest.config.ts"]
 }

@@ -1,4 +1,9 @@
 import type { AccountApiErrorCode } from "@u18/contracts";
+import {
+  supportsPasskey,
+  toCreationOptions,
+  toResponseJson,
+} from "@u18/web-ui/client/webauthn-json";
 import { createApiClient } from "./api-client";
 import { isRemoved } from "./outcome";
 
@@ -222,3 +227,153 @@ for (const [kind, action] of Object.entries(ACTIONS)) {
     attach(item, kind, action);
   }
 }
+
+/**
+ * パスキーの登録（#306）。
+ *
+ * ## なぜここに置くか
+ *
+ * 一覧と削除はこの画面にあったが、**登録だけ入口が無かった。** API
+ * （`POST /api/auth/passkeys/register/options` と `/verify`）は auth-worker に
+ * 実装済みで、本物の認証器を相手にしたテストも通っていたのに、
+ * **呼ぶ UI がどこにも無かった。**
+ *
+ * ## auth-worker の API を直接叩く
+ *
+ * 上の取り消し操作は dashboard の BFF（`/account/api/me/*`）を通すが、
+ * ここは **auth-worker の `/api/auth/passkeys/*` を直接呼ぶ。**
+ *
+ * - **同一オリジンである。** 本番は `auth.under18.dev` に両方が載っており
+ *   （`/account/*` が dashboard、残りが auth）、`__Host-` のセッション
+ *   Cookie はそのまま送られる。CSP も `connect-src 'self'` で通る
+ * - **BFF を 1 本増やす理由が無い。** 中継しても challenge を右から左へ
+ *   渡すだけで、**同じ操作に入口が 2 つできる**（取り消し経路を 2 本
+ *   持たないのと同じ判断）
+ *
+ * ## ボタンを出さない条件
+ *
+ * `supportsPasskey()` が false（認証器が無い・`PublicKeyCredential` が無い）
+ * なら**最初から描かない。** 押しても `navigator.credentials` が無いので、
+ * 出すと必ず失敗するボタンになる。
+ */
+
+/** Origin 検証で通る fetch。CSRF トークンは要らない（同一オリジンの POST には Origin が付く）。 */
+async function postJson(path: string, body: unknown): Promise<Response> {
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+  });
+}
+
+type RegisterOptionsResponse = {
+  readonly challengeId: string;
+  readonly options: Record<string, unknown>;
+};
+
+/** 登録した 1 件を一覧へ足す。再読み込みしない（取り消しと同じ方針）。 */
+function appendPasskey(label: string): void {
+  const list = document.querySelector<HTMLElement>("ul[data-empty-text]");
+  const empty = document.querySelector<HTMLElement>("p.empty");
+
+  const item = document.createElement("li");
+  const main = document.createElement("div");
+  main.className = "item-main";
+  const title = document.createElement("div");
+  title.className = "item-title";
+  title.textContent = label;
+  const meta = document.createElement("p");
+  meta.className = "item-meta";
+  meta.textContent = "登録しました。詳細は再読み込みで表示されます。";
+  main.append(title, meta);
+  item.append(main);
+
+  if (list !== null) {
+    list.append(item);
+    return;
+  }
+  // **一覧がまだ無い（0 件だった）。** `<p class="empty">` を一覧へ差し替える。
+  if (empty === null) return;
+  const created = document.createElement("ul");
+  created.className = "list";
+  created.setAttribute("data-empty-text", "登録されているパスキーはありません。");
+  created.append(item);
+  empty.replaceWith(created);
+}
+
+function attachRegister(mount: HTMLElement): void {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "button button-secondary";
+  button.textContent = "パスキーを登録";
+
+  const status = document.createElement("p");
+  status.className = "item-meta";
+
+  const fail = (text: string): void => {
+    status.className = "item-error";
+    status.setAttribute("role", "alert");
+    status.textContent = text;
+    button.disabled = false;
+    button.textContent = "パスキーを登録";
+  };
+
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    button.textContent = "認証器を待っています…";
+    status.textContent = "";
+    status.className = "item-meta";
+    status.removeAttribute("role");
+
+    void (async () => {
+      const optionsResponse = await postJson("/api/auth/passkeys/register/options", {});
+      if (!optionsResponse.ok) {
+        fail(
+          optionsResponse.status === 401
+            ? "ログインの有効期限が切れています。ログインし直してください。"
+            : "登録を開始できませんでした。しばらくしてからもう一度お試しください。",
+        );
+        return;
+      }
+
+      const { challengeId, options } = (await optionsResponse.json()) as RegisterOptionsResponse;
+      const credential = (await navigator.credentials.create({
+        publicKey: toCreationOptions(options),
+      })) as PublicKeyCredential | null;
+      // 利用者が取り消した。エラーにしない。
+      if (credential === null) {
+        fail("登録を取り消しました。");
+        return;
+      }
+
+      const label = `${navigator.platform || "この端末"} のパスキー`.slice(0, 64);
+      const verify = await postJson("/api/auth/passkeys/register/verify", {
+        challengeId,
+        response: toResponseJson(credential),
+        label,
+      });
+      if (!verify.ok) {
+        fail(
+          verify.status === 409
+            ? "この認証器は既に登録されています。"
+            : "登録を完了できませんでした。もう一度お試しください。",
+        );
+        return;
+      }
+
+      appendPasskey(label);
+      button.disabled = false;
+      button.textContent = "パスキーを登録";
+      status.textContent = "登録しました。";
+    })().catch(() => {
+      // 認証器が拒否した・利用者が閉じた・通信が落ちた。区別が付かない。
+      fail("登録できませんでした。もう一度お試しください。");
+    });
+  });
+
+  mount.append(button, status);
+}
+
+const registerMount = document.querySelector<HTMLElement>("[data-passkey-register]");
+if (registerMount !== null && supportsPasskey()) attachRegister(registerMount);

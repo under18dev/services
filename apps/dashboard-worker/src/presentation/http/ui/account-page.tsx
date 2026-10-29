@@ -86,6 +86,19 @@ export const AccountPage: FC<AccountPageProps> = ({ profile, passkeys }) => (
       <p class="section-lead">
         この一覧にある認証器でログインできます。身に覚えのないものがあれば削除してください。
       </p>
+      {/*
+        **登録ボタンはアイランドが作る**（#306）。サーバーがここに描かないのは
+        取り消しボタンと同じ理由で、**「押しても効かないボタン」を作らないため。**
+        WebAuthn は `navigator.credentials.create()` を呼ぶので、JS が無い・
+        読み込みに失敗した・認証器が無い、のどれでもボタンは出ない。
+
+        **この節が長らく一覧と削除しか持っていなかった。** API
+        （`POST /api/auth/passkeys/register/options` と `/verify`）は実装済みで、
+        本物の認証器を相手にしたテストも通っていたのに、**呼ぶ入口が無かった。**
+        結果として本番の `passkeys` は 0 件のままで、管理者を作る手順
+        （ランブック §10.5。付与に Passkey を 1 本以上要求する）も実行できなかった。
+      */}
+      <div data-passkey-register />
       {passkeys.length === 0 ? (
         <p class="empty">登録されているパスキーはありません。</p>
       ) : (
