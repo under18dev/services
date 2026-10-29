@@ -48,6 +48,21 @@ test("接尾辞が途中で切れている形も落ちる", () => {
   assert.match(problems.join("\n"), /接尾辞になっていない/);
 });
 
+test("ラベルが 1 つの RP_ID を落とす（接尾辞ではあるが登録可能ではない）", () => {
+  // `auth.under18.dev` は `.dev` で終わるので、接尾辞の判定だけでは通る。
+  // ブラウザは registrable domain でない rpId を拒むので、**この検査が
+  // 守ろうとしているものがそのまま起きる。**
+  const problems = checkWebAuthnVars({ RP_ID: "dev", WEBAUTHN_ORIGIN: "https://auth.under18.dev" });
+  assert.match(problems.join("\n"), /登録可能なドメインではない/);
+});
+
+test("localhost は 1 ラベルでも通る（host と一致するため）", () => {
+  assert.deepEqual(
+    checkWebAuthnVars({ RP_ID: "localhost", WEBAUTHN_ORIGIN: "http://localhost:8787" }),
+    [],
+  );
+});
+
 test("逆向き（origin のほうが広い）も落ちる", () => {
   const problems = checkWebAuthnVars({
     RP_ID: "auth.under18.dev",

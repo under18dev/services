@@ -107,6 +107,27 @@ export function checkWebAuthnVars(vars) {
   }
 
   const host = url.hostname;
+
+  // **ラベルが 1 つの RP_ID は、host が一致する場合しか許さない。**
+  //
+  // `RP_ID: "dev"` は `auth.under18.dev` の接尾辞なので下の判定を通るが、
+  // **ブラウザは registrable domain でない rpId を拒む。** まさにこの検査が
+  // 守ろうとしている SecurityError が起きる。`under18.dev` をゾーン名の
+  // つもりで `dev` に削る編集は現実に起こりうる形である。
+  //
+  // **完全な Public Suffix の判定はしない**（`co.uk` のような 2 ラベルの
+  // public suffix は通る）。PSL を抱え込むと更新の責任が増えるわりに、
+  // この構成で起こりうる形は 1 ラベルに尽きる。
+  //
+  // `localhost` は `host === rpId` の側を通るので影響しない。
+  if (host !== rpId && !rpId.includes(".")) {
+    problems.push(
+      `RP_ID "${rpId}" は登録可能なドメインではない（ラベルが 1 つ）。` +
+        `ブラウザが SecurityError で拒むため、登録も認証も 1 件も成立しない`,
+    );
+    return problems;
+  }
+
   if (host !== rpId && !host.endsWith(`.${rpId}`)) {
     problems.push(
       `RP_ID "${rpId}" が WEBAUTHN_ORIGIN のホスト "${host}" の接尾辞になっていない。` +
