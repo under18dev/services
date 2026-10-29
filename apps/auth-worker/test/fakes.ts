@@ -110,6 +110,18 @@ export class InMemoryUserRepository implements UserRepository {
   lastActiveAtOf(id: string): Date | undefined {
     return this.lastActive.get(id);
   }
+
+  /**
+   * 本人の退会（#318）。**`active` の行だけに当たる**ところまで写す ——
+   * 「二重の退会」と「先に BAN されている」を `false` で返す挙動を
+   * use-case のテストが使う。
+   */
+  async closeAccount(id: string): Promise<boolean> {
+    const props = this.store.get(id);
+    if (props === undefined || props.status !== "active") return false;
+    this.store.set(id, { ...props, status: "suspended" });
+    return true;
+  }
 }
 
 export class InMemorySessionRepository implements SessionRepository {

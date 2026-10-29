@@ -46,4 +46,19 @@ export interface UserRepository {
    * だけで、保持期間（最終利用から 1 年）の起点として 1 年を越えて残る。
    */
   touchLastActive(id: string, at: Date): Promise<void>;
+  /**
+   * 本人の退会（#318 / ランブック §11.7）。`status` を `suspended` にする。
+   *
+   * **`deleted` にしない。** あちらは「個人情報が落ちている」ことを指す
+   * 名前で、落とさずに立てると `purgeUserSql` の `status <> 'deleted'` に
+   * 弾かれ、**管理者が二度と落とせなくなる。** しかも `returning` が
+   * 0 行を返すので「既に落とした」と区別が付かない。
+   *
+   * **BAN と同じ状態になる。** 理由の区別は `audit_logs` の
+   * `account.closed` が持つ（`status` には持たせない）。
+   *
+   * 既に `active` でない行には当たらない。二重に退会させても
+   * `updated_at` だけが進むのを避ける。
+   */
+  closeAccount(id: string): Promise<boolean>;
 }

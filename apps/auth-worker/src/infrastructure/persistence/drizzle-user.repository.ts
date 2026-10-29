@@ -255,4 +255,23 @@ export class DrizzleUserRepository implements UserRepository {
       .where(eq(users.id, id))
       .run();
   }
+
+  /**
+   * 本人の退会（#318）。`active` の行だけを `suspended` にする。
+   *
+   * **`deleted` にしない。** 理由はポートのコメント（`purgeUserSql` の
+   * ガードに弾かれ、管理者が個人情報を落とせなくなる）。
+   *
+   * **`active` に限る。** 既に `suspended`（BAN 済み）の相手を退会扱いで
+   * 上書きすると、**BAN した事実が退会の記録で塗り替えられる。** 当たった
+   * かどうかを返し、呼び出し側が二重実行を見分けられるようにする。
+   */
+  async closeAccount(id: string): Promise<boolean> {
+    const result = await this.db
+      .update(users)
+      .set({ status: "suspended" })
+      .where(and(eq(users.id, id), eq(users.status, "active")))
+      .run();
+    return result.meta.changes > 0;
+  }
 }

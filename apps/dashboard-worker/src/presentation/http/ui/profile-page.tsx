@@ -71,10 +71,16 @@ export const ProfilePage: FC<ProfilePageProps> = ({ profile }) => (
       残る。「押せないボタンを置かない」と同じ理由。
     */}
     <div data-profile-edit />
+    {/*
+      退会（#318）。**編集とは別の囲いに置く** —— 同じ `panel` に混ぜると
+      保存のつもりで押す事故の余地が出る。ここも見た目を持たない置き場所で、
+      囲いごとアイランドが作る。
+    */}
+    <div data-account-close />
     <noscript>
       <p class="notice">
-        表示名とユーザー名の変更には JavaScript が必要です。登録されている内容の表示は JavaScript
-        無しでも行えます。
+        表示名とユーザー名の変更、およびアカウントの無効化には JavaScript
+        が必要です。登録されている内容の表示は JavaScript 無しでも行えます。
       </p>
     </noscript>
   </DashboardShell>

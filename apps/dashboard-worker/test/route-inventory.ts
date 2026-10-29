@@ -47,6 +47,8 @@ export const API_ROUTES = [
   { method: "GET", path: "/account/health" },
   { method: "GET", path: "/account/api/me" },
   { method: "PATCH", path: "/account/api/me" },
+  /** 本人の退会（#318）。**「削除」ではない** —— `status` が `suspended` になる。 */
+  { method: "DELETE", path: "/account/api/me" },
   { method: "GET", path: "/account/api/me/sessions" },
   { method: "DELETE", path: "/account/api/me/sessions/:id" },
   { method: "GET", path: "/account/api/me/passkeys" },
