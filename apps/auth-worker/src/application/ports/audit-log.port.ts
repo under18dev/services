@@ -78,6 +78,15 @@ export const AUDIT_EVENTS = [
    * 既存ユーザーへのログインでは記録しない。
    */
   "user.created",
+  /**
+   * 運用者が凍結アカウントの個人情報を落とした（#265 / ランブック §11.6）。
+   *
+   * **この操作だけは元に戻せない。** 落とした `username` /
+   * `display_name` / `primary_email` と `user_emails` の行は復元できない。
+   * だから**行そのものではなく、ここに残る記録が「何が起きたか」の唯一の
+   * 手がかり**になる（`users` の行は残るが、中身は置き換わっている）。
+   */
+  "user.purged",
   /** displayName / username の変更。 */
   "profile.updated",
 
@@ -179,6 +188,13 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * リクエストごとに増えるものではない。
    */
   "user.created": "security",
+  /**
+   * 個人情報を落とした。**支配権が変わるどころか、戻せない。**
+   *
+   * 2 年では短いかもしれないが、区分を増やすほどの根拠がまだ無い。
+   * R2 への退避（730 日）と合わせて約 4 年になる（決定 14）。
+   */
+  "user.purged": "security",
   /** 認証器を足した。乗っ取りの最も典型的な足跡。 */
   "passkey.register": "security",
   /** 認証器を外した。締め出しの手口でもある。 */
