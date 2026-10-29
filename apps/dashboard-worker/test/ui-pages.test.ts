@@ -6,6 +6,8 @@ import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import {
   GRANTS_PATH,
   OVERVIEW_PATH,
+  PASSKEYS_PATH,
+  PROFILE_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
@@ -51,7 +53,7 @@ const FULL_IDENTITY = {
   listGrants: async () => rpcOk([] as GrantListItem[]),
 };
 
-const PAGES = [OVERVIEW_PATH, SESSIONS_PATH, GRANTS_PATH];
+const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH];
 
 describe("3 つの画面が HTML を返す", () => {
   it.each(PAGES)("%s", async (path) => {
@@ -61,15 +63,18 @@ describe("3 つの画面が HTML を返す", () => {
     expect(response.headers.get("Content-Type")).toContain("text/html");
   });
 
-  it("ナビの行き先がすべて実在する", async () => {
-    // ナビに書いたパスと、実際に登録したルートがずれると 404 を踏む。
+  it("サイドバーの行き先がすべて実在する", async () => {
+    // サイドバーに書いたパスと、実際に登録したルートがずれると 404 を踏む。
     // 画面から `href` を抜き出して、全部引けることを確かめる。
+    //
+    // **ブランドのリンク（ホームへ戻る）も混ざる。** 除かずにそのまま
+    // 引ければよい —— あれも押せる必要がある。
     const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
-    const navHrefs = [...html.matchAll(/<nav class="nav">(.*?)<\/nav>/gs)]
+    const navHrefs = [...html.matchAll(/<nav class="dash-side"[^>]*>(.*?)<\/nav>/gs)]
       .flatMap((nav) => [...(nav[1] ?? "").matchAll(/href="([^"]+)"/g)])
       .map((m) => m[1] as string);
 
-    expect(navHrefs).toEqual(PAGES);
+    expect(new Set(navHrefs)).toEqual(new Set(PAGES));
 
     for (const href of navHrefs) {
       const response = await withCookie(href, FULL_IDENTITY);
@@ -286,9 +291,80 @@ describe("Referrer-Policy を no-referrer にしない", () => {
   });
 });
 
+describe("ダッシュボードのホーム（#308）", () => {
+  it("件数を出す", async () => {
+    // **「パスキー 0 本」はそれ自体が伝えたい状態である。** 一覧を開かないと
+    // 分からない形にすると、危ない状態の人ほど気づかない。
+    const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
+
+    expect(html).toContain("stat-value");
+    expect(html).toContain("パスキー");
+    expect(html).toContain("ログイン中の端末");
+    expect(html).toContain("連携アプリ");
+  });
+
+  it("パスキーが 0 本なら、その状態を名指しで伝える", async () => {
+    // `FULL_IDENTITY` の既定が 0 件。数字を出すだけでは「0 が危ない」ことが
+    // 伝わらないので、文言でも言う。
+    const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
+
+    expect(html).toContain("パスキーを登録してください");
+    expect(html).toContain("受信箱を使えなくなると");
+  });
+
+  it("パスキーがあれば、その案内は出さない", async () => {
+    const passkey: PasskeySummary = {
+      id: "pk_1",
+      label: "テスト",
+      deviceType: "platform",
+      createdAt: "2026-10-24T00:00:00.000Z",
+      lastUsedAt: null,
+    };
+    const html = await (
+      await withCookie(OVERVIEW_PATH, {
+        ...FULL_IDENTITY,
+        listPasskeys: async () => rpcOk([passkey]),
+      })
+    ).text();
+
+    expect(html).not.toContain("パスキーを登録してください");
+  });
+
+  it("ホームには一覧の中身を出さない", async () => {
+    // **導線と件数だけを置く。** 中身まで出すと、個別ページと 2 箇所で
+    // 同じものを描くことになり、片方だけ古くなる。
+    const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
+    expect(html).not.toContain("data-passkey-id");
+    expect(html).not.toContain("data-session-id");
+    expect(html).not.toContain("data-grant-client-id");
+  });
+});
+
+describe("プロフィール（#308）", () => {
+  it("登録情報を出す", async () => {
+    const html = await (await withCookie(PROFILE_PATH, FULL_IDENTITY)).text();
+
+    expect(html).toContain("表示名");
+    expect(html).toContain("ユーザー名");
+    expect(html).toContain("メールアドレス");
+  });
+
+  it("未確認のメールアドレスを黙らない", async () => {
+    // この状態だと復旧経路が無い。黙ると本人が気づけない。
+    const html = await (
+      await withCookie(PROFILE_PATH, {
+        ...FULL_IDENTITY,
+        getUserProfile: async () => rpcOk({ ...PROFILE, emailVerified: false }),
+      })
+    ).text();
+
+    expect(html).toContain("未確認");
+  });
+});
+
 describe("0 件のときに空の一覧を出さない", () => {
   it.each([
-    [OVERVIEW_PATH, "登録されているパスキーはありません"],
+    [PASSKEYS_PATH, "登録されているパスキーはありません"],
     [GRANTS_PATH, "連携を許可したアプリはありません"],
   ])("%s", async (path, message) => {
     const html = await (await withCookie(path, FULL_IDENTITY)).text();
@@ -348,7 +424,7 @@ describe("実装側の語を画面に出さない", () => {
     };
 
     const html = await (
-      await withCookie(OVERVIEW_PATH, {
+      await withCookie(PASSKEYS_PATH, {
         getUserProfile: async () => rpcOk(PROFILE),
         listPasskeys: async () => rpcOk([passkey]),
       })

@@ -1,7 +1,7 @@
 import type { GrantListItem } from "@u18/contracts";
 import { scopeLabel } from "@u18/web-ui";
 import type { FC } from "hono/jsx";
-import { AccountShell } from "./account-shell";
+import { DashboardShell } from "./dashboard-shell";
 import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
@@ -28,38 +28,43 @@ export type GrantsPageProps = {
 };
 
 export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
-  <AccountShell title="連携アプリ" current="grants" scripts={[ISLAND_PATH]} hasRevokeActions>
-    <section class="section">
-      <h2>連携アプリ</h2>
-      <p class="section-lead">
-        あなたの情報へのアクセスを許可したアプリです。使っていないものは連携を解除してください。
-      </p>
-      {grants.length === 0 ? (
-        <p class="empty">連携を許可したアプリはありません。</p>
-      ) : (
-        <ul class="list" data-empty-text="連携を許可したアプリはありません。">
-          {grants.map((grant) => (
-            <li key={grant.clientId} data-grant-client-id={grant.clientId}>
-              <div class="item-main">
-                <div class="item-title">{grant.clientName}</div>
-                <p class="item-meta">許可 {formatDateTime(grant.grantedAt)}</p>
-                {/*
+  <DashboardShell
+    title="連携アプリ"
+    heading="連携アプリ"
+    lead="あなたの情報へのアクセスを許可したアプリです。使っていないものは連携を解除してください。"
+    current="grants"
+    scripts={[ISLAND_PATH]}
+    hasRevokeActions
+  >
+    <div class="panel">
+      <div class="panel-body">
+        {grants.length === 0 ? (
+          <p class="empty">連携を許可したアプリはありません。</p>
+        ) : (
+          <ul class="list" data-empty-text="連携を許可したアプリはありません。">
+            {grants.map((grant) => (
+              <li key={grant.clientId} data-grant-client-id={grant.clientId}>
+                <div class="item-main">
+                  <div class="item-title">{grant.clientName}</div>
+                  <p class="item-meta">許可 {formatDateTime(grant.grantedAt)}</p>
+                  {/*
                   同意画面と**同じ文言**を使う（`@u18/web-ui` の `scopeLabel`）。
                   許可したときと取り消すときで言葉が違うと、利用者は
                   「同じものを取り消そうとしている」と確信できない。
                 */}
-                {grant.scopes.length > 0 && (
-                  <ul class="scopes">
-                    {grant.scopes.map((scope) => (
-                      <li key={scope}>{scopeLabel(scope)}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  </AccountShell>
+                  {grant.scopes.length > 0 && (
+                    <ul class="scopes">
+                      {grant.scopes.map((scope) => (
+                        <li key={scope}>{scopeLabel(scope)}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  </DashboardShell>
 );

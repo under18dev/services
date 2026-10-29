@@ -1,5 +1,5 @@
 import type { FC } from "hono/jsx";
-import { AccountShell } from "./account-shell";
+import { DashboardShell } from "./dashboard-shell";
 import { LOGIN_PATH } from "./asset-paths";
 import { loginUrlWithReturnTo } from "@u18/contracts";
 
@@ -8,7 +8,7 @@ import { loginUrlWithReturnTo } from "@u18/contracts";
  *
  * ## ナビを出さない
  *
- * `AccountShell` に `current` を渡していない。**どのページへ行っても同じ
+ * `DashboardShell` に `current` を渡していない。**どのページへ行っても同じ
  * 状態なので、ナビを出すと押すたびに同じ画面へ戻る。**
  *
  * ## 内部の事情を書かない
@@ -26,24 +26,28 @@ import { loginUrlWithReturnTo } from "@u18/contracts";
  * `sanitizeReturnTo` が行うので（関門は 1 つ）、ここは渡すだけ。
  */
 export const SignInRequiredPage: FC<{ readonly returnTo: string | null }> = ({ returnTo }) => (
-  <AccountShell title="ログインが必要です">
-    <section class="section">
-      <h2>ログインが必要です</h2>
-      <p class="section-lead">アカウント情報を表示するにはログインしてください。</p>
-      <p class="links">
-        <a href={returnTo === null ? LOGIN_PATH : loginUrlWithReturnTo(returnTo)}>ログイン画面へ</a>
-      </p>
-    </section>
-  </AccountShell>
+  <DashboardShell title="ログインが必要です" heading="ログインが必要です">
+    <div class="panel">
+      <div class="panel-body">
+        <p class="section-lead">アカウント情報を表示するにはログインしてください。</p>
+        <p class="links">
+          <a href={returnTo === null ? LOGIN_PATH : loginUrlWithReturnTo(returnTo)}>
+            ログイン画面へ
+          </a>
+        </p>
+      </div>
+    </div>
+  </DashboardShell>
 );
 
 export const UnavailablePage: FC = () => (
-  <AccountShell title="一時的に表示できません">
-    <section class="section">
-      <h2>一時的に表示できません</h2>
-      <p class="section-lead">
-        アカウント情報を取得できませんでした。しばらく待ってからもう一度お試しください。
-      </p>
-    </section>
-  </AccountShell>
+  <DashboardShell title="一時的に表示できません" heading="一時的に表示できません">
+    <div class="panel">
+      <div class="panel-body">
+        <p class="section-lead">
+          アカウント情報を取得できませんでした。しばらく待ってからもう一度お試しください。
+        </p>
+      </div>
+    </div>
+  </DashboardShell>
 );

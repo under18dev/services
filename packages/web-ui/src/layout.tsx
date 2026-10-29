@@ -24,11 +24,13 @@ export type LayoutProps = {
    *
    * - `"card"`（既定）: 中央に 1 枚のカード。ログイン・同意など、
    *   入力が 1 つで完結する画面。
-   * - `"shell"`: 上端寄せの広い面。アカウント管理のように節が複数あり、
-   *   一覧が縦に伸びる画面。中央寄せのままだと内容が増えたときに
-   *   上端がビューポートの外へ出る。
+   * - `"shell"`: 上端寄せの広い面。節が複数あり一覧が縦に伸びる画面。
+   *   中央寄せのままだと内容が増えたときに上端がビューポートの外へ出る。
+   * - `"dash"`: 全面。**この枠だけ `<h1 class="brand">` を描かない** ——
+   *   サイドバーが自分のブランドを持つので、2 つ出ると二重になる。
+   *   中身の組み立ては呼び出し側に任せる（#308）。
    */
-  readonly frame?: "card" | "shell";
+  readonly frame?: "card" | "shell" | "dash";
 
   /**
    * 読み込むスタイルシートのパス。
@@ -69,12 +71,18 @@ export const Layout: FC<LayoutProps> = ({
           <script key={src} type="module" src={src} defer />
         ))}
       </head>
-      <body class={frame === "shell" ? "page-shell" : undefined}>
-        <main class={frame === "shell" ? "shell" : "card"}>
-          <h1 class="brand">u18 Identity</h1>
-          {children}
-        </main>
-      </body>
+      {frame === "dash" ? (
+        // **`<main>` もブランドもここでは描かない。** サイドバーと本文の
+        // 関係は呼び出し側が組む（`<main>` は本文側に置く）。
+        <body class="page-dash">{children}</body>
+      ) : (
+        <body class={frame === "shell" ? "page-shell" : undefined}>
+          <main class={frame === "shell" ? "shell" : "card"}>
+            <h1 class="brand">u18 Identity</h1>
+            {children}
+          </main>
+        </body>
+      )}
     </html>
   </>
 );

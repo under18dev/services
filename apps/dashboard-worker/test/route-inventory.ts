@@ -68,6 +68,10 @@ export const API_ROUTES = [
  */
 export const PAGE_ROUTES = [
   { method: "GET", path: "/account" },
+  // **概要から切り出した 2 枚**（#308）。サイドバーを置くと 1 画面 1 主題に
+  // しないと「どの項目が現在地か」を決められない。
+  { method: "GET", path: "/account/profile" },
+  { method: "GET", path: "/account/passkeys" },
   { method: "GET", path: "/account/sessions" },
   { method: "GET", path: "/account/grants" },
   // **ハッシュは手で書けないので `<hash>` と書く**（#211）。突き合わせる
