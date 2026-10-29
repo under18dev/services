@@ -1,8 +1,8 @@
 # u18 Identity — 運用ランブック
 
-- Status: Draft
+- Status: **本番稼働中**（`auth.under18.dev` / `go.under18.dev`）
 - Version: 0.1.0
-- Date: 2026-10-24
+- Date: 2026-10-29
 - 対象: `apps/auth-worker` / `apps/dashboard-worker`
 - 前提仕様書: `docs/u18-identity-spec.md`
 
@@ -10,20 +10,21 @@
 
 本書は、コードを書いていない担当者が深夜に障害対応するために読む手順書である。各節は上から順に実行できる番号付き手順として書く。
 
-**現状は Phase 1（仕様書 12）のスケルトンである。** 以下は未実装であり、手順を最後まで書けない箇所はその都度「Phase N で実装」と明記する。
+**本番で稼働している。** `auth.under18.dev` と `go.under18.dev` が利用者を受けており、本書の手順は**実際に動いている系**に当てるものである。
 
-| 機能                                                                        | 現状                                                      | 実装箇所                                                       |
-| --------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
-| `/health`、`/api/me`、`/api/me/sessions`（GET / DELETE）                    | 実装済み                                                  | `apps/auth-worker/src/presentation/http/`                      |
-| `IdentityRPC`（getSession / getUserProfile / listSessions / revokeSession） | 実装済み                                                  | `apps/auth-worker/src/presentation/rpc/identity.entrypoint.ts` |
-| `/.well-known/openid-configuration`                                         | 静的に応答する                                            | `apps/auth-worker/src/presentation/http/oauth.routes.ts`       |
-| `/.well-known/jwks.json`                                                    | `signing_key_metadata` から公開鍵を返す（#14。§9.5）      | 同上                                                           |
-| `/oauth/authorize`、`/oauth/token`、`/oauth/userinfo`、`/oauth/revoke`      | **501 を返す**（Phase 2）                                 | 同上                                                           |
-| メール OTP、Passkey、ログアウト                                             | **501 を返す**（Phase 1 の残り）                          | `apps/auth-worker/src/presentation/http/auth.routes.ts`        |
-| `PATCH /api/me`                                                             | **501 を返す**                                            | `apps/auth-worker/src/presentation/http/me.routes.ts`          |
-| マイグレーション SQL                                                        | **1 本も生成されていない**（`packages/db/drizzle/` は空） | `packages/db/src/schema/`                                      |
+| Worker           | 本番ホスト                                          | 役割                                                |
+| ---------------- | --------------------------------------------------- | --------------------------------------------------- |
+| auth-worker      | `auth.under18.dev`                                  | OIDC + 認証（メール OTP / Passkey）+ アカウント API |
+| dashboard-worker | `auth.under18.dev/account/*`                        | 設定画面と BFF                                      |
+| nfc-worker       | `go.under18.dev` / `auth.under18.dev/account/nfc/*` | 短縮 URL の解決とカード管理                         |
 
-したがって、本番トラフィックを受けられる状態ではない。本書の「インシデント対応」は、現時点で実行可能な手段（DB への直接操作、Secret 差し替え、デプロイ巻き戻し）を中心に書いてある。
+**何が公開されているかは、ここに書かない。** `apps/*/test/route-inventory.ts` が正本で、**実際に登録されているルートと一致することを CI が確かめている**（#275 / #278 / #281）。手で書いた一覧は必ず実態からずれるので、**ずれたら落ちる場所**を 1 つにしてある。
+
+> **ここには長らく「現状は Phase 1 のスケルトンである」と書いてあり、`/oauth/*` もメール OTP も Passkey も `PATCH /api/me` も「501 を返す」、マイグレーションは「1 本も生成されていない」、結びは「したがって、本番トラフィックを受けられる状態ではない」だった。**
+>
+> **全部が事実と違っていた。** 2026-10-29 時点で `501` は実装のどこにも無く、マイグレーションは identity に 7 本・nfc に 1 本あり、OIDC は本番で拒否の分岐まで実測してある。
+>
+> **本書の 1 行目は「コードを書いていない担当者が深夜に障害対応するために読む」と書いている。** その人が最初に読む段落が「本番トラフィックを受けられる状態ではない」だった。**障害対応で最も誤解させてはいけない場所**だったので、記録として残す（#257 と同じ家系で、今日 6 件目）。
 
 ---
 
