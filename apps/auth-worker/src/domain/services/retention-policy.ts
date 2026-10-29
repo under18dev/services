@@ -203,3 +203,130 @@ export const ARCHIVED_TARGETS: readonly RetentionTarget[] = ["audit_logs"];
 
 export const isArchivedTarget = (target: RetentionTarget): boolean =>
   ARCHIVED_TARGETS.includes(target);
+
+/**
+ * **掃除しないテーブルと、その理由**（#301）。
+ *
+ * `RetentionPolicy` が「いつ消すか」の出典であるのに対し、ここは
+ * **「消さないと決めた」こと自体の出典**である。値は人が読むための理由で、
+ * 機械は使わない —— 機械が使うのは**キーが揃っていること**のほうである。
+ *
+ * ## なぜ「書かないこと」を書くのか
+ *
+ * #279 で「`expires_at` を持つテーブルは保持期間が決まっていなければ
+ * ならない」をスキーマ側から数える検査にした。ところがこれは、
+ * **列が `expires_at` という名前のときしか何も訊かない。** 期限列を持たない
+ * テーブルを足した人は、保持期間について一言も問われずに済む。
+ * `oauth_grants` がまさにそれで、「掃除しない」は散文のコメントにしか
+ * 無かった —— 読めば正しいが、**機械からは「判断済み」と「まだ誰も
+ * 考えていない」が同じ形に見える。**
+ *
+ * そこで `RetentionPolicy` と合わせて**スキーマの全テーブルをちょうど
+ * 1 回ずつ覆う**ことにし、分類されていないテーブルがあればテストを落とす
+ * （`retentionClassificationGaps`）。新しいテーブルは**分類するまで CI が
+ * 通らない。**
+ *
+ * ## これで防げないこと
+ *
+ * **分類を間違えることは防げない。** `users` をうっかり `RetentionPolicy`
+ * 側に書いた人も、ここに書いた人も、「1 箇所に書いた」ことには変わりない。
+ * 防げるのは**分類を忘れること**だけである。
+ *
+ * 掃除対象へ移すときに**理由の 1 行が差分から消える**のは副産物だが、
+ * レビューの当たる面としてはこちらのほうが効く。
+ *
+ * ## ここに入れれば `expires_at` の検査を回り込める、わけではない
+ *
+ * **期限列を持つテーブルはここに置けない。** 置けてしまうと、#279 の検査は
+ * 「分類済みだから良し」で黙り、**検査を回り込む抜け道をこの定数が作る**
+ * ことになる。`retentionClassificationGaps` が別建てで弾く。
+ */
+export const NEVER_SWEPT: Readonly<Record<string, string>> = {
+  /**
+   * アカウントは物理削除せず凍結で表現する（仕様書 14.1 決定 7）。
+   * 退会済みの行を消すかどうかは保持期間ではなく**退会の扱い**の話で、
+   * #27 / #51 の範囲。`last_active_at` は 1 年を越えて残ることが役割
+   * （#286 / #297）なので、ここが掃除されると判定材料ごと消える。
+   */
+  users: "凍結で表現するので物理削除しない（仕様書 14.1 決定 7）",
+
+  /** `users` と同じ寿命。メールアドレスは本人の識別子そのもので、期限が無い。 */
+  user_emails: "利用者の識別子。users と同じ寿命",
+
+  /**
+   * 認証器そのもの。消すと**本人がログインできなくなる。**
+   * 削除は利用者の操作（`DeletePasskeyUseCase`）だけが行う。
+   */
+  passkeys: "消すと本人がログインできなくなる。削除は利用者の操作だけ",
+
+  /** RP の登録情報。運用で入れたものを時間で消す意味が無い。 */
+  oauth_clients: "RP の登録情報。運用が消すまで有効",
+  oauth_redirect_uris: "RP の登録情報。oauth_clients と同じ寿命",
+
+  /**
+   * **期限を持たない継続中の状態。** 「この利用者がこのアプリに同意して
+   * いる」という事実そのものなので、保持期間で消すと**同意が黙って外れる。**
+   * 取り消しは `revoked_at` で表す。
+   */
+  oauth_grants: "継続中の同意そのもの。期限で消すと同意が黙って外れる",
+
+  /**
+   * **`retires_at` を持つが掃除しない。**（列名が `expires_at` でないため
+   * #279 の検査は見ていなかった。#301 で明示する。）
+   *
+   * 退役した鍵の `kid` と公開鍵は、**過去に発行したトークンがどの鍵で
+   * 署名されたかを後から言える**ために残す。行は 1 鍵につき 1 行で、
+   * ローテーションの頻度ぶんしか増えない —— 消して得られる容量より、
+   * 「この kid は確かに自分たちの鍵だった」と言えることのほうが価値が高い。
+   */
+  signing_key_metadata: "退役した鍵も kid の出所を後から言うために残す（行数は鍵の本数ぶん）",
+};
+
+/** 分類の穴。すべて空であることをテストが固定する（#301）。 */
+export interface RetentionClassificationGaps {
+  /** どちらにも書かれていないテーブル。**新しいテーブルはまずここに出る。** */
+  readonly unclassified: readonly string[];
+  /** 両方に書かれているテーブル。どちらの意図なのか読めない。 */
+  readonly classifiedTwice: readonly string[];
+  /** 期限列を持つのに「掃除しない」側にあるテーブル（#279 の回り込み）。 */
+  readonly expiringButNotSwept: readonly string[];
+  /** 分類に名前はあるが、スキーマに実在しないテーブル。 */
+  readonly unknownTables: readonly string[];
+}
+
+/** 分類そのもの。既定は `RetentionPolicy` と `NEVER_SWEPT`。 */
+export interface RetentionClassification {
+  readonly swept: readonly string[];
+  readonly kept: readonly string[];
+}
+
+/**
+ * スキーマのテーブル一覧を受け取り、分類の穴を返す（#301）。
+ *
+ * **スキーマも分類も自分で読みに行かない。** どちらも引数で受け取るのは、
+ * テストから**作り物**を渡して**この規則自体**を確かめられるようにする
+ * ためである。実物だけを相手にすると、規則が空振りしていても
+ * 「穴はありません」としか出てこない —— 検査を足した直後がいちばん
+ * 危ないのはこれで、このリポジトリで何度か踏んでいる。
+ *
+ * 既定の引数は実物なので、呼ぶ側は何も渡さなくてよい。
+ */
+export const retentionClassificationGaps = (
+  tables: readonly { readonly name: string; readonly hasExpiry: boolean }[],
+  classification: RetentionClassification = {
+    swept: Object.keys(RetentionPolicy),
+    kept: Object.keys(NEVER_SWEPT),
+  },
+): RetentionClassificationGaps => {
+  const { swept, kept } = classification;
+  const names = tables.map((table) => table.name);
+
+  return {
+    unclassified: names.filter((name) => !swept.includes(name) && !kept.includes(name)),
+    classifiedTwice: names.filter((name) => swept.includes(name) && kept.includes(name)),
+    expiringButNotSwept: tables
+      .filter((table) => table.hasExpiry && kept.includes(table.name))
+      .map((table) => table.name),
+    unknownTables: [...swept, ...kept].filter((name) => !names.includes(name)),
+  };
+};

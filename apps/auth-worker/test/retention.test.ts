@@ -27,7 +27,12 @@ import type {
   PurgeRequest,
   PurgeResult,
 } from "../src/application/ports/retention.port";
-import { RetentionPolicy, type RetentionTarget } from "../src/domain/services/retention-policy";
+import {
+  NEVER_SWEPT,
+  RetentionPolicy,
+  type RetentionTarget,
+  retentionClassificationGaps,
+} from "../src/domain/services/retention-policy";
 import { auditEventDeadlines, type AuditEventName } from "../src/application/ports/audit-log.port";
 import { OtpPolicy, TokenLifetime } from "../src/domain/services/token-lifetime";
 import { UnconfiguredArchiveSink } from "../src/infrastructure/archive/r2-archive-sink";
@@ -880,18 +885,23 @@ describe("scheduled ハンドラ", () => {
  * 何度か踏んでいるので、**何件見たか**を明示して、空振りを空振りとして読める
  * ようにしておく。
  */
-describe("保持期限の網羅", () => {
-  /**
-   * スキーマに含まれる全テーブル。`@u18/db` は名前空間ごと公開している。
-   *
-   * **`unknown[]` を経由する。** 名前空間はテーブル以外（`timestampMs` などの
-   * 列ヘルパー関数）も公開しているので、戻り値の合併型に関数が混ざる。
-   * そのまま型述語で絞ると「述語の型が引数の型に代入できない」と言われる。
-   */
-  const allTables: SQLiteTable[] = [];
+/**
+ * スキーマに含まれる全テーブル。`@u18/db` は名前空間ごと公開している。
+ *
+ * **`unknown[]` を経由する。** 名前空間はテーブル以外（`timestampMs` などの
+ * 列ヘルパー関数）も公開しているので、戻り値の合併型に関数が混ざる。
+ * そのまま型述語で絞ると「述語の型が引数の型に代入できない」と言われる。
+ */
+function allSchemaTables(): SQLiteTable[] {
+  const tables: SQLiteTable[] = [];
   for (const value of Object.values(schema) as unknown[]) {
-    if (is(value, SQLiteTable)) allTables.push(value);
+    if (is(value, SQLiteTable)) tables.push(value);
   }
+  return tables;
+}
+
+describe("保持期限の網羅", () => {
+  const allTables = allSchemaTables();
 
   /** `expires_at` 列を持つテーブル＝「いつか用済みになる行」を持つテーブル。 */
   const withExpiry = allTables
@@ -923,5 +933,131 @@ describe("保持期限の網羅", () => {
     const ghosts = Object.keys(RetentionPolicy).filter((target) => !names.includes(target));
 
     expect(ghosts).toEqual([]);
+  });
+});
+
+/**
+ * **「掃除しない」が宣言されていること**（#301）。
+ *
+ * 上の「保持期限の網羅」は `expires_at` を持つテーブルしか見ない。
+ * つまり**期限列を持たないテーブルを足した人は、保持期間について
+ * 一言も問われない。** `oauth_grants`（期限を持たない継続中の同意）が
+ * まさにそれで、「掃除しない」はコメントの散文にしか無かった ——
+ * 読めば正しいが、**機械からは「判断済み」と「まだ誰も考えていない」が
+ * 同じ形に見える。**
+ *
+ * `signing_key_metadata` も同じ理由で抜けていた。あちらは `retires_at` を
+ * 持つが、**列名が `expires_at` ではない**ので検査の視野に入らない。
+ *
+ * そこで `RetentionPolicy` と `NEVER_SWEPT` で**全テーブルをちょうど 1 回
+ * ずつ覆う**ことにし、分類されていないテーブルで落とす。
+ *
+ * ## 防げないこと
+ *
+ * **分類を間違えることは防げない。** 防げるのは分類を忘れることだけで、
+ * 掃除対象へ移すときに理由の 1 行が差分から消える、までである。
+ */
+describe("掃除の対象外であることの宣言", () => {
+  /** 実スキーマのテーブルを、規則が受け取る形に直したもの。 */
+  const actual = allSchemaTables().map((table) => ({
+    name: getTableName(table),
+    hasExpiry: Object.values(getTableColumns(table)).some((c) => c.name === "expires_at"),
+  }));
+
+  it("全テーブルがどちらかに分類されている", () => {
+    const gaps = retentionClassificationGaps(actual);
+
+    expect(
+      gaps.unclassified,
+      `${actual.length} 本のテーブルを見た。掃除するともしないとも書かれていないもの: ${
+        gaps.unclassified.join(", ") || "なし"
+      }`,
+    ).toEqual([]);
+    expect(gaps.classifiedTwice).toEqual([]);
+    expect(gaps.expiringButNotSwept).toEqual([]);
+    expect(gaps.unknownTables).toEqual([]);
+  });
+
+  it("分類の両側に中身がある", () => {
+    // 片方が空のまま「穴はありません」と言う形を塞ぐ。
+    expect(Object.keys(RetentionPolicy).length).toBeGreaterThan(0);
+    expect(Object.keys(NEVER_SWEPT).length).toBeGreaterThan(0);
+    expect(actual.length).toBe(
+      Object.keys(RetentionPolicy).length + Object.keys(NEVER_SWEPT).length,
+    );
+  });
+
+  it("掃除しない側には理由が書いてある", () => {
+    // 中身までは機械が読めない。空文字だけを弾く。
+    const blank = Object.entries(NEVER_SWEPT)
+      .filter(([, reason]) => reason.trim() === "")
+      .map(([name]) => name);
+
+    expect(blank).toEqual([]);
+  });
+
+  /**
+   * ここから下は**規則そのもの**を作り物で確かめる。
+   *
+   * 実スキーマだけを相手にすると、規則が何も見ていなくても
+   * 「穴はありません」と出る。4 つの穴を 1 つずつ実際に開けて、
+   * **その穴が報告されること**を固定する。
+   */
+  describe("規則が穴を見つけられる", () => {
+    const tables = [
+      { name: "swept_one", hasExpiry: true },
+      { name: "kept_one", hasExpiry: false },
+    ];
+    const classification = { swept: ["swept_one"], kept: ["kept_one"] };
+
+    it("穴が無ければ何も報告しない", () => {
+      expect(retentionClassificationGaps(tables, classification)).toEqual({
+        unclassified: [],
+        classifiedTwice: [],
+        expiringButNotSwept: [],
+        unknownTables: [],
+      });
+    });
+
+    it("どちらにも書かれていないテーブルを報告する", () => {
+      // **新しいテーブルを足した人が、期限列を持たないせいで
+      // 何も問われない**という #301 の本体。
+      const gaps = retentionClassificationGaps(
+        [...tables, { name: "brand_new", hasExpiry: false }],
+        classification,
+      );
+
+      expect(gaps.unclassified).toEqual(["brand_new"]);
+    });
+
+    it("両方に書かれているテーブルを報告する", () => {
+      const gaps = retentionClassificationGaps(tables, {
+        swept: ["swept_one", "kept_one"],
+        kept: ["kept_one"],
+      });
+
+      expect(gaps.classifiedTwice).toEqual(["kept_one"]);
+    });
+
+    it("期限列を持つテーブルを「掃除しない」側に置けない", () => {
+      // **これが無いと `NEVER_SWEPT` が #279 の抜け道になる。**
+      // 期限付きのテーブルを「掃除しない」側に書くだけで、
+      // 上の「保持期限の網羅」は分類済みとして黙る。
+      const gaps = retentionClassificationGaps(
+        [{ name: "kept_one", hasExpiry: true }],
+        classification,
+      );
+
+      expect(gaps.expiringButNotSwept).toEqual(["kept_one"]);
+    });
+
+    it("実在しないテーブルの名前を報告する", () => {
+      const gaps = retentionClassificationGaps(tables, {
+        swept: ["swept_one", "ghost_table"],
+        kept: ["kept_one"],
+      });
+
+      expect(gaps.unknownTables).toEqual(["ghost_table"]);
+    });
   });
 });
