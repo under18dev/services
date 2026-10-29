@@ -4,7 +4,7 @@ import {
   UNPROBEABLE,
   check,
   collect,
-  coversAsset,
+  coveredByPrefix,
   readAssetRoutes,
   readProbePages,
 } from "./asset-probe-pages.mjs";
@@ -17,8 +17,19 @@ import {
  * 正規表現）が実物と合っているかを確かめられない。
  */
 
-test("既定のページ一覧を読む", () => {
-  assert.deepEqual(readProbePages("x\n  set -- /login /account\ny"), ["/login", "/account"]);
+test("既定の一覧を ページ:接頭辞 の組として読む", () => {
+  assert.deepEqual(readProbePages("x\n  set -- /login:/ui/ /account:/account/ui/\ny"), [
+    { page: "/login", prefix: "/ui/" },
+    { page: "/account", prefix: "/account/ui/" },
+  ]);
+});
+
+test("接頭辞の欠けた要素があれば null（部分的に受けない）", () => {
+  // 受けると「接頭辞を書き忘れたページだけ借用の検査が無い」状態が、
+  // 照合側から見えなくなる。
+  assert.equal(readProbePages("  set -- /login:/ui/ /account"), null);
+  assert.equal(readProbePages("  set -- :/ui/"), null);
+  assert.equal(readProbePages("  set -- /login:"), null);
 });
 
 test("`set --` の行が無ければ null（黙って 0 件にしない）", () => {
@@ -36,19 +47,24 @@ test("route-inventory からアセットだけ拾う", () => {
   assert.deepEqual(readAssetRoutes(text), ["/account/ui/u18.<hash>.css"]);
 });
 
-test("接頭辞でカバーを判定する", () => {
-  assert.equal(coversAsset(["/account"], "/account/ui/u18.css"), true);
-  assert.equal(coversAsset(["/account/sessions"], "/account/ui/u18.css"), true);
-  assert.equal(coversAsset(["/login"], "/account/ui/u18.css"), false);
-  // auth-worker は `/ui/...` を root で配る。`/login` で確かめられる。
-  assert.equal(coversAsset(["/login"], "/ui/u18.css"), true);
+test("接頭辞は厳密に比べる", () => {
+  const pairs = [
+    { page: "/login", prefix: "/ui/" },
+    { page: "/account", prefix: "/account/ui/" },
+  ];
+  assert.equal(coveredByPrefix(pairs, "/ui/u18.css"), true);
+  assert.equal(coveredByPrefix(pairs, "/account/ui/u18.css"), true);
+
+  // **ここが肝。** `/account/nfc/ui/...` は `/account/` でも始まるので、
+  // 緩く見ると dashboard が nfc のものを借りても通ってしまう。
+  assert.equal(coveredByPrefix(pairs, "/account/nfc/ui/u18.css"), false);
 });
 
-const PROBE = "  set -- /login /account\n";
+const PROBE = "  set -- /login:/ui/ /account:/account/ui/\n";
 
 test("配っているのに触られない Worker があれば落ちる", () => {
   const result = check({
-    probeText: "  set -- /login\n",
+    probeText: "  set -- /login:/ui/\n",
     workers: [{ name: "dash", assets: ["/account/ui/u18.css"], hasInventory: true }],
   });
   assert.equal(result.ok, false);
@@ -56,12 +72,17 @@ test("配っているのに触られない Worker があれば落ちる", () => 
 });
 
 test("アセットを配っていない Worker は無視する", () => {
+  // 接頭辞の逆向き検査が鳴らないよう、実在のアセットを 1 つ持つ Worker も渡す。
   const result = check({
     probeText: PROBE,
-    workers: [{ name: "plain", assets: [], hasInventory: true }],
+    workers: [
+      { name: "plain", assets: [], hasInventory: true },
+      { name: "a", assets: ["/ui/x.css"], hasInventory: true },
+      { name: "d", assets: ["/account/ui/x.css"], hasInventory: true },
+    ],
     unprobeable: {},
   });
-  assert.equal(result.ok, true);
+  assert.deepEqual(result.problems, []);
 });
 
 test("UNPROBEABLE の理由が空なら落ちる", () => {
@@ -76,12 +97,19 @@ test("UNPROBEABLE の理由が空なら落ちる", () => {
 });
 
 test("理由が書いてあれば通す", () => {
+  // 宣言された接頭辞に入るアセットを持つ Worker も渡す。**渡さないと
+  // 「接頭辞に入るアセットが無い」のほうが鳴る** —— UNPROBEABLE の
+  // Worker のアセットは、どの接頭辞にも入らないのが正常なので。
   const result = check({
     probeText: PROBE,
-    workers: [{ name: "w", assets: ["/nowhere/ui/x.css"], hasInventory: true }],
+    workers: [
+      { name: "w", assets: ["/nowhere/ui/x.css"], hasInventory: true },
+      { name: "a", assets: ["/ui/x.css"], hasInventory: true },
+      { name: "d", assets: ["/account/ui/x.css"], hasInventory: true },
+    ],
     unprobeable: { w: "未ログインでは 302 を返すため、外から参照を読めない" },
   });
-  assert.equal(result.ok, true);
+  assert.deepEqual(result.problems, []);
 });
 
 test("実物の UNPROBEABLE には全部理由が書いてある", () => {
@@ -111,4 +139,16 @@ test("実物のリポジトリで通る", () => {
     "アセットを配る Worker が 2 個未満。route-inventory の読み取りが効いていない可能性がある",
   );
   assert.ok(result.pages.length >= 2, "既定ページが 2 件未満");
+});
+
+test("どの Worker のアセットも入らない接頭辞が残っていたら落ちる", () => {
+  // 配信パスを変えたときにここが置き去りになる。残ると借用の検査が
+  // **全部の参照を弾く**ようになり、原因が「借用」と報告される。
+  const result = check({
+    probeText: "  set -- /login:/ui/ /account:/old-path/ui/\n",
+    workers: [{ name: "a", assets: ["/ui/x.css"], hasInventory: true }],
+    unprobeable: {},
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /\/old-path\/ui\/ の接頭辞に入るアセットが/);
 });

@@ -48,18 +48,30 @@ fi
 base="${1%/}"
 shift
 
-# 既定のページ。**増やしたら scripts/check-asset-probe-pages.mjs も見ること。**
-# あちらが「アセットを配る Worker が全部ここに居るか」を突き合わせている。
+# 既定のページと、**そのページが自分で配っているはずの接頭辞**（`ページ:接頭辞`）。
+# **増やしたら scripts/check-asset-probe-pages.mjs も見ること。** あちらが
+# 「アセットを配る Worker が全部ここに居るか」「接頭辞が実物と合っているか」を
+# 突き合わせている。
 if [ "$#" -eq 0 ]; then
-  set -- /login /account
+  set -- /login:/ui/ /account:/account/ui/
 fi
 
 failures=0
 checked=0
 
-for page_path in "$@"; do
+for spec in "$@"; do
+  page_path="${spec%%:*}"
+  own_prefix="${spec#*:}"
+  if [ "$own_prefix" = "$page_path" ]; then
+    # 接頭辞が付いていない（`ページ` だけ）。借用の検査ができないので落とす。
+    # 省略を許すと、**付け忘れたページだけ静かに緩くなる。**
+    echo "::error::${spec} に接頭辞がありません。\`ページ:接頭辞\` の形で渡すこと（例: /account:/account/ui/）。"
+    failures=$((failures + 1))
+    continue
+  fi
+
   page_url="${base}${page_path}"
-  echo "GET ${page_url}"
+  echo "GET ${page_url}  (自前の接頭辞: ${own_prefix})"
 
   # **`-f` を付けない。** `/account` は未ログインで 401 と一緒に画面を返す
   # （ログイン導線）。`-f` だと 401 で落ち、「アセットが引けない」ではなく
@@ -107,6 +119,27 @@ for page_path in "$@"; do
   while IFS= read -r url; do
     [ -z "$url" ] && continue
     checked=$((checked + 1))
+
+    # **自分で配っているか、隣から借りているか。**
+    #
+    # 中身が同じなら**ハッシュも同じ**になる（共有の `@u18/web-ui`）。
+    # つまり dashboard のページが誤って `/ui/u18.<hash>.css`（auth 側の
+    # パス）を参照しても、**auth が配っているので 200 で通る。** 借用は
+    # それ自体では壊れず、**片方のハッシュが変わった瞬間に壊れる**
+    # （#246 で実際に踏んだ）。
+    #
+    # だから「引けること」ではなく「**自分の接頭辞の下にあること**」を見る。
+    # 接頭辞は厳密に比べる —— `/account/nfc/ui/...` は `/account/` で
+    # 始まるので、緩く見ると dashboard が nfc のものを借りても通る。
+    case "$url" in
+      "${own_prefix}"*) ;;
+      *)
+        echo "::error::${page_path} が ${url} を参照しています。これは自分で配っているものではありません（自前は ${own_prefix} の下）。"
+        echo "  中身が同じならハッシュも同じになるので、引けてしまいます。壊れるのは片方のハッシュが変わった瞬間です（#246）。"
+        failures=$((failures + 1))
+        continue
+        ;;
+    esac
 
     # 内容ハッシュが入っていること（#211）。入っていなければ immutable を
     # 付けてはいけないので、キャッシュの検査より先に見る。
