@@ -138,6 +138,13 @@
         //
         // このホストは短縮 URL 専用で他に載せるものが無いので、Worker に
         // 全部渡して未知のパスは Worker 自身に 404 を返させる。
+        //
+        // **副作用: この Worker の全パスがこのホストからも叩ける**（#280）。
+        // `/health` は 200 を返し、`/account/nfc/cards` は届いたうえで
+        // 401 になる（セッション Cookie は `__Host-` 接頭辞で
+        // `auth.under18.dev` にしか送られないため）。**漏れてはいないが、
+        // 公開面は 2 ホストに開いている。** ルートを足すときは
+        // `test/route-inventory.ts` で両方から見えてよいかを考えること。
         { "pattern": "go.under18.dev/*", "zone_name": "under18.dev" },
         // `/*` は裸の接頭辞に一致しない（dashboard の wrangler.jsonc の
         // 同じ箇所を参照）。`/account/nfc` も拾うために 2 つ並べる。
