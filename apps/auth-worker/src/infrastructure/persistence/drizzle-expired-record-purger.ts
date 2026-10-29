@@ -3,6 +3,7 @@ import {
   emailChallenges,
   type IdentityDatabase,
   oauthAuthorizationCodes,
+  oauthTokens,
   sessions,
   webauthnChallenges,
 } from "@u18/db";
@@ -66,6 +67,27 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
                 isNull(oauthAuthorizationCodes.consumedAt),
                 lt(oauthAuthorizationCodes.consumedAt, dead),
               ),
+            ),
+            limit,
+          );
+
+        case "oauth_tokens":
+          // **`sessions` と同じ形。** 期限切れだけを条件にすれば失効済みも
+          // 最終的に入る（アクセストークンの寿命は 10 分なので、失効させた
+          // 行も 10 分以内に期限切れになる）。それでも `revoked_at` を見るのは、
+          // **期限切れの後に失効させた行を即座に消さない**ため ——
+          // 同意の取り消し（`oauth_grants.revoked_at`）は紐づくトークンを
+          // 失効させるので、とうに期限切れの行に失効印が付くことがある。
+          //
+          // **`grant_id` の cascade には頼らない。** `oauth_grants` は掃除
+          // 対象ではない（期限を持たない継続中の状態なので）から、
+          // cascade は同意そのものを消したときにしか効かない。
+          return this.deleteDead(
+            oauthTokens,
+            oauthTokens.id,
+            and(
+              lt(oauthTokens.expiresAt, dead),
+              or(isNull(oauthTokens.revokedAt), lt(oauthTokens.revokedAt, dead)),
             ),
             limit,
           );
