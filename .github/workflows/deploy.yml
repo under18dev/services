@@ -392,10 +392,24 @@ jobs:
   #     https://go.under18.dev/health              200
   #     https://go.under18.dev/account/nfc/cards   401（認証で止まる）
   #
-  # ここで `/c/*` を使うのは、**正しい Worker が答えていることまで
-  # 見たいから**である。404 を返す主体は他にもいる（route の割り当てを
-  # 間違えれば dashboard や auth の 404 が返る）ので、本文まで確かめる。
-  # `/health` はどの Worker でも似た形を返すので、取り違えを捕まえられない。
+  # ここで `/c/*` を使うのは、**見ている範囲が広いから**である。
+  # `/health` は Identity にも D1 にも触れずに答えると決めてあり
+  # （`src/presentation/http/app.ts` のコメント）、**Worker が起動した
+  # ことしか言わない。** `/c/*` は**ルーティング + 起動 + カードの解決
+  # （NFC_DB の読み）**まで通る。
+  #
+  # 本文まで見るのは「正しい Worker が答えていること」を確かめるため。
+  # 404 を返す主体は他にもいる（route の割り当てを間違えれば dashboard や
+  # auth の 404 が返る）ので、ステータスだけでは足りない。
+  #
+  # **ただし「/health はどの Worker でも似た形を返すので取り違えを
+  # 捕まえられない」ではない。** 本文が Worker を名乗っている:
+  #
+  #     go.under18.dev/health    {"status":"ok","service":"u18-nfc",...}
+  #     auth.under18.dev/health  {"status":"ok","service":"u18-auth",...}
+  #
+  # `--contains '"service":"u18-nfc"'` と書けば取り違えは捕まる。
+  # `/c/*` を選ぶ理由は**範囲**であって、名乗らないことではない。
   #
   # **長らく「/health はどちらの route にも当たらず外から叩けない（#97）」と
   # 書いてあった。** 結論（/c/* を使う）は変わらないが、**理由が事実では
