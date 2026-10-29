@@ -87,6 +87,21 @@ export const AUDIT_EVENTS = [
    * 手がかり**になる（`users` の行は残るが、中身は置き換わっている）。
    */
   "user.purged",
+
+  // --- 運用者が wrangler 越しに書くもの（`ops.` 接頭辞） ---
+  //
+  // **アプリが書くイベントと混ざらないよう接頭辞で分けてある**
+  // （ランブック §10.6）。出所が違えば信用の度合いも違う。
+  /**
+   * 管理権限を与えた（`scripts/admin-role.mjs`）。
+   *
+   * **長らく登録簿に無く、180 日で消えていた**（#270）。決定 8 が
+   * 「管理者は Passkey 必須」として守ろうとしているものそのものなので、
+   * 他のどの security よりも支配権が変わる。
+   */
+  "ops.admin.granted",
+  /** 管理権限を剥がした。締め出しの手口でもある。 */
+  "ops.admin.revoked",
   /** displayName / username の変更。 */
   "profile.updated",
 
@@ -195,6 +210,10 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * R2 への退避（730 日）と合わせて約 4 年になる（決定 14）。
    */
   "user.purged": "security",
+  /** 管理権限の付与。**アカウントの支配権が変わる操作そのもの**（#270）。 */
+  "ops.admin.granted": "security",
+  /** 剥奪。締め出しの手口でもあるので、付与と同じだけ残す。 */
+  "ops.admin.revoked": "security",
   /** 認証器を足した。乗っ取りの最も典型的な足跡。 */
   "passkey.register": "security",
   /** 認証器を外した。締め出しの手口でもある。 */

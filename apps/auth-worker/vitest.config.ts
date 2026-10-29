@@ -26,9 +26,15 @@ const wranglerSource = readFileSync(join(import.meta.dirname, "wrangler.jsonc"),
  * どこからも発行されない名前や、逆に発行されているのに登録簿に無い名前を
  * 見つけるのが目的。
  *
- * **行コメントの中は数えない。** `// 監査ログ（event: "retention.sweep"）に
+ * **コメントの中は数えない。** `// 監査ログ（event: "retention.sweep"）に
  * 出している` のような説明が `src/index.ts` にあり、それを実装と
  * 取り違えると照合が緩む。
+ *
+ * **JSDoc（`*` で始まる行）も除く。** 行コメントだけを除いていたころ、
+ * **この走査の仕組みを説明する JSDoc が、この走査に拾われた**（#265 /
+ * #270 で 2 回）。説明のために書いた例が「登録簿に無い名前が発行されて
+ * いる」と報告される形で、**散文と対象を同じ面で見分けている限り
+ * 避けられない。** 2 回落ちたので構造で消す。
  *
  * ソースの走査は Node 側でしかできない（テスト本体は workerd の中で動く）。
  */
@@ -46,6 +52,8 @@ function collectAuditEventNames(dir: string): string[] {
     }
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
     for (const line of readFileSync(path, "utf8").split("\n")) {
+      // JSDoc / ブロックコメントの継続行。散文なので実装ではない。
+      if (/^\s*\*/.test(line)) continue;
       const code = line.split("//")[0] ?? "";
       for (const match of code.matchAll(/event: "([a-z_.]+)"/g)) names.push(match[1]!);
     }

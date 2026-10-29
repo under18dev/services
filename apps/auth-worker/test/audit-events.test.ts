@@ -58,6 +58,23 @@ describe("AUDIT_EVENT_RETENTION", () => {
     expect(classified).toEqual(registered);
   });
 
+  it("ops. のイベントはすべて security", () => {
+    // **運用者が wrangler 越しに書くものは、どれも支配権に関わる**
+    // （いまは管理権限の付与・剥奪）。180 日で消えると、
+    // 「誰がいつ管理者にしたか」が半年で分からなくなる。
+    //
+    // **長らく登録簿に無く、区分が付かないまま 180 日で消えていた**
+    // （#270）。直したあとに戻せないよう、ここで固定する ——
+    // 直前の状態では、区分を standard に書き換えても**どのテストも
+    // 落ちなかった。**
+    const ops = Object.entries(AUDIT_EVENT_RETENTION).filter(([event]) => event.startsWith("ops."));
+
+    expect(ops.length, "ops. のイベントが 1 つも無い").toBeGreaterThan(0);
+    for (const [event, tier] of ops) {
+      expect(tier, `${event} は security であること`).toBe("security");
+    }
+  });
+
   it("security は standard より長い", () => {
     // 逆転すると「長期側に置いたのに先に消える」になる。
     expect(AuditRetention.security).toBeGreaterThan(AuditRetention.standard);
