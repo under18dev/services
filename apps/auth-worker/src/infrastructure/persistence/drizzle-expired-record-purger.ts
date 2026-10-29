@@ -130,6 +130,17 @@ export class DrizzleExpiredRecordPurger implements ExpiredRecordPurger {
           // ここだけ退避してから消す（`ARCHIVED_TARGETS`）。
           // 保持期間はイベントによって変わる（#22）。
           return this.archiveThenDelete(auditLogCondition(dead, eventDeadlines), limit);
+
+        default:
+          // **網羅性をここで表明する。** これが無くても `case` の
+          // 書き忘れは型で落ちるが、落ちている理由は「IIFE の戻り値に
+          // `undefined` が混ざり、下の `deleted >= limit` が受け付けない」
+          // という**下流の使われ方**でしかない。`default: return 0;` を
+          // 足す人が 1 人いれば、あるいは `deleted` の使い道が変われば、
+          // **網羅性は黙って消える**（`case` を足し忘れた target だけが
+          // 0 件削除で成功を返す）。表明を置いて、落ちる理由を
+          // ここに固定する（#301、指摘: 39）。
+          return assertExhaustive(target);
       }
     })();
 
@@ -258,4 +269,9 @@ function auditLogCondition(
       and(inArray(auditLogs.event, events), lt(auditLogs.createdAt, new Date(deadline))),
     ),
   );
+}
+
+/** 届かないはずの分岐。`RetentionTarget` が増えたらここが型で落ちる（#301）。 */
+function assertExhaustive(target: never): never {
+  throw new Error(`掃除の対象に case がありません: ${String(target)}`);
 }
