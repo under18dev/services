@@ -73,6 +73,22 @@ jobs:
       - name: Check deadlines
         run: pnpm check:deadlines
 
+      # **同じ理由でここに置く。** 文書が「#N で決める」と指している issue
+      # は、**他人が閉じた瞬間に**落ちるようになる。差分とは無関係なので
+      # `Lint & format` には混ぜない。
+      #
+      # `gh` の認証に `GITHUB_TOKEN` が要る。public リポジトリなので
+      # 読むだけなら既定の権限（`contents: read`）で足りる。
+      #
+      # **期限と違って、踏んだ人が直せることが多い** —— 残件が残っている
+      # なら新しい issue を立てて指し直す、決着しているなら本文を書き換える。
+      # どちらも 1 行で済む。赤を消すために参照を消すのは、追跡をやめるのと
+      # 同じなので採らない。
+      - name: Check issue references
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm check:issue-refs
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
