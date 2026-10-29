@@ -1,8 +1,10 @@
 import { newClientId } from "@u18/domain";
 import type { OAuthClient, OAuthClientType } from "../../domain/entities/oauth-client";
+import { hasFreshAuthentication } from "../../domain/services/reauthentication";
 import { validateRedirectUriForRegistration } from "../../domain/services/redirect-uri";
 import { formatScope, unsupportedScopes } from "../../domain/services/scope";
 import type { AuditLogger } from "../ports/audit-log.port";
+import type { Clock } from "../ports/clock.port";
 import type { RandomTokenGenerator, TokenHasher } from "../ports/crypto.port";
 import type { OAuthClientRepository } from "../ports/oauth-client.repository";
 import { requireAdminSession, type AdminAccessDeps } from "./admin-access";
@@ -17,9 +19,8 @@ export type CreateOAuthClientCommand = {
   readonly redirectUris: readonly string[];
   /** 省略すると `openid profile email`。 */
   readonly scopes?: readonly string[] | undefined;
-  /** 省略すると false（同意画面を省略しない）。 */
-  readonly isFirstParty?: boolean | undefined;
   readonly logoUrl?: string | null | undefined;
+  // `isFirstParty` は**受け取らない**。クラスの JSDoc を参照。
 };
 
 export type CreateOAuthClientOutput = {
@@ -37,6 +38,8 @@ export type CreateOAuthClientDeps = AdminAccessDeps & {
   readonly clients: OAuthClientRepository;
   readonly tokens: RandomTokenGenerator;
   readonly hasher: TokenHasher;
+  /** 再認証の窓を測るのに要る。 */
+  readonly clock: Clock;
   readonly audit: AuditLogger;
 };
 
@@ -54,8 +57,43 @@ const MAX_REDIRECT_URIS = 16;
  * `scripts/oauth-client.mjs` の冒頭が書いていたとおり、登録を叩ける場所を
  * 広げることは **Redirect URI の完全一致検証の前提を薄くする**ことに等しい。
  * 「運用者の手元からしか叩けない」を「管理者だけが叩ける」へ置き換えた
- * 以上、**管理者の資格が唯一の壁**になる（脅威モデル RR-21）。だから
+ * 以上、**管理者の資格が壁の中心**になる（脅威モデル RR-21）。だから
  * 判定は Presentation ではなくここにある。
+ *
+ * ## 再認証が要る
+ *
+ * **盗んだセッション Cookie 1 枚で通させない。** この操作が決めるのは
+ * **認可コードの宛先**で、攻撃者が自分の `redirect_uri` を登録できると、
+ * Redirect URI の完全一致検証（T-1）を**登録の側から迂回**できる。
+ * 照合のコードは健在なまま、照合先が攻撃者のものになるという形である。
+ *
+ * **Passkey の登録（#306）が既存セッションだけで通るのと水準が違う。**
+ * あちらは自分の認証器を**足す**操作で、こちらは**他人の認可の宛先を作る**
+ * 操作である。`deletePasskey` / username の変更と同じ側に置く。
+ *
+ * 判定は `hasFreshAuthentication`（`domain/services/reauthentication.ts`）を
+ * そのまま使う。**独自の窓を作らない** —— 再認証の意味が操作ごとに違うと、
+ * 利用者から見た手順（ログインし直してからやり直す）も説明も分かれる。
+ * 窓は 5 分で、セッションの `created_at` が「最後に本人確認を通した時刻」
+ * そのものになっている（この実装にはセッション行を使い回したまま再認証する
+ * 経路が無い）。
+ *
+ * **順序は「管理者か」が先、「新しいか」が後。** 逆にすると、古い
+ * セッションを持つ一般利用者に `reauthentication_required` が返り、
+ * **管理機能が存在することだけが伝わる**（`not_found` に畳んだ意味が消える）。
+ *
+ * ## `is_first_party` は受け取らない
+ *
+ * **この入口から同意画面の省略は指定できない。常に false で登録する。**
+ *
+ * 「クライアントを登録できる」と「同意を省略できる」は**別の権限**で、
+ * 後者のほうが重い（T-1 の攻撃シナリオは「ファーストパーティなので
+ * 同意画面が出ず、被害者が気づかない」を前提にしている）。1 つの口に
+ * まとめると、**管理者アカウント 1 つの乗っ取りで同意の省略まで取れる。**
+ *
+ * 一次パーティの指定は稀で、重い判断である。経路は
+ * `scripts/oauth-client.mjs --first-party` だけに残す ——
+ * **あのスクリプトを残す理由が 1 つ増えた**ことになる。
  *
  * ## 検証は Domain の関数をそのまま使う
  *
@@ -89,7 +127,15 @@ export class CreateOAuthClientUseCase {
     );
     if (!admin.ok) return admin;
 
-    const { userId } = admin.value;
+    const { session, userId } = admin.value;
+
+    // 管理者であることを確かめた**後**に見る。逆順だと、古いセッションの
+    // 一般利用者に `reauthentication_required` が返り、`not_found` に
+    // 畳んだ意味（管理機能の存在を漏らさない）が消える。
+    if (!hasFreshAuthentication(session, this.deps.clock.now())) {
+      await this.record(userId, "failure", command.clientId, { reason: "stale_authentication" });
+      return err("reauthentication_required", "recent authentication is required");
+    }
 
     if (command.redirectUris.length === 0 || command.redirectUris.length > MAX_REDIRECT_URIS) {
       // Redirect URI を持たないクライアントは認可フローに入れない。
@@ -140,7 +186,11 @@ export class CreateOAuthClientUseCase {
       clientType: command.clientType,
       clientSecretHash,
       allowedScopes: formatScope(scopes),
-      isFirstParty: command.isFirstParty === true,
+      // **常に false。** 同意画面の省略はこの入口から取れない（上記）。
+      // 定数を直書きしているのは、command 側に項目が無いことを
+      // 読む人に見せるため —— `command.isFirstParty === true` のような
+      // 書き方だと「渡せば立つ」と読める。
+      isFirstParty: false,
       logoUrl: command.logoUrl ?? null,
       redirectUris: validated,
     });
@@ -157,7 +207,6 @@ export class CreateOAuthClientUseCase {
       metadata: {
         internalId: created.id,
         clientType: created.clientType,
-        isFirstParty: created.isFirstParty,
         redirectUris: validated,
         scopes: [...scopes],
       },

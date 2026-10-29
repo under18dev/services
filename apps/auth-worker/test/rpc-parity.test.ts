@@ -270,6 +270,24 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
     expect(!result.ok && result.error.code).toBe("not_found");
   });
 
+  it("登録には再認証が要る（管理者でも古いセッションでは通らない）", async () => {
+    // **再認証の判定が片方の入口にしか無い**のがこのファイルの見張る形。
+    // 登録はいま RPC からしか叩けないので、ここが唯一の固定になる。
+    const admin = await seedLoggedInUser({ authTime: STALE });
+    await db().update(users).set({ isAdmin: true }).where(eq(users.id, admin.userId)).run();
+
+    const result = await rpc.createOAuthClient({
+      sessionToken: admin.sessionToken,
+      caller: "dashboard-worker",
+      clientId: "u18-stale",
+      name: "古いセッションからの登録",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+
+    expect(!result.ok && result.error.code).toBe("reauthentication_required");
+  });
+
   it("管理者なら通る", async () => {
     const user = await seedLoggedInUser();
     await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();

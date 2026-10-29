@@ -369,6 +369,13 @@ export type DeletePasskeyResult = RpcResult<{
 // 3. **管理者でないセッションには `not_found` を返す。** 「権限がありません」と
 //    「そんな機能はありません」を区別すると、管理機能の存在そのものが
 //    一般利用者に漏れる。
+// 4. **登録と失効には再認証が要る**（`reauthentication_required`）。
+//    決めているのは**認可コードの宛先**なので、盗んだセッション Cookie
+//    1 枚で通ってよい操作ではない —— 通ると、Redirect URI の完全一致検証を
+//    **登録の側から迂回**できる。判定は auth-worker の UseCase にあり、
+//    窓は `deletePasskey` / username 変更と同じ 5 分。
+// 5. **同意画面の省略（`is_first_party`）はこの入口から指定できない。**
+//    登録できることと同意を省略できることは別の権限で、後者のほうが重い。
 
 export const listOAuthClientsInputSchema = z.object({
   sessionToken: sessionTokenSchema,
@@ -450,15 +457,19 @@ export const createOAuthClientInputSchema = z.object({
    * `displayName` と同じ扱い）。
    */
   scopes: z.array(z.string().min(1).max(64)).min(1).max(16).optional(),
-  /**
-   * u18 公式サービスとして登録するか（同意画面を省略してよい）。
-   *
-   * **既定は false。** 同意画面の省略は「利用者が気づかないまま認可が
-   * 完了する」ということで、脅威モデル T-1 が攻撃の前提に挙げているのは
-   * まさにそれである。省略形で付くべき印ではない。
-   */
-  isFirstParty: z.boolean().optional(),
   logoUrl: z.string().max(2048).nullable().optional(),
+  // **`isFirstParty` は無い。** この入口から登録したクライアントは
+  // 必ず third-party（同意画面が出る）になる。
+  //
+  // 「クライアントを登録できる」と「同意を省略できる」は**別の権限**で、
+  // 後者のほうが重い —— 脅威モデル T-1 の攻撃シナリオは「ファースト
+  // パーティなので同意画面が出ず、被害者が気づかない」を前提にしている。
+  // 1 つの口にまとめると、**管理者アカウント 1 つの乗っ取りで同意の省略
+  // まで取れる。**
+  //
+  // **項目ごと置いていない**のは、`isFirstParty: false` を残すと次に見た
+  // 人が「渡せば立つ」と読むため。一次パーティの登録は
+  // `scripts/oauth-client.mjs --first-party` だけに残してある（RR-21）。
 });
 
 export type CreateOAuthClientInput = z.infer<typeof createOAuthClientInputSchema>;
@@ -496,6 +507,12 @@ export type DisableOAuthClientResult = RpcResult<{
    * が登録済みか」を総当たりで調べる窓口になる。失効は何度呼んでも同じ
    * 状態へ収束し、`disabled_at` は最初の 1 回から動かない
    * （`DrizzleOAuthClientRepository.disable`）。
+   *
+   * **発行済みの Access Token は止まらない。** 止まるのは**以後の認可**
+   * だけで、既に出ているトークンは期限（最大 10 分）まで
+   * `/oauth/userinfo` から claim を返し続ける。いま動いているアクセスを
+   * 切るのは `revokeGrant` の仕事である。**表示側は「アクセスを停止
+   * しました」と書かないこと** —— 正しくは「新しい認可を止めました」。
    */
   readonly disabled: boolean;
 }>;
