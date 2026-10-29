@@ -77,6 +77,22 @@ passkeyRoutes.post("/register/verify", async (c) => {
 passkeyRoutes.post("/login/options", async (c) => {
   if (!isAllowedOrigin(c)) return problem(c, 403, "forbidden", "origin not allowed");
 
+  // **この経路は行を作る**（#264）。`webauthn_challenges` に 1 行ずつ増え、
+  // 保持は 24 時間（`RetentionPolicy.webauthn_challenges`）。Cron の掃除は
+  // 1 回 1,000 件 × 15 分おき = 1 日およそ 96,000 行までなので、
+  // **作る速度がそれを超えると溜まり続ける。**
+  //
+  // **入力を取らないので「読み取り」に見える**のが、制限が抜けていた
+  // 理由だと思われる。下の `/login/verify` には「署名検証は CPU を使う」
+  // という分かりやすい理由があり、そちらには付いていた。
+  //
+  // `login_verify` の枠を共有する。binding を増やさずに済み、正常利用
+  // （options → verify の 1 往復）で 2 回消費しても 20 / 60 秒なら
+  // 10 往復できる。**同じ利用者の同じ操作なので、別々の枠を持たせる
+  // 理由がない。**
+  const limited = await enforceIpRateLimit(c, "login_verify");
+  if (limited !== null) return limited;
+
   // 入力は受け取らない。誰のログインかを問わないことで、応答の差から
   // アカウントの実在を推測されないようにする（仕様書 9）。
   const result = await c.get("container").useCases.passkeyLoginOptions.execute();

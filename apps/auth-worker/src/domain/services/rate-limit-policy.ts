@@ -96,10 +96,18 @@ export const RateLimitPolicy: Readonly<Record<RateLimitScope, RateLimitRule>> = 
   email_verify: { binding: "RL_EMAIL_VERIFY", limit: 15, periodSeconds: 60 },
 
   /**
-   * Passkey のログイン検証。
+   * Passkey のログイン検証**と options**。
    *
    * 署名検証は CPU を使うので、失敗を投げ続けられること自体が負荷になる。
-   * 正常利用は 1 回で終わるため、他の 2 つより緩めても危険が増えない。
+   *
+   * **`options` も同じ枠を使う**（#264）。あちらは入力を 1 つも取らず
+   * アカウントの有無も漏らさないので読み取りに見えるが、
+   * **`webauthn_challenges` に 1 行ずつ作る。** 保持は 24 時間だが、
+   * Cron の掃除は 1 日およそ 96,000 行までなので、作る速度がそれを
+   * 超えると溜まり続ける。
+   *
+   * 正常利用は options → verify の 1 往復で 2 回消費する。20 なら
+   * 10 往復でき、**同じ利用者の同じ操作に別々の枠を持たせる理由がない。**
    */
   login_verify: { binding: "RL_LOGIN_VERIFY", limit: 20, periodSeconds: 60 },
 
