@@ -8,6 +8,7 @@ import type { IdentityOutcome } from "../../../application/ports";
 import type { AppBindings } from "../types";
 import { HomePage } from "./home-page";
 import {
+  APPS_ROUTE,
   GRANTS_ROUTE,
   ISLAND_ROUTE,
   OVERVIEW_ROUTE,
@@ -16,6 +17,8 @@ import {
   SESSIONS_ROUTE,
   STYLESHEET_ROUTE,
 } from "./asset-paths";
+import { APP_CATALOG, buildAppCatalog } from "./app-catalog";
+import { AppsPage } from "./apps-page";
 import { GrantsPage } from "./grants-page";
 import { PasskeysPage } from "./passkeys-page";
 import { ProfilePage } from "./profile-page";
@@ -138,6 +141,29 @@ export const accountUiRoutes = new Hono<AppBindings>()
     if (!grants.ok) return renderFailure(c, grants);
 
     return c.html(<GrantsPage grants={grants.value} />);
+  })
+
+  /**
+   * u18 Identity で使えるアプリのカタログ（#308）。
+   *
+   * **カタログ自体はコードにある**（`app-catalog.ts`。D1 から引かない理由は
+   * あちらの冒頭）。それでも `listGrants` を呼ぶのは、**「連携済み」バッジを
+   * 出すため**である。カタログと実態を結びつけているのがこの 1 本の RPC で、
+   * これが無いと「どこへ行けるか」は出せても「もう繋いだのか」は出せない。
+   *
+   * **ログインを要求する。** 中身は全利用者に同じだが、バッジが自分の
+   * `oauth_grants` を映すので、Cookie が無い状態で出すと「誰のバッジでも
+   * ない一覧」になる。他の画面と同じ 401 に揃えるほうが、入口の扱いが
+   * 1 つで済む。
+   */
+  .get(APPS_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const grants = await c.get("identity").listGrants(token);
+    if (!grants.ok) return renderFailure(c, grants);
+
+    return c.html(<AppsPage groups={buildAppCatalog(APP_CATALOG, grants.value)} />);
   })
 
   /** 共有スタイルシート（`@u18/web-ui` の `UI_STYLESHEET`）。 */

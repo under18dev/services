@@ -1,9 +1,11 @@
 import { DEV_SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
 import { scopeLabel } from "@u18/web-ui";
 import type { GrantListItem, PasskeySummary, SessionListItem, UserProfile } from "@u18/contracts";
+import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import {
+  APPS_PATH,
   GRANTS_PATH,
   OVERVIEW_PATH,
   PASSKEYS_PATH,
@@ -11,6 +13,9 @@ import {
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
+import type { AppCatalogEntry, AppCatalogGroup } from "../src/presentation/http/ui/app-catalog";
+import { APP_CATALOG, buildAppCatalog } from "../src/presentation/http/ui/app-catalog";
+import { AppsPage } from "../src/presentation/http/ui/apps-page";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
 
 /**
@@ -53,7 +58,7 @@ const FULL_IDENTITY = {
   listGrants: async () => rpcOk([] as GrantListItem[]),
 };
 
-const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH];
+const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH, APPS_PATH];
 
 describe("3 つの画面が HTML を返す", () => {
   it.each(PAGES)("%s", async (path) => {
@@ -454,5 +459,173 @@ describe("実装側の語を画面に出さない", () => {
     // 知らない scope は畳まずコードのまま出す。「その他」にすると、
     // 何を許可しているか分からないものが画面から消える。
     expect(html).toContain("wallet:write");
+  });
+});
+
+/**
+ * u18 Identity で使えるアプリのカタログ（`/account/apps`、#308）。
+ *
+ * **`/account/grants` と取り違えやすい。** あちらは「自分が同意した RP」、
+ * こちらは「基盤に繋がっているアプリ全部」。ここで確かめるのは、
+ * **カタログの中身がどうであれ画面が成立すること**と、**「連携済み」が
+ * `listGrants` の結果だけから決まること**である。
+ */
+describe("アプリのカタログ（#308）", () => {
+  /**
+   * カタログを差し替えて画面だけを描く。
+   *
+   * **本物のカタログ（`APP_CATALOG`）は 1 件しか無く、しかも RP ではない**
+   * ので、`/account/apps` を引くだけでは「0 件」も「連携済み」も踏めない。
+   * `AppsPage` に直接 props を渡して、カタログが変わったときの形を見る。
+   */
+  async function renderApps(groups: readonly AppCatalogGroup[]): Promise<string> {
+    const probe = new Hono().get("/", (c) => c.html(AppsPage({ groups }) as never));
+    return await (await probe.request("/")).text();
+  }
+
+  const GRANT: GrantListItem = {
+    clientId: "cli_catalog",
+    clientName: "Example App",
+    logoUrl: null,
+    scopes: ["openid"],
+    grantedAt: "2026-10-24T00:00:00.000Z",
+  };
+
+  const EXTERNAL: AppCatalogEntry = {
+    id: "example",
+    name: "Example App",
+    description: "説明",
+    url: "https://app.example/",
+    category: "service",
+    clientId: "cli_catalog",
+  };
+
+  it("カテゴリとアプリ名が出ている", async () => {
+    const html = await (await withCookie(APPS_PATH, FULL_IDENTITY)).text();
+
+    expect(html).toContain("サービス");
+    for (const entry of APP_CATALOG) {
+      expect(html, `${entry.name} が出ていない`).toContain(entry.name);
+      expect(html, `${entry.name} の行き先が出ていない`).toContain(entry.url);
+    }
+  });
+
+  it("載せた行き先は絶対パスか https:// である", () => {
+    // **相対パスを書くと、見ている画面によって行き先が変わる。**
+    // `rel` を付けるかどうかもこの形から決めている（`isExternalUrl`）。
+    for (const entry of APP_CATALOG) {
+      expect(
+        entry.url.startsWith("/") || entry.url.startsWith("https://"),
+        `${entry.name} の url が ${entry.url}`,
+      ).toBe(true);
+    }
+  });
+
+  it("カタログが 0 件でも画面が壊れない", async () => {
+    // **枠だけ作って埋まっているように見せない**（#306）。載せられるものが
+    // 無いことは、それ自体が伝えたい状態である。
+    expect(buildAppCatalog([], [])).toEqual([]);
+
+    const html = await renderApps([]);
+
+    expect(html).toContain("まだありません");
+    // 見出しだけ残ると「読み込みに失敗した」に見える。
+    expect(html).not.toContain('panel-title">サービス');
+  });
+
+  it("中身の無いカテゴリを出さない", () => {
+    // 「開発」はまだ載せられるものが無い。見出しだけを先に置かない。
+    const onlyService: AppCatalogEntry[] = [
+      { id: "a", name: "A", description: "a", url: "/account/nfc", category: "service" },
+    ];
+
+    expect(buildAppCatalog(onlyService, []).map((group) => group.category.key)).toEqual([
+      "service",
+    ]);
+  });
+
+  describe("「連携済み」は listGrants の結果と一致する", () => {
+    it("grants に同じ client_id があれば連携済み", async () => {
+      const groups = buildAppCatalog([EXTERNAL], [GRANT]);
+
+      expect(groups[0]?.items[0]?.connected).toBe(true);
+      expect(await renderApps(groups)).toContain("連携済み");
+    });
+
+    it("grants に無ければバッジを出さない", async () => {
+      const groups = buildAppCatalog([EXTERNAL], []);
+
+      expect(groups[0]?.items[0]?.connected).toBe(false);
+      expect(await renderApps(groups)).not.toContain("連携済み");
+    });
+
+    it("別の client_id の grant では連携済みにしない", () => {
+      const other = buildAppCatalog([EXTERNAL], [{ ...GRANT, clientId: "cli_other" }]);
+
+      expect(other[0]?.items[0]?.connected).toBe(false);
+    });
+
+    it("client_id を持たないアプリは、連携の有無を一切出さない", async () => {
+      // 同一オリジンでセッション Cookie を直接読むアプリ（NFC）は OAuth を
+      // 通らない。**「未連携」と出すと嘘になる。**
+      const sameOrigin: AppCatalogEntry = {
+        id: "nfc",
+        name: "NFC カード",
+        description: "説明",
+        url: "/account/nfc",
+        category: "service",
+      };
+      const groups = buildAppCatalog([sameOrigin], [GRANT]);
+
+      expect(groups[0]?.items[0]?.connected).toBe(false);
+
+      const html = await renderApps(groups);
+      expect(html).not.toContain("連携済み");
+      expect(html).not.toContain("未連携");
+    });
+  });
+
+  describe("外部サイトへのリンク", () => {
+    it("別ホストへ出すリンクには rel が付く", async () => {
+      const html = await renderApps(buildAppCatalog([EXTERNAL], []));
+
+      expect(html).toContain('rel="noopener noreferrer"');
+    });
+
+    it("同一オリジンのリンクには付けない", async () => {
+      // 付けても害は無いが、**付いていることが「外部だ」の合図でなくなる。**
+      const sameOrigin: AppCatalogEntry = {
+        id: "nfc",
+        name: "NFC カード",
+        description: "説明",
+        url: "/account/nfc",
+        category: "service",
+      };
+      const html = await renderApps(buildAppCatalog([sameOrigin], []));
+
+      expect(html).not.toContain('rel="noopener noreferrer"');
+    });
+
+    it("プロトコル相対 URL を同一オリジンとみなさない", async () => {
+      // `//evil.example` は別ホストへ飛ぶ。`/` 始まりだけを見て判定すると
+      // ここをすり抜け、rel の無い外部リンクになる。
+      const protocolRelative: AppCatalogEntry = {
+        id: "x",
+        name: "X",
+        description: "説明",
+        url: "//evil.example/",
+        category: "service",
+      };
+      const html = await renderApps(buildAppCatalog([protocolRelative], []));
+
+      expect(html).toContain('rel="noopener noreferrer"');
+    });
+  });
+
+  it("この画面は JavaScript を要求しない", async () => {
+    // 読むだけの画面なので `<script>` を出さない。
+    const html = await (await withCookie(APPS_PATH, FULL_IDENTITY)).text();
+
+    expect(html).not.toContain("<script");
   });
 });
