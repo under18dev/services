@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 /**
- * 凍結アカウントから個人情報を落とす運用 CLI（#265 / ランブック §11.6）。
+ * アカウントから個人情報を落とす運用 CLI（#265 / ランブック §11.6）。
+ *
+ * **凍結を経由していなくても落とせる**（`active` にも当たる）。ただし
+ * **運用としては凍結を先にすること** —— 本人確認をしている間に本人が
+ * 使い続けるのを止められる。落としてからでは戻せない。
  *
  * ## これは元に戻せない
  *
@@ -160,16 +164,30 @@ async function purge(options) {
   }
 
   const sql = await loadSql();
-  const statements = [
-    sql.purgeUserSql(options.userId),
+
+  /**
+   * **監査は 2 番目に流す**（d5 の指摘 / #265）。
+   *
+   * 1 つ目の UPDATE が通った時点で個人情報は消えている。監査を最後に
+   * 置くと、**途中で失敗したときに「消えた個人情報」と「何も言っていない
+   * 監査ログ」だけが残る** —— §11.7 が証跡の保全を取ると決めた以上、
+   * **いちばん記録が要る失敗ケースで記録が無い**のは逆である。
+   *
+   * 逆に監査を先頭にすると「やっていないのに記録がある」になる。
+   * **`returning` が行を返したことが「実際に落ちた」ことの証拠**なので、
+   * そこを境にすれば両方の嘘を避けられる。
+   */
+  const purgeStatement = sql.purgeUserSql(options.userId);
+  const auditStatement = sql.purgeUserAuditSql({
+    userId: options.userId,
+    actor: options.actor,
+    reason: options.reason,
+  });
+  const cleanupStatements = [
     sql.deleteUserEmailsSql(options.userId),
     ...sql.revokeEverythingSql(options.userId),
-    sql.purgeUserAuditSql({
-      userId: options.userId,
-      actor: options.actor,
-      reason: options.reason,
-    }),
   ];
+  const statements = [purgeStatement, auditStatement, ...cleanupStatements];
 
   if (options.dryRun) {
     console.log(statements.join("\n\n"));
@@ -197,7 +215,7 @@ async function purge(options) {
 
   // 落とせたかどうかは UPDATE の返り行で判断する。事前の SELECT で判断すると、
   // その間に状態が変わっても気付けない（admin-role.sql.ts と同じ TOCTOU の話）。
-  const purged = queryRows(statements[0], options);
+  const purged = queryRows(purgeStatement, options);
   if (purged.length === 0) {
     console.log("");
     console.log("落とさなかった。既に status = 'deleted' か、ユーザーが存在しない。");
@@ -205,9 +223,13 @@ async function purge(options) {
     return;
   }
 
-  // **ここから先は、途中で失敗しても戻せない。** 1 つ目の UPDATE が通った
-  // 時点で個人情報は消えているので、残りは必ず流し切る。
-  for (const statement of statements.slice(1)) runSql(statement, options);
+  // **落ちたことが確定した直後に記録を残す。** ここから先が失敗しても、
+  // 「いつ・誰が・なぜ落としたか」は残る。
+  runSql(auditStatement, options);
+
+  // **ここから先は、途中で失敗しても戻せない。** 個人情報は既に消えて
+  // いるので、残りは必ず流し切る。失敗しても監査は上で残っている。
+  for (const statement of cleanupStatements) runSql(statement, options);
 
   console.log("");
   console.log("落としたあとの状態:");
