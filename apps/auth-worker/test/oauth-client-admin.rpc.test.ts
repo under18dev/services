@@ -39,9 +39,12 @@ beforeEach(async () => {
   rpc = new IdentityRPC(createExecutionContext(), appEnv());
 });
 
+/** 再認証の窓（5 分）から確実に外れる古さ。`rpc-parity.test.ts` と同じ値。 */
+const STALE = new Date(Date.now() - 60 * 60 * 1000);
+
 /** 管理者としてログイン済みの利用者。 */
-async function seedAdmin(): Promise<SeededUser> {
-  const user = await seedLoggedInUser();
+async function seedAdmin(options: { readonly authTime?: Date } = {}): Promise<SeededUser> {
+  const user = await seedLoggedInUser(options);
   await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
   return user;
 }
@@ -55,7 +58,6 @@ function createClient(
     clientType: "confidential" | "public";
     redirectUris: string[];
     scopes: string[];
-    isFirstParty: boolean;
   }> = {},
 ) {
   return rpc.createOAuthClient({
@@ -66,7 +68,6 @@ function createClient(
     clientType: overrides.clientType ?? "confidential",
     redirectUris: overrides.redirectUris ?? ["https://app.example/cb"],
     ...(overrides.scopes === undefined ? {} : { scopes: overrides.scopes }),
-    ...(overrides.isFirstParty === undefined ? {} : { isFirstParty: overrides.isFirstParty }),
   });
 }
 
@@ -272,14 +273,12 @@ describe("createOAuthClient", () => {
     const result = await createClient(admin, {
       redirectUris: ["https://app.example/cb", "https://app.example/cb?tenant=u18"],
       scopes: ["openid", "profile"],
-      isFirstParty: true,
     });
     if (!result.ok) throw new Error("登録に失敗した");
 
     expect(result.value.client).toMatchObject({
       clientId: "u18-admin-created",
       clientType: "confidential",
-      isFirstParty: true,
       scopes: ["openid", "profile"],
       disabledAt: null,
     });
@@ -294,14 +293,109 @@ describe("createOAuthClient", () => {
     ]);
   });
 
-  it("isFirstParty は既定で false", async () => {
-    // 同意画面の省略は、利用者が気づかないまま認可が完了するということ
-    // （脅威モデル T-1）。省略形で付くべき印ではない。
+  it("この入口から first-party では登録できない", async () => {
+    // **「クライアントを登録できる」と「同意を省略できる」は別の権限**で、
+    // 後者のほうが重い（脅威モデル T-1 は「ファーストパーティなので同意
+    // 画面が出ず、被害者が気づかない」を攻撃の前提にしている）。1 つの口に
+    // まとめると、管理者アカウント 1 つの乗っ取りで同意の省略まで取れる。
+    // 一次パーティの登録は `oauth-client.mjs --first-party` だけに残す。
     const admin = await seedAdmin();
 
     const result = await createClient(admin);
+    if (!result.ok) throw new Error("登録に失敗した");
 
-    expect(result.ok && result.value.client.isFirstParty).toBe(false);
+    expect(result.value.client.isFirstParty).toBe(false);
+    // DB の行でも確かめる。DTO だけ見ると、列に true が入っていても
+    // 写し取りが落としているだけ、という形を見逃す。
+    const row = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .get();
+    expect(row?.isFirstParty).toBe(false);
+  });
+
+  it("isFirstParty は契約の入力に存在しない（型で落ちる）", async () => {
+    // 項目を残して「既定 false」にすると、次に見た人が「渡せば立つ」と
+    // 読んで立てる。**契約から外してあること**をここで固定する ——
+    // 入力に足し直すと、この `@ts-expect-error` が「未使用」で落ちる。
+    const admin = await seedAdmin();
+
+    const result = await rpc.createOAuthClient({
+      sessionToken: admin.sessionToken,
+      clientId: "u18-wants-first-party",
+      name: "一次パーティのつもり",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+      // @ts-expect-error createOAuthClientInputSchema に isFirstParty は無い
+      isFirstParty: true,
+    });
+    if (!result.ok) throw new Error("登録に失敗した");
+
+    // zod が未知のキーを落とすので、実行時にも立たない。
+    expect(result.value.client.isFirstParty).toBe(false);
+  });
+});
+
+/**
+ * 再認証（#308 / 仕様書 8.1）。
+ *
+ * **盗んだセッション Cookie 1 枚で通させない。** 登録が決めるのは
+ * **認可コードの宛先**で、攻撃者が自分の `redirect_uri` を登録できると、
+ * Redirect URI の完全一致検証（脅威モデル T-1）を**登録の側から迂回**
+ * できる。失効の側も、正規のクライアントを黙って止める手口になる。
+ *
+ * 窓は `deletePasskey` / username 変更と同じ 5 分
+ * （`domain/services/reauthentication.ts`）。
+ */
+describe("登録と失効には再認証が要る", () => {
+  it("古いセッションの管理者は登録できない（行も増えない）", async () => {
+    const admin = await seedAdmin({ authTime: STALE });
+
+    const result = await createClient(admin);
+
+    expect(!result.ok && result.error.code).toBe("reauthentication_required");
+    expect(await db().select().from(oauthClients).all()).toHaveLength(0);
+  });
+
+  it("古いセッションの管理者は失効させられない", async () => {
+    const fresh = await seedAdmin();
+    await createClient(fresh);
+    const stale = await seedAdmin({ authTime: STALE });
+
+    const result = await rpc.disableOAuthClient({
+      sessionToken: stale.sessionToken,
+      clientId: "u18-admin-created",
+    });
+
+    expect(!result.ok && result.error.code).toBe("reauthentication_required");
+    const row = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .get();
+    expect(row?.disabledAt).toBeNull();
+  });
+
+  it("管理者でない古いセッションには not_found を返す（順序が逆でないこと）", async () => {
+    // **再認証を先に見ると、一般利用者に `reauthentication_required` が
+    // 返る** —— 「ログインし直せば通る何かがある」と伝わり、`not_found` に
+    // 畳んだ意味が消える。管理者判定が先であることをここで固定する。
+    const user = await seedLoggedInUser({ authTime: STALE });
+
+    const result = await createClient(user);
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("再認証の失敗も監査に残る", async () => {
+    const admin = await seedAdmin({ authTime: STALE });
+
+    await createClient(admin);
+
+    const rows = await auditRows("oauth.client.created");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "failure", reason: "stale_authentication" });
   });
 });
 

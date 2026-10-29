@@ -448,6 +448,16 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
    * ハッシュだけで、取り損ねたら再発行するしかない（`oauth-client.mjs` が
    * 端末へ 1 度だけ出しているのと同じ性質）。
    *
+   * **再認証が要る**（`reauthentication_required`）。決めているのは
+   * 認可コードの宛先なので、盗んだ Cookie 1 枚で通ってよい操作ではない
+   * —— 通ると Redirect URI の完全一致検証を**登録の側から迂回**できる。
+   * 判定は UseCase の中なので、RPC 越しでも同じに効く
+   * （`deletePasskey` と同じ形。`test/rpc-parity.test.ts`）。
+   *
+   * **`is_first_party` は指定できない。** 契約の入力に項目が無く、
+   * 登録されるクライアントは必ず同意画面を出す。一次パーティの登録は
+   * `scripts/oauth-client.mjs --first-party` だけに残っている（RR-21）。
+   *
    * `redirect_uri` の検証も `client_id` の重複判定も UseCase の中にある。
    * **ここで先に弾かない** —— 入口ごとに判定を書くと、CLI で通した URI が
    * 認可時に弾かれる形のずれが起きる。
@@ -464,7 +474,6 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       clientType: parsed.data.clientType,
       redirectUris: parsed.data.redirectUris,
       scopes: parsed.data.scopes,
-      isFirstParty: parsed.data.isFirstParty,
       logoUrl: parsed.data.logoUrl,
     });
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
@@ -480,7 +489,13 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
    *
    * 2 度目は `disabled: false` になり、最初の `disabled_at` は動かない。
    * 未登録の `client_id` も同じ応答になる（登録済みかを総当たりで
-   * 調べさせない）。
+   * 調べさせない）。**登録と同じく再認証が要る** —— 失効は正規の
+   * クライアントを黙って止める手口でもある。
+   *
+   * **発行済みの Access Token は止まらない。** 止まるのは以後の認可だけで、
+   * いま動いているアクセスを切るには `revokeGrant` が要る
+   * （`DisableOAuthClientUseCase` の JSDoc）。呼び出し元は
+   * 「アクセスを停止しました」と書かないこと。
    */
   async disableOAuthClient(input: DisableOAuthClientInput): Promise<DisableOAuthClientResult> {
     const parsed = disableOAuthClientInputSchema.safeParse(input);

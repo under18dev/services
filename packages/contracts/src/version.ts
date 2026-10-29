@@ -123,10 +123,14 @@
  * **これはメソッドの追加であると同時に、緩和策の置き換えである。**
  * 「運用者の手元からしか叩けない」を「管理者だけが叩ける」に替えており、
  * 弱くなる方向の変更にあたる（`docs/threat-model.md` RR-21）。契約の形で
- * 効かせているのは 2 点 —— `OAuthClientSummary` に `client_secret_hash` を
+ * 効かせているのは 3 点 —— `OAuthClientSummary` に `client_secret_hash` を
  * 置かないこと、平文の `client_secret` を `createOAuthClient` の応答に
- * しか置かないこと。**認可の判定は契約では表現できない**ので、
- * auth-worker の UseCase の中に置いてある。
+ * しか置かないこと、`createOAuthClient` の入力に **`isFirstParty` を
+ * 置かないこと**（同意画面の省略は登録とは別の権限で、こちらのほうが
+ * 重い。経路は `scripts/oauth-client.mjs` だけに残す）。
+ * **認可と再認証の判定は契約では表現できない**ので、auth-worker の
+ * UseCase の中に置いてある —— 登録と失効には再認証が要り、
+ * `reauthentication_required`（1.3.0 で足したコード）が返る。
  *
  * **後方互換な追加**なので MINOR。デプロイ順は従来どおり auth-worker が先。
  * 逆順にすると、新しい dashboard-worker がまだメソッドを持たない

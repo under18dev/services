@@ -472,6 +472,9 @@ export function createContainer(
         // 戻り値にしか現れず、DB へはハッシュだけが入る（仕様書 7.1）。
         tokens,
         hasher,
+        // 再認証の窓（5 分）を測るのに要る。登録・失効のどちらも
+        // `deletePasskey` と同じ扱いにしてある。
+        clock,
       }),
       disableOAuthClient: new DisableOAuthClientUseCase({
         getSession,
