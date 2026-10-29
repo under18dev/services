@@ -8,5 +8,13 @@
   // この package は Worker 側からも読まれるので、DOM を lib に足すと
   // サーバーのコードが `window` を触れるようになる。型検査は各アプリの
   // `tsconfig.client.json`（DOM を持つ）が行う。
-  "include": ["src/*.ts", "src/*.tsx", "test/**/*.ts", "vitest.config.ts"]
+  // `src/kiwa/**` は入れる。あちらはサーバーで描く JSX で DOM を触らない。
+  "include": [
+    "src/*.ts",
+    "src/*.tsx",
+    "src/kiwa/*.ts",
+    "src/kiwa/*.tsx",
+    "test/**/*.ts",
+    "vitest.config.ts"
+  ]
 }

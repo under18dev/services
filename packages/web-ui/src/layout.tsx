@@ -29,8 +29,15 @@ export type LayoutProps = {
    * - `"dash"`: 全面。**この枠だけ `<h1 class="brand">` を描かない** ——
    *   サイドバーが自分のブランドを持つので、2 つ出ると二重になる。
    *   中身の組み立ては呼び出し側に任せる（#308）。
+   * - `"bare"`: `<body>` に class を付けない。**`"dash"` との違いは
+   *   `class="page-dash"` が出ないことだけ**である（#332）。
+   *
+   *   Kiwa UI の画面は手書き CSS（`styles.ts`）を読まない。そこへ
+   *   `page-dash` を出すと、**読んでいないスタイルシートのクラスが
+   *   HTML に残る。** 害は無いが、読んだ人は「このページは u18.css も
+   *   読んでいる」と思う。枠の指定は読んでいる CSS についてだけ言う。
    */
-  readonly frame?: "card" | "shell" | "dash";
+  readonly frame?: "card" | "shell" | "dash" | "bare";
 
   /**
    * 読み込むスタイルシートのパス。
@@ -71,7 +78,9 @@ export const Layout: FC<LayoutProps> = ({
           <script key={src} type="module" src={src} defer />
         ))}
       </head>
-      {frame === "dash" ? (
+      {frame === "bare" ? (
+        <body>{children}</body>
+      ) : frame === "dash" ? (
         // **`<main>` もブランドもここでは描かない。** サイドバーと本文の
         // 関係は呼び出し側が組む（`<main>` は本文側に置く）。
         <body class="page-dash">{children}</body>

@@ -1,6 +1,7 @@
 import { hashedFileName, UI_STYLESHEET } from "@u18/web-ui";
 import { ACCOUNT_BASE_PATH } from "../base-path";
 import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
+import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 
 /**
  * この Worker が配信する静的アセットと画面のパス。
@@ -37,6 +38,32 @@ import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 /** 共有スタイルシート（`@u18/web-ui` の `UI_STYLESHEET`）。 */
 export const STYLESHEET_ROUTE = `/ui/${hashedFileName("u18.css", UI_STYLESHEET)}`;
 export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}`;
+
+/**
+ * Kiwa UI のスタイルシート（#332）。
+ *
+ * **`u18.css` と両方が生きている。** `/account/apps` だけがこちらを読み、
+ * 残りの 5 枚とログイン画面・同意画面はまだ手書きの `u18.css` である
+ * （#332 の P0 が「見本を 1 枚だけ組み直す」なので、移行の途中は必ず
+ * この状態を通る）。P1 / P2 が終わったら `u18.css` 側が消える。
+ *
+ * ## 1 枚のページに両方を読ませない
+ *
+ * Tailwind は preflight でブラウザ既定のスタイルを潰す。手書き CSS は
+ * その既定を前提に書かれている（`body` の `display: flex` で中央寄せ、
+ * `h2` の余白など）ので、**同じページに重ねると手書き側の画面が崩れる。**
+ * 混ぜられる形にしておくと、P1 で 1 枚ずつ移すときに「両方読み込む」が
+ * 一番楽な逃げ道になってしまう。
+ *
+ * ## 中身はビルドが作るが、ハッシュはここが計算する
+ *
+ * `scripts/build-client.mjs` が Tailwind を回して
+ * `generated/kiwa-stylesheet.ts` を書く。**ハッシュをビルドに計算させて
+ * いない** —— `hashedFileName` が**配信するのと同じ文字列**から出すので、
+ * 生成が古くても URL が古いほうのハッシュになる（#211 / #132）。
+ */
+export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
+export const KIWA_STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${KIWA_STYLESHEET_ROUTE}`;
 
 /**
  * 取り消し操作のアイランド（#9）。
