@@ -46,7 +46,16 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     // Identity にも D1 にも触れずに答える。死活確認が依存先の状態に
     // 引きずられると、どこが落ちているのか切り分けられなくなる
     // （dashboard-worker の /health と同じ方針）。
-    c.json({ status: "ok", service: "u18-nfc", environment: c.env.ENVIRONMENT }),
+    //
+    // **`environment` は出さない**（脅威モデル RR-18）。未認証で叩ける
+    // endpoint に構成情報を置かない —— ステージングの存在や構成が読める。
+    // auth-worker と dashboard-worker からは RR-18 の時点で外したが、
+    // **この Worker だけ残っていた**。`go.under18.dev/health` は実際に
+    // 外から 200 を返す（#280）ので、公開されたままだった。
+    //
+    // `--env production` の付け忘れはここでは見ない。auth-worker の
+    // Discovery の `issuer` で検出する（`deploy.yml`）。
+    c.json({ status: "ok", service: "u18-nfc" }),
   );
 
   registerRedirectRoutes(app);
