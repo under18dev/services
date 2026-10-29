@@ -12,6 +12,11 @@ declare global {
       readonly TEST_WRANGLER_JSONC: string;
       /** `src/` に書かれている監査イベント名（#22）。vitest.config.ts が走査する。 */
       readonly TEST_AUDIT_EVENT_NAMES: string[];
+      /**
+       * Presentation 層が `isAdmin:` に詰めている右辺（決定 8 / RR-21）。
+       * vitest.config.ts が走査する。照合は `admin-session-passkey.test.ts`。
+       */
+      readonly TEST_PRESENTATION_IS_ADMIN_SOURCES: string[];
     }
   }
 }

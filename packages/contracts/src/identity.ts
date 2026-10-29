@@ -70,7 +70,17 @@ export type SessionSummary = {
   /** ISO 8601 (UTC) */
   readonly expiresAt: string;
   /**
-   * 操作者が管理者か（`users.is_admin`、仕様書 §14.1 決定 8）。
+   * **このセッションで管理者として振る舞ってよいか**（仕様書 §14.1 決定 8）。
+   *
+   * ## `users.is_admin` そのものではない
+   *
+   * 決定 8 は「管理者は Passkey 必須」なので、**`auth_method` が `passkey`
+   * でないセッションでは false になる**（auth-worker の
+   * `User.actsAsAdminWith`）。アカウントに旗が立っていることと、いま来ている
+   * この 1 回の呼び出しを管理者として通してよいことは別である。
+   *
+   * 消費者から見ると「管理者が減る」方向にしか動かないので、受け取る側の
+   * 実装は変えなくてよい（脅威モデル RR-21）。
    *
    * ## なぜ `UserProfile` ではなくここか
    *
@@ -118,7 +128,13 @@ export type UserProfile = {
   readonly status: "active" | "suspended" | "deleted";
   readonly createdAt: string;
   /**
-   * 管理者か（`users.is_admin`、仕様書 §14.1 決定 8）。
+   * **このセッションで管理者として振る舞ってよいか**（仕様書 §14.1 決定 8）。
+   *
+   * `SessionSummary.isAdmin` と同じ判定で、`users.is_admin` そのものではない
+   * —— 根拠はあちらに書いた。`getUserProfile` はプロフィールを返す経路だが、
+   * **ここだけ `users` の行をそのまま出すと、同じ名前の項目が 2 つの意味を
+   * 持つ。** 片方だけ絞った状態は「画面には管理者の導線が出るが、押すと
+   * 存在しないと言われる」形になる。
    *
    * **`SessionSummary` にも同じ値がある。** 重複しているのは意図的で、
    * 消費者と最小化の要求が違う:
