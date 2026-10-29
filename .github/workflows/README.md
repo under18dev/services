@@ -52,12 +52,12 @@ gh api repos/<owner>/<repo>/git/tags/<上で得た sha> --jq '.object.sha'
 判断したもので、**検査そのものは正しく動いていた。** 集約して 1 行にする過程で
 意味が変わる。
 
-| 見え方                            | 実態                                                                                                                   | 見分け方                                                                                                   |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **赤**                            | **古い木を見ている。** `pull_request` のチェックは `refs/pull/N/merge` を見るので、base が進むと再計算が要る           | **再実行では直らない。** `gh pr update-branch <N>` で追従させる                                            |
-| **チェックが 1 つも無い**         | **コンフリクトで run が 1 本も作られていない。** `mergeStateStatus` が `DIRTY`                                         | `no checks reported` は「CI 未設定」と**区別が付かない。** `gh pr view <N> --json mergeStateStatus` を見る |
-| **赤（ジョブは全部緑）**          | **古い run が追い越されて `cancelled` になり、集約ジョブだけが `failure` を残している**                                | `gh run view <id> --json jobs` で `cancelled` が並んでいないか見る                                         |
-| **同じ名前のチェックが 2 つ並ぶ** | **片方は解析ジョブ、片方は GitHub Advanced Security の集約。** 短いほう（数秒）が集約で、**そちらが alert を報告する** | URL の形で見分ける。`/actions/runs/<run>/job/<job>` は解析ジョブ、`/runs/<id>` は check-run（下記）        |
+| 見え方                            | 実態                                                                                                                                                 | 見分け方                                                                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **赤**                            | **古い木を見ている。** `pull_request` のチェックは `refs/pull/N/merge` を見るので、base が進むと再計算が要る                                         | **再実行では直らない。** `gh pr update-branch <N>` で追従させる                                                                |
+| **チェックが 1 つも無い**         | **run が 1 本も作られていない。** 原因は 2 つ —— (a) コンフリクト（`mergeStateStatus` が `DIRTY`）、(b) **`MERGEABLE` なのに作られていない**（下記） | `no checks reported` は「CI 未設定」と**区別が付かない。** `gh pr view <N> --json mergeable,mergeStateStatus` の**両方**を見る |
+| **赤（ジョブは全部緑）**          | **古い run が追い越されて `cancelled` になり、集約ジョブだけが `failure` を残している**                                                              | `gh run view <id> --json jobs` で `cancelled` が並んでいないか見る                                                             |
+| **同じ名前のチェックが 2 つ並ぶ** | **片方は解析ジョブ、片方は GitHub Advanced Security の集約。** 短いほう（数秒）が集約で、**そちらが alert を報告する**                               | URL の形で見分ける。`/actions/runs/<run>/job/<job>` は解析ジョブ、`/runs/<id>` は check-run（下記）                            |
 
 3 つ目は**同じ PR に両方が並ぶ。** `#300`（マージ済み・全ジョブ緑）の実際の出力:
 
@@ -115,6 +115,33 @@ gh api 'repos/<owner>/<repo>/code-scanning/alerts?ref=refs/pull/<N>/merge&state=
 **`pull_request` の解析は `refs/pull/N/merge`（base と混ぜた木）を見る。**
 ブランチの先端は解析されていないので、そちらに alert は紐づかない。
 **「ブランチに alert が無い」を「問題が無い」と読まないこと。**
+
+### `MERGEABLE` なのにチェックが 1 本も無いとき
+
+**`DIRTY` ではないのに run が作られていないことがある。** #324 の実測:
+
+```
+mergeable=MERGEABLE  status=BLOCKED  base=main
+gh run list --branch <branch>         → 0 件
+gh api .../commits/<head>/check-runs  → total_count 0
+```
+
+ruleset が CI を要求しているので、**走っていないこと自体が `BLOCKED` の
+理由**になる。待っても変わらない —— **作られていないものは完了しない。**
+
+**再トリガは `gh pr update-branch` で足りる。**
+
+```bash
+gh pr update-branch <N>   # base を取り込んだ新しい head ができ、pull_request が走る
+```
+
+実測では、これで head が変わり `pull_request` の run が 2 本作られた。
+**close → reopen でも再トリガできるが、そちらは PR の状態を一度壊す**
+（通知が飛び、レビューの文脈が切れる）。**副作用の小さいほうを先に試すこと。**
+
+原因は特定していない。force-push や base の削除と前後したときに起きて
+いるように見えるが、**そう書くのは推測である。** 観測できるのは上の 3 つで、
+対処はそれで足りる。
 
 ### 手元の検査は全部緑でありうる
 
