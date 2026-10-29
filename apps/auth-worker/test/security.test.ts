@@ -1,5 +1,9 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { SESSION_ROUTES } from "./route-inventory";
+
+/** Origin 検証が通る値（`ISSUER` と同じ）。 */
+const ORIGIN = "http://localhost:8787";
 
 /**
  * 「失敗すること」を確かめるテスト。
@@ -40,12 +44,58 @@ describe("状態変更 API の Origin 検証", () => {
   });
 });
 
+/**
+ * `SESSION_ROUTES` に載せたものが、本当にセッションを要求すること（#275 / #278）。
+ *
+ * ## 一覧を「表」から「検査」にする
+ *
+ * `route-inventory.test.ts` は**一覧と実際のルートが一致すること**を見ている。
+ * だが区分（public / session / oauth）は手で書くもので、**`SESSION_ROUTES` に
+ * 載せたものが実際に認証を要求するかは誰も見ていなかった。** 区分を取り違えて
+ * 載せても緑のままで、「ここは Cookie が要る」という一覧の主張が裏取り無しに
+ * 残る。
+ *
+ * **ここを一覧から回すと、取り違えがその場で落ちる。**
+ *
+ * ## `PUBLIC_ROUTES` 側は回さない
+ *
+ * 「401 にならないこと」は弱い主張である（400 でも 302 でも通る）うえ、
+ * 公開経路には副作用がある（メール送信・行の生成）。区分の取り違えは
+ * `SESSION_ROUTES` 側を固定するだけで捕まる。
+ */
 describe("未認証アクセス", () => {
-  it.each(["/api/me", "/api/me/sessions"])("%s は Cookie 無しで 401", async (path) => {
-    const response = await SELF.fetch(`http://localhost${path}`);
-    expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({ error: "unauthenticated" });
+  // **0 件ガード。** `it.each([])` はテストを 1 つも作らずに緑になるので、
+  // 一覧が空になったときこの describe 全体が黙る。
+  it("SESSION_ROUTES が空でない", () => {
+    expect(SESSION_ROUTES.length).toBeGreaterThan(0);
   });
+
+  // **`Origin` は通る値を付ける。** ここで見たいのは「セッションが要るか」
+  // だけで、Origin 検証に引っ掛けてしまうと**どちらで止まったのか分からない。**
+  //
+  // 実際、止まる場所は経路ごとに違う —— `me.routes.ts` は Cookie を先に見て
+  // 401 を返すが（上の「Cookie が無ければ Origin 検証の前に 401」）、
+  // `auth.passkey.routes.ts` の register は Origin が先で、ヘッダを付けないと
+  // **403 になる。** どちらでも守れてはいるが、**403 を「セッションを要求して
+  // いる証拠」と読むことはできない**（Origin を落としただけでも 403 になる）。
+  //
+  // `:id` は実在しない値で埋める。**認証が先に来るなら、存在しない ID でも
+  // 401 が返る。** 404 が返ったら資源を引いてから認証していることになり、
+  // それは ID の実在が未認証で読めるということなので、**落ちたら実装のほうを
+  // 疑うこと。**
+  it.each(SESSION_ROUTES.map((route) => [`${route.method} ${route.path}`, route] as const))(
+    "%s は Cookie 無しで 401",
+    async (_label, route) => {
+      const path = route.path.replaceAll(/:[A-Za-z]+/g, "does-not-exist");
+      const response = await SELF.fetch(`http://localhost${path}`, {
+        method: route.method,
+        headers: { Origin: ORIGIN },
+      });
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: "unauthenticated" });
+    },
+  );
 
   it("無効なセッショントークンでも 401 になる", async () => {
     const response = await SELF.fetch("http://localhost/api/me", {
