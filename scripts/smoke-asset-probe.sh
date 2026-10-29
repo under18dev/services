@@ -40,20 +40,55 @@
 #
 set -euo pipefail
 
-if [ "$#" -lt 1 ]; then
-  echo "usage: $0 <origin> [page-path ...]" >&2
+if [ "$#" -lt 2 ]; then
+  echo "usage: $0 <origin> <worker-name> [page:prefix ...]" >&2
+  echo "  worker-name: auth-worker / dashboard-worker / nfc-worker" >&2
   exit 2
 fi
 
 base="${1%/}"
-shift
+worker="$2"
+shift 2
 
-# 既定のページと、**そのページが自分で配っているはずの接頭辞**（`ページ:接頭辞`）。
+# **Worker ごとに、自分のデプロイ直後に引くページと接頭辞**（`ページ:接頭辞`）。
+#
+# **一覧を 1 つにまとめて全ジョブで回さない。** `deploy.yml` では
+# dashboard と nfc が `needs: deploy-auth-worker` なので、auth のジョブから
+# `/account` を引くと
+#
+#   1. **まだデプロイされていない dashboard を引く。** その回で dashboard の
+#      コードが変わっていても、見えるのは**前のデプロイ**である。緑でも
+#      「いま載せたもの」を確かめていない
+#   2. **auth 自身は無事なのに dashboard と nfc のデプロイが止まる。**
+#      実際に 1 度起きた（#310 のマージ後、`--max-time 20` ちょうどで
+#      タイムアウトし、両方 `skipped`。再実行で 3/3 成功。指摘: 66）
+#
+# だから**各ジョブが自分の Worker ぶんだけを引く。** 既存の他のスモークも
+# その形で揃っている。
+#
 # **増やしたら scripts/check-asset-probe-pages.mjs も見ること。** あちらが
-# 「アセットを配る Worker が全部ここに居るか」「接頭辞が実物と合っているか」を
-# 突き合わせている。
+# 「アセットを配る Worker が全部ここに居るか」を突き合わせている。
+probe_pages_for() {
+  case "$1" in
+    auth-worker) echo "/login:/ui/" ;;
+    dashboard-worker) echo "/account:/account/ui/" ;;
+    *) echo "" ;;
+  esac
+}
+
+# ページが明示されていなければ、その Worker ぶんを引く。
 if [ "$#" -eq 0 ]; then
-  set -- /login:/ui/ /account:/account/ui/
+  pages="$(probe_pages_for "$worker")"
+  if [ -z "$pages" ]; then
+    # **「ページが無い Worker」を黙って成功にしない。** アセットを配って
+    # いるのに宣言が無い場合と、そもそも配っていない場合が、同じ「0 件」に
+    # なる。どちらかは `check-asset-probe-pages.mjs` が知っているので、
+    # ここでは**呼ばれ方が間違っている**として落とす。
+    echo "::error::${worker} に対応するページが宣言されていません。probe_pages_for を見るか、呼び出し側の Worker 名を確かめてください。"
+    exit 1
+  fi
+  # shellcheck disable=SC2086
+  set -- $pages
 fi
 
 failures=0
@@ -176,4 +211,4 @@ if [ "$failures" -gt 0 ]; then
   exit 1
 fi
 
-echo "${#} ページが参照する ${checked} 件のアセットは、すべて本番から引けます。"
+echo "${worker}: ${#} ページが参照する ${checked} 件のアセットは、すべて本番から引けます。"

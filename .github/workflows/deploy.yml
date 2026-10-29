@@ -341,14 +341,20 @@ jobs:
       # 外形監視にも出ない。両側のテストは自分の Worker の内側に閉じて
       # いて、どちらもそれを見られなかった。
       #
-      # **auth-worker だけでは足りない。** ハッシュ付きアセットを配る Worker は
-      # 3 つあり（auth / dashboard / nfc）、**それぞれが自分でバンドルを生成して
-      # 自分でハッシュを決めている。** 以前この検査は `/login` だけを見ていて、
-      # dashboard-worker のアセットは誰も本番で確かめていなかった ——
-      # 上に書いた失敗が、Worker 1 つ隣で再発できる状態だった。
-      # 既定の一覧（`ページ:接頭辞`）はスクリプトが持ち、
-      # `pnpm check:asset-pages` が「配っている Worker が全部そこに居るか」
-      # 「接頭辞が実物と合っているか」を突き合わせる。
+      # **このジョブが見るのは auth-worker ぶんだけ。** ハッシュ付きアセットを
+      # 配る Worker は 3 つあり（auth / dashboard / nfc）、それぞれが自分で
+      # バンドルを生成して自分でハッシュを決めている。**各 Worker のぶんは
+      # 各 Worker のジョブが、自分のデプロイ直後に引く。**
+      #
+      # 一度ここから `/account` も引いていたが、**dashboard は
+      # `needs: deploy-auth-worker` なのでまだデプロイされておらず、
+      # 見えるのは前のデプロイだった。** さらに 1 度タイムアウトして
+      # **auth 自身は無事なのに dashboard と nfc が `skipped` になった**
+      # （#310 のマージ後。指摘: 66）。
+      #
+      # どのページを引くかはスクリプトが持ち、`pnpm check:asset-pages` が
+      # 「配っている Worker が全部そこに居るか」「宣言した接頭辞が実物と
+      # 合っているか」を突き合わせる。
       #
       # **「引けること」だけでは足りない。** 中身が同じならハッシュも同じに
       # なるので（共有の `@u18/web-ui`）、dashboard のページが誤って auth 側の
@@ -370,10 +376,10 @@ jobs:
             echo "::warning::PRODUCTION_URL repository variable is not set, skipping the asset smoke test."
             exit 0
           fi
-          # ページは渡さない。**既定の一覧はスクリプト側が持つ** ——
+          # ページは渡さない。**どのページを引くかはスクリプト側が持つ** ——
           # ここに書くと、`check:asset-pages` が突き合わせる相手が
           # 2 箇所になる（ワークフローとスクリプト）。
-          scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}"
+          scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}" auth-worker
 
       # **Passkey の options 側だけ本番で踏む。**
       #
@@ -529,3 +535,27 @@ jobs:
           scripts/smoke-probe.sh "${PRODUCTION_URL%/}/account/api/me" 401 \
             --jq .error unauthenticated \
             --header Referrer-Policy same-origin
+
+      # **自分のデプロイ直後に、自分のアセットを引く。**
+      #
+      # 一度これを auth-worker のジョブに置いていたが、dashboard は
+      # `needs: deploy-auth-worker` なので、**あちらから引くとまだ
+      # デプロイされていない dashboard を見ることになる** —— その回で
+      # こちらのコードが変わっていても、見えるのは前のデプロイである。
+      # さらに 1 度タイムアウトして、**auth 自身は無事なのにこのジョブごと
+      # `skipped` になった**（#310 のマージ後。指摘: 66）。
+      #
+      # dashboard は #195 以降 auth-worker の CSS を借りず**自分で配信して
+      # いる。** このステップは「引けること」に加えて、参照が
+      # `/account/ui/` の下にあること（＝借りていないこと）も見る。
+      # 中身が同じならハッシュも同じになるので、借用は 200 で通ってしまい、
+      # **片方のハッシュが変わった瞬間に初めて壊れる**（#246）。
+      - name: Smoke test the assets the page references
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the asset smoke test."
+            exit 0
+          fi
+          scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}" dashboard-worker
