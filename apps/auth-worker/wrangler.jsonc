@@ -92,7 +92,7 @@
   "ratelimits": [
     { "name": "RL_EMAIL_START", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
     { "name": "RL_EMAIL_VERIFY", "namespace_id": "1002", "simple": { "limit": 15, "period": 60 } },
-    { "name": "RL_LOGIN_VERIFY", "namespace_id": "1003", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_LOGIN_VERIFY", "namespace_id": "1003", "simple": { "limit": 40, "period": 60 } },
     // 以下は OAuth 経路（#21 の残り）。RL_OAUTH_CLIENT だけ鍵が IP 単体ではなく
     // <client_id>:<ipHash> になる。理由は rate-limit-policy.ts に詳述。
     {
@@ -181,7 +181,7 @@
         {
           "name": "RL_LOGIN_VERIFY",
           "namespace_id": "1003",
-          "simple": { "limit": 20, "period": 60 },
+          "simple": { "limit": 40, "period": 60 },
         },
         {
           "name": "RL_OAUTH_AUTHORIZE",
