@@ -207,4 +207,15 @@ export class DrizzleUserRepository implements UserRepository {
         .where(eq(users.id, id)),
     ]);
   }
+
+  /**
+   * 最後にログインした時刻を記録する（#286）。
+   *
+   * **`updated_at` は動かさない。** あれは「行が書き換わった時刻」で、
+   * ログインのたびに動かすと §11.6 の `deleted_at is null` の議論と同じで
+   * 「何の時刻か」が読めなくなる。`last_active_at` だけを書く。
+   */
+  async touchLastActive(id: string, at: Date): Promise<void> {
+    await this.db.update(users).set({ lastActiveAt: at }).where(eq(users.id, id)).run();
+  }
 }

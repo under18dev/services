@@ -50,6 +50,13 @@
       "when": 1793209833374,
       "tag": "0006_zippy_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793264202638,
+      "tag": "0007_cuddly_goliath",
+      "breakpoints": true
     }
   ]
 }

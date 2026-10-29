@@ -134,6 +134,35 @@ describe("IssueSessionUseCase", () => {
     expect(tokens.size).toBe(20);
   });
 
+  it("ログインが成立したら last_active_at を書く（#286）", async () => {
+    const user = ctx.users.seed(aUser());
+
+    await ctx.issueSession.execute({
+      userId: user.id,
+      authMethod: "passkey",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(ctx.users.lastActiveAtOf(user.id)).toEqual(NOW);
+  });
+
+  it("発行しなかったら last_active_at を書かない（#286）", async () => {
+    // **ここが保持期間の意味を決める。** 停止中のアカウントに「ログインが
+    // 試みられた」だけで起点が進むと、**BAN されたアカウントが永久に
+    // 洗い出しから外れる** —— 攻撃者が自分で延長できることになる。
+    const user = ctx.users.seed(aUser({ status: "suspended" }));
+
+    await ctx.issueSession.execute({
+      userId: user.id,
+      authMethod: "passkey",
+      userAgent: null,
+      ip: null,
+    });
+
+    expect(ctx.users.lastActiveAtOf(user.id)).toBeUndefined();
+  });
+
   it("停止中ユーザーには発行しない", async () => {
     const user = ctx.users.seed(aUser({ status: "suspended" }));
 
