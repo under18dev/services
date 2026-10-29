@@ -47,11 +47,26 @@ export const API_ROUTES = [
   { method: "GET", path: "/account/health" },
   { method: "GET", path: "/account/api/me" },
   { method: "PATCH", path: "/account/api/me" },
-  { method: "GET", path: "/account/api/me/sessions" },
+  /**
+   * **一覧の取得は BFF を通さない**（#321）。
+   *
+   * かつて `GET /account/api/me/sessions` / `.../passkeys` / `.../grants` が
+   * あったが、**リポジトリ内に呼ぶ側が 1 つも無かった。** 画面（`sessions-page.tsx`
+   * など）はサーバー側で RPC から描くので、この経路を通らない。アイランドが
+   * 呼ぶのは書き込みだけである。
+   *
+   * **誰も使わないまま、セッション Cookie さえあればブラウザから個人情報が
+   * 読める口が空いていた**（`ip_hash` / `user_agent` を含むセッション一覧など）。
+   * 漏れていたわけではない（本人しか読めない）が、**使われていない経路は
+   * 壊れても誰も気づかない。**
+   *
+   * **足し直すなら、それを呼ぶ入口と一緒に足すこと。** 「読み取りの口が無いのは
+   * 漏れだ」と見えるかもしれないが、漏れではなく判断である。
+   * `route-reachability.test.ts`（#322）が、入口の無い読み取りを足した瞬間に
+   * 理由を書かせる側へ並べる。
+   */
   { method: "DELETE", path: "/account/api/me/sessions/:id" },
-  { method: "GET", path: "/account/api/me/passkeys" },
   { method: "DELETE", path: "/account/api/me/passkeys/:id" },
-  { method: "GET", path: "/account/api/me/grants" },
   { method: "DELETE", path: "/account/api/me/grants/:clientId" },
 ] as const;
 

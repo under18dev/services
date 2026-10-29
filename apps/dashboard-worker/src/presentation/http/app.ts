@@ -147,16 +147,6 @@ function registerRoutes(app: AccountRouter) {
         return c.json(result.value);
       })
 
-      .get("/api/me/sessions", async (c) => {
-        const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
-        if (token === undefined) return c.json({ error: "unauthenticated" } as const, 401);
-
-        const result = await c.get("identity").listSessions(token);
-        if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
-
-        return c.json({ sessions: result.value });
-      })
-
       .delete("/api/me/sessions/:id", async (c) => {
         const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
         if (token === undefined) return c.json({ error: "unauthenticated" } as const, 401);
@@ -218,23 +208,6 @@ function registerRoutes(app: AccountRouter) {
       })
 
       /**
-       * BFF: 登録済み Passkey の一覧（仕様書 8.1 / #75）。
-       *
-       * auth-worker から受けた DTO を**加工せず**そのまま返す。
-       * `PasskeySummary` に `credentialId` と公開鍵が無いので、ここで
-       * フィルタしなくても漏れない（packages/contracts）。
-       */
-      .get("/api/me/passkeys", async (c) => {
-        const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
-        if (token === undefined) return c.json({ error: "unauthenticated" } as const, 401);
-
-        const result = await c.get("identity").listPasskeys(token);
-        if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
-
-        return c.json({ passkeys: result.value });
-      })
-
-      /**
        * BFF: Passkey の削除（仕様書 8.1 / #75）。
        *
        * **再認証が要る。** セッションの盗用がそのまま認証器の剥奪に
@@ -254,23 +227,6 @@ function registerRoutes(app: AccountRouter) {
         if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
 
         return c.json(result.value);
-      })
-
-      /**
-       * BFF: 同意済みアプリの一覧（#18）。
-       *
-       * `/api/me/sessions` と同じく、auth-worker から受けた DTO を**加工せず**
-       * そのまま返す。つまり `GrantListItem` に項目を足すと、それはそのまま
-       * 利用者のブラウザへ届く（packages/contracts/src/identity.ts）。
-       */
-      .get("/api/me/grants", async (c) => {
-        const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
-        if (token === undefined) return c.json({ error: "unauthenticated" } as const, 401);
-
-        const result = await c.get("identity").listGrants(token);
-        if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
-
-        return c.json({ grants: result.value });
       })
 
       /**

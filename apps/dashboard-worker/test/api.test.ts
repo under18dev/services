@@ -5,7 +5,7 @@ import {
   rpcErr,
   rpcOk,
 } from "@u18/contracts";
-import type { GrantListItem, RpcErrorCode, SessionListItem, UserProfile } from "@u18/contracts";
+import type { RpcErrorCode, UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
@@ -81,11 +81,12 @@ describe("Cookie の名前は環境で切り替わる", () => {
 describe("Cookie が無ければ RPC を呼ばずに 401", () => {
   const identity = {
     getUserProfile: () => neverCalled("getUserProfile"),
-    listSessions: () => neverCalled("listSessions"),
     revokeSession: () => neverCalled("revokeSession"),
   } as never;
 
-  it.each(["/api/me", "/api/me/sessions"])("%s", async (path) => {
+  // **読み取りの BFF は `/api/me` だけになった**（#321）。一覧の取得は
+  // 呼ぶ側が無かったので消してある。
+  it.each(["/api/me"])("%s", async (path) => {
     const response = await request(path, envWith(identity));
 
     expect(response.status).toBe(401);
@@ -165,8 +166,8 @@ describe("RPC の失敗を HTTP ステータスへ翻訳する", () => {
 
   it.each(cases)("%s は %i になる", async (code, status) => {
     const response = await request(
-      "/api/me/sessions",
-      envWith({ listSessions: async () => rpcErr(code, "internal detail from auth-worker") }),
+      "/api/me",
+      envWith({ getUserProfile: async () => rpcErr(code, "internal detail from auth-worker") }),
       { headers: { Cookie: cookie } },
     );
 
@@ -175,9 +176,9 @@ describe("RPC の失敗を HTTP ステータスへ翻訳する", () => {
 
   it("auth-worker 側のメッセージを応答に載せない", async () => {
     const response = await request(
-      "/api/me/sessions",
+      "/api/me",
       envWith({
-        listSessions: async () => rpcErr("internal", "sqlite: no such table: sessions"),
+        getUserProfile: async () => rpcErr("internal", "sqlite: no such table: sessions"),
       }),
       { headers: { Cookie: cookie } },
     );
@@ -190,9 +191,9 @@ describe("RPC の失敗を HTTP ステータスへ翻訳する", () => {
     // Worker の停止やデプロイ中の不整合で throw されうる。
     // 素通しすると Presentation が 500 以外を選べなくなる。
     const response = await request(
-      "/api/me/sessions",
+      "/api/me",
       envWith({
-        listSessions: () => {
+        getUserProfile: () => {
           throw new Error("service binding is not available");
         },
       }),
@@ -274,32 +275,18 @@ describe("自己失効のときだけ Cookie を落とす", () => {
   });
 });
 
-describe("セッション一覧", () => {
-  it("auth-worker から受けた配列をそのまま返す", async () => {
-    // この Worker は DTO を**加工せず**ブラウザへ渡す。つまり
-    // SessionListItem に項目を足すと、それはそのまま利用者へ届く。
-    // ipHash を契約から外してあるのはこのため（packages/contracts/src/identity.ts）。
-    const items: SessionListItem[] = [
-      {
-        sessionId: "ses_1",
-        createdAt: "2026-10-24T00:00:00.000Z",
-        lastSeenAt: "2026-10-24T00:00:00.000Z",
-        expiresAt: "2026-11-24T00:00:00.000Z",
-        current: true,
-        userAgent: "Mozilla/5.0",
-      },
-    ];
-
-    const response = await request(
-      "/api/me/sessions",
-      envWith({ listSessions: async () => rpcOk(items) }),
-      { headers: { Cookie: `${DEV_SESSION_COOKIE_NAME}=token-value` } },
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ sessions: items });
-  });
-});
+/*
+ * **「セッション一覧」のテストはここにあった**（#321 で消した）。
+ *
+ * `GET /account/api/me/sessions` が返す DTO をそのまま確かめるもので、
+ * 「`SessionListItem` に項目を足すと、それはそのまま利用者へ届く」という
+ * 性質を固定していた。**経路ごと消したので、その性質はこの Worker の
+ * HTTP には無い。**
+ *
+ * **同じ性質は画面側に残っている** —— `sessions-page.tsx` がサーバー側で
+ * RPC から描くので、契約に項目を足せばやはり利用者へ届く。そちらは
+ * `ui-island.test.ts` が見ている。
+ */
 
 describe("本番の route に合わせた /account 接頭辞（#106）", () => {
   const identity = { getUserProfile: async () => rpcOk(PROFILE) };
@@ -341,61 +328,16 @@ describe("本番の route に合わせた /account 接頭辞（#106）", () => {
   });
 });
 
-describe("同意済みアプリの一覧", () => {
-  const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
-
-  const GRANTS: GrantListItem[] = [
-    {
-      clientId: "u18-first-party",
-      clientName: "u18 公式",
-      logoUrl: null,
-      scopes: ["openid", "profile"],
-      grantedAt: "2026-10-24T00:00:00.000Z",
-    },
-  ];
-
-  it("auth-worker から受けた配列をそのまま返す", async () => {
-    // この Worker は DTO を加工せずブラウザへ渡す。つまり GrantListItem に
-    // 項目を足すと、それはそのまま利用者へ届く。
-    const response = await request(
-      "/api/me/grants",
-      envWith({ listGrants: async () => rpcOk(GRANTS) }),
-      { headers: { Cookie: cookie } },
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ grants: GRANTS });
-  });
-
-  it("Cookie が無ければ RPC を呼ばずに 401", async () => {
-    const response = await request(
-      "/api/me/grants",
-      envWith({ listGrants: () => neverCalled("listGrants") } as never),
-    );
-
-    expect(response.status).toBe(401);
-  });
-
-  it("GET には Origin 検証を課さない", async () => {
-    const response = await request(
-      "/api/me/grants",
-      envWith({ listGrants: async () => rpcOk(GRANTS) }),
-      { headers: { Cookie: cookie } },
-    );
-
-    expect(response.status).toBe(200);
-  });
-
-  it("RPC の失敗を HTTP ステータスへ翻訳する", async () => {
-    const response = await request(
-      "/api/me/grants",
-      envWith({ listGrants: async () => rpcErr("unauthenticated", "session is not valid") }),
-      { headers: { Cookie: cookie } },
-    );
-
-    expect(response.status).toBe(401);
-  });
-});
+/*
+ * **「同意済みアプリの一覧」のテストはここにあった**（#321 で消した）。
+ *
+ * `GET /account/api/me/grants` を確かめるものだったが、**呼ぶ側が 1 つも
+ * 無かったので経路ごと消した。** 取り消し（`DELETE .../grants/:clientId`）は
+ * アイランドが呼ぶので残っており、下の「同意の取り消し」が見ている。
+ *
+ * 一覧の表示は `grants-page.tsx` がサーバー側で RPC から描く
+ * （`ui-island.test.ts`）。
+ */
 
 describe("同意の取り消し", () => {
   const cookie = `${DEV_SESSION_COOKIE_NAME}=token-value`;
