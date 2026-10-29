@@ -344,6 +344,29 @@ export type DeletePasskeyResult = RpcResult<{
   readonly remaining: number;
 }>;
 
+// ----------------------------------------------------------- closeAccount
+
+export const closeAccountInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+});
+
+export type CloseAccountInput = z.infer<typeof closeAccountInputSchema>;
+
+/**
+ * 本人の退会（#318 / ランブック §11.7）。
+ *
+ * **個人情報は落ちない。** `status` が `suspended` になりログインが
+ * 塞がるだけで、氏名相当とメールアドレスは残る（落とすのは管理者の
+ * §11.6）。**「削除した」と呼ばないのはそのため。**
+ */
+export type CloseAccountResult = RpcResult<{
+  /** 今回の操作で閉じたか。既に閉じていれば `false`。 */
+  readonly closed: boolean;
+  /** 失効させたセッションの本数。 */
+  readonly revokedSessions: number;
+}>;
+
 export interface IdentityRpcContract {
   getSession(input: GetSessionInput): Promise<GetSessionResult>;
   getUserProfile(input: GetUserProfileInput): Promise<GetUserProfileResult>;
@@ -354,6 +377,7 @@ export interface IdentityRpcContract {
   updateProfile(input: UpdateProfileInput): Promise<UpdateProfileResult>;
   listPasskeys(input: ListPasskeysInput): Promise<ListPasskeysResult>;
   deletePasskey(input: DeletePasskeyInput): Promise<DeletePasskeyResult>;
+  closeAccount(input: CloseAccountInput): Promise<CloseAccountResult>;
   /** 副作用の無い死活確認（#44）。認証を要求しない。 */
   ping(): Promise<PingResult>;
 }

@@ -75,5 +75,19 @@
  *
  * **後方互換な追加**なので MINOR。デプロイ順は auth-worker が先。
  */
-export const CONTRACT_VERSION = "1.4.0" as const;
+/**
+ * ## 1.4.0 → 1.5.0（#318: 本人の退会）
+ *
+ * `closeAccount` を足した。本人が自分のアカウントを閉じられるようにする
+ * （それまで経路が 1 つも無かった。ランブック §11.7）。
+ *
+ * **後方互換な追加**なので MINOR。既存メソッドの署名・意味・DTO は
+ * 変えていない。デプロイ順は従来どおり **auth-worker が先**。
+ *
+ * **`status` は `suspended` になる。`deleted` ではない。** 個人情報は
+ * 落ちないので、呼び出し元は「削除しました」と言ってはならない
+ * （§11.7 の応対原則）。`deleted` を立てると `purgeUserSql` の
+ * `status <> 'deleted'` に弾かれ、**管理者が二度と落とせなくなる。**
+ */
+export const CONTRACT_VERSION = "1.5.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

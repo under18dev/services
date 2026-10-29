@@ -1,4 +1,5 @@
 import {
+  closeAccountInputSchema,
   deletePasskeyInputSchema,
   getSessionInputSchema,
   getUserProfileInputSchema,
@@ -10,6 +11,8 @@ import {
   revokeSessionInputSchema,
   rpcErr,
   rpcOk,
+  type CloseAccountInput,
+  type CloseAccountResult,
   type DeletePasskeyInput,
   type DeletePasskeyResult,
   type GetSessionInput,
@@ -344,6 +347,33 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk({ deleted: result.value.deleted, remaining: result.value.remaining });
+  }
+
+  /**
+   * 本人の退会（#318 / ランブック §11.7）。
+   *
+   * **個人情報は落ちない。** `status` が `suspended` になりログインが
+   * 塞がるだけである。`deleted` にしないのは、落とさずに立てると
+   * `purgeUserSql` の `status <> 'deleted'` に弾かれ、**管理者が二度と
+   * 落とせなくなる**ため。
+   *
+   * **再認証が要る**（`hasFreshAuthentication`）。Cookie を 1 枚持って
+   * いるだけの相手に通させない。
+   */
+  async closeAccount(input: CloseAccountInput): Promise<CloseAccountResult> {
+    const parsed = closeAccountInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.closeAccount.execute({
+      sessionToken: parsed.data.sessionToken,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({
+      closed: result.value.closed,
+      revokedSessions: result.value.revokedSessions,
+    });
   }
 
   /**

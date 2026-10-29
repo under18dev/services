@@ -32,6 +32,7 @@ import { AuthenticateOAuthClientUseCase } from "../application/use-cases/authent
 import { AuthorizeRequestUseCase } from "../application/use-cases/authorize-request.use-case";
 import { ExchangeAuthorizationCodeUseCase } from "../application/use-cases/exchange-authorization-code.use-case";
 import { IssueAuthorizationCodeUseCase } from "../application/use-cases/issue-authorization-code.use-case";
+import { CloseAccountUseCase } from "../application/use-cases/close-account.use-case";
 import { DeletePasskeyUseCase } from "../application/use-cases/delete-passkey.use-case";
 import { GetSessionUseCase } from "../application/use-cases/get-session.use-case";
 import { GetUserInfoUseCase } from "../application/use-cases/get-user-info.use-case";
@@ -141,6 +142,7 @@ export type Container = {
     readonly updateProfile: UpdateProfileUseCase;
     readonly listPasskeys: ListPasskeysUseCase;
     readonly deletePasskey: DeletePasskeyUseCase;
+    readonly closeAccount: CloseAccountUseCase;
     readonly passkeyRegisterOptions: PasskeyRegisterOptionsUseCase;
     readonly passkeyRegisterVerify: PasskeyRegisterVerifyUseCase;
     readonly passkeyLoginOptions: PasskeyLoginOptionsUseCase;
@@ -364,6 +366,7 @@ export function createContainer(
       updateProfile: new UpdateProfileUseCase({ getSession, users, clock, audit }),
       listPasskeys: new ListPasskeysUseCase({ getSession, passkeys }),
       deletePasskey: new DeletePasskeyUseCase({ getSession, passkeys, users, clock, audit }),
+      closeAccount: new CloseAccountUseCase({ getSession, users, sessions, clock, audit }),
       passkeyRegisterOptions: new PasskeyRegisterOptionsUseCase({
         getSession,
         users,

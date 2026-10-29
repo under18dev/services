@@ -9,6 +9,9 @@ import {
 } from "@u18/web-ui/client/webauthn-json";
 import { createApiClient } from "./api-client";
 import {
+  CLOSE_ACCOUNT_COPY,
+  CLOSE_FALLBACK,
+  CLOSE_MESSAGES,
   messageFor,
   PROFILE_FALLBACK,
   PROFILE_MESSAGES,
@@ -516,3 +519,82 @@ function attachProfileEdit(mount: HTMLElement): void {
 
 const profileMount = document.querySelector<HTMLElement>("[data-profile-edit]");
 if (profileMount !== null) attachProfileEdit(profileMount);
+
+/**
+ * 退会（#318、`DELETE /api/me`）。
+ *
+ * **囲いごとアイランドが作る。** プロフィールの編集（#312）と同じ理由で、
+ * 見出しだけ先に描くと JS が落ちたときに**押せない「無効化」**が残る。
+ *
+ * **編集とは別の囲いに置く。** 同じ `panel` に混ぜると、保存のつもりで
+ * 押す事故の余地が出る（指摘: 39）。
+ *
+ * 文言は `messages.ts` の `CLOSE_ACCOUNT_COPY` に寄せてある ——
+ * 「削除しました」と言えるかがまだ決まっていないため（ランブック §11.7）。
+ */
+function attachCloseAccount(mount: HTMLElement): void {
+  const panel = document.createElement("div");
+  panel.className = "panel";
+  const header = document.createElement("div");
+  header.className = "panel-header";
+  const title = document.createElement("h2");
+  title.className = "panel-title";
+  title.textContent = CLOSE_ACCOUNT_COPY.panelTitle;
+  const desc = document.createElement("p");
+  desc.className = "panel-desc";
+  desc.textContent = CLOSE_ACCOUNT_COPY.panelDescription;
+  header.append(title, desc);
+
+  const body = document.createElement("div");
+  body.className = "panel-body";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "button button-danger";
+  button.textContent = CLOSE_ACCOUNT_COPY.buttonLabel;
+
+  const status = document.createElement("p");
+  status.className = "item-meta";
+
+  const fail = (text: string): void => {
+    status.className = "item-error";
+    status.setAttribute("role", "alert");
+    status.textContent = text;
+    button.disabled = false;
+    button.textContent = CLOSE_ACCOUNT_COPY.buttonLabel;
+  };
+
+  button.addEventListener("click", () => {
+    if (!window.confirm(CLOSE_ACCOUNT_COPY.confirm)) return;
+
+    button.disabled = true;
+    button.textContent = "処理中…";
+    status.textContent = "";
+    status.className = "item-meta";
+    status.removeAttribute("role");
+
+    void client.account.api.me
+      .$delete()
+      .then(async (response) => {
+        if (!response.ok) {
+          fail(await messageFor(response, CLOSE_MESSAGES, CLOSE_FALLBACK));
+          return;
+        }
+        // **一覧を触らない。** セッションは全部失効しており、この画面の
+        // 操作はこの先すべて 401 になる。ログイン画面へ送る
+        // （自分のセッションを切ったときと同じ扱い）。
+        status.textContent = CLOSE_ACCOUNT_COPY.done;
+        location.assign("/login");
+      })
+      .catch(() => {
+        fail(CLOSE_FALLBACK);
+      });
+  });
+
+  body.append(button, status);
+  panel.append(header, body);
+  mount.append(panel);
+}
+
+const closeMount = document.querySelector<HTMLElement>("[data-account-close]");
+if (closeMount !== null) attachCloseAccount(closeMount);

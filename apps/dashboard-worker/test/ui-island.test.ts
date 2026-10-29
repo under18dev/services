@@ -125,7 +125,16 @@ describe("アイランドが掴む目印が出ている", () => {
     expect(page).not.toContain("変更する");
     // JS が無効な人には、できないことを伝える。
     expect(page).toContain("<noscript>");
-    expect(page).toContain("表示名とユーザー名の変更には JavaScript が必要です");
+    expect(page).toContain("アカウントの無効化には JavaScript");
+  });
+
+  it("退会の置き場所が出ていて、編集とは別の囲いである（#318）", async () => {
+    // **編集と同じ囲いに混ぜない。** 保存のつもりで押す事故の余地が出る。
+    const page = await html(PROFILE_PATH);
+    expect(page).toContain("data-account-close");
+    expect(page).toContain("data-profile-edit");
+    // サーバーは中身を描かない。「無効化」の文言はアイランドが作る。
+    expect(page).not.toContain("アカウントを無効化");
   });
 
   it("自分自身のセッションが区別できる", async () => {
