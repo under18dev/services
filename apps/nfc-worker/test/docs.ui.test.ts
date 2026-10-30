@@ -1,6 +1,7 @@
 import { collectAssetRefs, normalizeAssetHash } from "@u18/web-ui";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { newCardId } from "@u18/domain";
 import { createApp } from "../src/presentation/http/app";
 import { DOCS_PATH } from "../src/presentation/http/base-path";
 import { DOCS_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
@@ -130,5 +131,41 @@ describe("案内のページ", () => {
 
     expect(cacheControl).toContain("max-age");
     expect(cacheControl).not.toContain("immutable");
+  });
+
+  it("載せているカード ID の例が、本物と同じ形である", async () => {
+    // **#382 の運用者の問い合わせ。** 設定する URL を聞かれて
+    // `go.under18.dev/c/:cardId` と答えていたので、**`:cardId` をそのまま
+    // 焼こうとしていた。** 置き換え後の例を載せたが、**例の形が間違って
+    // いると、今度はその形が広まる** —— 実際 18 文字の例が会話に出ていた。
+    //
+    // **本物の生成器と同じ正規表現で見る。** 例を直すときに長さを
+    // 間違えたら、ここが落ちる。
+    const html = await (await openDocs()).text();
+    const shape = /^nfc_[0-9abcdefghjkmnpqrstvwxyz]{20}$/;
+
+    const examples = [...html.matchAll(/nfc_[0-9a-z]+/g)].map((m) => m[0]);
+
+    // 0 件だと下の `every` が何も確かめずに通る。
+    expect(examples.length, "カード ID の例が 1 つも載っていない").toBeGreaterThan(0);
+    for (const example of examples) {
+      expect(example, `${example} が本物の形と違う`).toMatch(shape);
+    }
+    // 生成器が実際にその形を作ることも併せて見る（片方だけ直せない形にする）。
+    expect(newCardId()).toMatch(shape);
+  });
+
+  it("`:cardId` のまま載せていない", async () => {
+    // **route の記法であって、焼く値ではない。** 公開ページに出すと、
+    // 読んだ人がそのまま焼きうる。
+    const html = await (await openDocs()).text();
+
+    expect(html).not.toContain(":cardId");
+  });
+
+  it("焼く値そのものを、完成した URL として見せている", async () => {
+    const html = await (await openDocs()).text();
+
+    expect(html).toMatch(/https:\/\/go\.under18\.dev\/c\/nfc_[0-9abcdefghjkmnpqrstvwxyz]{20}/);
   });
 });
