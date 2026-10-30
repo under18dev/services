@@ -51,11 +51,8 @@ export const PUBLIC_ROUTES: readonly Route[] = [
 
   // 静的アセット。**URL に内容ハッシュが入る**（#211）ので、照合側で
   // `<hash>` に正規化している。
-  // 手書きの共有スタイルシート。**いま読んでいるのは同意画面だけ**
-  // （#332 の P2 でログイン画面が Kiwa へ移った）。P2 の残りで消える。
-  { method: "GET", path: "/ui/u18.<hash>.css" },
-  // Kiwa UI のスタイルシート（#332）。ログイン・新規登録・コード入力・
-  // ログイン済みの 4 つの見え方が、どれもこれを読む。
+  // **この Worker のスタイルシートはこれ 1 本**（#332）。ログイン・
+  // 新規登録・コード入力・ログイン済み・同意・認可エラーの全部が読む。
   { method: "GET", path: "/ui/kiwa.<hash>.css" },
   { method: "GET", path: "/ui/login-island.<hash>.js" },
 
@@ -139,16 +136,19 @@ export const PROBE_PAGES: readonly string[] = ["/login"];
  *
  * 書いてあれば、**その配信が壊れても本番検査は気づかない**ことが
  * 読んだ人に伝わる。
+ *
+ * ## いまは 0 件である（#332）
+ *
+ * 唯一の住人だった `/ui/u18.<hash>.css` は、最後の持ち主（同意画面）が
+ * Kiwa へ移ったあと**アセットごと消えた。** この Worker のアセットは
+ * `/login` 1 枚から全部辿れる。
+ *
+ * **空のまま残しておく。** 仕組みごと消すと、次に「外から確かめられない
+ * アセット」が出たときに**宣言する場所が無いので黙って外れる**。
+ * `asset-coverage.test.ts` が「一覧に無い名前を宣言していないか」を
+ * 見ているので、0 件でも検査の形は保たれる。
  */
-export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
-  "/ui/u18.<hash>.css":
-    "**もう誰も読んでいない。** #332 の P2 で最後の持ち主（同意画面）が " +
-    "Kiwa へ移り、この Worker の画面はすべて kiwa.css だけを読む。" +
-    "配信する route だけが残っている状態で、**本番検査は参照元が無い" +
-    "アセットを引けない**（PROBE_PAGES はページから辿る）。" +
-    "**次の PR（`styles.ts` の削除）でアセットごと消える**ので、" +
-    "そのときこの宣言も消すこと。",
-};
+export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {};
 
 export const EXPECTED_ROUTES: readonly Route[] = [
   ...PUBLIC_ROUTES,
