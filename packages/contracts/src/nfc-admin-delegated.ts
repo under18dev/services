@@ -67,6 +67,26 @@ export const reinstateCardDelegatedInputSchema = z.object({
 export type ReinstateCardDelegatedInput = z.infer<typeof reinstateCardDelegatedInputSchema>;
 export type ReinstateCardDelegatedResult = RpcResult<null>;
 
+export const countBatchIssuedCardsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  batch: z.string().min(1).max(64),
+});
+
+export type CountBatchIssuedCardsDelegatedInput = z.infer<
+  typeof countBatchIssuedCardsDelegatedInputSchema
+>;
+export type CountBatchIssuedCardsDelegatedResult = RpcResult<{ readonly count: number }>;
+
+export const batchDisableCardsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  batch: z.string().min(1).max(64),
+});
+
+export type BatchDisableCardsDelegatedInput = z.infer<typeof batchDisableCardsDelegatedInputSchema>;
+export type BatchDisableCardsDelegatedResult = RpcResult<{
+  readonly cardIds: readonly string[];
+}>;
+
 /**
  * 一覧・発行で使う、運営向けの表示用データ。
  *
@@ -116,6 +136,12 @@ export type IssueCardsDelegatedResult = RpcResult<{
  * だけにすること（`scripts/check-service-bindings.mjs`）。
  */
 export interface NfcAdminDelegatedRpcContract {
+  /**
+   * #427 から、`issued`（未紐づけ）も対象にできる。それ以前は `active`
+   * だけだった——未紐づけのカードを無効化する経路が 1 つも無く、
+   * `batchDisableCards` の単発版が無いまま一括だけが存在する状態を
+   * 避けるために広げた。
+   */
   disableCard(input: DisableCardDelegatedInput): Promise<DisableCardDelegatedResult>;
   updateCardTarget(input: UpdateCardTargetDelegatedInput): Promise<UpdateCardTargetDelegatedResult>;
   /**
@@ -137,6 +163,22 @@ export interface NfcAdminDelegatedRpcContract {
    * 判断）。理由は `DelegatedReinstateCardUseCase` の冒頭を参照。
    */
   reinstateCard(input: ReinstateCardDelegatedInput): Promise<ReinstateCardDelegatedResult>;
+  /**
+   * batch 一括無効化の確認画面が出す件数（#427「配布前の箱ごと盗難」）。
+   * **書き込まない。** 2 段階確認の 1 段階目が呼ぶ——
+   * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
+   */
+  countBatchIssuedCards(
+    input: CountBatchIssuedCardsDelegatedInput,
+  ): Promise<CountBatchIssuedCardsDelegatedResult>;
+  /**
+   * batch 単位で `issued`（未紐づけ）のカードを一括無効化する（#427）。
+   * **`active` は対象外。** 理由・監査・戻す経路が無いことは
+   * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
+   */
+  batchDisableCards(
+    input: BatchDisableCardsDelegatedInput,
+  ): Promise<BatchDisableCardsDelegatedResult>;
   /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;

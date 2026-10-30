@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { newCardId } from "@u18/domain";
 import { nfcCardEvents } from "@u18/nfc-db";
 import { desc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -30,6 +31,20 @@ import {
  *  5. 無効化済みのカードへは両方のメソッドとも効かない
  */
 const ACTOR = "usr_admin_from_admin_worker";
+
+/**
+ * `seedActiveCard` は `batch` を受け取らない（既定 "test-batch" 固定）ので、
+ * 「同じバッチ名の active カードは対象外」を確かめるために、ここだけ
+ * issue → claim → updateTarget を直接呼ぶ。
+ */
+async function seedActiveCardWithBatch(ownerUserId: string, batch: string): Promise<string> {
+  const cardId = newCardId();
+  const now = new Date();
+  await repository().issue({ id: cardId, batch }, now);
+  await repository().claim(cardId, ownerUserId, now);
+  await repository().updateTarget(cardId, ownerUserId, "https://example.com/taro", now);
+  return cardId;
+}
 
 let rpc: NfcAdminDelegatedRPC;
 
@@ -84,6 +99,22 @@ describe("disableCard", () => {
 
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error.code).toBe("invalid_input");
+  });
+
+  /**
+   * **#427 から。** それ以前は `active` だけが対象で、`issued`
+   * （未紐づけ）のカードを無効化する経路が 1 つも無かった——単発でも
+   * 使えないと、一括（`batchDisableCards`）だけが「issued を無効化する」
+   * 能力を持つ、安全な単発版の無い危ない形になる。
+   */
+  it("issued（未紐づけ）のカードも無効化できる", async () => {
+    const cardId = await seedIssuedCard();
+
+    const result = await rpc.disableCard({ actorUserId: ACTOR, cardId });
+
+    expect(result.ok, "disableCard が失敗した").toBe(true);
+    const card = await repository().findById(cardId);
+    expect(card?.isDisabled).toBe(true);
   });
 });
 
@@ -378,5 +409,117 @@ describe("issueCards", () => {
 
     const card = await repository().findById(result.value.cards[0]!.cardId);
     expect(card?.batch).toBeNull();
+  });
+});
+
+describe("countBatchIssuedCards", () => {
+  it("issued のカードだけを数え、active・disabled は数えない", async () => {
+    await seedIssuedCard("bunkasai-2026");
+    await seedIssuedCard("bunkasai-2026");
+    // 同じバッチ名でも active（誰かのもの）は数えない。
+    await seedActiveCardWithBatch("usr_taro", "bunkasai-2026");
+    await seedIssuedCard("other-batch");
+
+    const result = await rpc.countBatchIssuedCards({ actorUserId: ACTOR, batch: "bunkasai-2026" });
+
+    expect(result.ok, "countBatchIssuedCards が失敗した").toBe(true);
+    if (!result.ok) return;
+    expect(result.value.count).toBe(2);
+  });
+
+  it("書き込まない。カードの状態は変わらない", async () => {
+    const cardId = await seedIssuedCard("bunkasai-2026");
+
+    await rpc.countBatchIssuedCards({ actorUserId: ACTOR, batch: "bunkasai-2026" });
+
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("issued");
+  });
+
+  it("該当が無ければ 0", async () => {
+    const result = await rpc.countBatchIssuedCards({ actorUserId: ACTOR, batch: "no-such-batch" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.count).toBe(0);
+  });
+
+  it("入力の形が崩れていれば invalid_input で落ちる", async () => {
+    const result = await rpc.countBatchIssuedCards({ actorUserId: "", batch: "" });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+  });
+});
+
+describe("batchDisableCards", () => {
+  it("バッチ内の issued カードを一括無効化し、active は対象外にする", async () => {
+    const issuedA = await seedIssuedCard("bunkasai-2026");
+    const issuedB = await seedIssuedCard("bunkasai-2026");
+    // 同じバッチ名でも active は対象外にすること自体を確かめる。
+    const active = await seedActiveCardWithBatch("usr_taro", "bunkasai-2026");
+    const otherBatch = await seedIssuedCard("other-batch");
+
+    const result = await rpc.batchDisableCards({ actorUserId: ACTOR, batch: "bunkasai-2026" });
+
+    expect(result.ok, "batchDisableCards が失敗した").toBe(true);
+    if (!result.ok) return;
+    expect(new Set(result.value.cardIds)).toEqual(new Set([issuedA, issuedB]));
+
+    expect((await repository().findById(issuedA))?.isDisabled).toBe(true);
+    expect((await repository().findById(issuedB))?.isDisabled).toBe(true);
+    // **active は対象外**（①の設計判断）。バッチ名が一致するだけでは巻き込まない。
+    expect((await repository().findById(active))?.isDisabled).toBe(false);
+    // 別バッチは無関係。
+    expect((await repository().findById(otherBatch))?.isDisabled).toBe(false);
+  });
+
+  it("対象カードの数ぶん card.disabled を書き、metadata.batch を残す", async () => {
+    const cardId = await seedIssuedCard("bunkasai-2026");
+
+    await rpc.batchDisableCards({ actorUserId: ACTOR, batch: "bunkasai-2026" });
+
+    const rows = await db()
+      .select()
+      .from(nfcCardEvents)
+      .where(eq(nfcCardEvents.cardId, cardId))
+      .orderBy(desc(nfcCardEvents.id))
+      .all();
+    const disabledEvent = rows.find((row) => row.event === "card.disabled");
+
+    // **イベント名は増やさない。** 単発の運営操作と同じ card.disabled /
+    // reason: "admin_action" を使い、metadata.batch で一括操作の一部
+    // だったことを残す。
+    expect(disabledEvent?.actorUserId).toBe(ACTOR);
+    expect(disabledEvent?.metadata?.["actingAsAdmin"]).toBe(true);
+    expect(disabledEvent?.metadata?.["reason"]).toBe("admin_action");
+    expect(disabledEvent?.metadata?.["batch"]).toBe("bunkasai-2026");
+  });
+
+  it("既に無効化済みのカードを含む状態でもう一度叩いても失敗にしない（冪等）", async () => {
+    await seedIssuedCard("bunkasai-2026");
+    await rpc.batchDisableCards({ actorUserId: ACTOR, batch: "bunkasai-2026" });
+
+    const second = await rpc.batchDisableCards({ actorUserId: ACTOR, batch: "bunkasai-2026" });
+
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    // 2 回目は対象 0 件。失敗にはしない。
+    expect(second.value.cardIds).toHaveLength(0);
+  });
+
+  it("該当が無ければ 0 件を返す（失敗にしない）", async () => {
+    const result = await rpc.batchDisableCards({ actorUserId: ACTOR, batch: "no-such-batch" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cardIds).toHaveLength(0);
+  });
+
+  it("入力の形が崩れていれば invalid_input で落ちる", async () => {
+    const result = await rpc.batchDisableCards({ actorUserId: "", batch: "" });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("invalid_input");
   });
 });

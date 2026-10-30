@@ -1,4 +1,6 @@
 import {
+  batchDisableCardsDelegatedInputSchema,
+  countBatchIssuedCardsDelegatedInputSchema,
   disableCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
   reinstateCardDelegatedInputSchema,
@@ -7,6 +9,10 @@ import {
   rpcOk,
   updateCardTargetDelegatedInputSchema,
   type AdminCardStatusDelegated,
+  type BatchDisableCardsDelegatedInput,
+  type BatchDisableCardsDelegatedResult,
+  type CountBatchIssuedCardsDelegatedInput,
+  type CountBatchIssuedCardsDelegatedResult,
   type DisableCardDelegatedInput,
   type DisableCardDelegatedResult,
   type IssueCardsDelegatedInput,
@@ -171,6 +177,45 @@ export class NfcAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
 
     return rpcOk(null);
+  }
+
+  /**
+   * batch 一括無効化の確認画面が出す件数（#427）。**書き込まない。**
+   */
+  async countBatchIssuedCards(
+    input: CountBatchIssuedCardsDelegatedInput,
+  ): Promise<CountBatchIssuedCardsDelegatedResult> {
+    const parsed = countBatchIssuedCardsDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or batch is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedCountBatchIssuedCards.execute({
+      batch: parsed.data.batch,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({ count: result.value.count });
+  }
+
+  /**
+   * batch 単位で `issued`（未紐づけ）のカードを一括無効化する（#427
+   * 「配布前の箱ごと盗難」）。**`active` は対象外。** 理由は
+   * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
+   */
+  async batchDisableCards(
+    input: BatchDisableCardsDelegatedInput,
+  ): Promise<BatchDisableCardsDelegatedResult> {
+    const parsed = batchDisableCardsDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or batch is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedBatchDisableCards.execute({
+      actorUserId: parsed.data.actorUserId,
+      batch: parsed.data.batch,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({ cardIds: result.value.cardIds });
   }
 
   /**

@@ -162,14 +162,53 @@ export interface CardRepository {
    * 運営による無効化（#382「他人のカードへの操作」）。
    *
    * **`disable` との違いは `ownerUserId` を WHERE 句に持たないことだけ。**
-   * 所有者を問わず、`active` であることだけを条件にする。所有者判定を
-   * ここで外すのは、**管理者判定を UseCase の中だけに置く**という
-   * `cards.routes.ts` の方針（判定をルートに書くと経路が増えたときに
-   * 素通りする形を作る）を、Repository 層まで一貫させるため ——
-   * 「誰のカードか」という条件自体を無くし、「管理者かどうか」の判定は
-   * `AdminDisableCardUseCase` の `requireAdminUserId` だけに置く。
+   * 所有者を問わず、**`active` または `issued`** であることだけを条件に
+   * する。所有者判定をここで外すのは、**管理者判定を UseCase の中だけに
+   * 置く**という `cards.routes.ts` の方針（判定をルートに書くと経路が
+   * 増えたときに素通りする形を作る）を、Repository 層まで一貫させる
+   * ため —— 「誰のカードか」という条件自体を無くし、「管理者かどうか」
+   * の判定は `AdminDisableCardUseCase` の `requireAdminUserId` だけに置く。
+   *
+   * **`issued` を条件に加えたのは #427（batch 一括無効化）から。** それ
+   * 以前は `active` だけで、**未紐づけのカードを無効化する経路が 1 つも
+   * 無かった**——所有者本人の `disable`（`cards.routes.ts`）も所有者を
+   * 要求するので同じく届かない。箱ごと盗難（配布前、全カードが `issued`）
+   * という想定に対して、運営に手段が無かった。単発でも使える——
+   * 一括のほうが危ない操作なのに、安全な単発版が無いのは順序が逆という
+   * 判断（`DelegatedBatchDisableCardsUseCase` の冒頭を参照）。
    */
   disableAsAdmin(cardId: string, reason: string, now: Date): Promise<boolean>;
+
+  /**
+   * batch 単位で `issued` のカードを一括無効化する（#427「配布前の箱ごと
+   * 盗難」）。
+   *
+   * **`active` は対象外。** 誰かのものになっているカードを、バッチ名が
+   * 一致するというだけで巻き込まない——想定（配布前の盗難）に対しては
+   * `issued` だけで足りる。
+   *
+   * **戻す経路はまだ無い。** `reinstateAsAdmin`（#434）は `disabled` →
+   * `active` で、ここが作る `issued` → `disabled` の逆（`disabled` →
+   * `issued`）とは別の遷移——転用すると、所有者の無いカードが `active`
+   * になる壊れた行ができる。#436 で追跡する。
+   *
+   * @returns 実際に無効化できたカードの ID。**D1 の 1 文の
+   *   `UPDATE ... RETURNING` なので、この戻り値自体が「何枚効いたか」の
+   *   確定した答えである**——途中で止まる・一部だけ効くという状態は
+   *   SQL エンジンの単一文として起こりえない。
+   */
+  disableBatchAsAdmin(
+    batch: string,
+    reason: string,
+    now: Date,
+  ): Promise<readonly { readonly id: string }[]>;
+
+  /**
+   * batch 一括無効化の確認画面が出す件数（#427）。**書き込まない。**
+   * `disableBatchAsAdmin` と同じ条件（`batch` かつ `issued`）で数える
+   * だけで、2 段階確認の 1 段階目はこれだけを呼ぶ。
+   */
+  countIssuedInBatch(batch: string): Promise<number>;
 
   /**
    * 運営による遷移先の変更（#382「他人のカードへの操作」2 本目）。

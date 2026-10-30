@@ -1,5 +1,5 @@
 import { type NfcDatabase, nfcCards } from "@u18/nfc-db";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { CardRepository, NewCard } from "../../application/ports";
 import { Card, type CardProps } from "../../domain/entities/card";
 
@@ -138,9 +138,39 @@ export class DrizzleCardRepository implements CardRepository {
     const rows = await this.db
       .update(nfcCards)
       .set({ status: "disabled", disabledAt: now, disabledReason: reason, updatedAt: now })
-      .where(and(eq(nfcCards.id, cardId), eq(nfcCards.status, "active")))
+      .where(
+        and(
+          eq(nfcCards.id, cardId),
+          or(eq(nfcCards.status, "active"), eq(nfcCards.status, "issued")),
+        ),
+      )
       .returning({ id: nfcCards.id });
     return rows.length > 0;
+  }
+
+  /**
+   * batch 単位で `issued` のカードを一括無効化する（#427）。**`active` は
+   * 対象外**——WHERE 句がそのまま表明である。
+   */
+  async disableBatchAsAdmin(
+    batch: string,
+    reason: string,
+    now: Date,
+  ): Promise<readonly { readonly id: string }[]> {
+    return await this.db
+      .update(nfcCards)
+      .set({ status: "disabled", disabledAt: now, disabledReason: reason, updatedAt: now })
+      .where(and(eq(nfcCards.batch, batch), eq(nfcCards.status, "issued")))
+      .returning({ id: nfcCards.id });
+  }
+
+  async countIssuedInBatch(batch: string): Promise<number> {
+    const rows = await this.db
+      .select({ id: nfcCards.id })
+      .from(nfcCards)
+      .where(and(eq(nfcCards.batch, batch), eq(nfcCards.status, "issued")))
+      .all();
+    return rows.length;
   }
 
   /**

@@ -51,6 +51,13 @@ export const NAV_PAGE_ROUTES: readonly Route[] = [
 /** 上の画面から呼ぶ更新系・検索系。 */
 export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/nfc" },
+  /**
+   * batch 単位の一括無効化（#427）。**この 1 本が 2 つの意味を持つ。**
+   * `target_batch` が空なら 1 段階目（対象枚数を数えるだけ、書き込まない）、
+   * 入っていれば 2 段階目（再入力が一致すれば実際に無効化する）——
+   * フォームの `action` が同じなので、一覧には 1 行しか出てこない。
+   */
+  { method: "POST", path: "/nfc/batch-disable" },
   { method: "POST", path: "/nfc/:cardId/disable" },
   { method: "POST", path: "/nfc/:cardId/release" },
   { method: "POST", path: "/nfc/:cardId/reinstate" },

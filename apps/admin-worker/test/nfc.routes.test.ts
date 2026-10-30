@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
   AdminCardViewDelegated,
+  BatchDisableCardsDelegatedInput,
+  CountBatchIssuedCardsDelegatedInput,
   DisableCardDelegatedInput,
   IssueCardsDelegatedInput,
   IssueCardsDelegatedResult,
@@ -49,6 +51,8 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     issueCards: IssueCardsDelegatedInput[];
     releaseCard: ReleaseCardDelegatedInput[];
     reinstateCard: ReinstateCardDelegatedInput[];
+    countBatchIssuedCards: CountBatchIssuedCardsDelegatedInput[];
+    batchDisableCards: BatchDisableCardsDelegatedInput[];
   };
 } {
   const calls = {
@@ -57,6 +61,8 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     issueCards: [] as IssueCardsDelegatedInput[],
     releaseCard: [] as ReleaseCardDelegatedInput[],
     reinstateCard: [] as ReinstateCardDelegatedInput[],
+    countBatchIssuedCards: [] as CountBatchIssuedCardsDelegatedInput[],
+    batchDisableCards: [] as BatchDisableCardsDelegatedInput[],
   };
 
   const rpc: NfcAdminDelegatedRpcContract = {
@@ -81,6 +87,14 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     reinstateCard: async (input) => {
       calls.reinstateCard.push(input);
       return rpcOk(null);
+    },
+    countBatchIssuedCards: async (input) => {
+      calls.countBatchIssuedCards.push(input);
+      return rpcOk({ count: 0 });
+    },
+    batchDisableCards: async (input) => {
+      calls.batchDisableCards.push(input);
+      return rpcOk({ cardIds: [] });
     },
     ...overrides,
   };
@@ -728,6 +742,207 @@ describe("POST /nfc/:cardId/target", () => {
     expect(response.status).toBe(400);
     const html = await response.text();
     expect(html).toContain("そのカードは見つかりませんでした。");
+  });
+});
+
+describe("POST /nfc/batch-disable", () => {
+  it("CSRF トークンが無ければ 403 で、countBatchIssuedCards も batchDisableCards も呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/batch-disable`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ batch: "bunkasai-2026" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.countBatchIssuedCards).toHaveLength(0);
+    expect(calls.batchDisableCards).toHaveLength(0);
+  });
+
+  it("1 段階目: バッチ名を入れると件数を数えるだけで、無効化は呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      countBatchIssuedCards: async (input) => {
+        calls.countBatchIssuedCards.push(input);
+        return rpcOk({ count: 3 });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/batch-disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ batch: "bunkasai-2026", csrf_token: csrfToken }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.countBatchIssuedCards).toEqual([{ actorUserId: SUB, batch: "bunkasai-2026" }]);
+    expect(calls.batchDisableCards).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("bunkasai-2026");
+    expect(html).toContain("3 枚");
+    // 2 段階目の hidden フィールドが対象バッチ名を持って出ていること。
+    expect(html).toMatch(/name="target_batch" value="bunkasai-2026"/);
+  });
+
+  it("対象が 0 件なら確認画面を出さず、エラーにする", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      countBatchIssuedCards: async () => rpcOk({ count: 0 }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/batch-disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ batch: "no-such-batch", csrf_token: csrfToken }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("そのバッチには未紐づけのカードがありません。");
+    expect(html).not.toMatch(/name="target_batch"/);
+  });
+
+  it("2 段階目: 再入力が一致すれば batchDisableCards を呼び、PRG で戻す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      batchDisableCards: async (input) => {
+        calls.batchDisableCards.push(input);
+        return rpcOk({ cardIds: ["nfc_a", "nfc_b"] });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/batch-disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          batch: "bunkasai-2026",
+          target_batch: "bunkasai-2026",
+          csrf_token: csrfToken,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/nfc?batch_disabled=2");
+    expect(calls.batchDisableCards).toEqual([{ actorUserId: SUB, batch: "bunkasai-2026" }]);
+  });
+
+  it("2 段階目: 再入力が一致しなければ、無効化を呼ばず確認画面へ差し戻す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      countBatchIssuedCards: async () => rpcOk({ count: 5 }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/batch-disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          batch: "typo-ed-name",
+          target_batch: "bunkasai-2026",
+          csrf_token: csrfToken,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls.batchDisableCards).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("入力が一致しません");
+    expect(html).toContain("bunkasai-2026");
+  });
+
+  it("CSRF トークンが通っていても、target_batch が hidden なだけでは権限を迂回しない（意図の確認でしかない）", async () => {
+    // **これは正常系の裏返しの確認。** target_batch を偽造して直接
+    // POST しても、権限（CSRF・セッション）の検査は同じに掛かる。
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/batch-disable`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ batch: "x", target_batch: "x" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.batchDisableCards).toHaveLength(0);
   });
 });
 

@@ -34,6 +34,9 @@ import type { AppBindings } from "./types";
 /** 発行の直後に「何枚出したか」を運ぶクエリ名。移行元と同じ理由（ID は運ばない）。 */
 const ISSUED_COUNT_PARAM = "issued";
 
+/** batch 一括無効化の直後に「何枚止めたか」を運ぶクエリ名（#427）。 */
+const BATCH_DISABLED_COUNT_PARAM = "batch_disabled";
+
 const TARGET_URL_REASON_LABEL: Readonly<Record<string, string>> = {
   not_absolute: "URL は https:// から始まる絶対 URL で入力してください。",
   too_long: "URL が長すぎます。短いものをお使いください。",
@@ -48,6 +51,14 @@ function issuedCountFromQuery(raw: string | undefined): number | null {
   if (raw === undefined) return null;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) return null;
+  return parsed;
+}
+
+/** `ISSUED_COUNT_PARAM` と違い 0 を許す——該当なしで一括無効化が実行されうる。 */
+function batchDisabledCountFromQuery(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
   return parsed;
 }
 
@@ -73,6 +84,9 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         csrfToken={ensureCsrfToken(c)}
         issuedCount={issuedCountFromQuery(c.req.query(ISSUED_COUNT_PARAM))}
         error={null}
+        batchDisable={null}
+        batchDisableError={null}
+        batchDisabledCount={batchDisabledCountFromQuery(c.req.query(BATCH_DISABLED_COUNT_PARAM))}
       />,
     );
   });
@@ -204,6 +218,84 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     c.header("Cache-Control", "no-store");
     return c.redirect("/nfc", 303);
   });
+
+  /**
+   * batch 単位で `issued`（未紐づけ）のカードを一括無効化する（#427
+   * 「配布前の箱ごと盗難」）。**`active` は対象外**——理由は
+   * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
+   *
+   * ## 2 段階の retype 確認
+   *
+   * **`target_batch` が空なら 1 段階目。** 入力されたバッチ名で対象
+   * 枚数を数えるだけで、何も書き込まない。0 件ならエラーを出す。
+   *
+   * **`target_batch` があれば 2 段階目。** 再入力した `batch` が
+   * `target_batch` と完全に一致したときだけ実際に無効化する。一致
+   * しなければ、同じ確認画面へ理由を添えて差し戻す（`target_batch` は
+   * 変えない——打ち直すのは利用者で、対象は動かさない）。
+   *
+   * **これは意図の確認であって、権限の確認ではない。** `target_batch`
+   * は hidden に入っているだけなので、攻撃者には障害にならない——
+   * 権限は CSRF（上のチェック）とセッションガード（`app.ts`）が持つ。
+   */
+  app.post("/nfc/batch-disable", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return c.text("forbidden", 403);
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const typed = form.get("batch")?.toString().trim() ?? "";
+    const targetBatch = form.get("target_batch")?.toString().trim() ?? "";
+
+    if (targetBatch === "") {
+      if (typed === "") {
+        return renderNfcPageWithError(c, "バッチ名を入力してください。");
+      }
+
+      const counted = await container.nfcCards.countBatchIssuedCards({
+        actorUserId: session.sub,
+        batch: typed,
+      });
+      if (!counted.ok) {
+        return c.text("しばらくしてからもう一度お試しください。", 503);
+      }
+      if (counted.value.count === 0) {
+        return renderNfcPageWithError(c, "そのバッチには未紐づけのカードがありません。");
+      }
+
+      return renderNfcPageWithBatchConfirm(c, { batch: typed, count: counted.value.count });
+    }
+
+    if (typed !== targetBatch) {
+      const counted = await container.nfcCards.countBatchIssuedCards({
+        actorUserId: session.sub,
+        batch: targetBatch,
+      });
+      if (!counted.ok) {
+        return c.text("しばらくしてからもう一度お試しください。", 503);
+      }
+      return renderNfcPageWithBatchConfirm(
+        c,
+        { batch: targetBatch, count: counted.value.count },
+        "入力が一致しません。もう一度バッチ名を入力してください。",
+      );
+    }
+
+    const result = await container.nfcCards.batchDisableCards({
+      actorUserId: session.sub,
+      batch: targetBatch,
+    });
+    if (!result.ok) {
+      return renderNfcPageWithError(c, "しばらくしてからもう一度お試しください。");
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect(`/nfc?${BATCH_DISABLED_COUNT_PARAM}=${result.value.cardIds.length}`, 303);
+  });
 }
 
 /**
@@ -234,7 +326,48 @@ async function renderNfcPageWithError(c: Context<AppBindings>, message: string):
       csrfToken={ensureCsrfToken(c)}
       issuedCount={null}
       error={message}
+      batchDisable={null}
+      batchDisableError={null}
+      batchDisabledCount={null}
     />,
     400,
+  );
+}
+
+/**
+ * batch 一括無効化の確認画面を描き直す（#427）。**一覧をもう一度引く**
+ * のは `renderNfcPageWithError` と同じ理由——直前の操作の結果を手で
+ * 足すと、食い違いを作れる。
+ */
+async function renderNfcPageWithBatchConfirm(
+  c: Context<AppBindings>,
+  batchDisable: { readonly batch: string; readonly count: number },
+  error: string | null = null,
+): Promise<Response> {
+  const container = c.get("container");
+  const result = await container.nfcCards.listAllCards();
+
+  if (!result.ok) {
+    return c.text("しばらくしてからもう一度お試しください。", 503);
+  }
+
+  const tapUrls = result.value.cards
+    .filter((card) => card.status === "issued")
+    .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+
+  c.header("Cache-Control", "no-store");
+  return c.html(
+    <NfcPage
+      cards={result.value.cards}
+      truncated={result.value.truncated}
+      tapUrls={tapUrls}
+      csrfToken={ensureCsrfToken(c)}
+      issuedCount={null}
+      error={null}
+      batchDisable={batchDisable}
+      batchDisableError={error}
+      batchDisabledCount={null}
+    />,
+    error === null ? 200 : 400,
   );
 }
