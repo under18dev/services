@@ -4,10 +4,11 @@ import type { Child, FC } from "hono/jsx";
 /**
  * HTML を返す全画面の共通レイアウト（仕様書 §14.1 決定 4）。
  *
- * ログイン画面・同意画面（auth-worker）と、アカウント管理画面
- * （dashboard-worker）で共有する。**同じオリジンで配信される別々の Worker**
- * なので、見た目と `<head>` の中身がずれると利用者には 1 つのサイトが
- * 突然変わったように見える。画面固有のものはここに置かない。
+ * ログイン画面・同意画面（auth-worker）、アカウント管理画面
+ * （dashboard-worker）、カード画面（nfc-worker）で共有する。**同じ
+ * オリジンで配信される別々の Worker** なので、見た目と `<head>` の中身が
+ * ずれると利用者には 1 つのサイトが突然変わったように見える。画面固有の
+ * ものはここに置かない。
  *
  * - スクリプトは**外部ファイルだけ**。インライン `<script>` を書くと
  *   `script-src 'self'` の CSP に引っかかり、`'unsafe-inline'` か nonce が
@@ -15,39 +16,27 @@ import type { Child, FC } from "hono/jsx";
  *   （CSP の定義は `page-headers.ts`）。
  * - `scripts` が未指定なら `<script>` が 1 つも出ない。JS 無しで成立する
  *   画面（同意画面など）はそのまま使える。
+ *
+ * ## `<body>` に class を付けない（#332）
+ *
+ * かつては骨格の種類を引数で選び、手書き CSS（`styles.ts`）のクラスを
+ * `<body>` と `<main>` へ出していた。**全部の画面が Kiwa UI へ移って
+ * 手書き CSS が消えたので、選ぶものが無くなった。** 骨格は外枠の
+ * コンポーネント（`kiwa/card-shell.tsx` / `kiwa/shell.tsx`）が自分で組む。
+ * **ここは `<head>` だけを受け持つ。**
  */
 export type LayoutProps = {
   readonly title: string;
 
   /**
-   * 画面の骨格。
-   *
-   * - `"card"`（既定）: 中央に 1 枚のカード。ログイン・同意など、
-   *   入力が 1 つで完結する画面。
-   * - `"shell"`: 上端寄せの広い面。節が複数あり一覧が縦に伸びる画面。
-   *   中央寄せのままだと内容が増えたときに上端がビューポートの外へ出る。
-   * - `"dash"`: 全面。**この枠だけ `<h1 class="brand">` を描かない** ——
-   *   サイドバーが自分のブランドを持つので、2 つ出ると二重になる。
-   *   中身の組み立ては呼び出し側に任せる（#308）。
-   * - `"bare"`: `<body>` に class を付けない。**`"dash"` との違いは
-   *   `class="page-dash"` が出ないことだけ**である（#332）。
-   *
-   *   Kiwa UI の画面は手書き CSS（`styles.ts`）を読まない。そこへ
-   *   `page-dash` を出すと、**読んでいないスタイルシートのクラスが
-   *   HTML に残る。** 害は無いが、読んだ人は「このページは u18.css も
-   *   読んでいる」と思う。枠の指定は読んでいる CSS についてだけ言う。
-   */
-  readonly frame?: "card" | "shell" | "dash" | "bare";
-
-  /**
    * 読み込むスタイルシートのパス。
    *
-   * **Worker ごとに違う。** auth-worker は `/ui/u18.css`、dashboard-worker は
-   * `/account/ui/u18.css` で、同じ `UI_STYLESHEET` を各自が配信している
-   * （理由は `styles.ts` の「定義はここ 1 つ。配信は Worker ごとに行う」）。
+   * **Worker ごとに違う。** auth-worker は `/ui/kiwa.<hash>.css`、
+   * dashboard-worker は `/account/ui/kiwa.<hash>.css` で、**それぞれが
+   * 自分で Tailwind を走らせている**（走査対象が違うので中身も違う）。
    * 既定値を置かないのは、**書き忘れたら素の HTML が出る**ようにしておく
-   * ため。既定を `/ui/u18.css` にすると、dashboard で指定を忘れても
-   * 本番だけは（auth-worker のおかげで）たまたま動いてしまう。
+   * ため。既定を 1 つ決めると、指定を忘れた Worker でも隣のおかげで
+   * たまたま動いてしまう。
    */
   readonly stylesheet: string;
 
@@ -57,13 +46,7 @@ export type LayoutProps = {
   readonly children?: Child;
 };
 
-export const Layout: FC<LayoutProps> = ({
-  title,
-  frame = "card",
-  stylesheet,
-  scripts = [],
-  children,
-}) => (
+export const Layout: FC<LayoutProps> = ({ title, stylesheet, scripts = [], children }) => (
   <>
     {raw("<!DOCTYPE html>")}
     <html lang="ja">
@@ -78,20 +61,11 @@ export const Layout: FC<LayoutProps> = ({
           <script key={src} type="module" src={src} defer />
         ))}
       </head>
-      {frame === "bare" ? (
-        <body>{children}</body>
-      ) : frame === "dash" ? (
-        // **`<main>` もブランドもここでは描かない。** サイドバーと本文の
-        // 関係は呼び出し側が組む（`<main>` は本文側に置く）。
-        <body class="page-dash">{children}</body>
-      ) : (
-        <body class={frame === "shell" ? "page-shell" : undefined}>
-          <main class={frame === "shell" ? "shell" : "card"}>
-            <h1 class="brand">u18 Identity</h1>
-            {children}
-          </main>
-        </body>
-      )}
+      {/*
+        **`<main>` もブランドもここでは描かない。** 外枠と本文の関係は
+        呼び出し側が組む（`kiwa/card-shell.tsx` / `kiwa/shell.tsx`）。
+      */}
+      <body>{children}</body>
     </html>
   </>
 );

@@ -4,8 +4,10 @@ import { Layout } from "../layout";
 /**
  * 中央に 1 枚のカードを置く外枠、Kiwa UI 版（#332 の P2）。
  *
- * **`Layout` の `frame="card"` の置き換えである。** あちらは手書き CSS の
- * `.card` / `.brand` に依っているので、Tailwind だけを読む画面では使えない。
+ * **`Layout` が骨格を選んでいた頃の `frame="card"` を引き取ったもの。**
+ * あちらは手書き CSS の `.card` / `.brand` に依っていたので、Tailwind だけを
+ * 読む画面では使えなかった。手書き CSS が消えたいま、骨格を組むのは
+ * 外枠のコンポーネントだけで、`Layout` は `<head>` を受け持つ。
  *
  * 使うのは**入力が 1 つで完結する画面** —— ログイン、新規登録、確認コード、
  * 同意。一覧が縦に伸びる画面はサイドバー付きの `KiwaShell` のほう。
@@ -42,7 +44,7 @@ export const KiwaCardShell: FC<KiwaCardShellProps> = ({
   scripts = [],
   children,
 }) => (
-  <Layout title={title} frame="bare" stylesheet={stylesheet} scripts={scripts}>
+  <Layout title={title} stylesheet={stylesheet} scripts={scripts}>
     <div class="flex min-h-dvh items-center justify-center px-5 py-10">
       <main class="flex w-full max-w-md flex-col gap-5 rounded-xl border border-border bg-card p-8">
         <p class="text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase">

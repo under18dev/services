@@ -7,7 +7,7 @@ import { aUser } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 import { DrizzleEmailChallengeRepository } from "../src/infrastructure/persistence/drizzle-email-challenge.repository";
-import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH } from "../src/presentation/http/ui/asset-paths";
 import { freshIpFactory } from "./fresh-ip";
 import { resetDatabase } from "./helpers";
 
@@ -296,14 +296,17 @@ describe("URL に内容ハッシュが入る（#211）", () => {
     // サーバーから取れない。代わりに、ページを読めば必ず新しい URL を
     // 指しているので取りに行ける。ここが 200 を返すなら古い URL も
     // 生かしていることになり、#211 で消した窓が戻る。
-    expect((await SELF.fetch(`${BASE}/ui/u18.css`)).status).toBe(404);
+    expect((await SELF.fetch(`${BASE}/ui/kiwa.css`)).status).toBe(404);
     expect((await SELF.fetch(`${BASE}/ui/login-island.js`)).status).toBe(404);
+    // `u18.css` は**ハッシュ付きでももう存在しない**（#332 の P2 で
+    // `styles.ts` ごと消した）。ハッシュの有無に関わらず 404 である。
+    expect((await SELF.fetch(`${BASE}/ui/u18.css`)).status).toBe(404);
   });
 });
 
 describe("Auth UI のアセット配信", () => {
   it("スタイルシートを返す", async () => {
-    const response = await SELF.fetch(`${BASE}${STYLESHEET_PATH}`);
+    const response = await SELF.fetch(`${BASE}${KIWA_STYLESHEET_PATH}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/css");
     expect((await response.text()).length).toBeGreaterThan(100);

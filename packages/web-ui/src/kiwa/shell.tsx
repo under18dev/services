@@ -27,11 +27,12 @@ import { SidebarItem } from "./sidebar-item";
  *
  * ## 読む CSS は Tailwind の 1 本だけ
  *
- * 手書き CSS（`../styles.ts`）と**同じページに重ねない。** Tailwind の
- * preflight がブラウザ既定を潰し、手書き側はその既定を前提に書かれて
- * いる（`body` の中央寄せ、`h2` の余白）ので、重ねると手書き側が崩れる。
  * `Layout` に渡す `stylesheet` は 1 本で、各 Worker のテストが
  * `<link rel="stylesheet">` がちょうど 1 本であることを見ている。
+ * **重ねないための決まりだった** —— かつては手書き CSS（`styles.ts`）が
+ * 並んでおり、Tailwind の preflight がその前提（`body` の中央寄せ、
+ * `h2` の余白）を潰した。手書き側は #332 で消えたが、**1 本であること
+ * 自体は Worker ごとの CSS が混ざらないために要る。**
  *
  * ## インラインの `style` を書かない
  *
@@ -150,7 +151,7 @@ export const KiwaShell: FC<KiwaShellProps> = ({
   loginHref,
   children,
 }) => (
-  <Layout title={title} frame="bare" stylesheet={stylesheet} scripts={scripts}>
+  <Layout title={title} stylesheet={stylesheet} scripts={scripts}>
     <div class="flex min-h-dvh flex-col md:flex-row">
       {current !== undefined && <Sidebar nav={nav} current={current} brandHref={brandHref} />}
       <main class="min-w-0 flex-1 px-5 py-8 md:px-10 md:py-12">
