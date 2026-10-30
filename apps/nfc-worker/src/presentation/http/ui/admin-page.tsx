@@ -11,13 +11,22 @@ import {
   Empty,
   EmptyHeader,
   EmptyTitle,
+  getButtonClasses,
   KiwaShell,
   Separator,
 } from "@u18/web-ui/kiwa";
-import { ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
+import {
+  FIELD_CLASS,
+  INPUT_CLASS,
+  ITEM_META_CLASS,
+  LABEL_CLASS,
+} from "@u18/web-ui/kiwa/island-classes";
 import type { FC } from "hono/jsx";
 import type { AdminCardList, AdminCardView } from "../../../application/ports";
 import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ADMIN_UI_PATH } from "../base-path";
+import { CSRF_FIELD_NAME } from "../csrf";
+import { MAX_ISSUE_COUNT } from "../../../application/use-cases/issue-cards.use-case";
 
 /**
  * 運営向けのカード管理画面（`/account/nfc/admin`、#338 Step 3）。
@@ -128,9 +137,21 @@ export type AdminPageProps = {
    * 渡すと、ホストを画面が決めることになる**（`base-path.ts`）。
    */
   readonly tapUrls: readonly string[];
+  /** 発行フォームの CSRF トークン。**form を描くときだけ要る。** */
+  readonly csrfToken: string;
+  /**
+   * 直前の発行で出した枚数（PRG で戻ってきたとき）。
+   *
+   * **枚数だけ。カード ID は運ばない** —— URL に載ると CSRF 失敗時の
+   * ログへ落ちる（`base-path.ts` の `CLAIM_CARD_PARAM`）。
+   * **新しいカードは `issued` なので、下の `<textarea>` に必ず入っている。**
+   */
+  readonly issuedCount: number | null;
+  /** 発行に失敗したときの文言。 */
+  readonly error: string | null;
 };
 
-export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls }) => (
+export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls, csrfToken, issuedCount, error }) => (
   <KiwaShell
     title="カードの管理"
     nav={ACCOUNT_NAV_GROUPS}
@@ -154,6 +175,96 @@ export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls }) => (
         共有しない、スクリーンショットを残さない。
       </AlertDescription>
     </Alert>
+
+    {/*
+      **発行 → その場で URL が並ぶ**（#382）。発行したカードは `issued`
+      なので、下の `<textarea>` に**そのまま入る。** 別の場所へ出し分けない。
+    */}
+    <Card>
+      <CardHeader>
+        <CardTitle>カードを発行する</CardTitle>
+        <CardDescription>
+          空のカード ID を作ります。<strong>取り消せません。</strong>
+          発行したぶんは下の URL 一覧にそのまま並びます。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {issuedCount === null ? null : (
+          // **完了の知らせはエラーではないので `role="status"`**（控えめに読み上げる）。
+          <p class={`${ITEM_META_CLASS} mb-4`} role="status">
+            {issuedCount} 枚発行しました。下の一覧に入っています。
+          </p>
+        )}
+        {error === null ? null : (
+          <p
+            class="mb-4 rounded-lg border border-destructive/40 bg-background-subtle px-3 py-2.5 text-sm text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
+
+        {/*
+          **JavaScript を要求しない。** この Worker で 2 本目の form POST で、
+          1 本目（紐づけ）と同じ理由である —— **JS の有無で出し分けると、
+          JS が落ちている人は発行だけ済んで URL を受け取れない。**
+
+          走査（`vitest.config.ts` の `collectFormCsrfSites`）が、CSRF の
+          hidden input を描いていない form を落とす。
+
+          **ここに判定の正規表現が当たる文字列を書かないこと。** 走査は
+          JSDoc（行頭 `*`）と `//` は読み飛ばすが、**この `{…}` の中は
+          読む** —— 「どう判定しているか」を例示した瞬間に、その例示が
+          判定を満たしてしまい、**hidden input が無くても守られていると
+          読まれる。** 実際ここで踏んだ。
+        */}
+        <form method="post" action={ADMIN_UI_PATH} class="flex flex-col gap-4">
+          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+
+          <label class={FIELD_CLASS} for="issue-count">
+            <span class={LABEL_CLASS}>枚数</span>
+            <input
+              id="issue-count"
+              class={INPUT_CLASS}
+              type="number"
+              name="count"
+              value="10"
+              required
+              min={1}
+              max={MAX_ISSUE_COUNT}
+              inputmode="numeric"
+            />
+          </label>
+
+          <label class={FIELD_CLASS} for="issue-batch">
+            <span class={LABEL_CLASS}>ロット名（任意）</span>
+            <input
+              id="issue-batch"
+              class={INPUT_CLASS}
+              type="text"
+              name="batch"
+              maxlength={64}
+              placeholder="2026-bunkasai"
+              autocapitalize="off"
+            />
+          </label>
+          <p class={ITEM_META_CLASS}>
+            配布の単位です。あとから「どの束のカードか」を辿るのに使います。
+          </p>
+
+          <button type="submit" class={getButtonClasses()}>
+            発行する
+          </button>
+          <p class={ITEM_META_CLASS}>
+            1 回に {MAX_ISSUE_COUNT} 枚まで。
+            <strong>
+              発行したカードは、ID を知っている人がタップすればその人のものになります。
+            </strong>
+            配る直前に発行してください。
+          </p>
+        </form>
+      </CardContent>
+    </Card>
 
     <Card>
       <CardHeader>
@@ -240,13 +351,9 @@ export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls }) => (
       <CardHeader>
         <CardTitle>この画面からできないこと</CardTitle>
         <CardDescription>
-          カードの発行、他の人のカードの遷移先の変更・無効化・所有者の付け替えは、
-          まだこの画面からは行えません。
-          <strong>
-            発行は <code class="font-mono">POST /account/nfc/cards</code> の API から行えます。
-          </strong>
-          他の人のカードへの操作は API にもまだありません（いまの API は、どれも自分が
-          所有者であるカードにしか効きません）。
+          他の人のカードの遷移先の変更・無効化・所有者の付け替えは、まだこの画面からは 行えません。
+          <strong>API にもありません</strong> —— いまの API は、どれも自分が
+          所有者であるカードにしか効きません（裏側から作る必要があります）。
         </CardDescription>
       </CardHeader>
     </Card>

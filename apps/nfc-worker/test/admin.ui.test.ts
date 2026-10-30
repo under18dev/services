@@ -219,3 +219,171 @@ describe("打ち切りを黙って行わない", () => {
 function textareaIn(html: string): string {
   return /<textarea\b[^>]*>([\s\S]*?)<\/textarea>/.exec(html)?.[1] ?? "";
 }
+
+/**
+ * **描かれた form だけでカードを発行する**（#382）。
+ *
+ * `consent.form-drive.test.ts`（auth-worker）と同じ形である。あちらは
+ * **CSRF の hidden input を 1 行消しても 918 本が緑だった**ことから
+ * 入れたもので、理由はここでも同じ —— **画面を読まずに画面のテストを
+ * 名乗らない。**
+ *
+ * **発行は取り消せない。** 枚数も action も method も、こちらでは
+ * 1 つも書かず、**画面が言っているものだけ**を送る。
+ */
+describe("描かれた form だけで発行する", () => {
+  type Form = {
+    readonly action: string;
+    readonly method: string;
+    readonly fields: Readonly<Record<string, string>>;
+  };
+
+  /** HTML から form を 1 つ取り出す。既定へ落ちたことが分かるよう空文字で返す。 */
+  function formIn(html: string, marker: string): Form {
+    const tags = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g)];
+    const found = tags.find(([, attrs, body]) => `${attrs}${body}`.includes(marker));
+    if (found === undefined) throw new Error(`${marker} を含む form が無い`);
+
+    const [, attrs = "", body = ""] = found;
+    const fields: Record<string, string> = {};
+    for (const [, tag] of [...body.matchAll(/(<input\b[^>]*>)/g)]) {
+      const name = /\bname="([^"]*)"/.exec(tag ?? "")?.[1];
+      if (name === undefined) continue;
+      fields[name] = /\bvalue="([^"]*)"/.exec(tag ?? "")?.[1] ?? "";
+    }
+
+    return {
+      action: /\baction="([^"]*)"/.exec(attrs)?.[1] ?? "",
+      method: (/\bmethod="([^"]*)"/.exec(attrs)?.[1] ?? "").toLowerCase(),
+      fields,
+    };
+  }
+
+  /** 画面を開いて、発行の form と Cookie 列を取り出す。 */
+  async function openIssueForm(cookie = cookieFor(ADMIN)): Promise<{ form: Form; cookie: string }> {
+    const response = await open(cookie);
+    expect(response.status, "管理画面が 200 で出ていない").toBe(200);
+
+    const csrfCookie = response.headers
+      .getSetCookie()
+      .map((raw) => raw.split(";")[0] ?? "")
+      .filter((pair) => pair.startsWith("u18_csrf="));
+
+    return {
+      form: formIn(await response.text(), 'name="count"'),
+      cookie: [cookie, ...csrfCookie].join("; "),
+    };
+  }
+
+  /** form が言っているとおりに送る。**こちらでパスも名前も足さない。** */
+  async function send(
+    form: Form,
+    filled: Readonly<Record<string, string>>,
+    cookie: string,
+  ): Promise<Response> {
+    return await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}${form.action}`, {
+        method: form.method,
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Cookie: cookie,
+        },
+        body: new URLSearchParams({ ...form.fields, ...filled }).toString(),
+      }),
+      env,
+      executionContext(),
+    );
+  }
+
+  it("form が POST で、CSRF トークンを hidden で運んでいる", async () => {
+    const { form } = await openIssueForm();
+
+    // **`method` が消えるとブラウザは GET で送る。** 枚数がクエリに載り、
+    // しかも発行は起きないので「押しても何も出ない」になる。
+    expect(form.method, "method が post でない（既定の GET になる）").toBe("post");
+    expect(form.action, "action が空（現在の URL へ送られる）").not.toBe("");
+    // **これが欠けると、押すたびに 403 になる。**
+    expect(form.fields["csrf_token"], "CSRF トークンが hidden に無い").toBeTruthy();
+    // 枚数の欄があること。既定値は画面が持つ。
+    expect(Object.keys(form.fields)).toContain("count");
+  });
+
+  it("押すだけで発行され、焼く用の URL に並ぶ", async () => {
+    const { form, cookie } = await openIssueForm();
+
+    const issued = await send(form, { count: "3", batch: "lot-x" }, cookie);
+
+    // **PRG。** 200 で描くと、再読み込みでもう一度発行される。
+    expect(issued.status, "発行の応答が 303 でない").toBe(303);
+    expect(issued.headers.get("Location")).toBe(`${ADMIN_UI_PATH}?issued=3`);
+
+    // 戻った先に 3 枚ぶんの URL が並んでいること。**ID はクエリで運んで
+    // いない** —— `issued` のカードなので一覧に必ず入る。
+    const after = await (await open(cookieFor(ADMIN))).text();
+    const urls = textareaIn(after).split("\n").filter(Boolean);
+    expect(urls).toHaveLength(3);
+    for (const url of urls) expect(url.startsWith(`${env.SHORT_URL_ORIGIN}/c/`)).toBe(true);
+    // ロット名も一覧に出ること。
+    expect(after).toContain("lot-x");
+  });
+
+  it("CSRF トークンが無ければ発行しない", async () => {
+    const { form, cookie } = await openIssueForm();
+
+    const response = await send(form, { count: "3", csrf_token: "" }, cookie);
+
+    expect(response.status).toBe(403);
+    // **1 枚も作られていないこと。** 403 を返しつつ発行していたら最悪である。
+    const after = await (await open(cookieFor(ADMIN))).text();
+    expect(textareaIn(after)).toBe("");
+  });
+
+  it("一般利用者は、正しい CSRF トークンを持っていても発行できない", async () => {
+    // **トークンは Worker 共通である。** 紐づけ画面から取れるので、
+    // 「管理画面を開けない」は発行を止める根拠にならない。
+    // 止めているのは `IssueCardsUseCase` の `requireAdminUserId` である。
+    const { form, cookie } = await openIssueForm();
+
+    const response = await send(
+      form,
+      { count: "3" },
+      `${cookieFor(TARO)}; ${cookie.split("; ").slice(1).join("; ")}`,
+    );
+
+    // 管理者でないので 404（403 にしない。#331 / #333 の判断）。
+    expect(response.status).toBe(404);
+    const after = await (await open(cookieFor(ADMIN))).text();
+    expect(textareaIn(after)).toBe("");
+  });
+
+  it("枚数が範囲外なら 400 で、1 枚も作らない", async () => {
+    const { form, cookie } = await openIssueForm();
+
+    const response = await send(form, { count: "0" }, cookie);
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("枚数は");
+
+    const after = await (await open(cookieFor(ADMIN))).text();
+    expect(textareaIn(after), "弾いたのにカードが作られている").toBe("");
+  });
+
+  it("完了の知らせは、数として読めるものしか出さない", async () => {
+    // **クエリは利用者が書き換えられる。** そのまま出すと、攻撃者が
+    // 選んだ文章を管理画面に表示させられる（auth-worker の
+    // `LoginView.notice` が同じ理由で固定文言に限っている）。
+    const response = await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}${ADMIN_UI_PATH}?issued=%3Cscript%3Eevil`, {
+        headers: { Cookie: cookieFor(ADMIN) },
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("evil");
+    expect(html).not.toContain("枚発行しました");
+  });
+});
