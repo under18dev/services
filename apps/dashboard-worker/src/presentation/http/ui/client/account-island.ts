@@ -17,6 +17,13 @@ import {
   USERNAME_REASONS,
 } from "./messages";
 import { isRemoved } from "./outcome";
+import {
+  EMPTY_ATTR,
+  EMPTY_TEXT_ATTR,
+  ITEM_BODY_ATTR,
+  ITEM_ERROR_ATTR,
+  ITEM_TITLE_ATTR,
+} from "../island-hooks";
 
 /**
  * アカウント管理画面の取り消し操作（#9 / 仕様書 §14.1 決定 16）。
@@ -112,14 +119,21 @@ const ACTIONS: Record<string, Action> = {
   },
 };
 
-/** 行に文言を出す。既にあれば差し替える。 */
+/**
+ * 行に文言を出す。既にあれば差し替える。
+ *
+ * **引き先は `data-*`。** 見た目のクラスで引いていたときは、
+ * `.item-main` が消えても `?.` が飲み込んで**文言がどこにも出ない**
+ * だけだった（`../island-hooks.ts`）。
+ */
 function showError(item: HTMLElement, text: string): void {
-  const existing = item.querySelector(".item-error");
+  const existing = item.querySelector(`[${ITEM_ERROR_ATTR}]`);
   const node = existing ?? document.createElement("p");
   node.className = "item-error";
+  node.setAttribute(ITEM_ERROR_ATTR, "");
   node.textContent = text;
   node.setAttribute("role", "alert");
-  if (existing === null) item.querySelector(".item-main")?.append(node);
+  if (existing === null) item.querySelector(`[${ITEM_BODY_ATTR}]`)?.append(node);
 }
 
 /**
@@ -135,7 +149,8 @@ function removeItem(item: HTMLElement): void {
 
   const empty = document.createElement("p");
   empty.className = "empty";
-  empty.textContent = list.getAttribute("data-empty-text") ?? "ありません。";
+  empty.setAttribute(EMPTY_ATTR, "");
+  empty.textContent = list.getAttribute(EMPTY_TEXT_ATTR) ?? "ありません。";
   list.replaceWith(empty);
 }
 
@@ -149,7 +164,7 @@ function attach(item: HTMLElement, kind: string, action: Action): void {
   button.textContent = action.buttonLabel;
 
   // 読み上げで「削除」だけが並ばないように、対象を名前で言う。
-  const label = item.querySelector(".item-title")?.textContent?.trim() ?? "この項目";
+  const label = item.querySelector(`[${ITEM_TITLE_ATTR}]`)?.textContent?.trim() ?? "この項目";
   button.setAttribute("aria-label", `${label} を${action.buttonLabel}`);
 
   button.addEventListener("click", () => {
@@ -244,14 +259,16 @@ type RegisterOptionsResponse = {
 
 /** 登録した 1 件を一覧へ足す。再読み込みしない（取り消しと同じ方針）。 */
 function appendPasskey(label: string): void {
-  const list = document.querySelector<HTMLElement>("ul[data-empty-text]");
-  const empty = document.querySelector<HTMLElement>("p.empty");
+  const list = document.querySelector<HTMLElement>(`ul[${EMPTY_TEXT_ATTR}]`);
+  const empty = document.querySelector<HTMLElement>(`[${EMPTY_ATTR}]`);
 
   const item = document.createElement("li");
   const main = document.createElement("div");
   main.className = "item-main";
+  main.setAttribute(ITEM_BODY_ATTR, "");
   const title = document.createElement("div");
   title.className = "item-title";
+  title.setAttribute(ITEM_TITLE_ATTR, "");
   title.textContent = label;
   const meta = document.createElement("p");
   meta.className = "item-meta";
@@ -263,11 +280,11 @@ function appendPasskey(label: string): void {
     list.append(item);
     return;
   }
-  // **一覧がまだ無い（0 件だった）。** `<p class="empty">` を一覧へ差し替える。
+  // **一覧がまだ無い（0 件だった）。** 「ありません」の表示を一覧へ差し替える。
   if (empty === null) return;
   const created = document.createElement("ul");
   created.className = "list";
-  created.setAttribute("data-empty-text", "登録されているパスキーはありません。");
+  created.setAttribute(EMPTY_TEXT_ATTR, "登録されているパスキーはありません。");
   created.append(item);
   empty.replaceWith(created);
 }

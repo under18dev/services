@@ -3,6 +3,7 @@ import type { FC } from "hono/jsx";
 import { ISLAND_PATH } from "./asset-paths";
 import { DashboardShell } from "./dashboard-shell";
 import { formatDateTime } from "./format";
+import { EMPTY_ATTR, EMPTY_TEXT_ATTR, ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 
 /**
  * パスキー（`/account/passkeys`、#308）。
@@ -52,13 +53,17 @@ export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys }) => (
     <div class="panel">
       <div class="panel-body">
         {passkeys.length === 0 ? (
-          <p class="empty">登録されているパスキーはありません。</p>
+          <p class="empty" {...{ [EMPTY_ATTR]: "" }}>
+            登録されているパスキーはありません。
+          </p>
         ) : (
-          <ul class="list" data-empty-text="登録されているパスキーはありません。">
+          <ul class="list" {...{ [EMPTY_TEXT_ATTR]: "登録されているパスキーはありません。" }}>
             {passkeys.map((passkey) => (
               <li key={passkey.id} data-passkey-id={passkey.id}>
-                <div class="item-main">
-                  <div class="item-title">{passkeyTitle(passkey)}</div>
+                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
+                    {passkeyTitle(passkey)}
+                  </div>
                   <p class="item-meta">
                     {passkey.deviceType !== null &&
                       passkey.deviceType !== "" &&
@@ -76,7 +81,7 @@ export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys }) => (
         )}
       </div>
       {/*
-        **一覧の外に置く。** 中に入れると 0 件のとき `<p class="empty">` へ
+        **一覧の外に置く。** 中に入れると 0 件のとき `<p class="empty" {...{ [EMPTY_ATTR]: "" }}>` へ
         差し替わって消える —— **1 本も無い人こそ登録したい。**
       */}
       <div class="panel-footer" data-passkey-register />
