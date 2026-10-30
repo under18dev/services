@@ -1,6 +1,7 @@
 // @ts-check
 import tseslint from "typescript-eslint";
 import boundaries from "./packages/config/eslint.layers.js";
+import noInlineStyle from "./packages/config/eslint.no-inline-style.js";
 
 export default tseslint.config(
   {
@@ -31,4 +32,6 @@ export default tseslint.config(
   },
   // Layered Architecture の依存方向を lint で強制する (仕様書 2.3)
   ...boundaries,
+  // JSX の style 属性を書いた時点で落とす (#326、#320 の後追い)
+  ...noInlineStyle,
 );
