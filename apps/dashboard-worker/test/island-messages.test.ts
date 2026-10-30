@@ -2,6 +2,7 @@ import { ACCOUNT_API_ERROR_CODES } from "@u18/contracts";
 import { Username } from "@u18/domain";
 import { describe, expect, it } from "vitest";
 import {
+  CLOSE_ACCOUNT_COPY,
   messageFor,
   PROFILE_FALLBACK,
   PROFILE_MESSAGES,
@@ -114,5 +115,40 @@ describe("messageFor", () => {
     await expect(messageFor(broken, PROFILE_MESSAGES, PROFILE_FALLBACK)).resolves.toBe(
       PROFILE_FALLBACK,
     );
+  });
+});
+
+/**
+ * 退会の文言（#318）。
+ *
+ * ## 何を固定しているか
+ *
+ * **「退会しました」という言葉そのものは固定しない。** 文言は運用者が
+ * 決めるもので、テストで縛ると直すたびにここが落ちる。
+ *
+ * **固定するのは、言わないと嘘になる部分である。** `primary_email` が
+ * 残って一意制約で弾かれる以上、**同じアドレスで登録し直せないことを
+ * 書かずに「退会しました」とだけ言うのは、言葉を変えても同じ嘘**になる
+ * （運用者の条件、2026-10-30）。
+ *
+ * **パネルの説明と確認の両方で見る。** 説明を読まずにボタンを押す人が
+ * いるので、**押す直前にもう一度言わないと、いちばん戻れない条件だけが
+ * 読まれないまま通る。**
+ */
+describe("退会の文言", () => {
+  it("パネルの説明に、同じアドレスで登録し直せないことが書いてある", () => {
+    expect(CLOSE_ACCOUNT_COPY.panelDescription).toContain("登録し直すことはできません");
+  });
+
+  it("確認にも書いてある", () => {
+    expect(CLOSE_ACCOUNT_COPY.confirm).toContain("登録し直すことはできません");
+  });
+
+  it("完了の文言で「削除」と言わない", () => {
+    // 個人情報は残っている。消したと言うと、その日から仕様書 §9 Privacy と
+    // 食い違う（ランブック §11.7）。**「退会」は関係の話なので嘘にならない。**
+    expect(CLOSE_ACCOUNT_COPY.done).not.toContain("削除");
+    expect(CLOSE_ACCOUNT_COPY.panelDescription).not.toContain("削除");
+    expect(CLOSE_ACCOUNT_COPY.confirm).not.toContain("削除");
   });
 });

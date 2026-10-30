@@ -124,6 +124,10 @@ export class RpcIdentityGateway implements IdentityGateway {
     return this.call(() => this.identity.deletePasskey(this.input({ sessionToken, passkeyId })));
   }
 
+  closeAccount(sessionToken: string) {
+    return this.call(() => this.identity.closeAccount(this.input({ sessionToken })));
+  }
+
   /**
    * 死活確認（#44）。**ここだけタイムアウトを課す。**
    *

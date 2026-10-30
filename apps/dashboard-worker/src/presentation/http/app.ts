@@ -208,6 +208,39 @@ function registerRoutes(app: AccountRouter) {
       })
 
       /**
+       * BFF: 本人の退会（#318 / ランブック §11.7）。
+       *
+       * **「削除」ではない。** auth-worker が `status` を `suspended` に
+       * するだけで、氏名相当とメールアドレスは残る（落とすのは管理者の
+       * §11.6）。`deleted` を立てないのは、落とさずに立てると
+       * `purgeUserSql` の `status <> 'deleted'` に弾かれ、**管理者が二度と
+       * 落とせなくなる**ため。
+       *
+       * **再認証が要る。** 判定は auth-worker 側にあり、ここは
+       * `reauthentication_required` を 403 として返すだけ。置き忘れた端末で
+       * 他人が閉じられる形にしない。
+       *
+       * **Cookie を必ず落とす。** 退会は全セッションを失効させるので、
+       * 自分の Cookie も必ず死んでいる（`revokeSession` のように
+       * 「自分だったら」の判定は要らない）。落とさないとブラウザが
+       * 失効済みの Cookie を送り続け、次に 401 を踏むまで
+       * 「退会が効かなかった」ように見える。
+       */
+      .delete("/api/me", async (c) => {
+        const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+        if (token === undefined) return c.json({ error: "unauthenticated" } as const, 401);
+
+        if (!hasTrustedOrigin(c)) return c.json({ error: "forbidden" } as const, 403);
+
+        const result = await c.get("identity").closeAccount(token);
+        if (!result.ok) return c.json({ error: result.failure.kind }, statusFor(result.failure));
+
+        c.header("Set-Cookie", buildClearedSessionCookie(c.env.ENVIRONMENT), { append: true });
+
+        return c.json(result.value);
+      })
+
+      /**
        * BFF: Passkey の削除（仕様書 8.1 / #75）。
        *
        * **再認証が要る。** セッションの盗用がそのまま認証器の剥奪に
