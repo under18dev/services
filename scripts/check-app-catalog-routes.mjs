@@ -23,6 +23,16 @@ const UI = path.join(ROOT, "apps", "dashboard-worker", "src", "presentation", "h
 const CATALOG = path.join(UI, "app-catalog.ts");
 const ASSET_PATHS = path.join(UI, "asset-paths.ts");
 const ACCOUNT_NAV = path.join(ROOT, "packages", "contracts", "src", "account-nav.ts");
+const ADMIN_NAV = path.join(
+  ROOT,
+  "apps",
+  "admin-worker",
+  "src",
+  "presentation",
+  "http",
+  "ui",
+  "nav.ts",
+);
 
 function fail(message) {
   console.error(`::error::${message}`);
@@ -32,10 +42,12 @@ function fail(message) {
 let catalogText;
 let assetPathsText;
 let navText;
+let adminNavText;
 try {
   catalogText = readFileSync(CATALOG, "utf8");
   assetPathsText = readFileSync(ASSET_PATHS, "utf8");
   navText = readFileSync(ACCOUNT_NAV, "utf8");
+  adminNavText = readFileSync(ADMIN_NAV, "utf8");
 } catch (error) {
   fail(
     `could not read the app catalog (${error instanceof Error ? error.message : String(error)}). ` +
@@ -126,7 +138,7 @@ function inventoryOf(worker) {
  * `/account/...` は、本番でどの Worker に当たり、その Worker が
  * 登録しているか」）なので、通す経路も 1 つでよい。
  */
-const navHrefs = readNavHrefs(navText);
+const navHrefs = readNavHrefs(navText, "ACCOUNT_NAV_GROUPS");
 if (navHrefs === null) {
   // **「読めなかったので 0 件」を「問題なし」にしない**（カタログと同じ）。
   fail(
@@ -144,6 +156,32 @@ if (foreign.length > 0) {
     `ACCOUNT_NAV_GROUPS contains non-absolute href(s): ${foreign.join(", ")}. ` +
       `The sidebar only links to pages on auth.under18.dev; an external link there ` +
       `would leave the account area without saying so.`,
+  );
+}
+
+/**
+ * admin-worker のサイドバー（`ADMIN_NAV_GROUPS`、#427）。
+ *
+ * **`ACCOUNT_NAV_GROUPS` と同じ検査に通す。** `nav.ts` のコメントが
+ * 書いているとおり、こちらは別の共用体・別のオリジン（admin.under18.dev）
+ * の並びだが、「href が本番の route を通って、その Worker に登録されて
+ * いるか」を見る仕組みは変わらない。2 つ目の仕組みを作らないこと。
+ */
+const adminNavHrefs = readNavHrefs(adminNavText, "ADMIN_NAV_GROUPS");
+if (adminNavHrefs === null) {
+  fail(
+    `ADMIN_NAV_GROUPS could not be parsed out of ${path.relative(ROOT, ADMIN_NAV)}. ` +
+      `The check reads the TypeScript as text, so a change to how items are written ` +
+      `silently empties it. Update lib/app-catalog-routes.mjs along with the nav.`,
+  );
+}
+
+const adminForeign = adminNavHrefs.filter((href) => !href.startsWith("/"));
+if (adminForeign.length > 0) {
+  fail(
+    `ADMIN_NAV_GROUPS contains non-absolute href(s): ${adminForeign.join(", ")}. ` +
+      `The sidebar only links to pages on admin.under18.dev; an external link there ` +
+      `would leave the admin area without saying so.`,
   );
 }
 
@@ -168,6 +206,15 @@ for (const { path: p, reason } of unreachablePaths(navHrefs, routes, inventoryOf
   );
 }
 
+for (const { path: p, reason } of unreachablePaths(adminNavHrefs, routes, inventoryOf)) {
+  failed = true;
+  console.error(
+    `::error::the admin sidebar (apps/admin-worker/src/presentation/http/ui/nav.ts) lists ` +
+      `"${p}", but ${reason}. A dead entry shows a 404 link on every page of the admin area. ` +
+      `Either fix the href, or fix admin-worker's test/route-inventory.ts.`,
+  );
+}
+
 if (failed) process.exit(1);
 
 // **0 件は「問題なし」と書き分ける。** カタログが空になるのは設計上
@@ -178,3 +225,4 @@ console.log(
     : `app catalog: ${paths.length} same-origin entr${paths.length === 1 ? "y reaches" : "ies reach"} the Worker that registers it`,
 );
 console.log(`account sidebar: ${navHrefs.length} entries reach the Worker that registers them`);
+console.log(`admin sidebar: ${adminNavHrefs.length} entries reach the Worker that registers them`);
