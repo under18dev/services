@@ -57,7 +57,10 @@ function toRpcCode(kind: NfcFailure["kind"]): RpcErrorCode {
  * 承認リストで管理者性を確かめている。二重に確かめる理由が無い。
  *
  * **この Entrypoint を束縛してよいのは admin-worker だけである。**
- * `scripts/check-service-bindings.mjs` が静的に検査する対象になる。
+ * ただし**いまはまだ検査されていない** —— `scripts/check-service-bindings.mjs`
+ * の allow-list は、admin-worker の `wrangler.jsonc` に実際の束縛が
+ * 増えたとき（binding の PR）に足すこと。それまでは「束縛する相手が
+ * 1 つも無い」状態で、検査対象にすら入っていない。
  *
  * ## `IdentityRPC` / `IdentityAdminRPC` とは別の仕組みである
  *

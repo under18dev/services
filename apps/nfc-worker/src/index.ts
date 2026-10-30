@@ -17,8 +17,9 @@ export { NfcAdminDelegatedRPC } from "./presentation/rpc/nfc-admin-delegated.ent
  *
  * **RPC Entrypoint を 1 つだけ公開する**（#382 / #390 決定 16 ③）。
  * `NfcAdminDelegatedRPC` —— admin-worker が他人のカードを操作するための
- * delegated RPC。**束縛してよいのは admin-worker だけ**
- * （`scripts/check-service-bindings.mjs` が静的に検査する）。
+ * delegated RPC。**束縛してよいのは admin-worker だけ。**
+ * admin-worker 側の束縛が入った時点で `scripts/check-service-bindings.mjs`
+ * の allow-list に足すこと（いまはまだ束縛が無いので検査対象にも入っていない）。
  * それ以外の Worker へは引き続き開いていない（docs/architecture.md 1.1）。
  */
 const app = createApp();
