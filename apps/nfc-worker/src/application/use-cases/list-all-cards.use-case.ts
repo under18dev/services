@@ -2,6 +2,7 @@ import type {
   AdminCardList,
   AdminCardView,
   CardRepository,
+  CardTapRecorder,
   IdentityGateway,
   NfcOutcome,
 } from "../ports";
@@ -56,6 +57,7 @@ export class ListAllCardsUseCase {
   constructor(
     private readonly identity: IdentityGateway,
     private readonly cards: CardRepository,
+    private readonly cardTaps: CardTapRecorder,
   ) {}
 
   async execute(sessionToken: string | undefined): Promise<NfcOutcome<AdminCardList>> {
@@ -66,9 +68,14 @@ export class ListAllCardsUseCase {
     // 多い 1 件は「まだ先がある」の合図で、画面には出さない。
     const rows = await this.cards.listAll(MAX_ADMIN_LIST);
     const truncated = rows.length > MAX_ADMIN_LIST;
+    const page = rows.slice(0, MAX_ADMIN_LIST);
+
+    // **一括で引く。** 1 枚ずつ `totalsFor` を呼ぶと、最大 500 枚の画面が
+    // 500 回 D1 を叩くことになる。
+    const totals = await this.cardTaps.totalsFor(page.map((card) => card.id));
 
     return outcomeOk({
-      cards: rows.slice(0, MAX_ADMIN_LIST).map(toAdminView),
+      cards: page.map((card) => toAdminView(card, totals.get(card.id) ?? 0)),
       truncated,
     });
   }
@@ -80,7 +87,7 @@ export class ListAllCardsUseCase {
  * **`card-view.ts` の `toCardView` と別にしてある。** あちらは所有者向けで
  * `ownerUserId` を落とすことに意味がある（`AdminCardView` の宣言を参照）。
  */
-export function toAdminView(card: Card): AdminCardView {
+export function toAdminView(card: Card, tapCount: number): AdminCardView {
   return {
     cardId: card.id,
     status: card.status,
@@ -90,5 +97,6 @@ export function toAdminView(card: Card): AdminCardView {
     issuedAt: card.createdAt.toISOString(),
     claimedAt: card.claimedAt?.toISOString() ?? null,
     disabledAt: card.disabledAt?.toISOString() ?? null,
+    tapCount,
   };
 }

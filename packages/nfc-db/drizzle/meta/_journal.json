@@ -15,6 +15,13 @@
       "when": 1793350363891,
       "tag": "0001_next_firestar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793374779512,
+      "tag": "0002_empty_bishop",
+      "breakpoints": true
     }
   ]
 }

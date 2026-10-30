@@ -40,17 +40,30 @@ export default {
    * （auth-worker の `scheduled` と同じ判断）。
    */
   async scheduled(controller, env, _ctx): Promise<void> {
-    const { purgeExpiredEvents } = createContainer(env).useCases;
-    const result = await purgeExpiredEvents.execute();
+    const { purgeExpiredEvents, purgeExpiredTaps } = createContainer(env).useCases;
 
-    if (result.reachedLimit) {
+    const eventsResult = await purgeExpiredEvents.execute();
+    if (eventsResult.reachedLimit) {
       // 上限に達した＝まだ溜まっている。次回の実行で続きを消す。
       // 毎回出続けるなら、流入が掃除の速度を超えている。
       console.warn(
         JSON.stringify({
           event: "nfc.retention.carried_over",
           cron: controller.cron,
-          deleted: result.deleted,
+          deleted: eventsResult.deleted,
+        }),
+      );
+    }
+
+    // タップ集計の掃除（#394）。別の Port・別のテーブルなので、
+    // 片方が例外にならない限り両方を同じ実行で回す。
+    const tapsResult = await purgeExpiredTaps.execute();
+    if (tapsResult.reachedLimit) {
+      console.warn(
+        JSON.stringify({
+          event: "nfc.tap_count.carried_over",
+          cron: controller.cron,
+          deleted: tapsResult.deleted,
         }),
       );
     }

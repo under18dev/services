@@ -91,6 +91,13 @@ export type AdminCardView = {
   /** ISO 8601 (UTC)。 */
   readonly claimedAt: string | null;
   readonly disabledAt: string | null;
+  /**
+   * タップされた回数の合計（#394）。`resolvable` だったタップだけを数える。
+   *
+   * **所有者には見せない。** 運営向けの一覧（この型）にだけ乗せ、
+   * `CardView`（所有者向け）には足さない——運用者の判断（#394）。
+   */
+  readonly tapCount: number;
 };
 
 /**
@@ -225,4 +232,51 @@ export interface ExpiredEventPurger {
    * @param limit 1 回で消す上限。
    */
   purge(deadlines: ReadonlyMap<string, Date>, limit: number): Promise<number>;
+}
+
+/**
+ * カードのタップ回数の記録・集計 Port（#394）。
+ *
+ * **カードごと・日ごとの合計だけを持つ。誰がタップしたかは記録しない。**
+ * `taps.ts`（`packages/nfc-db`）の冒頭にその理由がある。
+ *
+ * `CardEventRecorder` と別の Port にしてあるのは、こちらが「所有者の
+ * 操作」ではなく「認証しない公開経路（`redirect.routes.ts`）からの
+ * 集計」だからである——呼び出し元の信頼レベルが違う。
+ */
+export interface CardTapRecorder {
+  /**
+   * `resolvable` だったタップを 1 回記録する。
+   *
+   * **失敗してもリダイレクトを止めてはならない。** 呼び出し側
+   * （`redirect.routes.ts`）がこれを `executionCtx.waitUntil` へ載せ、
+   * 応答を返したあとに実行させる。実装自身も失敗を飲み込む
+   * （`DrizzleCardEventRecorder` と同じ fail-open）。
+   *
+   * @param date UTC の日付文字列（`YYYY-MM-DD`）。
+   */
+  recordTap(cardId: string, date: string): Promise<void>;
+
+  /**
+   * 運営向け一覧の表示用。指定した `cardId` ごとの合計を返す
+   * （行が無いカードは結果に含まれない。呼び出し側は 0 として扱うこと）。
+   */
+  totalsFor(cardIds: readonly string[]): Promise<ReadonlyMap<string, number>>;
+}
+
+/**
+ * 保持期限を過ぎた `nfc_card_taps` の行を消す Port（#394）。
+ *
+ * **`ExpiredEventPurger` と別にしてある。** あちらは `event` 名ごとに
+ * 違う境界を持つが、こちらは単一の境界（`date` 列）しか無く、
+ * `nfc_card_taps` には `id` も無い（複合主キー）ので削除の組み立て方も違う
+ * （`infrastructure/persistence/drizzle-expired-tap.purger.ts`）。
+ */
+export interface ExpiredTapPurger {
+  /**
+   * @param deadline UTC の日付文字列。これより古い（文字列比較で小さい）
+   *   `date` の行を消す。
+   * @param limit 1 回で消す上限。
+   */
+  purge(deadline: string, limit: number): Promise<number>;
 }

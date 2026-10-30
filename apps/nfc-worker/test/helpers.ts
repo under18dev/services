@@ -1,19 +1,22 @@
 import { DEV_SESSION_COOKIE_NAME } from "@u18/contracts";
 import { newCardId } from "@u18/domain";
-import { createNfcDatabase, nfcCardEvents, nfcCards } from "@u18/nfc-db";
+import { createNfcDatabase, nfcCardEvents, nfcCardTaps, nfcCards } from "@u18/nfc-db";
 import { env } from "cloudflare:test";
 import type { IdentityGateway, NfcOutcome } from "../src/application/ports";
 import { DrizzleCardRepository } from "../src/infrastructure/persistence/drizzle-card.repository";
+import { DrizzleCardTapRecorder } from "../src/infrastructure/persistence/drizzle-card-tap.recorder";
 
 /** テスト内のリクエストは常にこの origin から出す。Origin 検証が URL と比べるため。 */
 export const ORIGIN = "http://localhost";
 
 export const db = () => createNfcDatabase(env.NFC_DB);
 export const repository = () => new DrizzleCardRepository(db());
+export const tapRecorder = () => new DrizzleCardTapRecorder(db());
 
 /** 行を消すだけ。マイグレーションは再適用しない（auth-worker の helpers と同じ方針）。 */
 export async function resetDatabase(): Promise<void> {
   await db().delete(nfcCardEvents).run();
+  await db().delete(nfcCardTaps).run();
   await db().delete(nfcCards).run();
 }
 

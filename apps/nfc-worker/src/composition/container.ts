@@ -1,6 +1,12 @@
 import { systemClock } from "@u18/domain";
 import { createNfcDatabase } from "@u18/nfc-db";
-import type { CardRepository, ExpiredEventPurger, IdentityGateway } from "../application/ports";
+import type {
+  CardRepository,
+  CardTapRecorder,
+  ExpiredEventPurger,
+  ExpiredTapPurger,
+  IdentityGateway,
+} from "../application/ports";
 import { AdminDisableCardUseCase } from "../application/use-cases/admin-disable-card.use-case";
 import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-disable-card.use-case";
 import { DelegatedIssueCardsUseCase } from "../application/use-cases/delegated-issue-cards.use-case";
@@ -13,12 +19,15 @@ import { ListAllCardsUseCase } from "../application/use-cases/list-all-cards.use
 import { ListMyCardsUseCase } from "../application/use-cases/list-cards.use-case";
 import { ReleaseCardUseCase } from "../application/use-cases/release-card.use-case";
 import { PurgeExpiredEventsUseCase } from "../application/use-cases/purge-expired-events.use-case";
+import { PurgeExpiredTapsUseCase } from "../application/use-cases/purge-expired-taps.use-case";
 import { ResolveCardUseCase } from "../application/use-cases/resolve-card.use-case";
 import { UpdateCardTargetUseCase } from "../application/use-cases/update-card-target.use-case";
 import { ViewClaimUseCase } from "../application/use-cases/view-claim.use-case";
 import { DrizzleCardEventRecorder } from "../infrastructure/persistence/drizzle-card-event.recorder";
 import { DrizzleCardRepository } from "../infrastructure/persistence/drizzle-card.repository";
+import { DrizzleCardTapRecorder } from "../infrastructure/persistence/drizzle-card-tap.recorder";
 import { DrizzleExpiredEventPurger } from "../infrastructure/persistence/drizzle-expired-event.purger";
+import { DrizzleExpiredTapPurger } from "../infrastructure/persistence/drizzle-expired-tap.purger";
 import { RpcIdentityGateway, asIdentityRpc } from "../infrastructure/rpc/identity.gateway";
 
 /**
@@ -39,6 +48,8 @@ export type ContainerOverrides = {
   readonly identity?: IdentityGateway;
   readonly cards?: CardRepository;
   readonly eventPurger?: ExpiredEventPurger;
+  readonly cardTaps?: CardTapRecorder;
+  readonly tapPurger?: ExpiredTapPurger;
 };
 
 export type Container = ReturnType<typeof createContainer>;
@@ -67,16 +78,20 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
   // 保持期限を過ぎたカードイベントの掃除。scheduled からしか使わないが、
   // Port の配線先はここ 1 箇所に揃える（auth-worker の purger と同じ）。
   const eventPurger = overrides.eventPurger ?? new DrizzleExpiredEventPurger(db);
+  // タップ回数の記録・集計（#394）。公開経路（`redirect.routes.ts`）と
+  // 運営向け一覧（`listAllCards`）の両方から使う。
+  const cardTaps = overrides.cardTaps ?? new DrizzleCardTapRecorder(db);
+  const tapPurger = overrides.tapPurger ?? new DrizzleExpiredTapPurger(db);
   const clock = systemClock;
 
   return {
-    repositories: { cards },
+    repositories: { cards, cardTaps },
     services: { identity, clock },
     useCases: {
       resolveCard: new ResolveCardUseCase(cards),
       listMyCards: new ListMyCardsUseCase(identity, cards),
       // 運営向けの全カード一覧（#338 Step 3）。**管理者判定は UseCase の中。**
-      listAllCards: new ListAllCardsUseCase(identity, cards),
+      listAllCards: new ListAllCardsUseCase(identity, cards, cardTaps),
       updateCardTarget: new UpdateCardTargetUseCase(
         identity,
         cards,
@@ -90,7 +105,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       // admin-worker からの delegated RPC 専用（#382 / #390 決定 16 ③）。
       // **`identity` を渡さない** —— 認可は admin-worker 側で済んでいる。
       delegatedDisableCard: new DelegatedDisableCardUseCase(cards, events, clock),
-      delegatedListAllCards: new DelegatedListAllCardsUseCase(cards),
+      delegatedListAllCards: new DelegatedListAllCardsUseCase(cards, cardTaps),
       delegatedIssueCards: new DelegatedIssueCardsUseCase(cards, events, clock),
       delegatedUpdateCardTarget: new DelegatedUpdateCardTargetUseCase(
         cards,
@@ -103,6 +118,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       releaseCard: new ReleaseCardUseCase(identity, cards, events, clock),
       viewClaim: new ViewClaimUseCase(identity, cards),
       purgeExpiredEvents: new PurgeExpiredEventsUseCase({ purger: eventPurger, clock }),
+      purgeExpiredTaps: new PurgeExpiredTapsUseCase({ purger: tapPurger, clock }),
     },
   };
 }
