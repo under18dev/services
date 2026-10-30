@@ -97,6 +97,16 @@ export type NfcPageProps = {
   readonly issuedCount: number | null;
   /** 発行またはカード操作に失敗したときの文言。 */
   readonly error: string | null;
+  /**
+   * batch 一括無効化の 2 段階確認（#427）。**非 null なら確認待ちの状態**
+   * ——1 段階目（対象枚数を数えた）か、2 段階目で入力が一致しなかった
+   * 直後。`null` なら通常の「バッチ名を入力する」フォームを出す。
+   */
+  readonly batchDisable: { readonly batch: string; readonly count: number } | null;
+  /** 確認の再入力が一致しなかったときの文言。`batchDisable` とセットで使う。 */
+  readonly batchDisableError: string | null;
+  /** 直前の一括無効化で実際に止めた枚数（PRG で戻ってきたとき）。 */
+  readonly batchDisabledCount: number | null;
 };
 
 /**
@@ -124,6 +134,13 @@ export type NfcPageProps = {
  * `DelegatedReinstateCardUseCase` の冒頭を参照）。渡したい場合は、復帰
  * させたあとであらためて「手放させる」を押す——弱い操作を 2 つ並べる
  * ほうが、強い操作を 1 つ作るより安全という #422 と同じ判断。
+ *
+ * ## `issued` のカードにも単発の「無効化する」を出す（#427）
+ *
+ * **一括無効化（下のバッチ無効化フォーム）だけに「`issued` を無効化する」
+ * 能力を持たせると、押し間違いで 1 枚だけ盗まれたカードを単発で止める
+ * 口が無いまま、一括のほうが危ない操作になる。** `disableCard` の
+ * WHERE 句を `active | issued` へ広げたのに合わせ、単発の行にも出す。
  */
 const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToken: string }> = ({
   card,
@@ -139,6 +156,21 @@ const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToke
           aria-label={`${card.cardId} を復帰させる`}
         >
           復帰させる
+        </button>
+      </form>
+    );
+  }
+
+  if (card.status === "issued") {
+    return (
+      <form method="post" action={`/nfc/${card.cardId}/disable`}>
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <button
+          type="submit"
+          class={DANGER_BUTTON_CLASS}
+          aria-label={`${card.cardId} を無効化する`}
+        >
+          無効化する
         </button>
       </form>
     );
@@ -197,6 +229,9 @@ export const NfcPage: FC<NfcPageProps> = ({
   csrfToken,
   issuedCount,
   error,
+  batchDisable,
+  batchDisableError,
+  batchDisabledCount,
 }) => (
   <KiwaShell
     title="NFC カード"
@@ -286,6 +321,83 @@ export const NfcPage: FC<NfcPageProps> = ({
             配る直前に発行してください。
           </p>
         </form>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>バッチを一括で無効化する</CardTitle>
+        <CardDescription>
+          配布前の箱ごと盗難など、<strong>未紐づけ（まだ誰のものでもない）のカードだけ</strong>
+          をバッチ単位で止めます。<strong>誰かのカードは対象になりません。</strong>
+          戻す手段はまだありません——実行前によく確かめてください。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {batchDisabledCount === null ? null : (
+          <p class={`${ITEM_META_CLASS} mb-4`} role="status">
+            {batchDisabledCount} 枚を無効化しました。
+          </p>
+        )}
+        {batchDisable === null ? (
+          <form method="post" action="/nfc/batch-disable" class="flex flex-col gap-4">
+            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+            <label class={FIELD_CLASS} for="batch-disable-name">
+              <span class={LABEL_CLASS}>バッチ名</span>
+              <input
+                id="batch-disable-name"
+                class={INPUT_CLASS}
+                type="text"
+                name="batch"
+                required
+                maxlength={64}
+                autocapitalize="off"
+              />
+            </label>
+            <button type="submit" class={getButtonClasses("outline")}>
+              対象を確認する
+            </button>
+          </form>
+        ) : (
+          <div class="flex flex-col gap-4">
+            {batchDisableError === null ? null : (
+              <p
+                class="rounded-lg border border-destructive/40 bg-background-subtle px-3 py-2.5 text-sm text-destructive"
+                role="alert"
+              >
+                {batchDisableError}
+              </p>
+            )}
+            <p class={ITEM_META_CLASS} role="status">
+              バッチ「{batchDisable.batch}」には、未紐づけのカードが{" "}
+              <strong>{batchDisable.count} 枚</strong>あります。
+              本当に無効化する場合は、下にバッチ名をもう一度入力してください。
+            </p>
+            <form method="post" action="/nfc/batch-disable" class="flex flex-col gap-4">
+              <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+              <input type="hidden" name="target_batch" value={batchDisable.batch} />
+              <label class={FIELD_CLASS} for="batch-disable-confirm">
+                <span class={LABEL_CLASS}>確認のため、バッチ名をもう一度入力してください</span>
+                <input
+                  id="batch-disable-confirm"
+                  class={INPUT_CLASS}
+                  type="text"
+                  name="batch"
+                  required
+                  maxlength={64}
+                  autocapitalize="off"
+                  placeholder={batchDisable.batch}
+                />
+              </label>
+              <button type="submit" class={DANGER_BUTTON_CLASS}>
+                {batchDisable.count} 枚を無効化する
+              </button>
+            </form>
+            <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
+              キャンセルする
+            </a>
+          </div>
+        )}
       </CardContent>
     </Card>
 

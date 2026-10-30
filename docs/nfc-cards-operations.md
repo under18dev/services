@@ -364,8 +364,9 @@ https://go.under18.dev/c/nfc_hdt62b396zy809mmqk3v
 
 **止める・戻す・遷移先の変更・一覧・発行・手放させるは、運営が代行できる**
 （`NfcAdminDelegatedRPC` —— `disableCard` / `reinstateCard` /
-`updateCardTarget` / `listAllCards` / `issueCards` / `releaseCard`、
-置き場所は `admin.under18.dev/nfc`）。
+`updateCardTarget` / `listAllCards` / `issueCards` / `releaseCard` /
+`countBatchIssuedCards` / `batchDisableCards`、置き場所は
+`admin.under18.dev/nfc`）。
 
 ### 止める（無効化）
 
@@ -382,6 +383,36 @@ POST https://auth.under18.dev/account/nfc/cards/<cardId>/disable
 
 **止めたカードは「存在しないカード」と 1 バイトも変わらない応答になる。**
 これは紛失対策の本体である。
+
+### 配布前の箱ごと盗難（batch 単位の一括無効化、#427）
+
+```
+admin.under18.dev/nfc の「バッチを一括で無効化する」
+```
+
+**60 枚を 1 バッチで焼く運用（`scripts/nfc-burn.py --batch <名前> --count 60`）
+に対して、箱ごと盗まれたときに 1 枚ずつ止めるしかなかった穴。** 配布前の
+盗難では、盗まれるカードは全部 `issued`（まだ誰も登録していない）——
+対象は **`issued` のカードだけ**にしてある。**`active`（誰かのもの）は
+バッチ名が一致するというだけでは巻き込まない。**
+
+**これが初めて「`issued` を無効化する」経路を作った。** それ以前は
+`active` だけが対象で、未紐づけのカードを無効化する経路が単発でも
+存在しなかった。単発の `disableCard` の WHERE 句も `active | issued`
+へ広げてあるので、**1 枚だけ盗まれたときは単発の「無効化する」を、
+箱ごとのときはバッチ一括を使う。**
+
+**2 段階の確認を挟む。** バッチ名を入れると対象枚数を数えて見せるだけで
+（何も書き込まない）、**バッチ名をもう一度入力して一致したときだけ**
+実際に無効化する。JS は使わない——このリポジトリはクライアント JS
+ゼロが既定であり、「意図の確認」であって「権限の確認」ではない
+（権限は CSRF とセッションガードが持つ）。
+
+**戻す手段はまだ無い。** `reinstateCard`（上の「止めたカードを戻す」）
+は `disabled` → `active` で、元々 `active` だったカードの前提——ここで
+無効化するカードは元々 `issued`（所有者なし）なので、そのまま転用すると
+所有者の無いカードが `active` になる壊れた行ができる。**実行前によく
+確かめること。** 追跡は #436。
 
 ### 止めたカードを戻す（運営が代わりに復帰させる、#427）
 
