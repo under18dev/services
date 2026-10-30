@@ -227,6 +227,30 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
     expect(KIWA_STYLESHEET_PATH).toBe(`/account/ui/${hashedFileName("kiwa.css", css)}`);
   });
 
+  /**
+   * モバイルのサイドバー開閉（#399 の作り直し）。
+   *
+   * **「class が CSS に在る」だけでは、#399 の事故は捕まえられない。**
+   * 旧版の `group-open:flex` も CSS には在った——`[open]` が付いたときに
+   * しか効かない形で在っただけで、`<summary>` を `md:hidden` にしたことで
+   * PC では `[open]` へ至る手段ごと消えていた。「在る」と「何にも阻まれず
+   * 効く」は別なので、ここでは `md:flex` の**ルールの形**を見る。
+   */
+  it("md:flex は何にも阻まれず効く（:checked や [open] に守られていない）", async () => {
+    const css = await fetchText(KIWA_STYLESHEET_PATH, false);
+
+    // Tailwind v4 は `md:` を `@media (min-width:48rem)` にまとめる。
+    const mediaMatch = css.match(/@media \(min-width:48rem\)\{([^]*)/);
+    expect(mediaMatch, "md: のメディアクエリが見当たらない").not.toBeNull();
+
+    const mdFlexRule = mediaMatch?.[1]?.match(/\.md\\:flex\{([^}]*)\}/)?.[0];
+    expect(mdFlexRule, "md:flex のルールが見当たらない").toBeDefined();
+    // プレーンな `.md\:flex{display:flex}` であること。`:checked` や
+    // `[open]` のような状態セレクタが前に付いていたら、それは「PC でも
+    // 閉じていたら消える」形に戻っている。
+    expect(mdFlexRule).toBe(".md\\:flex{display:flex}");
+  });
+
   it("グラデーションを使わない", async () => {
     // design.md の "No gradients."。上流の `.bg-primary-mesh` は
     // `linear-gradient` だったので持ってきていない。
