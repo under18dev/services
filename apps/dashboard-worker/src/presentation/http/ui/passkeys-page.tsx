@@ -1,8 +1,16 @@
 import type { PasskeySummary } from "@u18/contracts";
+import { Card, CardContent, CardFooter, Separator } from "@u18/web-ui/kiwa";
 import type { FC } from "hono/jsx";
+import { AccountShell } from "./account-shell";
 import { ISLAND_PATH } from "./asset-paths";
-import { DashboardShell } from "./dashboard-shell";
 import { formatDateTime } from "./format";
+import {
+  EMPTY_CLASS,
+  ITEM_BODY_CLASS,
+  ITEM_META_CLASS,
+  ITEM_TITLE_CLASS,
+  LIST_CLASS,
+} from "./island-classes";
 import { EMPTY_ATTR, EMPTY_TEXT_ATTR, ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 
 /**
@@ -42,7 +50,7 @@ function deviceTypeLabel(deviceType: string): string {
 export type PasskeysPageProps = { readonly passkeys: readonly PasskeySummary[] };
 
 export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys }) => (
-  <DashboardShell
+  <AccountShell
     title="パスキー"
     heading="パスキー"
     lead="この一覧にある認証器でログインできます。身に覚えのないものがあれば削除してください。"
@@ -50,21 +58,23 @@ export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys }) => (
     scripts={[ISLAND_PATH]}
     hasRevokeActions
   >
-    <div class="panel">
-      <div class="panel-body">
+    <Card>
+      <CardContent>
         {passkeys.length === 0 ? (
-          <p class="empty" {...{ [EMPTY_ATTR]: "" }}>
+          // 形も文言もアイランドが作る側と揃える（`grants-page.tsx` を参照）。
+          <p class={EMPTY_CLASS} {...{ [EMPTY_ATTR]: "" }}>
             登録されているパスキーはありません。
           </p>
         ) : (
-          <ul class="list" {...{ [EMPTY_TEXT_ATTR]: "登録されているパスキーはありません。" }}>
-            {passkeys.map((passkey) => (
+          <ul class={LIST_CLASS} {...{ [EMPTY_TEXT_ATTR]: "登録されているパスキーはありません。" }}>
+            {passkeys.map((passkey, index) => (
               <li key={passkey.id} data-passkey-id={passkey.id}>
-                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
-                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
+                {index > 0 && <Separator class="my-3" />}
+                <div class={ITEM_BODY_CLASS} {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class={ITEM_TITLE_CLASS} {...{ [ITEM_TITLE_ATTR]: "" }}>
                     {passkeyTitle(passkey)}
                   </div>
-                  <p class="item-meta">
+                  <p class={ITEM_META_CLASS}>
                     {passkey.deviceType !== null &&
                       passkey.deviceType !== "" &&
                       `${deviceTypeLabel(passkey.deviceType)} / `}
@@ -79,12 +89,12 @@ export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys }) => (
             ))}
           </ul>
         )}
-      </div>
+      </CardContent>
       {/*
-        **一覧の外に置く。** 中に入れると 0 件のとき `<p class="empty" {...{ [EMPTY_ATTR]: "" }}>` へ
+        **一覧の外に置く。** 中に入れると 0 件のとき「ありません」の表示へ
         差し替わって消える —— **1 本も無い人こそ登録したい。**
       */}
-      <div class="panel-footer" data-passkey-register />
-    </div>
-  </DashboardShell>
+      <CardFooter data-passkey-register />
+    </Card>
+  </AccountShell>
 );

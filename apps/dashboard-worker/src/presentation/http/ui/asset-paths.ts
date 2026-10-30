@@ -1,4 +1,4 @@
-import { hashedFileName, UI_STYLESHEET } from "@u18/web-ui";
+import { hashedFileName } from "@u18/web-ui";
 import { ACCOUNT_BASE_PATH } from "../base-path";
 import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
@@ -35,10 +35,17 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
  * そのままなので、片方だけ変えられないことは変わらない。
  */
 
-/** 共有スタイルシート（`@u18/web-ui` の `UI_STYLESHEET`）。 */
-export const STYLESHEET_ROUTE = `/ui/${hashedFileName("u18.css", UI_STYLESHEET)}`;
-export const STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${STYLESHEET_ROUTE}`;
-
+/**
+ * ## `u18.css` はもう配信していない（#332 の P1）
+ *
+ * この Worker の画面が 6 枚とも Kiwa UI へ移り、**手書き CSS を 1 枚も
+ * 読まなくなった。** 配信ルートだけを残すと「誰も参照しないアセット」に
+ * なる —— `test/asset-coverage.test.ts` がまさにそれを落とす検査なので、
+ * 残すなら理由を宣言することになる。宣言できる理由が無いので消した。
+ *
+ * **`styles.ts` 自体はまだ生きている。** auth-worker のログイン画面・
+ * 同意画面が読んでおり、あちらの移行は #332 の P2 である。
+ *
 /**
  * Kiwa UI のスタイルシート（#332）。
  *

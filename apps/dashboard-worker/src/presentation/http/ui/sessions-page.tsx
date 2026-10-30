@@ -1,10 +1,19 @@
 import type { SessionListItem } from "@u18/contracts";
+import { Badge, Card, CardContent, CardDescription, CardHeader, Separator } from "@u18/web-ui/kiwa";
 import type { FC } from "hono/jsx";
-import { DashboardShell } from "./dashboard-shell";
+import { AccountShell } from "./account-shell";
 import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
-import { summarizeUserAgent } from "./user-agent";
+import {
+  EMPTY_CLASS,
+  ITEM_BODY_CLASS,
+  ITEM_META_CLASS,
+  ITEM_RAW_CLASS,
+  ITEM_TITLE_CLASS,
+  LIST_CLASS,
+} from "./island-classes";
 import { EMPTY_ATTR, EMPTY_TEXT_ATTR, ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
+import { summarizeUserAgent } from "./user-agent";
 
 /**
  * ログイン中の端末（`/account/sessions`）。
@@ -41,28 +50,30 @@ export type SessionsPageProps = {
 };
 
 export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
-  <DashboardShell
+  <AccountShell
     title="ログイン中の端末"
     heading="ログイン中の端末"
     current="sessions"
     scripts={[ISLAND_PATH]}
     hasRevokeActions
   >
-    <div class="panel">
-      <div class="panel-body">
-        <p class="section-lead">
+    <Card>
+      <CardHeader>
+        <CardDescription>
           現在ログインしているセッションの一覧です。身に覚えのないものがあればログアウトしてください。
-        </p>
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
         {sessions.length === 0 ? (
           // 自分のセッションで見ている以上、普通は 0 件にならない。
-          <p class="empty" {...{ [EMPTY_ATTR]: "" }}>
+          <p class={EMPTY_CLASS} {...{ [EMPTY_ATTR]: "" }}>
             表示できるセッションがありません。
           </p>
         ) : (
-          // `data-*` はアイランドがボタンを付ける目印（`client/account-island.ts`）。
+          // `data-*` はアイランドがボタンを付ける目印（`island-hooks.ts`）。
           // 空になったときの文言もここに置く —— アイランドに日本語を持たせない。
-          <ul class="list" {...{ [EMPTY_TEXT_ATTR]: "表示できるセッションがありません。" }}>
-            {sessions.map((session) => (
+          <ul class={LIST_CLASS} {...{ [EMPTY_TEXT_ATTR]: "表示できるセッションがありません。" }}>
+            {sessions.map((session, index) => (
               <li
                 key={session.sessionId}
                 data-session-id={session.sessionId}
@@ -70,17 +81,18 @@ export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
                 // アイランドはログイン画面へ送る必要がある。
                 data-current={session.current ? "true" : "false"}
               >
-                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
-                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
+                {index > 0 && <Separator class="my-3" />}
+                <div class={ITEM_BODY_CLASS} {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class={ITEM_TITLE_CLASS} {...{ [ITEM_TITLE_ATTR]: "" }}>
                     {titleFor(session.userAgent)}
-                    {session.current && <span class="badge">このブラウザ</span>}
+                    {session.current && <Badge variant="secondary">このブラウザ</Badge>}
                   </div>
                   {/* 見出しが要約になったときだけ、原文を併記する。 */}
                   {session.userAgent !== null &&
                     titleFor(session.userAgent) !== session.userAgent && (
-                      <p class="item-raw">{session.userAgent}</p>
+                      <p class={ITEM_RAW_CLASS}>{session.userAgent}</p>
                     )}
-                  <p class="item-meta">
+                  <p class={ITEM_META_CLASS}>
                     ログイン {formatDateTime(session.createdAt)}
                     {" / "}
                     最終アクセス {formatDateTime(session.lastSeenAt)}
@@ -92,7 +104,7 @@ export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
             ))}
           </ul>
         )}
-      </div>
-    </div>
-  </DashboardShell>
+      </CardContent>
+    </Card>
+  </AccountShell>
 );

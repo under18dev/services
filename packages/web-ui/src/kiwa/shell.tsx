@@ -39,9 +39,22 @@ import { SidebarItem } from "./sidebar-item";
  * `style="..."` はブラウザに破棄されるので、**ローカルでは効いて本番で
  * だけ崩れる**（#320）。
  *
- * ## JS を 1 行も要求しない
+ * ## サイドバーは JS を 1 行も要求しない
  *
- * サイドバーは `<a>` の並びで、開閉も折りたたみも無い。
+ * `<a>` の並びで、開閉も折りたたみも無い。**中身のほうは画面次第**で、
+ * アイランドを読むなら `scripts` を渡す（`<script type="module" defer>`
+ * が出る。インラインは CSP が禁じている）。
+ *
+ * ## `<noscript>` を出すかは画面が決める
+ *
+ * `hasRevokeActions` が立っている画面だけが「JS が無いとできないこと」を
+ * 出す。**全画面に出すと、取り消しの無い画面でも「何かができない」と
+ * 読めてしまう。**
+ *
+ * **これは外枠が出せる 1 種類だけである。** 画面固有の事情（プロフィール
+ * の「表示名の変更には JS が要る」など）は、**その画面が自分で
+ * `<noscript>` を書く。** 外枠に種類を増やすと、どの画面が何を出すのかを
+ * 外枠が知ることになる。
  */
 
 export type KiwaShellProps = {
@@ -64,6 +77,18 @@ export type KiwaShellProps = {
   /** 見出し。ページごとに 1 つ。 */
   readonly heading: string;
   readonly lead?: string;
+  /** 読み込む外部スクリプト。インラインは CSP が禁じている。 */
+  readonly scripts?: readonly string[];
+  /**
+   * 取り消しの操作がある画面かどうか。`true` なら `<noscript>` で
+   * 「JS が無いとできないこと」を伝える。
+   *
+   * **`loginHref` も要る。** 行き先を外枠が決め打つと、`/login` を
+   * 配信しているのが別 Worker（auth-worker）であることが見えなくなる。
+   */
+  readonly hasRevokeActions?: boolean;
+  /** 全端末からのログアウトができるログイン画面。`hasRevokeActions` のときに使う。 */
+  readonly loginHref?: string;
   readonly children?: Child;
 };
 
@@ -120,9 +145,12 @@ export const KiwaShell: FC<KiwaShellProps> = ({
   stylesheet,
   heading,
   lead,
+  scripts = [],
+  hasRevokeActions = false,
+  loginHref,
   children,
 }) => (
-  <Layout title={title} frame="bare" stylesheet={stylesheet}>
+  <Layout title={title} frame="bare" stylesheet={stylesheet} scripts={scripts}>
     <div class="flex min-h-dvh flex-col md:flex-row">
       {current !== undefined && <Sidebar nav={nav} current={current} brandHref={brandHref} />}
       <main class="min-w-0 flex-1 px-5 py-8 md:px-10 md:py-12">
@@ -132,6 +160,26 @@ export const KiwaShell: FC<KiwaShellProps> = ({
             {lead !== undefined && <p class="text-sm/relaxed text-foreground-muted">{lead}</p>}
           </div>
           {children}
+          {hasRevokeActions && (
+            <div class="flex flex-col gap-2">
+              <noscript>
+                <p class="text-sm/relaxed text-foreground-muted">
+                  この画面での取り消し操作（ログアウト・削除・連携の解除）には JavaScript
+                  が必要です。一覧の表示は JavaScript 無しでも行えます。
+                </p>
+                {loginHref !== undefined && (
+                  <p class="text-sm/relaxed text-foreground-muted">
+                    身に覚えのない端末がある場合は、
+                    <a href={loginHref} class="text-foreground underline underline-offset-4">
+                      ログイン画面
+                    </a>
+                    から「すべての端末からログアウト」を行えます。こちらは JavaScript
+                    無しでも使えます。
+                  </p>
+                )}
+              </noscript>
+            </div>
+          )}
         </div>
       </main>
     </div>

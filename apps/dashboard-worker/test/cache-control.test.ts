@@ -5,7 +5,7 @@ import {
   GRANTS_PATH,
   OVERVIEW_PATH,
   SESSIONS_PATH,
-  STYLESHEET_PATH,
+  KIWA_STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
 
@@ -91,7 +91,7 @@ describe("キャッシュしてよい経路はスタイルシートだけ", () =
     // （#211）。中身が変われば URL が変わるので、古いものを掴んだ
     // ブラウザと新しいサーバーが重なる窓が無い。
     const response = await createApp().fetch(
-      new Request(`${ORIGIN}${STYLESHEET_PATH}`),
+      new Request(`${ORIGIN}${KIWA_STYLESHEET_PATH}`),
       envWith({} as never),
       executionContext(),
     );
@@ -120,7 +120,7 @@ describe("キャッシュしてよい経路はスタイルシートだけ", () =
     // 「個人情報を含まない」を、説明ではなく振る舞いで確かめる。
     const fetchCss = (headers: HeadersInit) =>
       createApp().fetch(
-        new Request(`${ORIGIN}${STYLESHEET_PATH}`, { headers }),
+        new Request(`${ORIGIN}${KIWA_STYLESHEET_PATH}`, { headers }),
         envWith({} as never),
         executionContext(),
       );
