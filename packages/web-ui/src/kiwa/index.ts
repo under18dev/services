@@ -24,4 +24,5 @@ export * from "./empty";
 export * from "./separator";
 export * from "./shell";
 export * from "./sidebar-item";
+export * from "./table";
 export * from "./utils";

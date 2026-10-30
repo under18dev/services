@@ -149,6 +149,54 @@ describe("GET /account/admin/users", () => {
     expect(received).not.toHaveProperty("query");
   });
 
+  it("表で出る（ヘッダに列名がある）", async () => {
+    const response = await get(ADMIN_USERS_PATH, true, {
+      listUsers: async () => rpcOk({ users: [USER], nextCursor: null }),
+    });
+    const html = await response.text();
+
+    expect(html).toContain("<table");
+    // **見出しを空にしない。** 読み上げで最後の列が何か分からなくなる。
+    for (const column of ["利用者", "メールアドレス", "状態", "登録", "ID", "操作"]) {
+      expect(html).toContain(`>${column}<`);
+    }
+  });
+
+  it("0 件のときは表を描かない（ヘッダ行だけ残さない）", async () => {
+    // **`docs/kiwa-ui-migration.md` §3.3 が `table.tsx` を外した理由。**
+    // 列はあるのに中身が無い表は、取得に失敗したようにも見える。
+    const response = await get(ADMIN_USERS_PATH, true, {
+      listUsers: async () => rpcOk({ users: [], nextCursor: null }),
+    });
+    const html = await response.text();
+
+    expect(html).not.toContain("<table");
+    expect(html).toContain("一致する利用者はいません");
+  });
+
+  it("行ごとの操作が、その行の利用者を指している", async () => {
+    // **取り違えを防いでいるのは hidden の `user_id` である**（#383 の
+    // `cardId` と同じ形）。行が増えても、押した form の中の値だけが飛ぶ。
+    const other: typeof USER = {
+      ...USER,
+      id: "usr_other",
+      username: "hanako",
+      displayName: "花子",
+      primaryEmail: "hanako@example.com",
+    };
+    const response = await get(ADMIN_USERS_PATH, true, {
+      listUsers: async () => rpcOk({ users: [USER, other], nextCursor: null }),
+    });
+    const html = await response.text();
+
+    expect(html).toContain(`value="${USER.id}"`);
+    expect(html).toContain('value="usr_other"');
+    // **行の数だけ form がある。** 1 つの form に畳むと、どの行への
+    // 操作かを `user_id` で選び直すことになり、取り違えの余地ができる。
+    const forms = html.match(/<form[^>]*users\/action/g) ?? [];
+    expect(forms).toHaveLength(2);
+  });
+
   it("続きがあるときだけ「続きを読む」が出る", async () => {
     const withMore = await get(ADMIN_USERS_PATH, true, {
       listUsers: async () => rpcOk({ users: [USER], nextCursor: "1700000000000:usr_01ABC" }),

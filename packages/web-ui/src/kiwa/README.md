@@ -39,6 +39,7 @@ diff に出る。** CSP は `style-src 'self'` で、インライン `style=` �
 | `empty.tsx`        | `registry/ui/empty.tsx`                                  |
 | `separator.tsx`    | `registry/ui/separator.tsx`                              |
 | `sidebar-item.tsx` | `registry/ui/sidebar-item.tsx`                           |
+| `table.tsx`        | `registry/ui/table.tsx`（#375）                          |
 | `theme.css`        | `templates/styles/globals.css`（**値は入れ替えてある**） |
 
 **`/account/apps` を組むのに要ったものだけ。** 残りの画面（#332 の P1 / P2）で
