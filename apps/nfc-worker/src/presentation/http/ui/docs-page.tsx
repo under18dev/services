@@ -42,6 +42,27 @@ import { DOCS_STYLESHEET_PATH } from "./asset-paths";
  * JS 無しで詰まる箇所は無い。
  */
 
+/**
+ * 文書に載せるカード ID の例（#382 の運用者の問い合わせ）。
+ *
+ * ## 「`:cardId` を焼けばいい」と読まれた
+ *
+ * 設定する URL を聞かれて、こちらが `go.under18.dev/c/:cardId` と答えていた。
+ * **`:cardId` は route の書き方であって、焼く値ではない。** 実際に
+ * 「この URL でいいんですよね？」と確認が来ている。
+ *
+ * **置き換え後の形を見せるほうが速い。** コロンもハイフンも入らないことが、
+ * 例を 1 つ見れば分かる。
+ *
+ * ## 形は本物に合わせてある
+ *
+ * `nfc_` + 20 文字（`newCardId()` の 100 ビット）。文字集合は Crockford
+ * base32 から `i l o u` を除いたもの。**長さを間違えた例を載せると、
+ * 今度はその形が広まる** —— 実際 18 文字の例が会話に出ていた。
+ */
+const EXAMPLE_CARD_ID = "nfc_hdt62b396zy809mmqk3v";
+const EXAMPLE_CARD_URL = `https://go.under18.dev/c/${EXAMPLE_CARD_ID}`;
+
 export type DocsPageProps = {
   /** アカウント側のオリジン。本番は `https://auth.under18.dev`。 */
   readonly accountOrigin: string;
@@ -70,6 +91,25 @@ export const DocsPage: FC<DocsPageProps> = ({ accountOrigin }) => {
           </p>
           <p class="mt-3 text-sm/relaxed text-foreground-muted">
             まだ誰のものでもないカードをタップしたときは、登録の画面が開きます。
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>カードに入っているもの</CardTitle>
+          <CardDescription>こんな形の URL が 1 本だけです。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p class="font-mono text-sm break-all">{EXAMPLE_CARD_URL}</p>
+          <p class="mt-3 text-sm/relaxed text-foreground-muted">
+            うしろの <span class="font-mono">{EXAMPLE_CARD_ID}</span> の部分がカードごとに違います。
+            <strong>カードを見分けるための番号</strong>で、 あなたのアカウントとは関係がありません。
+          </p>
+          <p class="mt-3 text-sm/relaxed text-foreground-muted">
+            番号は <span class="font-mono">nfc_</span> のあとに 20 文字続きます。
+            数字と小文字だけで、<strong>まぎらわしい i・l・o・u は使っていません</strong>
+            （1 と l、0 と o を読み間違えないようにするためです）。
           </p>
         </CardContent>
       </Card>
