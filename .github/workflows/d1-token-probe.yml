@@ -1,0 +1,182 @@
+# CI のトークンが D1 に対して何をできるかを、実際にやって確かめる（#325）。
+#
+# ## なぜ R2 の probe と別に要るのか
+#
+# `r2-token-probe.yml` が確かめたのは**書き込み先**で、こちらは**読み出し元**
+# である。バックアップの定期実行は `d1 export --remote` → R2 への put の
+# 2 段で、**どちらが欠けても組めない。** R2 側が通ったことは D1 側の保証に
+# ならない（Cloudflare の API トークンは権限をリソース種別ごとに持つ）。
+#
+# ## なぜ権限一覧を読むのではなく実際に操作するのか
+#
+# `r2-token-probe.yml` に書いた理由がそのまま当てはまる。**権限の名前と
+# 実際にできることはずれる。** `backup-d1.mjs list` が存在しない
+# サブコマンドを呼んでいて一度も動いていなかった（#164）のが実例で、
+# あれは権限ですらなく「コマンドが無い」だった。**通していないものを
+# 信用しない。**
+#
+# ## ★ここだけ R2 の probe と扱いが違う —— 出力が個人情報そのもの
+#
+# `d1 export` が落とすのは**全利用者の平文メールアドレスを含む D1 の完全な
+# 複製**である（`users` / `user_emails` / `email_challenges`）。したがって
+# このワークフローは:
+#
+#   - **ダンプの中身を 1 バイトも出力しない。** 行数もテーブル名も出さず、
+#     **バイト数と「0 でないこと」だけ**を見る
+#   - **artifact にしない。** `actions/upload-artifact` を使うと、リポジトリの
+#     読み取り権限を持つ全員がダウンロードできる
+#   - ランナーの作業ディレクトリではなく `$RUNNER_TEMP` へ落とす。
+#     **`$GITHUB_WORKSPACE` に置くと後続ステップやキャッシュに拾われうる**
+#
+# 「権限があるか」を知るのにダンプの中身は要らない。**要らないものを
+# 外へ出さない。**
+#
+# ## 手動実行のみ
+#
+# 本番 D1 から全件を読み出す操作なので、誰かが明示的に走らせたときだけ
+# 動かす。`schedule:` に乗せるのはバックアップ本体のほうで、こちらは
+# 「本体を繋いでよいか」を 1 回確かめるための道具である。
+name: D1 token probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe D1 read permissions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+
+      # **道具が動くことを先に確かめる。** r2-token-probe が最初に
+      # `Command "wrangler" not found` を「トークンに権限が無い」と報告し、
+      # **本番トークンの作り直しという user 操作を誤った根拠で要求する
+      # ところだった。** 道具の不在と権限の不足は別の結論になる。
+      - name: wrangler が動くことを確かめる
+        working-directory: apps/auth-worker
+        run: pnpm exec wrangler --version
+
+      # **暗号化の経路も道具のうち。** ここが動かないなら、D1 を読めても
+      # バックアップは組めない。本番の鍵は使わず、使い捨ての鍵で 1 往復する。
+      - name: age を入れて往復を確かめる
+        uses: ./.github/actions/age-roundtrip
+
+      # 失敗しても後続を止めない。「どこまでできるか」を知るのが目的。
+      # 判定は最後にまとめて行う（outcome を見る。下記 Report 参照）。
+      - name: d1 list
+        id: list
+        continue-on-error: true
+        working-directory: apps/auth-worker
+        run: pnpm exec wrangler d1 list
+
+      # 本命。バックアップ本体が打つのと同じコマンドである。
+      # `--output` の宛先を $RUNNER_TEMP にするのは上記のとおり。
+      - name: d1 export u18-identity
+        id: identity
+        continue-on-error: true
+        working-directory: apps/auth-worker
+        run: |
+          pnpm exec wrangler d1 export u18-identity --remote \
+            --output "$RUNNER_TEMP/identity.sql"
+
+      - name: d1 export u18-nfc
+        id: nfc
+        continue-on-error: true
+        working-directory: apps/nfc-worker
+        run: |
+          pnpm exec wrangler d1 export u18-nfc --remote \
+            --output "$RUNNER_TEMP/nfc.sql"
+
+      # **exit 0 だけでは足りない。** `backup-d1.mjs` の `exportDatabases()`
+      # が同じ理由でサイズを見ている —— 空のファイルが書かれて正常終了した
+      # 場合に、「取れた」と読んでしまう。
+      #
+      # **中身は見ない。** バイト数が 0 でないことだけを確かめる。
+      - name: ダンプが空でないことを確かめる
+        id: size
+        if: always()
+        continue-on-error: true
+        run: |
+          fail=0
+          for name in identity nfc; do
+            path="$RUNNER_TEMP/$name.sql"
+            if [ ! -f "$path" ]; then
+              echo "$name: ファイルが無い"
+              fail=1
+              continue
+            fi
+            bytes=$(wc -c < "$path" | tr -d ' ')
+            echo "$name: $bytes バイト"
+            if [ "$bytes" -eq 0 ]; then
+              echo "::error::$name のダンプが 0 バイト。export は成功を返したが中身が無い"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      # **落としたものを必ず消す。** ランナーは使い捨てだが、後続の
+      # ステップやジョブから読めるので、要らなくなった時点で消す。
+      # `if: always()` なのは、途中で落ちたときこそ残るため。
+      - name: ダンプを消す
+        if: always()
+        run: rm -f "$RUNNER_TEMP/identity.sql" "$RUNNER_TEMP/nfc.sql"
+
+      # **判定は outcome を見ること。conclusion ではない。**
+      # continue-on-error を付けたステップは、実際に失敗しても
+      # conclusion が success に書き換わる。`gh run view --json jobs` が
+      # 返すのも conclusion なので、**UI とコマンドの両方で「成功」に
+      # 見えるのに、実際は全部失敗している**という状態になる。
+      # r2-token-probe で実際にそれを一度読み違えている。
+      - name: Report
+        if: always()
+        run: |
+          verdict() { [ "$1" = "success" ] && echo "OK" || echo "NG"; }
+          list="${{ steps.list.outcome }}"
+          identity="${{ steps.identity.outcome }}"
+          nfc="${{ steps.nfc.outcome }}"
+          size="${{ steps.size.outcome }}"
+
+          {
+            echo "## D1 token probe"
+            echo
+            echo "| 操作 | 結果 |"
+            echo "| --- | --- |"
+            echo "| d1 list | $(verdict "$list") |"
+            echo "| d1 export u18-identity --remote | $(verdict "$identity") |"
+            echo "| d1 export u18-nfc --remote | $(verdict "$nfc") |"
+            echo "| ダンプが空でない | $(verdict "$size") |"
+            echo
+            echo "※ ダンプの中身は出力していない（全利用者の平文メールアドレスを含むため）。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "list=$list identity=$identity nfc=$nfc size=$size"
+
+          # **2 つの DB は揃っていなければ意味が無い。** 片方だけ戻すと
+          # `nfc_cards.owner_user_id` が存在しないユーザーを指す
+          # （runbook 12.4 (5)）。片方だけ通る状態を「半分できた」とは
+          # 書かない —— バックアップとしては成立しないため。
+          if [ "$identity" != "success" ] || [ "$nfc" != "success" ] || [ "$size" != "success" ]; then
+            echo "::error::The CI token cannot export both D1 databases. Scheduled backups (#325) cannot be wired with this token."
+            {
+              echo
+              echo "**CI のトークンでは 2 つの D1 を揃えて読み出せない。** バックアップの定期実行はこのトークンでは組めない。"
+              echo "D1 の読み取り権限を付けて作り直す必要がある（user の操作）。"
+              echo
+              echo "**片方だけ通っていても「半分できた」ではない。** 2 つの DB は揃っていないと復元できない（runbook 12.4 (5)）。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo
+            echo "**CI のトークンは 2 つの D1 を揃えて読み出せる。** バックアップの定期実行を組める（#325）。"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -22,10 +22,18 @@
  * ダンプは Cloudflare が吐いた生の出力のまま保管する。加工して保管すると、
  * **加工側にバグがあったときに元へ戻せない。**
  */
-export function reorderDump(sql) {
-  // 行頭が文の開始キーワードのところで区切る。D1 のダンプは 1 文が
-  // 複数行にまたがる（`CREATE TABLE` の列定義）が、継続行が上記の
-  // キーワードで始まることは無い。
+/**
+ * ダンプを文に分ける。
+ *
+ * 行頭が文の開始キーワードのところで区切る。D1 のダンプは 1 文が複数行に
+ * またがる（`CREATE TABLE` の列定義）が、**継続行がこれらのキーワードで
+ * 始まることは無い。**
+ *
+ * `reorderDump()` と `countInsertsByTable()`（`restore-rehearsal.mjs`）が
+ * **同じ分け方を使う**ためにここへ出してある。別々に分けると、
+ * 「並べ替えたもの」と「数えたもの」がずれても誰も気づかない。
+ */
+export function splitStatements(sql) {
   const statements = [];
   let current = [];
   const starts = /^(PRAGMA|CREATE|INSERT|DELETE|DROP|UPDATE)\b/;
@@ -38,6 +46,11 @@ export function reorderDump(sql) {
     }
   }
   if (current.length > 0) statements.push(current.join("\n"));
+  return statements;
+}
+
+export function reorderDump(sql) {
+  const statements = splitStatements(sql);
 
   const tableOf = /^CREATE TABLE(?: IF NOT EXISTS)? [`"]?([A-Za-z_0-9]+)/;
   const rowsOf = /^(?:INSERT INTO|DELETE FROM) [`"]?([A-Za-z_0-9]+)/;

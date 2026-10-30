@@ -1,0 +1,137 @@
+# D1 のバックアップを取り、R2 へ退避する（#325 / runbook 12.11）。
+#
+# **いまは手動実行だけ。** 日次に繋ぐのは別の PR（下の `on:` に理由）。
+#
+# ## なぜ（繋いだら）毎日なのか
+#
+# RPO（許容できるデータ損失時間）を 24 時間と置いた。Identity DB の書き込みは
+# 多くない（登録・ログイン・セッション失効）。**30 日以内なら Time Travel で
+# 戻せる**ので、このバックアップが埋めるのは「30 日より前」と
+# 「**Cloudflare アカウントごと失う**」場合である。
+#
+# ## ★ここは「取れた」で終わらない
+#
+# #164 / #165 がそれだった —— **ダンプは取れていた。復元できなかった。**
+# しかも**子テーブルに行が無い間は通ってしまう**ので、本番で最初の
+# アカウントができた瞬間から壊れていて、表示は緑のままだった。
+#
+# **自動化するとこの嘘が毎日出続ける。** そこで取得と同じ run の中で、
+# ダンプを実際に空の SQLite へ流し込み、**復元できることを確かめてから
+# 封をする**（`scripts/lib/restore-rehearsal.mjs`）。
+#
+# ## ★CI は自分が作ったバックアップを開けない
+#
+# ダンプは age の**公開鍵**で暗号化する。復号できるのは運用者の手元の
+# 秘密鍵だけで、**CI に置くのは公開鍵だけ**である。共通鍵を CI に置くと
+# 鍵も Cloudflare 側の管理下に入り、「アカウントごと失う」というこの
+# バックアップの前提そのものが崩れるため。
+#
+# その帰結として、**リハーサルは封をする前の平文に対して行う。** 保管物と
+# 中身は同一なので「取れたものは戻せる」は毎回言える。
+# **言えないのは「運用者の秘密鍵で実際に復号できる」こと**で、そこは
+# runbook 12.11 の期限として `pnpm check:deadlines` が見ている。
+#
+# ## 出力に中身を出さない
+#
+# ダンプは**全利用者の平文メールアドレス**を含む。artifact にしない。
+# ログに行を出さない。出すのはテーブル名と行数まで。
+name: Backup
+
+on:
+  # **いまは手動だけ。`schedule:` は別の PR で足す。**
+  #
+  # 繋ぐ前に 1 回ずつ通しておきたいものが 2 つある ——
+  # `D1 token probe`（トークンが本番 D1 を読めるか）と、この手動実行である。
+  #
+  # **形式ではない。** いま `schedule:` を入れると、最初の実行は誰も見ていない
+  # 時間に走り、**本番の全利用者のメールアドレスを平文で扱う経路**がそこで
+  # 初めて動くことになる。
+  #
+  # 足すときの時刻は `0 21 * * *`（UTC）= **06:00 JST** を想定している。
+  # 失敗したときに**運用者が起きた時点で結果が出ている**ようにするため。
+  # 分を 0 にしているのはこの時刻に限った話で、**毎時 0 分は GitHub 側が
+  # 混むので普段は避ける** —— ここは「朝に結果が出ている」を優先した。
+  # `security.yml` の `17 3 * * 1` とは曜日も時刻もぶつからない。
+  workflow_dispatch:
+
+# **前の実行を打ち切らない。** バックアップは「走り切ったこと」に意味が
+# あるので、重なったら後続を待たせる。
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: Export, rehearse and upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+
+      # **道具が動くことを先に確かめる。** r2-token-probe が最初に
+      # `Command "wrangler" not found` を「トークンに権限が無い」と報告し、
+      # **誤った根拠で本番トークンの作り直しを要求するところだった。**
+      - name: wrangler が動くことを確かめる
+        working-directory: apps/auth-worker
+        run: pnpm exec wrangler --version
+
+      # age を入れ、**使い捨ての鍵で 1 往復させてから**先へ進む。
+      # 往復が落ちたらバックアップを取りに行かない —— 開けないものを
+      # 積み上げないため。本番の鍵はここでは使わない。
+      - name: age を入れて往復を確かめる
+        id: age
+        uses: ./.github/actions/age-roundtrip
+
+      - name: バックアップを取り、復元を確かめ、暗号化して上げる
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # **公開鍵。秘密ではない。** それでも Secrets に置くのは、
+          # 受信者を変えたときに履歴へ残さないため。
+          AGE_RECIPIENT: ${{ secrets.BACKUP_AGE_RECIPIENT }}
+          AGE_BIN: ${{ steps.age.outputs.bin }}
+          # ダンプはランナーの一時領域へ。$GITHUB_WORKSPACE へ置くと
+          # 後続ステップやキャッシュに拾われうる。
+          BACKUP_OUT: ${{ runner.temp }}/backup
+        run: |
+          if [ -z "$AGE_RECIPIENT" ]; then
+            echo "::error::BACKUP_AGE_RECIPIENT が設定されていない。鍵の生成手順は runbook 12.11（運用者の操作）。"
+            exit 1
+          fi
+          pnpm backup:run --out "$BACKUP_OUT"
+
+      # **落としたものを必ず消す。** 途中で落ちたときこそ残るので always。
+      - name: ダンプを消す
+        if: always()
+        run: rm -rf "${{ runner.temp }}/backup"
+
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            {
+              echo "## Backup"
+              echo
+              echo "2 つの D1 を取得し、**空の SQLite へ流し込んで復元できることを確かめてから** age で暗号化して R2 へ上げた。"
+              echo
+              echo "- 保管先: \`r2://u18-identity-archive/d1-backups/\`"
+              echo "- **復号できるのは運用者の秘密鍵だけ。** CI は自分が上げたものを開けない"
+              echo "- 確かめていないこと: **運用者の鍵で実際に復号できること**（runbook 12.11 の期限で追跡）"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Backup — 失敗"
+              echo
+              echo "**バックアップが取れていない。** 対応は runbook 12.11。"
+              echo
+              echo "よくある原因:"
+              echo "- CI のトークンが D1 を読めない → \`D1 token probe\` を手で走らせて切り分ける"
+              echo "- **復元リハーサルで落ちた** → ダンプは取れたが戻せない。#165 と同じ形かを疑う"
+              echo "- \`BACKUP_AGE_RECIPIENT\` が未設定 → runbook 12.11（運用者の操作）"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
