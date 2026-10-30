@@ -48,6 +48,7 @@ function paramsFromQuery(c: Context<AppBindings>): AuthorizationRequestParams {
     codeChallengeMethod: q("code_challenge_method"),
     prompt: q("prompt"),
     maxAge: q("max_age"),
+    acrValues: q("acr_values"),
     hasRequestObject: q("request") !== null || q("request_uri") !== null,
     sessionToken: readSessionCookie(c),
   };
@@ -85,6 +86,10 @@ function paramsFromForm(c: Context<AppBindings>, form: FormData): AuthorizationR
     codeChallengeMethod: field(form, "code_challenge_method"),
     prompt: null,
     maxAge: null,
+    // `acr_values` も運ばない。`prompt` / `max_age` と同じ理由 ——
+    // 対話なしで満たせるかの判定（`prompt=none` と組んでしか効かない）は
+    // 最初の GET で終わっており、同意画面まで来た時点で関係が無い。
+    acrValues: null,
     hasRequestObject: false,
     sessionToken: readSessionCookie(c),
   };

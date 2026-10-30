@@ -437,6 +437,7 @@ export function createContainer(
         pkce,
         clock,
         audit,
+        sessions,
       }),
       // #17: `/oauth/userinfo` と `/oauth/revoke`。どちらも Bearer / クライアント
       // 認証を経た後の判断だけを持ち、HTTP の作法は Presentation 側にある。

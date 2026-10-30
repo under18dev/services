@@ -1,10 +1,12 @@
 import type { OAuthClient } from "../../domain/entities/oauth-client";
+import type { Session } from "../../domain/entities/session";
 import type { User } from "../../domain/entities/user";
 import {
   isSupportedCodeChallengeMethod,
   isValidCodeChallenge,
   type CodeChallengeMethod,
 } from "../../domain/services/pkce";
+import { ACR_PASSKEY } from "../../domain/services/amr";
 import { disallowedScopes, parseScope, unsupportedScopes } from "../../domain/services/scope";
 import type { AuditLogger } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
@@ -32,6 +34,14 @@ export type AuthorizationRequestParams = {
   readonly codeChallengeMethod: string | null;
   readonly prompt: string | null;
   readonly maxAge: string | null;
+  /**
+   * `acr_values`（#390）。空白区切りで優先順に並ぶ（OIDC Core 3.1.2.1）。
+   * u18 が応じられるのは `ACR_PASSKEY` だけ。**知らない値は無視する**
+   * （RFC の `acr_values` は「要求」であって「必須」ではない —— 満たせない
+   * 要求をすべて拒否すると、他の IdP 向けに書かれた値を渡すだけで
+   * ログインできなくなる）。
+   */
+  readonly acrValues: string | null;
   /** `request` / `request_uri`（Request Object）が付いていたか。 */
   readonly hasRequestObject: boolean;
   /** セッション Cookie の値。未ログインなら null。 */
@@ -229,6 +239,9 @@ export class AuthorizeRequestUseCase {
     if (maxAgeSeconds === "invalid") {
       return reject("invalid_request", "max_age must be a non-negative integer");
     }
+    // 知らない値は無視する（上の JSDoc）。u18 が応じられるのは 1 つだけ。
+    const requestedAcr = parseScope(params.acrValues ?? "");
+    const requiresPasskey = requestedAcr.includes(ACR_PASSKEY);
 
     const request: ValidatedAuthorizationRequest = {
       client,
@@ -260,6 +273,24 @@ export class AuthorizeRequestUseCase {
         return reject("login_required", "authentication is required");
       }
       return { kind: "login_required", request };
+    }
+
+    // ---- 7.5. acr（#390）----
+    //
+    // **ここでは `prompt=none` のときしか拒否しない。** 対話で済ませられる
+    // 場合に拒否すると、利用者には「ログインしたのに弾かれた」としか見えない
+    // —— ログイン画面側を Passkey 専用に誘導する導線は別途要る
+    // （いまは誘導していない。既存のセッションのまま進み、`acr` 無しの
+    // ID Token を RP が見て断る形に委ねる。追って画面側を手当てする）。
+    //
+    // `prompt=none` は「対話なしで済むか」を聞いているので、ここで
+    // 答えが出せる —— 既存のセッションが Passkey でなければ、対話なしに
+    // 満たす方法が無い。
+    if (requiresPasskey && session.authMethod !== "passkey" && prompts.includes("none")) {
+      return reject(
+        "unmet_authentication_requirements",
+        "the requested authentication context cannot be satisfied without user interaction",
+      );
     }
 
     const user = await this.deps.users.findById(session.userId);
@@ -329,9 +360,12 @@ export class AuthorizeRequestUseCase {
   }
 
   /** セッション Cookie から `userId` / `sessionId` / `auth_time` を取り出す。 */
-  private async loadSession(
-    sessionToken: string | null,
-  ): Promise<{ userId: string; sessionId: string; authTime: Date } | null> {
+  private async loadSession(sessionToken: string | null): Promise<{
+    userId: string;
+    sessionId: string;
+    authTime: Date;
+    authMethod: Session["authMethod"];
+  } | null> {
     if (sessionToken === null || sessionToken === "") return null;
 
     const result = await this.deps.getSession.execute({ sessionToken });
@@ -344,6 +378,7 @@ export class AuthorizeRequestUseCase {
       // 「1 回の認証」と 1 対 1 で、途中で認証をやり直す経路が無い
       // （再認証は `domain/services/reauthentication.ts` も `created_at` を見る）。
       authTime: result.value.session.createdAt,
+      authMethod: result.value.session.authMethod,
     };
   }
 }

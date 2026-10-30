@@ -41,6 +41,11 @@ export class JoseIdTokenIssuer implements IdTokenIssuer {
     // nonce が無いときは claim 自体を出さない。`"nonce": null` を載せると、
     // RP 側の「nonce が一致するか」の検証が null 同士で通ってしまう実装がある。
     if (claims.nonce !== null) payload["nonce"] = claims.nonce;
+    // amr が無いときも claim 自体を出さない。`nonce` と同じ理由 ——
+    // 空配列や null を載せると、RP 側が「確認できたが空」と「確認して
+    // いない」を区別できなくなる。
+    if (claims.amr !== null) payload["amr"] = claims.amr;
+    if (claims.acr !== null) payload["acr"] = claims.acr;
 
     return new SignJWT(payload)
       .setProtectedHeader({
