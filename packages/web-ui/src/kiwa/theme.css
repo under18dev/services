@@ -1,0 +1,285 @@
+/*
+ * Kiwa UI のトークンを u18 の色で埋めたもの（#332）。
+ *
+ * 上流の `templates/styles/globals.css` が土台。**値は入れ替えてある** ——
+ * 実値は `../styles.ts` の `:root` から持ってきたもので、出どころは
+ * `under18dev/under18dev` の design.md である。
+ *
+ * ## 変えた 4 点と、その理由
+ *
+ * 1. **Inter を読む `@import url("https://rsms.me/inter/inter.css")` を外した。**
+ *    仕様書 §14.1 決定 15。第三者ホストからフォントを読むと、CSP に
+ *    `font-src` の外部ホストが要るうえ、**認証画面を開いた事実がその
+ *    ホストへ渡る。** `--font-sans` は `styles.ts` と同じシステム
+ *    フォント列にしてある。要るなら self-host する。
+ *
+ * 2. **ライト側を持たない。** 上流は `:root` にライト、`.dark` にダークを
+ *    置き `@custom-variant dark` で切り替えるが、design.md にライト
+ *    パレットが無い。**切り替えの機構ごと落として `:root` に直接
+ *    ダークを書いている** —— 残すと「`.dark` を付け忘れた画面だけ
+ *    真っ白」という形で壊れる。
+ *
+ * 3. **影を作り直した。** 上流の影は `oklch(20.5% 0 0 / 0.05)`、つまり
+ *    明るい面に落とす前提の値で、**`#0a0a0a` の上では何も見えない。**
+ *    上流のカードは `border` を持たず `0 0 0 1px` のリングで輪郭を
+ *    作っているので、そのままだとカードの境界が消える。リング側を
+ *    `var(--border)` にして、手書き CSS のパネルが
+ *    `1px solid var(--border)` で出していた輪郭と同じものにしてある。
+ *
+ * 4. **`.bg-primary-mesh` を持ってきていない。** 中身がグラデーションで、
+ *    design.md の "No gradients." に当たる。
+ *
+ * ## `@source` はここに書かない
+ *
+ * どのファイルを走査するかは**使う側が決める**（`apps/dashboard-worker/
+ * src/presentation/http/ui/kiwa.css`）。ここに書くと、この package を
+ * 読む Worker が増えるたびに `packages/` 側を直すことになる。
+ */
+
+@theme inline {
+  /* `styles.ts` と同じシステムフォント列。第三者ホストから読まない。 */
+  --font-sans: var(--font-sans-stack);
+  --font-mono: var(--font-mono-stack);
+
+  --radius-xs: calc(var(--radius) - 6px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+  --radius-2xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-background-raised: var(--background-raised);
+  --color-background-subtle: var(--background-subtle);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+
+  --color-secondary-soft: var(--secondary-soft);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-secondary-active: var(--secondary-active);
+
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-hover: var(--destructive-hover);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+
+  --color-overlay-scrim: var(--overlay-scrim);
+
+  /*
+   * design.md が許すのは fade in / 軽い hover / smooth transition まで。
+   * 上流が持っていた parallax 向けの `--animate-scroll` 系は入れていない。
+   */
+  --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-fade-out: fade-out 0.15s ease-out;
+
+  /*
+   * **輪郭はリングで作る。** 上流の影の値は明るい面に落とす前提で、
+   * `#0a0a0a` の上では見えない（冒頭 3 を参照）。
+   */
+  --shadow-xs: 0 0 0 1px var(--border);
+  --shadow-sm: 0 0 0 1px var(--border);
+  --shadow: 0 0 0 1px var(--border);
+  --shadow-md: 0 0 0 1px var(--border-strong);
+  --shadow-lg: 0 0 0 1px var(--border-strong);
+}
+
+:root {
+  /*
+   * **ダーク固定。** ブラウザ既定の UI（スクロールバー・フォーム
+   * コントロール）もダーク側に揃える。`styles.ts` と同じ宣言。
+   */
+  color-scheme: dark;
+
+  --radius: 0.625rem;
+
+  /*
+   * `styles.ts` の `:root` から。出どころは under18dev/under18dev の
+   * `src/index.css`。**ここで値を作らない** —— ログイン画面
+   * （auth-worker、まだ手書き CSS）と並べたときに別のサイトに見える。
+   */
+  --font-sans-stack:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP",
+    sans-serif;
+  --font-mono-stack: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* --bg / --surface / --bg-secondary / --card */
+  --background: #0a0a0a;
+  --background-raised: #151515;
+  --background-subtle: #111111;
+
+  /* --fg / --muted / --muted-deep */
+  --foreground: #fafafa;
+  --foreground-muted: #a1a1aa;
+  --foreground-soft: #71717a;
+
+  --card: var(--background-raised);
+  --card-foreground: var(--foreground);
+  --popover: var(--background-raised);
+  --popover-foreground: var(--foreground);
+
+  /*
+   * --accent / --accent-fg。**u18 ではこれが唯一の有彩色である。**
+   * design.md の "No rainbow effects. No colorful UI." により、
+   * 色で意味を足さない。
+   */
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --primary-soft: color-mix(in srgb, var(--primary) 18%, transparent);
+  --primary-hover: color-mix(in srgb, var(--primary) 85%, #ffffff);
+  --primary-active: color-mix(in srgb, var(--primary) 85%, #000000);
+
+  /*
+   * 第 2 ボタン・バッジの面。**`--card` と同じにしない** —— カードの上に
+   * 置いたときに hover が見えなくなる（上流が同じ理由で neutral-700 を
+   * 当てている）。`--border-strong` と同じ段を使う。
+   */
+  --secondary: #2e2e2e;
+  --secondary-foreground: var(--foreground);
+  --secondary-soft: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --secondary-hover: #3a3a3a;
+  --secondary-active: #454545;
+
+  --muted: var(--secondary);
+  --muted-foreground: var(--foreground-muted);
+
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+
+  /* --danger。彩度を上げると "colorful UI" になるので赤は 1 段落としてある。 */
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --destructive-soft: color-mix(in srgb, var(--destructive) 18%, transparent);
+  --destructive-hover: color-mix(in srgb, var(--destructive) 85%, #ffffff);
+
+  /*
+   * **成功・注意・情報に色を当てていない。**
+   *
+   * design.md が持つ有彩色は `--accent`（青）と `--danger`（赤）の 2 つ
+   * だけで、緑も橙も無い。**無い色をここで作ると、design.md に書いて
+   * いない配色がダッシュボードにだけ生える** —— "No rainbow effects.
+   * No colorful UI." はまさにそれを禁じている。
+   *
+   * かといって**未定義にはしない。** Tailwind は値の無いトークンの
+   * ユーティリティを生成しないので、`bg-success-soft` と書いた瞬間に
+   * **class は HTML に出るのに CSS が存在しない**状態になる。#320
+   * （インライン `style=` が CSP に捨てられた）と同じ、
+   * **ローカルでも本番でも静かに効かない**形である。
+   *
+   * そこで中立な面に倒してある。`variant="success"` は**既定と同じ
+   * 見た目になる**（壊れはしない）。色で状態を言いたくなったら、
+   * まず design.md 側に色を足す決定が要る。
+   */
+  --success: var(--foreground-muted);
+  --success-foreground: var(--foreground);
+  --success-soft: color-mix(in srgb, var(--foreground) 10%, transparent);
+
+  --warning: var(--foreground-muted);
+  --warning-foreground: var(--foreground);
+  --warning-soft: color-mix(in srgb, var(--foreground) 10%, transparent);
+
+  --info: var(--foreground-muted);
+  --info-foreground: var(--foreground);
+  --info-soft: color-mix(in srgb, var(--foreground) 10%, transparent);
+
+  /* --border / --border-strong。段が 2 つしかないので間を 1 つ足した。 */
+  --border: #222222;
+  --border-subtle: #1a1a1a;
+  --border-strong: #2e2e2e;
+  --input: var(--border);
+  --ring: var(--primary);
+
+  --overlay-scrim: color-mix(in srgb, #000000 80%, transparent);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@layer base {
+  /*
+   * **上流そのまま。** Tailwind v4 の preflight は枠線色を
+   * `currentColor` にするので、`border` だけ書いたときに文字色の枠が
+   * 出る。既定をトークンへ寄せている。
+   */
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    /*
+     * **`var(--font-sans)` と書かない。** `@theme inline` のトークンは
+     * ユーティリティへ値を埋め込む形で、`:root` に同名の変数が出るとは
+     * 限らない。素の CSS から読むのは `:root` に自分で置いた側にする。
+     */
+    font-family: var(--font-sans-stack);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 35%, transparent);
+    color: var(--foreground);
+  }
+}

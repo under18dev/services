@@ -5,14 +5,18 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./client/webauthn-json": "./src/client/webauthn-json.ts"
+    "./client/webauthn-json": "./src/client/webauthn-json.ts",
+    "./kiwa": "./src/kiwa/index.ts",
+    "./kiwa/theme.css": "./src/kiwa/theme.css"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "4.13.13"
+    "clsx": "2.1.1",
+    "hono": "4.13.13",
+    "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
     "typescript": "5.9.3",

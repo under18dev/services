@@ -13,3 +13,11 @@ apps/*/worker-configuration.d.ts
 
 # esbuild の出力を 1 行の文字列として抱えた生成物。整形対象にしない。
 apps/auth-worker/src/presentation/http/ui/generated
+
+# Kiwa UI から取り込んだ primitives（#332）。**上流のまま置いてある。**
+# 整形すると、上流から取り直したときに中身の違いと整形の違いが混ざって
+# diff から読めなくなる。import の書き換え以外に手を入れない約束
+# （packages/web-ui/src/kiwa/README.md）は、ここで整形しないことで保てる。
+# **`*.tsx` だけ。** `utils.ts` / `theme.css` / `index.ts` / `README.md` は
+# このリポジトリで書いたものなので整形の対象に残す。
+packages/web-ui/src/kiwa/*.tsx

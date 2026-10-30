@@ -33,6 +33,16 @@
   // 生成 -> 変更検知 -> 再生成 が無限に続いて `wrangler dev` が
   // 起動しなくなる（#138）。deploy / dry-run は watch しないので、
   // 絞っても「どの経路から入っても必ず走る」は保たれる。
+  //
+  // **この絞り込みは Tailwind には効かない**（#332）。スタイルシートの
+  // 材料は画面の .tsx と packages/web-ui/src/kiwa/ で、どちらも
+  // watch_dir の外にある。**`wrangler dev` を開いたまま class を足しても
+  // CSS は作り直されない** —— dev を入れ直すこと。
+  //
+  // watch_dir を広げて直せない。出力（.../ui/generated/）が .../ui/ の
+  // 中にあるので、ui を見た瞬間に #138 の無限ループへ戻る。
+  // **deploy と dry-run は watch しない**ので、本番へ古い CSS が出る形は
+  // ここからは生まれない（ビルドが毎回走る）。
   "build": {
     "command": "node scripts/build-client.mjs",
     "watch_dir": "src/presentation/http/ui/client",
