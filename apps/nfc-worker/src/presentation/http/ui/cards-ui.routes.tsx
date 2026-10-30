@@ -1,4 +1,5 @@
 import { loginUrlWithReturnTo, returnToForCurrentRequest, sessionCookieName } from "@u18/contracts";
+import { isCardId } from "@u18/domain";
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
@@ -18,16 +19,6 @@ import type { AppBindings } from "../types";
 import { AdminPage } from "./admin-page";
 import { CardsPage } from "./cards-page";
 import { ClaimPage } from "./claim-page";
-
-/**
- * 紐づけ画面が受け付けるカード ID の形。
- *
- * `cards.routes.ts` の `cardIdSchema` と同じ形。**弾いた場合も
- * 「紐づけられないカード」と同じ画面にすること** —— 「形が不正」と
- * 「そんなカードは無い」を区別すると、カード ID の形を教える。
- * （実際の ID の形と合っていないことと、3 箇所に散っていることは #365。）
- */
-const CARD_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
 
 /**
  * 発行の直後に「何枚出したか」を運ぶクエリ名（#382）。
@@ -290,7 +281,7 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     }
 
     const cardId = c.req.param("cardId");
-    if (!CARD_ID_PATTERN.test(cardId)) {
+    if (!isCardId(cardId)) {
       return renderAdminWithError(c, "そのカードは見つかりませんでした。");
     }
 
@@ -342,10 +333,10 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
       //
       // **早期 return を足さないこと。** 形が不正なときだけ D1 を飛ばすと、
       // 「形が不正」と「形は合っているが存在しない」で処理時間が変わる ——
-      // `cards.routes.ts` の `CARD_ID_PATTERN` が明示的に避けている形である。
+      // `@u18/domain` の `isCardId()` の JSDoc が明示的に避けている形である。
       // ここで正規化しているのは、**変な値をそのまま UseCase へ運ばない**
       // ためだけで、応答を速くするためではない。
-      cardId: CARD_ID_PATTERN.test(cardId) ? cardId : "",
+      cardId: isCardId(cardId) ? cardId : "",
     });
 
     if (!result.ok) {
@@ -403,7 +394,7 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     if (!isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) return concealed();
 
     const cardId = form.get("cardId")?.toString() ?? "";
-    if (!CARD_ID_PATTERN.test(cardId)) return concealed();
+    if (!isCardId(cardId)) return concealed();
 
     const result = await c.get("container").useCases.claimCard.execute({
       sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),

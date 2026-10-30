@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newCardId, newId, newSessionId, newUserId } from "../src/identifier";
+import { isCardId, newCardId, newId, newSessionId, newUserId } from "../src/identifier";
 
 describe("newId", () => {
   it("接頭辞をつけて返す", () => {
@@ -117,5 +117,37 @@ describe("newCardId", () => {
     );
 
     expect(chars.size).toBe(32);
+  });
+});
+
+/**
+ * **作る側（`newCardId()`）と見る側（`isCardId()`）が離れていないことの
+ * 往復確認**（#365）。
+ *
+ * 3 Worker のルートに散っていた `/^[a-z0-9_]{1,64}$/` を 1 箇所へ寄せた。
+ * この往復が崩れると、`newCardId()` が作った本物の ID を `isCardId()` が
+ * 弾く——発行したカードが自分自身の検査で 404 になる、という壊れ方になる。
+ */
+describe("isCardId", () => {
+  it("newCardId() が作った値を受け入れる", () => {
+    for (let i = 0; i < 100; i += 1) {
+      expect(isCardId(newCardId())).toBe(true);
+    }
+  });
+
+  it.each([
+    ["空文字", ""],
+    ["接頭辞が無い", "0".repeat(20)],
+    ["長さが短い", `nfc_${"0".repeat(19)}`],
+    ["長さが長い", `nfc_${"0".repeat(21)}`],
+    ["紛らわしい文字（i）を含む", `nfc_i${"0".repeat(19)}`],
+    ["紛らわしい文字（l）を含む", `nfc_l${"0".repeat(19)}`],
+    ["紛らわしい文字（o）を含む", `nfc_o${"0".repeat(19)}`],
+    ["紛らわしい文字（u）を含む", `nfc_u${"0".repeat(19)}`],
+    ["大文字を含む", `nfc_${"0".repeat(19)}A`],
+    ["以前の緩い検査なら通っていた形", "doesnotexist"],
+    ["パス区切りを含む", "../../etc/passwd"],
+  ])("%s は拒否する", (_label, value) => {
+    expect(isCardId(value)).toBe(false);
   });
 });
