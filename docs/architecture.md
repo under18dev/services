@@ -30,7 +30,7 @@ dashboard-worker に `IDENTITY_DB` を渡した瞬間、dashboard のテンプ�
 1 つで `sessions` テーブル全体が読める。D1 binding には「このユーザーの行だけ」という
 粒度が存在しないため、行レベルの認可は Worker 境界でしか作れない。
 
-RPC 経由であれば、dashboard が行えるのは `IdentityRPC` が公開する 4 メソッドだけに限られ、
+RPC 経由であれば、dashboard が行えるのは auth-worker の Entrypoint が公開するメソッドだけに限られ、
 そのそれぞれが auth-worker 側で入力検証と所有者チェックを通る。
 「dashboard を信用する」のではなく「dashboard に渡す鍵を小さくする」設計である。
 
@@ -436,7 +436,7 @@ auth-worker 内部のエラーコードと、外部に公開する `RpcErrorCode
 
 ### 5.2 入力検証と認可
 
-`IdentityRPC` の 4 メソッドはすべて同じ形をしている。
+`IdentityRPC` のメソッドはすべて同じ形をしている。
 
 1. zod スキーマ（`getSessionInputSchema` 等）で `safeParse` し、失敗すれば `invalid_input`
 2. `createContainer(this.env)`
@@ -455,10 +455,12 @@ dashboard-worker が侵害された瞬間にそれが Identity の侵害にな�
 ### 5.3 `CONTRACT_VERSION` とデプロイ順
 
 ```ts
-export const CONTRACT_VERSION = "1.4.0" as const;
+export const CONTRACT_VERSION = "1.5.0" as const;
 ```
 
-直近の更新は #187 の `isAdmin` 追加（1.3.0 → 1.4.0）。`SessionSummary` と `UserProfile` の**両方**に置いてあるのは消費者が違うため —— nfc-worker は発行の可否に 1 ビットだけ要り、`getUserProfile` を呼ばせるとメールアドレスまで渡る。
+直近の更新は #308 の OAuth クライアント管理（1.4.0 → 1.5.0）。`listOAuthClients` / `createOAuthClient` / `disableOAuthClient` を、**`IdentityRpcContract` ではなく新しい `IdentityAdminRpcContract` に**足した（auth-worker 側の Entrypoint も `IdentityAdminRPC` として別クラス）。**Service Binding はメソッド単位で絞れない**ので、同じ Entrypoint に置くと `IdentityRPC` を束縛している nfc-worker からも呼べることになる —— あちらは運営＝管理者のセッションを扱う Worker である（#187）。誰がどの Entrypoint を束縛してよいかは `scripts/check-service-bindings.mjs` が静的に検査する。**束縛先の Entrypoint が無いと workerd は起動に失敗する**ので、デプロイ順は従来以上に auth-worker 先行である。**メソッドの追加であると同時に、緩和策の置き換えでもある** —— 登録を叩ける場所が「運用者の手元」から「管理者のセッション」へ広がった（脅威モデル RR-21）。契約で表現できたのは「`client_secret_hash` を DTO に置かない」「平文は登録の応答にしか置かない」までで、**認可の判定は契約では書けない**ので auth-worker の UseCase の中にある。
+
+その前は #187 の `isAdmin` 追加（1.3.0 → 1.4.0）。`SessionSummary` と `UserProfile` の**両方**に置いてあるのは消費者が違うため —— nfc-worker は発行の可否に 1 ビットだけ要り、`getUserProfile` を呼ばせるとメールアドレスまで渡る。
 
 その前は #11 / #75 の `updateProfile` / `listPasskeys` / `deletePasskey` 追加（1.2.0 → 1.3.0）。あわせて `RpcErrorCode` に `reauthentication_required` と `conflict` を足した —— **呼び出し元の見せ方が変わるものを `forbidden` や `internal` へ畳むと、UI が「失敗しました」としか言えなくなる。**
 

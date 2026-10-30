@@ -396,4 +396,14 @@ export interface IdentityRpcContract {
   closeAccount(input: CloseAccountInput): Promise<CloseAccountResult>;
   /** 副作用の無い死活確認（#44）。認証を要求しない。 */
   ping(): Promise<PingResult>;
+  // **OAuth クライアント管理（#308）はここに無い。** `IdentityAdminRpcContract`
+  // （`identity-admin.ts`）という別の Entrypoint に分けてある。
+  //
+  // **Service Binding はメソッド単位で絞れない。** この契約に足すと、
+  // `IdentityRPC` を束縛している Worker は**全部**管理用メソッドを呼べる
+  // ことになる —— nfc-worker を含む。nfc-worker は設計上**管理者の
+  // セッショントークンを扱う**（#187 でこの契約に `isAdmin` を足した理由が
+  // それ）ので、侵害されれば通りかかった管理者の新しいセッションで
+  // クライアントを登録できてしまう。`entrypoint` の指定は Cloudflare 側で
+  // 強制されるので、`caller`（自己申告）と違って**実際に効く境界**になる。
 }

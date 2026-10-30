@@ -53,7 +53,7 @@ import { createContainer, type RequestContext } from "../../composition/containe
  * 知らないコードは `internal` に倒す。**`not_found` には倒さない** ——
  * 「存在しない」と言い切るのは、存在するかどうかを確かめた場合だけにする。
  */
-function toRpcCode(code: string): RpcErrorCode {
+export function toRpcCode(code: string): RpcErrorCode {
   switch (code) {
     case "unauthenticated":
       return "unauthenticated";

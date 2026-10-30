@@ -113,5 +113,47 @@
  * （§11.7 の応対原則）。`deleted` を立てると `purgeUserSql` の
  * `status <> 'deleted'` に弾かれ、**管理者が二度と落とせなくなる。**
  */
-export const CONTRACT_VERSION = "1.5.0" as const;
+/**
+ * ## 1.5.0 → 1.6.0（#308: OAuth クライアント管理を RPC へ出す）
+ *
+ * `listOAuthClients` / `createOAuthClient` / `disableOAuthClient` を足した。
+ * これまで `scripts/oauth-client.mjs` からしかできなかった登録・失効を、
+ * **管理者のセッションでだけ**画面から行えるようにする。
+ *
+ * **`IdentityRpcContract` には足していない。** 別の契約
+ * （`IdentityAdminRpcContract` / `identity-admin.ts`）と別の Entrypoint
+ * （`IdentityAdminRPC`）になっている —— Service Binding はメソッド単位で
+ * 絞れないので、同じ Entrypoint に置くと **nfc-worker からも呼べる**。
+ * 束縛を分けることがそのまま境界になる。
+ *
+ * **デプロイ順に新しい注意が 1 つある。** dashboard-worker の
+ * `wrangler.jsonc` は `IDENTITY_ADMIN`（`entrypoint: "IdentityAdminRPC"`）を
+ * 束縛する。**束縛先の Entrypoint が存在しないと workerd は起動に失敗する**
+ * ので、ここでも **auth-worker が先**。逆順にすると dashboard-worker が
+ * 起動せず、管理領域だけでなく**画面全部が落ちる**。
+ *
+ * **これはメソッドの追加であると同時に、緩和策の置き換えである。**
+ * 「運用者の手元からしか叩けない」を「管理者だけが叩ける」に替えており、
+ * 弱くなる方向の変更にあたる（`docs/threat-model.md` RR-21）。契約の形で
+ * 効かせているのは 3 点 —— `OAuthClientSummary` に `client_secret_hash` を
+ * 置かないこと、平文の `client_secret` を `createOAuthClient` の応答に
+ * しか置かないこと、`createOAuthClient` の入力に **`isFirstParty` を
+ * 置かないこと**（同意画面の省略は登録とは別の権限で、こちらのほうが
+ * 重い。経路は `scripts/oauth-client.mjs` だけに残す）。
+ * **認可と再認証の判定は契約では表現できない**ので、auth-worker の
+ * UseCase の中に置いてある —— 登録と失効には再認証が要り、
+ * `reauthentication_required`（1.3.0 で足したコード）が返る。
+ *
+ * **後方互換な追加**なので MINOR。デプロイ順は従来どおり auth-worker が先。
+ * 逆順にすると、新しい dashboard-worker がまだメソッドを持たない
+ * auth-worker を呼び、`RpcIdentityGateway.call()` が
+ * `identity_unavailable` へ畳む —— 画面は 503 で済むが、管理領域だけが
+ * 無言で壊れた状態がデプロイ完了まで続く。
+ *
+ * **番号は 1.6.0 である。** この変更を書いたときは 1.5.0 のつもりだったが、
+ * 先に #318（退会）が 1.5.0 を取って main へ入った。リベースで繰り上げた
+ * ——  **同じ番号に 2 つの意味が付くと、`CONTRACT_VERSION` を見ても
+ * どちらが入っているか分からなくなる。**
+ */
+export const CONTRACT_VERSION = "1.6.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

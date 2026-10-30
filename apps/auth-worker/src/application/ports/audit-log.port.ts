@@ -134,12 +134,51 @@ export const AUDIT_EVENTS = [
   "admin.session_not_passkey",
   /** displayName / username の変更。 */
   "profile.updated",
+  /**
+   * 管理者向けの操作を、管理者でないセッションが叩いた（#308）。
+   *
+   * **このイベントは `audit_logs` に書かない。** `rate_limit.exceeded` と
+   * 同じ理由で、有効なセッションさえ持てば誰でも呼べる経路なので、
+   * 拒否のたびに D1 へ 1 行書くと**弾くこと自体が書き込みに変換される**。
+   * RPC 経路にレート制限は無く、しかも `security` 区分なら 2 年残る。
+   * Workers の observability へ構造化ログとして出す
+   * （`application/use-cases/admin-access.ts`、ランブック §13.5）。
+   *
+   * 名前をここに置いているのは、**出力先が違っても同じ名前空間の
+   * セキュリティイベントだから**（`rate_limit.exceeded` と同じ扱い）。
+   *
+   * 応答は `not_found` に畳むので、**叩かれたことはこのログにしか
+   * 現れない。** 何を登録しようとしたかは出さない（呼び出し元が決めた
+   * 文字列をログへ流さないため）。
+   */
+  "admin.denied",
 
   // --- OAuth / OIDC ---
   /** client_id から公開情報を解決した（認可画面の表示前）。 */
   "oauth.client.resolve",
   /** client_secret による認証。失敗はクライアントのなりすまし試行を意味する。 */
   "oauth.client.authenticate",
+  /**
+   * 管理者が OAuth クライアントを登録した（#308）。
+   *
+   * **`ops.admin.*` と同じ「支配権が変わる操作」である。** 登録された
+   * `redirect_uri` は認可コードの宛先そのもので、1 行増えるたびに
+   * 「コードを受け取ってよい場所」が増える。しかも効くのは特定の利用者に
+   * 対してではなく、その `client_id` で認可を通す全員に対してである。
+   *
+   * **この名前で行が書かれるのは、管理者まで通った呼び出しだけ**
+   * （成功と、再認証切れ・不正な `redirect_uri`・重複などの失敗）。
+   * 管理者でないセッションからの呼び出しは `admin.denied` として
+   * Workers のログへ出し、ここには書かない —— 理由は `admin.denied`。
+   */
+  "oauth.client.created",
+  /**
+   * 管理者が OAuth クライアントを失効させた（#308）。
+   *
+   * 付与と同じだけ残す（`ops.admin.revoked` と同じ理由）——
+   * 失効は正規のクライアントを黙って止める手口でもある。
+   */
+  "oauth.client.disabled",
   /** 認可リクエストの受理・拒否。 */
   "oauth.authorize.decided",
   /** 認可コードの発行。 */
@@ -257,6 +296,17 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
   "profile.updated": "security",
   /** 同意の取り消し。第三者アプリの常設アクセスが切れた時点。 */
   "oauth.grant.revoked": "security",
+  /**
+   * OAuth クライアントの登録（#308）。**認可コードの宛先が増えた記録**で、
+   * `ops.admin.granted` と同じく支配権が変わる操作にあたる。
+   *
+   * **量は管理者の操作回数で頭打ちになる。** 管理者でない呼び出しは
+   * ここに来ない（`admin.denied` として Workers のログへ出る）ので、
+   * 「弾いた回数ぶん行が増える」形にはならない。
+   */
+  "oauth.client.created": "security",
+  /** 失効。正規のクライアントを止める手口でもあるので、登録と同じだけ残す。 */
+  "oauth.client.disabled": "security",
   /** 本人によるセッション失効。「いつ気づいたか」の起点になる。 */
   "session.revoke": "security",
   /** ログアウト（全デバイス失効を含む）。乗っ取り後の後始末か本人かを後から分ける。 */
@@ -314,15 +364,27 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * 「管理者の前提が崩れていた期間」は後から遡りたい種類の情報だからである。
    * ここが `standard` なのは**出力先の話であって重要度の話ではない。**
    *
-   * **この「実際には使われない行」はこれで 2 件目である**
-   * （`rate_limit.exceeded` / `csrf.rejected` と合わせて 3 件）。
-   * `Record` の網羅が要求するので値を置いているが、**置いた値が意味を
-   * 持たない行が増えていく形**になっている。3 件目を足すときは、
-   * 区分を `"not_persisted"` のような値で表せないかを先に考えること ——
-   * いまは「掃除の対象になる期間」と「そもそも掃除の対象でない」が
-   * 同じ型で書かれている。
+   * **ここには「次を足すときは、区分を `"not_persisted"` のような値で
+   * 表せないかを先に考えること」と書いてあった。その次がすぐ下の
+   * `admin.denied` で、4 行目になる**（`rate_limit.exceeded` /
+   * `csrf.rejected` / これ / `admin.denied`）。`Record` の網羅が要求する
+   * ので値を置いているが、**置いた値が意味を持たない行が増えていく形**が
+   * そのまま続いている。
+   *
+   * 直すべきなのは型のほうで、いまは「掃除の対象になる期間」と
+   * 「そもそも掃除の対象でない」が同じ型で書かれている。**この PR では
+   * 直さない** —— ここで型を変えると、この PR が触っていない監査イベント
+   * 全部の分類を道連れにする。別で出す。
    */
   "admin.session_not_passkey": "standard",
+  /**
+   * こちらも**実際には使われない行**。`admin.denied` は `audit_logs` に
+   * 書かず Workers のログへ出す（#308）。`Record` の網羅のために置いている。
+   *
+   * 仮に書くことにしたとしても `security` には入れない —— 外から誘発できる
+   * イベントを 2 年側へ置くと、掃除が効かないまま行が伸びる。
+   */
+  "admin.denied": "standard",
 };
 
 /**

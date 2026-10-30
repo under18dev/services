@@ -58,6 +58,12 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
     return this.store.get(clientId)?.redirectUris ?? [];
   }
 
+  async listAll(): Promise<readonly OAuthClient[]> {
+    // 本物と同じく失効済みも返す。`Map` の挿入順＝登録順なので、
+    // D1 側の `order by created_at` と同じ並びになる。
+    return [...this.store.values()].map((props) => OAuthClient.fromPersistence(props));
+  }
+
   async verifySecret(clientId: string, presentedSecret: string): Promise<boolean> {
     const props = this.store.get(clientId);
     if (props === undefined) return false;

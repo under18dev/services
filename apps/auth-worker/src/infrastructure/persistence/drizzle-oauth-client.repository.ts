@@ -63,6 +63,33 @@ export class DrizzleOAuthClientRepository implements OAuthClientRepository {
     return rows.map((row) => row.uri);
   }
 
+  async listAll(): Promise<readonly OAuthClient[]> {
+    // `findByClientId` と同じく、クライアントと Redirect URI を 1 回の
+    // 問い合わせで読む。件数は運用者が登録した数（数十の桁）なので、
+    // ページングは置かない —— 置くと「続きがある一覧」を扱う分岐が
+    // 呼び出し側に増え、全件を見たい管理画面の用途と合わない。
+    const rows = await this.db
+      .select({ client: oauthClients, uri: oauthRedirectUris.uri })
+      .from(oauthClients)
+      .leftJoin(oauthRedirectUris, eq(oauthRedirectUris.clientId, oauthClients.id))
+      .orderBy(oauthClients.createdAt)
+      .all();
+
+    // join で行が増えるので、内部 ID で畳む。`Map` は挿入順を保つため、
+    // 上の `order by created_at` がそのまま結果の順序になる。
+    const uris = new Map<string, string[]>();
+    const clients = new Map<string, OAuthClientRow>();
+    for (const row of rows) {
+      clients.set(row.client.id, row.client);
+      if (row.uri === null) continue;
+      const list = uris.get(row.client.id);
+      if (list === undefined) uris.set(row.client.id, [row.uri]);
+      else list.push(row.uri);
+    }
+
+    return [...clients.values()].map((client) => toDomain(client, uris.get(client.id) ?? []));
+  }
+
   async verifySecret(clientId: string, presentedSecret: string): Promise<boolean> {
     const row = await this.db
       .select({

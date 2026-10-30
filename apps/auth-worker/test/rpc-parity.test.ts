@@ -2,6 +2,7 @@ import { passkeys } from "@u18/db";
 import { newId } from "@u18/domain";
 import { SELF, createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { IdentityAdminRPC } from "../src/presentation/rpc/identity-admin.entrypoint";
 import { IdentityRPC } from "../src/presentation/rpc/identity.entrypoint";
 import { appEnv, db, seedLoggedInUser, sessionCookie, type SeededUser } from "./helpers.oauth";
 import { resetDatabase } from "./helpers";
@@ -33,10 +34,17 @@ const ORIGIN = BASE;
 const STALE = new Date(Date.now() - 60 * 60 * 1000);
 
 let rpc: IdentityRPC;
+/**
+ * 管理用は**別の Entrypoint**（#308）。Service Binding はメソッド単位で
+ * 絞れないので、束縛を分けること自体が境界になっている ——
+ * `IdentityRPC` を束縛している nfc-worker からは、こちらが見えない。
+ */
+let adminRpc: IdentityAdminRPC;
 
 beforeEach(async () => {
   await resetDatabase();
   rpc = new IdentityRPC(createExecutionContext(), appEnv());
+  adminRpc = new IdentityAdminRPC(createExecutionContext(), appEnv());
 });
 
 async function seedPasskey(user: SeededUser, id = newId("pk")): Promise<string> {
@@ -217,9 +225,104 @@ describe("無効なセッションは両方の入口で拒否される", () => {
     ["updateProfile", () => rpc.updateProfile({ sessionToken: "x".repeat(40), displayName: "a" })],
     ["listPasskeys", () => rpc.listPasskeys({ sessionToken: "x".repeat(40) })],
     ["deletePasskey", () => rpc.deletePasskey({ sessionToken: "x".repeat(40), passkeyId: "pk_x" })],
+    // #308 の管理用 3 メソッド。**HTTP の対になる経路はまだ無い**
+    // （画面は dashboard-worker 側で、auth-worker にルートを足していない）。
+    // 入口が RPC しかないからこそ、ここが唯一の固定になる。
+    ["listOAuthClients", () => adminRpc.listOAuthClients({ sessionToken: "x".repeat(40) })],
+    [
+      "createOAuthClient",
+      () =>
+        adminRpc.createOAuthClient({
+          sessionToken: "x".repeat(40),
+          clientId: "u18-x",
+          name: "x",
+          clientType: "public",
+          redirectUris: ["https://app.example/cb"],
+        }),
+    ],
+    [
+      "disableOAuthClient",
+      () => adminRpc.disableOAuthClient({ sessionToken: "x".repeat(40), clientId: "u18-x" }),
+    ],
   ])("%s は unauthenticated を返す", async (_name, invoke) => {
     const result = await invoke();
     expect(!result.ok && result.error.code).toBe("unauthenticated");
+  });
+});
+
+/**
+ * OAuth クライアント管理は**管理者のセッションでしか通らない**（#308）。
+ *
+ * ## なぜこのファイルにも置くか
+ *
+ * 判定は `application/use-cases/admin-access.ts` にあり、詳しい検査は
+ * `oauth-client-admin.rpc.test.ts` が持っている。ここに置くのは
+ * **「入口が増えたときに判定が素通りする」形を見張るのがこのファイルの
+ * 役目**だからで、`updateProfile` の再認証と同じ位置づけになる。
+ *
+ * この 3 つは**登録経路を CLI から管理者へ広げる**変更にあたる
+ * （脅威モデル RR-21）。判定が Presentation 層へ移っていないことを、
+ * 契約の入口から 1 回通して確かめる。
+ */
+describe("OAuth クライアント管理は管理者のセッションでしか通らない", () => {
+  it("一般利用者には not_found を返す（forbidden ではない）", async () => {
+    const user = await seedLoggedInUser();
+
+    const result = await adminRpc.listOAuthClients({
+      sessionToken: user.sessionToken,
+      caller: "dashboard-worker",
+    });
+
+    // 「権限がありません」と答えると、管理機能の存在が一般利用者に漏れる。
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("登録には再認証が要る（管理者でも古いセッションでは通らない）", async () => {
+    // **再認証の判定が片方の入口にしか無い**のがこのファイルの見張る形。
+    // 登録はいま RPC からしか叩けないので、ここが唯一の固定になる。
+    const admin = await seedLoggedInUser({ authTime: STALE, isAdmin: true, authMethod: "passkey" });
+
+    const result = await adminRpc.createOAuthClient({
+      sessionToken: admin.sessionToken,
+      caller: "dashboard-worker",
+      clientId: "u18-stale",
+      name: "古いセッションからの登録",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+
+    expect(!result.ok && result.error.code).toBe("reauthentication_required");
+  });
+
+  it("管理者なら通る", async () => {
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "passkey" });
+
+    const result = await adminRpc.listOAuthClients({
+      sessionToken: user.sessionToken,
+      caller: "dashboard-worker",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("旗が立っていても、OTP のセッションでは not_found になる", async () => {
+    // **`users.is_admin` が true でも、このセッションでは管理者ではない**
+    // （決定 8 / RR-5。`User.actsAsAdminWith`）。`requireAdminSession` は
+    // `GetSessionUseCase` の返す `isAdmin` を見ているので、ここは
+    // **判定を書き足さなくても効いている** —— 効いていることを固定する。
+    //
+    // **これが抜けると、管理領域だけが決定 8 の外に残る。** 上の「管理者なら
+    // 通る」は `authMethod: "passkey"` で seed しているので、`actsAsAdminWith`
+    // を `isAdmin` だけ見る形に戻しても緑のままになる。
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "email_otp" });
+
+    const result = await adminRpc.listOAuthClients({
+      sessionToken: user.sessionToken,
+      caller: "dashboard-worker",
+    });
+
+    // 一般利用者とまったく同じ応答。「管理者だが方式が足りない」とは言わない。
+    expect(!result.ok && result.error.code).toBe("not_found");
   });
 });
 

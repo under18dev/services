@@ -40,7 +40,10 @@ import { IssueSessionUseCase } from "../application/use-cases/issue-session.use-
 import { LogoutUseCase } from "../application/use-cases/logout.use-case";
 import { StartEmailOtpUseCase } from "../application/use-cases/start-email-otp.use-case";
 import { VerifyEmailOtpUseCase } from "../application/use-cases/verify-email-otp.use-case";
+import { CreateOAuthClientUseCase } from "../application/use-cases/create-oauth-client.use-case";
+import { DisableOAuthClientUseCase } from "../application/use-cases/disable-oauth-client.use-case";
 import { ListGrantsUseCase } from "../application/use-cases/list-grants.use-case";
+import { ListOAuthClientsUseCase } from "../application/use-cases/list-oauth-clients.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -157,6 +160,9 @@ export type Container = {
     readonly revokeAccessToken: RevokeAccessTokenUseCase;
     readonly listGrants: ListGrantsUseCase;
     readonly revokeGrant: RevokeGrantUseCase;
+    readonly listOAuthClients: ListOAuthClientsUseCase;
+    readonly createOAuthClient: CreateOAuthClientUseCase;
+    readonly disableOAuthClient: DisableOAuthClientUseCase;
   };
 };
 
@@ -454,6 +460,27 @@ export function createContainer(
         codes: authorizationCodes,
         clock,
         audit,
+      }),
+      // #308: OAuth クライアント管理。**管理者のセッションでしか通らない**
+      // （判定は UseCase の中。`application/use-cases/admin-access.ts`）。
+      listOAuthClients: new ListOAuthClientsUseCase({ getSession, clients: oauthClients }),
+      createOAuthClient: new CreateOAuthClientUseCase({
+        getSession,
+        audit,
+        clients: oauthClients,
+        // 秘密の生成とハッシュ化はここで配線する。平文は UseCase の
+        // 戻り値にしか現れず、DB へはハッシュだけが入る（仕様書 7.1）。
+        tokens,
+        hasher,
+        // 再認証の窓（5 分）を測るのに要る。登録・失効のどちらも
+        // `deletePasskey` と同じ扱いにしてある。
+        clock,
+      }),
+      disableOAuthClient: new DisableOAuthClientUseCase({
+        getSession,
+        audit,
+        clients: oauthClients,
+        clock,
       }),
     },
   };

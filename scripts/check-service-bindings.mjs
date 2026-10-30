@@ -51,6 +51,44 @@ const appsDir = path.join(repoRoot, "apps");
  */
 const EXTERNAL_SERVICES = new Set();
 
+/**
+ * **どの Worker がどの Entrypoint を束縛してよいか**（#308）。
+ *
+ * ## なぜ要るのか
+ *
+ * **Service Binding はメソッド単位で絞れない。** 束縛の単位は
+ * `entrypoint` で、その Entrypoint が持つメソッドは全部呼べる。だから
+ * 「管理用のメソッドを誰に見せるか」は、コードではなく**この設定**で
+ * 決まっている。
+ *
+ * auth-worker は 2 つの Entrypoint を公開している。
+ *
+ * - `IdentityRPC` —— セッション・プロフィール・Passkey・同意（#187 の
+ *   `isAdmin` を含む）。dashboard-worker と nfc-worker が使う
+ * - `IdentityAdminRPC` —— OAuth クライアントの登録・一覧・失効（#308）。
+ *   **dashboard-worker だけ**
+ *
+ * **nfc-worker をここに足さないこと。** あちらは設計上、運営（＝管理者）の
+ * セッショントークンを扱う（カード発行の可否を `SessionSummary.isAdmin` で
+ * 決める）。侵害されたとき、通りかかった管理者の新しいセッションで
+ * OAuth クライアントを登録できる状態になる（脅威モデル RR-21 / N-5）。
+ *
+ * ## なぜ検査するのか
+ *
+ * **`wrangler.jsonc` に 4 行足すだけで境界が消えるから。** コードは一切
+ * 変わらないので、レビューで「設定ファイルの差分」としてしか現れない。
+ * 次に Worker が増えたとき、既存の binding をコピーして黙って
+ * `IdentityAdminRPC` ごと持っていける ——
+ * **それを型検査もテストも止めない。**
+ *
+ * 知らない Entrypoint 名も失敗にする。素通しにすると、この表が
+ * 「古い名前の集合」になったことに誰も気づけない。
+ */
+const ALLOWED_ENTRYPOINT_CONSUMERS = new Map([
+  ["IdentityRPC", new Set(["dashboard-worker", "nfc-worker"])],
+  ["IdentityAdminRPC", new Set(["dashboard-worker"])],
+]);
+
 /** apps/ 配下の Worker 設定をすべて拾う。列挙しないのは Worker が増えたときに漏らさないため。 */
 function findWorkerConfigs() {
   if (!existsSync(appsDir)) return [];
@@ -121,6 +159,32 @@ let failures = 0;
 
 for (const b of bindings) {
   const label = `${b.app} (env ${b.env}) binding ${b.binding}`;
+
+  // 宛先の名前が正しくても、**束縛してよい Entrypoint とは限らない**（#308）。
+  if (b.entrypoint !== undefined) {
+    const allowed = ALLOWED_ENTRYPOINT_CONSUMERS.get(b.entrypoint);
+    if (allowed === undefined) {
+      failures++;
+      console.error(
+        `::error::${label} binds entrypoint "${b.entrypoint}", which is not listed in ` +
+          `ALLOWED_ENTRYPOINT_CONSUMERS in scripts/check-service-bindings.mjs. ` +
+          `Service bindings cannot be narrowed per method, so every method on that entrypoint ` +
+          `becomes callable by this Worker. Add the entrypoint with the Workers that may bind it, ` +
+          `and say why.`,
+      );
+      continue;
+    }
+    if (!allowed.has(b.app)) {
+      failures++;
+      console.error(
+        `::error::${label} binds entrypoint "${b.entrypoint}", which only ` +
+          `${[...allowed].join(", ")} may bind. Service bindings cannot be narrowed per method: ` +
+          `binding it hands ${b.app} every method on that entrypoint. ` +
+          `If this is intended, widen ALLOWED_ENTRYPOINT_CONSUMERS and record the reason (#308).`,
+      );
+      continue;
+    }
+  }
 
   if (EXTERNAL_SERVICES.has(b.service)) {
     console.log(`  ${label}: "${b.service}" is an allow-listed external Worker; skipped.`);
