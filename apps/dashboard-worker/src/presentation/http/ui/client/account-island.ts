@@ -24,6 +24,25 @@ import {
   ITEM_ERROR_ATTR,
   ITEM_TITLE_ATTR,
 } from "../island-hooks";
+import {
+  BUTTON_CLASS,
+  DANGER_BUTTON_CLASS,
+  EMPTY_CLASS,
+  ITEM_ACTIONS_CLASS,
+  ITEM_BODY_CLASS,
+  ITEM_ERROR_CLASS,
+  ITEM_META_CLASS,
+  ITEM_TITLE_CLASS,
+  FIELD_CLASS,
+  INPUT_CLASS,
+  LABEL_CLASS,
+  LIST_CLASS,
+  PANEL_BODY_CLASS,
+  PANEL_CLASS,
+  PANEL_DESC_CLASS,
+  PANEL_HEADER_CLASS,
+  PANEL_TITLE_CLASS,
+} from "../island-classes";
 
 /**
  * アカウント管理画面の取り消し操作（#9 / 仕様書 §14.1 決定 16）。
@@ -129,7 +148,7 @@ const ACTIONS: Record<string, Action> = {
 function showError(item: HTMLElement, text: string): void {
   const existing = item.querySelector(`[${ITEM_ERROR_ATTR}]`);
   const node = existing ?? document.createElement("p");
-  node.className = "item-error";
+  node.className = ITEM_ERROR_CLASS;
   node.setAttribute(ITEM_ERROR_ATTR, "");
   node.textContent = text;
   node.setAttribute("role", "alert");
@@ -148,7 +167,7 @@ function removeItem(item: HTMLElement): void {
   if (list === null || list.children.length > 0) return;
 
   const empty = document.createElement("p");
-  empty.className = "empty";
+  empty.className = EMPTY_CLASS;
   empty.setAttribute(EMPTY_ATTR, "");
   empty.textContent = list.getAttribute(EMPTY_TEXT_ATTR) ?? "ありません。";
   list.replaceWith(empty);
@@ -160,7 +179,7 @@ function attach(item: HTMLElement, kind: string, action: Action): void {
 
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "button button-secondary button-small button-danger";
+  button.className = DANGER_BUTTON_CLASS;
   button.textContent = action.buttonLabel;
 
   // 読み上げで「削除」だけが並ばないように、対象を名前で言う。
@@ -202,7 +221,7 @@ function attach(item: HTMLElement, kind: string, action: Action): void {
   });
 
   const actions = document.createElement("div");
-  actions.className = "item-actions";
+  actions.className = ITEM_ACTIONS_CLASS;
   actions.append(button);
   item.append(actions);
 }
@@ -264,14 +283,14 @@ function appendPasskey(label: string): void {
 
   const item = document.createElement("li");
   const main = document.createElement("div");
-  main.className = "item-main";
+  main.className = ITEM_BODY_CLASS;
   main.setAttribute(ITEM_BODY_ATTR, "");
   const title = document.createElement("div");
-  title.className = "item-title";
+  title.className = ITEM_TITLE_CLASS;
   title.setAttribute(ITEM_TITLE_ATTR, "");
   title.textContent = label;
   const meta = document.createElement("p");
-  meta.className = "item-meta";
+  meta.className = ITEM_META_CLASS;
   meta.textContent = "登録しました。詳細は再読み込みで表示されます。";
   main.append(title, meta);
   item.append(main);
@@ -283,7 +302,7 @@ function appendPasskey(label: string): void {
   // **一覧がまだ無い（0 件だった）。** 「ありません」の表示を一覧へ差し替える。
   if (empty === null) return;
   const created = document.createElement("ul");
-  created.className = "list";
+  created.className = LIST_CLASS;
   created.setAttribute(EMPTY_TEXT_ATTR, "登録されているパスキーはありません。");
   created.append(item);
   empty.replaceWith(created);
@@ -292,14 +311,14 @@ function appendPasskey(label: string): void {
 function attachRegister(mount: HTMLElement): void {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "button button-secondary";
+  button.className = BUTTON_CLASS;
   button.textContent = "パスキーを登録";
 
   const status = document.createElement("p");
-  status.className = "item-meta";
+  status.className = ITEM_META_CLASS;
 
   const fail = (text: string): void => {
-    status.className = "item-error";
+    status.className = ITEM_ERROR_CLASS;
     status.setAttribute("role", "alert");
     status.textContent = text;
     button.disabled = false;
@@ -310,7 +329,7 @@ function attachRegister(mount: HTMLElement): void {
     button.disabled = true;
     button.textContent = "認証器を待っています…";
     status.textContent = "";
-    status.className = "item-meta";
+    status.className = ITEM_META_CLASS;
     status.removeAttribute("role");
 
     void (async () => {
@@ -395,10 +414,15 @@ function showField(name: string, value: string): void {
 /** ラベル付きの入力欄を 1 つ作る。 */
 function field(label: string, name: string, value: string): [HTMLLabelElement, HTMLInputElement] {
   const wrapper = document.createElement("label");
-  wrapper.className = "field";
+  wrapper.className = FIELD_CLASS;
   const caption = document.createElement("span");
+  caption.className = LABEL_CLASS;
   caption.textContent = label;
   const input = document.createElement("input");
+  // **クラスを明示する。** 手書き CSS は `input[type="text"]` という
+  // 要素セレクタで当てていたが、Tailwind には要素への既定が無い
+  // （preflight が枠線も余白も落とす）。付け忘れると**素の入力欄**になる。
+  input.className = INPUT_CLASS;
   input.type = "text";
   input.name = name;
   input.value = value;
@@ -411,19 +435,19 @@ function field(label: string, name: string, value: string): [HTMLLabelElement, H
 
 function attachProfileEdit(mount: HTMLElement): void {
   const panel = document.createElement("div");
-  panel.className = "panel";
+  panel.className = PANEL_CLASS;
   const header = document.createElement("div");
-  header.className = "panel-header";
+  header.className = PANEL_HEADER_CLASS;
   const title = document.createElement("h2");
-  title.className = "panel-title";
+  title.className = PANEL_TITLE_CLASS;
   title.textContent = "変更する";
   const desc = document.createElement("p");
-  desc.className = "panel-desc";
+  desc.className = PANEL_DESC_CLASS;
   desc.textContent = "ユーザー名の変更には、最近のログインが必要です。";
   header.append(title, desc);
 
   const body = document.createElement("div");
-  body.className = "panel-body";
+  body.className = PANEL_BODY_CLASS;
 
   // **`<form>` にする。** Enter で送れるようにするためで、送信先は持たない
   // （`PATCH` は form では送れない）。`submit` を止めて fetch に回す。
@@ -437,14 +461,14 @@ function attachProfileEdit(mount: HTMLElement): void {
 
   const button = document.createElement("button");
   button.type = "submit";
-  button.className = "button";
+  button.className = BUTTON_CLASS;
   button.textContent = "保存";
 
   const status = document.createElement("p");
-  status.className = "item-meta";
+  status.className = ITEM_META_CLASS;
 
   const say = (text: string, failed: boolean): void => {
-    status.className = failed ? "item-error" : "item-meta";
+    status.className = failed ? ITEM_ERROR_CLASS : ITEM_META_CLASS;
     if (failed) status.setAttribute("role", "alert");
     else status.removeAttribute("role");
     status.textContent = text;

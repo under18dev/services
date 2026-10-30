@@ -1,4 +1,3 @@
-import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
 import {
   Alert,
   AlertDescription,
@@ -12,13 +11,13 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-  KiwaShell,
   Separator,
 } from "@u18/web-ui/kiwa";
 import type { FC } from "hono/jsx";
 import type { AppCatalogView } from "./app-catalog";
 import { isExternalUrl } from "./app-catalog";
-import { GRANTS_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { AccountShell } from "./account-shell";
+import { GRANTS_PATH } from "./asset-paths";
 
 /**
  * u18 Identity で使えるアプリ（`/account/apps`、#308）。
@@ -69,14 +68,8 @@ export type AppsPageProps = {
 };
 
 export const AppsPage: FC<AppsPageProps> = ({ view }) => (
-  <KiwaShell
+  <AccountShell
     title="アプリ"
-    // 並びは `@u18/contracts`。**nfc-worker も同じものを渡す**ので、
-    // 片方にだけ項目を足した状態が作れない（#338）。
-    nav={ACCOUNT_NAV_GROUPS}
-    brandHref={ACCOUNT_HOME_PATH}
-    // **Worker ごとに違う。** この Worker が自分で配信している CSS。
-    stylesheet={KIWA_STYLESHEET_PATH}
     heading="u18 Identity で使えるアプリ"
     lead="u18 Identity のアカウントでそのまま使えるアプリの一覧です。あなたがアクセスを許可したアプリは「連携アプリ」で確認できます。"
     current="apps"
@@ -189,5 +182,5 @@ export const AppsPage: FC<AppsPageProps> = ({ view }) => (
         </CardDescription>
       </CardHeader>
     </Card>
-  </KiwaShell>
+  </AccountShell>
 );

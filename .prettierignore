@@ -23,6 +23,7 @@ apps/auth-worker/src/presentation/http/ui/generated
 # 「上流のまま」のファイルの一覧でもある（README.md の表と同じ中身）。
 packages/web-ui/src/kiwa/alert.tsx
 packages/web-ui/src/kiwa/badge.tsx
+packages/web-ui/src/kiwa/button.tsx
 packages/web-ui/src/kiwa/card.tsx
 packages/web-ui/src/kiwa/empty.tsx
 packages/web-ui/src/kiwa/separator.tsx

@@ -1,15 +1,26 @@
 import type { FC } from "hono/jsx";
-import { DashboardShell } from "./dashboard-shell";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@u18/web-ui/kiwa";
+import { AccountShell } from "./account-shell";
 import { LOGIN_PATH } from "./asset-paths";
 import { loginUrlWithReturnTo } from "@u18/contracts";
 
 /**
  * 一覧を出せないときの画面。未ログインと、Identity に届かないときの 2 つ。
  *
+ * ## 6 つの URL すべてから返る
+ *
+ * `account.routes.tsx` の共通ハンドラが使うので、**ダッシュボードの
+ * どのページを開いても未ログインならこれが出る。**
+ *
+ * **そのせいで #342 のあいだ、ログインしている人には Kiwa、していない
+ * 人には手書き CSS が出ていた。** `ui-pages.test.ts` が必ず Cookie を
+ * 付けて取りに行っていたので、どの検査もその経路を見ていなかった
+ * （いまは未認証でも「スタイルシートはちょうど 1 本」を見ている）。
+ *
  * ## ナビを出さない
  *
- * `DashboardShell` に `current` を渡していない。**どのページへ行っても同じ
- * 状態なので、ナビを出すと押すたびに同じ画面へ戻る。**
+ * `current` を渡していない。**どのページへ行っても同じ状態なので、
+ * ナビを出すと押すたびに同じ画面へ戻る。**
  *
  * ## 内部の事情を書かない
  *
@@ -26,28 +37,30 @@ import { loginUrlWithReturnTo } from "@u18/contracts";
  * `sanitizeReturnTo` が行うので（関門は 1 つ）、ここは渡すだけ。
  */
 export const SignInRequiredPage: FC<{ readonly returnTo: string | null }> = ({ returnTo }) => (
-  <DashboardShell title="ログインが必要です" heading="ログインが必要です">
-    <div class="panel">
-      <div class="panel-body">
-        <p class="section-lead">アカウント情報を表示するにはログインしてください。</p>
-        <p class="links">
-          <a href={returnTo === null ? LOGIN_PATH : loginUrlWithReturnTo(returnTo)}>
-            ログイン画面へ
-          </a>
-        </p>
-      </div>
-    </div>
-  </DashboardShell>
+  <AccountShell title="ログインが必要です" heading="ログインが必要です">
+    <Card>
+      <CardHeader>
+        <CardTitle>アカウント情報を表示するにはログインしてください。</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <a
+          href={returnTo === null ? LOGIN_PATH : loginUrlWithReturnTo(returnTo)}
+          class="text-sm text-foreground underline underline-offset-4"
+        >
+          ログイン画面へ
+        </a>
+      </CardContent>
+    </Card>
+  </AccountShell>
 );
 
 export const UnavailablePage: FC = () => (
-  <DashboardShell title="一時的に表示できません" heading="一時的に表示できません">
-    <div class="panel">
-      <div class="panel-body">
-        <p class="section-lead">
-          アカウント情報を取得できませんでした。しばらく待ってからもう一度お試しください。
-        </p>
-      </div>
-    </div>
-  </DashboardShell>
+  <AccountShell title="一時的に表示できません" heading="一時的に表示できません">
+    <Card>
+      <CardHeader>
+        <CardTitle>アカウント情報を取得できませんでした。</CardTitle>
+        <CardDescription>しばらく待ってからもう一度お試しください。</CardDescription>
+      </CardHeader>
+    </Card>
+  </AccountShell>
 );

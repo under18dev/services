@@ -13,7 +13,6 @@ import {
   KIWA_STYLESHEET_PATH,
   NFC_CARDS_PATH,
   SESSIONS_PATH,
-  STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
 import type { AppCatalogEntry, AppCatalogView } from "../src/presentation/http/ui/app-catalog";
 import {
@@ -99,7 +98,7 @@ describe("画面が HTML を返す", () => {
     // **ブランドのリンク（ホームへ戻る）も混ざる。** 除かずにそのまま
     // 引ければよい —— あれも押せる必要がある。
     const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
-    const navHrefs = [...html.matchAll(/<nav class="dash-side"[^>]*>(.*?)<\/nav>/gs)]
+    const navHrefs = [...html.matchAll(/<nav [^>]*aria-label="ダッシュボード"[^>]*>(.*?)<\/nav>/gs)]
       .flatMap((nav) => [...(nav[1] ?? "").matchAll(/href="([^"]+)"/g)])
       .map((m) => m[1] as string);
 
@@ -153,12 +152,16 @@ describe("参照しているスタイルシートを自分で配信している"
    * `sentinel` は**中身が入れ替わっていないこと**を見るための目印。
    * 両方に出る文字列を選ぶと、取り違えても気づけない。
    */
+  //
+  // **6 枚とも Kiwa になった**（#332 の P1）。`sentinel` は中身が
+  // 入れ替わっていないことを見るための目印で、Tailwind の出力の先頭に
+  // 必ず出るバナーを使っている。
   const EXPECTED_STYLESHEET: readonly (readonly [string, string, string])[] = [
-    [OVERVIEW_PATH, STYLESHEET_PATH, ".dash-side"],
-    [PROFILE_PATH, STYLESHEET_PATH, ".dash-side"],
-    [PASSKEYS_PATH, STYLESHEET_PATH, ".dash-side"],
-    [SESSIONS_PATH, STYLESHEET_PATH, ".dash-side"],
-    [GRANTS_PATH, STYLESHEET_PATH, ".dash-side"],
+    [OVERVIEW_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
+    [PROFILE_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
+    [PASSKEYS_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
+    [SESSIONS_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
+    [GRANTS_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
     [APPS_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
   ];
 
@@ -433,7 +436,9 @@ describe("ダッシュボードのホーム（#308）", () => {
     // 分からない形にすると、危ない状態の人ほど気づかない。
     const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
 
-    expect(html).toContain("stat-value");
+    // 数字そのものを見る。**クラス名を目印にしない** ——
+    // 見た目のクラスは移行のたびに変わる（#332）。
+    expect(html).toMatch(/>\s*0\s*</);
     expect(html).toContain("パスキー");
     expect(html).toContain("ログイン中の端末");
     expect(html).toContain("連携アプリ");

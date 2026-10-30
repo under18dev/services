@@ -82,10 +82,9 @@ export const PAGE_ROUTES = [
   // **ハッシュは手で書けないので `<hash>` と書く**（#211）。突き合わせる
   // 側が実際のパスを正規化してから比べる。**ハッシュが入らなくなったら、
   // 正規化しても `<hash>` にならないのでここで落ちる。**
-  { method: "GET", path: "/account/ui/u18.<hash>.css" },
-  // Kiwa UI のスタイルシート（#332）。**`u18.css` と 2 本ある状態は
-  // 移行の途中だからである** —— いま読んでいるのは `/account/apps` だけで、
-  // P1 / P2 が終わったら `u18.css` 側が消える。
+  // Kiwa UI のスタイルシート（#332）。**この Worker が配信する唯一の
+  // スタイルシートである** —— 6 枚とも Kiwa へ移り、手書きの `u18.css` は
+  // 誰も読まなくなったので消した。
   { method: "GET", path: "/account/ui/kiwa.<hash>.css" },
   { method: "GET", path: "/account/ui/account-island.<hash>.js" },
 ] as const;
@@ -129,19 +128,19 @@ export const PROBE_PAGES: readonly string[] = ["/account"];
  * 読んだ人に伝わる。代わりに `asset-coverage.test.ts` が、**ログインした
  * 状態でレンダリングして**参照されていることを確かめている。
  */
+/**
+ * **`kiwa.<hash>.css` はここから外れた**（#332 の P1）。
+ *
+ * P0 のあいだは「読むのは `/account/apps` だけで、未認証だとログイン導線
+ * （手書き CSS）が返る」ため外から確かめられなかった。いまはログイン導線
+ * （`message-page.tsx`）も Kiwa なので、**`PROBE_PAGES` を未認証で引けば
+ * 本番でも見える。**
+ */
 export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
   "/account/ui/account-island.<hash>.js":
     "アイランドを読むのはログイン後の画面だけ。未認証では全ページが 401 で" +
     "ログイン導線を返し、参照するのは CSS だけである（本番で実測）。" +
     "ページの選び方では外から見えるようにできない。",
-  "/account/ui/kiwa.<hash>.css":
-    "これを読むのは /account/apps だけで（#332 の P0）、未認証だと" +
-    "ログイン導線（SignInRequiredPage）が返る。あちらはまだ手書き CSS の" +
-    "Layout なので、参照するのは u18.css のほうである。" +
-    "PROBE_PAGES に /account/apps を足しても結果は変わらない。" +
-    "外から見えるようになるのは、ログイン導線自体が Kiwa へ移る P1 / P2 の" +
-    "あとである。それまでは asset-coverage.test.ts が" +
-    "ログイン済みのレンダリングで参照を確かめている。",
 };
 
 export const EXPECTED_ROUTES = [...API_ROUTES, ...PAGE_ROUTES];
