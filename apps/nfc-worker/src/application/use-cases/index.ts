@@ -1,5 +1,7 @@
 export * from "./admin-disable-card.use-case";
 export * from "./delegated-disable-card.use-case";
+export * from "./delegated-issue-cards.use-case";
+export * from "./delegated-list-all-cards.use-case";
 export * from "./delegated-update-card-target.use-case";
 export * from "./authenticate";
 export * from "./card-view";

@@ -52,6 +52,46 @@ export type UpdateCardTargetDelegatedInput = z.infer<typeof updateCardTargetDele
 export type UpdateCardTargetDelegatedResult = RpcResult<null>;
 
 /**
+ * 一覧・発行で使う、運営向けの表示用データ。
+ *
+ * **nfc-worker の `AdminCardView`（Application 層）を直接 import しない。**
+ * Worker をまたぐ契約は `@u18/contracts` 側で独立して定義する ——
+ * 直接参照すると、nfc-worker 内部の型を変えた瞬間に admin-worker の
+ * ビルドが壊れる形になる（Worker 境界を跨ぐ依存の向きを 1 本にする）。
+ */
+export type AdminCardStatusDelegated = "issued" | "active" | "disabled";
+
+export type AdminCardViewDelegated = {
+  readonly cardId: string;
+  readonly status: AdminCardStatusDelegated;
+  /** 未紐づけなら null。 */
+  readonly ownerUserId: string | null;
+  readonly targetUrl: string | null;
+  readonly batch: string | null;
+  readonly issuedAt: string;
+  readonly claimedAt: string | null;
+  readonly disabledAt: string | null;
+};
+
+export type ListAllCardsDelegatedResult = RpcResult<{
+  readonly cards: readonly AdminCardViewDelegated[];
+  /** 上限で打ち切ったか。true なら画面にそう出すこと（セッション版と同じ判断）。 */
+  readonly truncated: boolean;
+}>;
+
+export const issueCardsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  count: z.number().int().min(1),
+  /** ロット名。指定なしは null（空文字と区別する。`nfc-admin.routes.ts` を参照）。 */
+  batch: z.string().min(1).max(64).nullable(),
+});
+
+export type IssueCardsDelegatedInput = z.infer<typeof issueCardsDelegatedInputSchema>;
+export type IssueCardsDelegatedResult = RpcResult<{
+  readonly cards: readonly { readonly cardId: string }[];
+}>;
+
+/**
  * `NfcAdminDelegatedRPC` の契約。
  *
  * **メソッドが増えるたびに、ここと Entrypoint の両方を変えること。**
@@ -62,4 +102,7 @@ export type UpdateCardTargetDelegatedResult = RpcResult<null>;
 export interface NfcAdminDelegatedRpcContract {
   disableCard(input: DisableCardDelegatedInput): Promise<DisableCardDelegatedResult>;
   updateCardTarget(input: UpdateCardTargetDelegatedInput): Promise<UpdateCardTargetDelegatedResult>;
+  /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
+  listAllCards(): Promise<ListAllCardsDelegatedResult>;
+  issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;
 }

@@ -80,7 +80,7 @@ export class ListAllCardsUseCase {
  * **`card-view.ts` の `toCardView` と別にしてある。** あちらは所有者向けで
  * `ownerUserId` を落とすことに意味がある（`AdminCardView` の宣言を参照）。
  */
-function toAdminView(card: Card): AdminCardView {
+export function toAdminView(card: Card): AdminCardView {
   return {
     cardId: card.id,
     status: card.status,
