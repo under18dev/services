@@ -1,5 +1,17 @@
 import type { UserAdminSummary } from "@u18/contracts";
-import { Badge, Card, CardContent, CardHeader, CardTitle } from "@u18/web-ui/kiwa";
+import {
+  Badge,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@u18/web-ui/kiwa";
 import {
   EMPTY_CLASS,
   FIELD_CLASS,
@@ -10,7 +22,6 @@ import {
   ITEM_RAW_CLASS,
   ITEM_TITLE_CLASS,
   LABEL_CLASS,
-  LIST_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
@@ -165,29 +176,42 @@ const UserRow: FC<{
   readonly csrfToken: string;
   readonly isSelf: boolean;
 }> = ({ user, csrfToken, isSelf }) => (
-  <li class={ITEM_BODY_CLASS}>
-    <div class={ITEM_TITLE_CLASS}>
-      <span>{user.displayName}</span>
-      <StatusBadge status={user.status} />
-      {user.hasAdminFlag ? <Badge variant="outline-primary">管理者</Badge> : null}
-      {user.emailVerified ? null : <Badge variant="outline">メール未確認</Badge>}
-    </div>
-    <p class={ITEM_META_CLASS}>@{user.username}</p>
+  <TableRow>
+    <TableCell class="whitespace-normal">
+      <div class={ITEM_TITLE_CLASS}>
+        <span>{user.displayName}</span>
+        {user.hasAdminFlag ? <Badge variant="outline-primary">管理者</Badge> : null}
+        {user.emailVerified ? null : <Badge variant="outline">メール未確認</Badge>}
+      </div>
+      <p class={ITEM_META_CLASS}>@{user.username}</p>
+    </TableCell>
     {/*
       **メールアドレスをリンクにしない。** `mailto:` は押した先が
       利用者の端末のメールクライアントで、**管理画面から誤って本人へ
       送る導線**になる。問い合わせ対応では既にメールの画面を開いている。
+
+      **`whitespace-normal` で折り返す。** `TableCell` の既定は
+      `whitespace-nowrap` で、長いアドレスが表を横に伸ばす。
     */}
-    <p class={ITEM_RAW_CLASS}>{user.primaryEmail}</p>
-    <p class={ITEM_META_CLASS}>登録 {formatDateTime(user.createdAt)}</p>
+    <TableCell class="whitespace-normal">
+      <span class={ITEM_RAW_CLASS}>{user.primaryEmail}</span>
+    </TableCell>
+    <TableCell>
+      <StatusBadge status={user.status} />
+    </TableCell>
+    <TableCell>{formatDateTime(user.createdAt)}</TableCell>
     {/*
-      **内部 ID を出す。** 凍結やセッションの失効を足したときの宛先が
-      これになるうえ、いまも `wrangler d1 execute` で調べるときに要る
-      （この画面が SQL を置き換えきるまでの間、両方が使われる）。
+      **内部 ID を出す。** 停止やセッションの失効の宛先がこれになるうえ、
+      いまも `wrangler d1 execute` で調べるときに要る（この画面が SQL を
+      置き換えきるまでの間、両方が使われる）。
     */}
-    <p class={ITEM_RAW_CLASS}>{user.id}</p>
-    <UserActions user={user} csrfToken={csrfToken} isSelf={isSelf} />
-  </li>
+    <TableCell class="whitespace-normal">
+      <span class={ITEM_RAW_CLASS}>{user.id}</span>
+    </TableCell>
+    <TableCell class="whitespace-normal">
+      <UserActions user={user} csrfToken={csrfToken} isSelf={isSelf} />
+    </TableCell>
+  </TableRow>
 );
 
 export const AdminUsersPage: FC<AdminUsersPageProps> = ({
@@ -264,14 +288,36 @@ export const AdminUsersPage: FC<AdminUsersPageProps> = ({
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {/*
+          **0 件なら表を描かない。** ヘッダ行だけが残る表は「列はあるのに
+          中身が無い」と読め、取得に失敗したようにも見える ——
+          `docs/kiwa-ui-migration.md` §3.3 が `table.tsx` を外した理由が
+          まさにこれだった。**0 件の見せ方を決めたうえで使っている。**
+        */}
         {users.length === 0 ? (
           <p class={EMPTY_CLASS}>一致する利用者はいません。</p>
         ) : (
-          <ul class={LIST_CLASS}>
-            {users.map((user) => (
-              <UserRow user={user} csrfToken={csrfToken} isSelf={user.id === actorUserId} />
-            ))}
-          </ul>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>利用者</TableHead>
+                <TableHead>メールアドレス</TableHead>
+                <TableHead>状態</TableHead>
+                <TableHead>登録</TableHead>
+                <TableHead>ID</TableHead>
+                {/*
+                  **見出しを空にしない。** 読み上げで「列が 6 つある」と
+                  分かっても、最後の列が何かは分からない。
+                */}
+                <TableHead>操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((user) => (
+                <UserRow user={user} csrfToken={csrfToken} isSelf={user.id === actorUserId} />
+              ))}
+            </TableBody>
+          </Table>
         )}
         {nextCursor === null ? null : (
           /*

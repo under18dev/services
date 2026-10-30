@@ -28,3 +28,4 @@ packages/web-ui/src/kiwa/card.tsx
 packages/web-ui/src/kiwa/empty.tsx
 packages/web-ui/src/kiwa/separator.tsx
 packages/web-ui/src/kiwa/sidebar-item.tsx
+packages/web-ui/src/kiwa/table.tsx
