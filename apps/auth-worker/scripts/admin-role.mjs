@@ -41,11 +41,27 @@
  *
  * 既定は `--local`（miniflare のローカル D1）。本番へ当てるときだけ `--remote`。
  * `--dry-run` は SQL を表示するだけで実行しない。
+ *
+ * ## `--remote` を使うとき: 口座が複数あるなら指定が要る
+ *
+ * **Cloudflare の口座を 2 つ以上持っている環境では、口座を指定しない
+ * wrangler は失敗する。** `npx wrangler whoami` に複数行出るならこれに当たる。
+ *
+ *   npx wrangler whoami                     # 口座 ID を確かめる
+ *   CLOUDFLARE_ACCOUNT_ID=<口座 ID> \
+ *     node scripts/admin-role.mjs grant --user-id usr_xxx --actor <実行者> --remote
+ *
+ * CI 側は `deploy.yml` / `backup.yml` が同じ変数を渡している。**手元だけが
+ * 素のまま**だったので、ここに書いてある。
  */
 
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// **`.ts` を直接読む。** `loadSql()` が `admin-role.sql.ts` を同じ形で
+// 読んでいる（Node 22.18 以降の型ストリップ）ので、ここだけ別の流儀に
+// しない。型が付くぶん `test/admin-role-cli.test.ts` から素直に import できる。
+import { describeWranglerFailure } from "./lib/wrangler-failure.ts";
 
 const WORKER_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const DATABASE_NAME = "u18-identity";
@@ -69,13 +85,38 @@ async function loadSql() {
   }
 }
 
+/**
+ * wrangler を呼ぶ。
+ *
+ * ## 失敗したときに、捕まえた出力を捨てないこと
+ *
+ * **`--json` を付けた wrangler は、エラーを stdout に JSON で書く。
+ * stderr は空である**（実測。`lib/wrangler-failure.mjs` に出力を貼ってある）。
+ *
+ * ここは `json` のとき stdout を pipe で捕まえるので、**失敗時にそれを
+ * 捨てると原因がどこにも残らない。** stderr は `inherit` なので
+ * 「端末に出るはず」に見えるが、そこには何も流れてこない。
+ *
+ * 実際これで運用者の手元が
+ * 「`エラー: wrangler が失敗した (exit 1)`」だけになった。
+ */
 function wrangler(args, { json = false } = {}) {
   const result = spawnSync("npx", ["wrangler", ...args], {
     cwd: WORKER_DIR,
     stdio: json ? ["inherit", "pipe", "inherit"] : "inherit",
     encoding: "utf8",
   });
-  if (result.status !== 0) throw new Error(`wrangler が失敗した (exit ${result.status})`);
+  if (result.status !== 0) {
+    throw new Error(
+      describeWranglerFailure({
+        status: result.status,
+        stdout: result.stdout,
+        // **引数から読む。** 呼び出し側に渡させると、足し忘れた経路だけ
+        // 助言が出なくなる（`runSql` と `queryRows` の 2 箇所ある）。
+        remote: args.includes("--remote"),
+      }),
+    );
+  }
   return result.stdout ?? "";
 }
 
