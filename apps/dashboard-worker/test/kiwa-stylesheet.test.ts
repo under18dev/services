@@ -4,15 +4,8 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import { classesIn, classesMissingFrom } from "@u18/testing";
 import { hashedFileName } from "@u18/web-ui";
-import {
-  APPS_PATH,
-  GRANTS_PATH,
-  KIWA_STYLESHEET_PATH,
-  OVERVIEW_PATH,
-  PASSKEYS_PATH,
-  PROFILE_PATH,
-  SESSIONS_PATH,
-} from "../src/presentation/http/ui/asset-paths";
+import { KIWA_STYLESHEET_PATH, OVERVIEW_PATH } from "../src/presentation/http/ui/asset-paths";
+import { PAGES } from "./pages";
 import { ORIGIN, envWith, executionContext } from "./helpers";
 
 /**
@@ -137,11 +130,11 @@ const IDENTITY = {
  * 1 枚のままだった。**`/account/grants` の `<ul>` に存在しない class を
  * 足しても、この Worker の 277 本が全部通った**（実測）。
  *
- * `ui-pages.test.ts` の `PAGES` と同じ並びにしてある。**あちらは
- * 「どのスタイルシートを読むか」、ここは「読んだ CSS に class が在るか」**
- * で、同じ 6 枚を別の角度から見ている。
+ * **一覧は `ui-pages.test.ts` と共有している**（`./pages`）。あちらは
+ * 「どのスタイルシートを読むか」、ここは「読んだ CSS に class が在るか」で、
+ * 同じ 6 枚を別の角度から見ている。**片方にしか無い画面があると、
+ * その画面だけ片目で見ていることになる**（理由は `./pages` の冒頭）。
  */
-const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH, APPS_PATH];
 
 async function fetchText(
   path: string,
@@ -184,13 +177,6 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
       `${path}: CSS に無いクラス。theme.css にトークンが無いか、@source の走査から` +
         `漏れたファイルで組み立てている（apps/dashboard-worker/src/presentation/http/ui/kiwa.css）。`,
     ).toEqual([]);
-  });
-
-  it("一覧が ui-pages.test.ts の PAGES を漏れなく覆っている", () => {
-    // 画面を足して**ここに書き忘れる**と、上の `it.each` が静かに
-    // その画面を見なくなる。`ui-pages.test.ts` が同じ仕掛けを持っている。
-    expect(PAGES.length).toBe(6);
-    expect(new Set(PAGES).size, "同じパスが 2 回入っている").toBe(PAGES.length);
   });
 
   /**
