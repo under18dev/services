@@ -1,4 +1,4 @@
-import { auditLogs, oauthClients, oauthRedirectUris, sessions, users } from "@u18/db";
+import { auditLogs, oauthClients, oauthRedirectUris, users } from "@u18/db";
 import { createExecutionContext } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,22 +53,23 @@ const STALE = new Date(Date.now() - 60 * 60 * 1000);
 /**
  * 管理者としてログイン済みの利用者。
  *
- * **セッションの `authMethod` を `passkey` に直している。** `seedLoggedInUser`
- * は `email_otp` で行を作るが、**本番にその組み合わせは存在しない** ——
- * 決定 8（#40 / #83）により `IssueSessionUseCase` は管理者の `email_otp`
+ * **`authMethod` は `passkey` である。** `seedLoggedInUser` の既定は
+ * `email_otp` だが、**本番にその組み合わせは存在しない** —— 決定 8
+ * （#40 / #83）により `IssueSessionUseCase` は管理者の `email_otp`
  * セッションを拒否し、管理権限の付与は既存の非 Passkey セッションを失効
- * させる。実在しない前提でテストを回すと、**再認証の窓が `authMethod` を
- * 見ていないこと**（RR-21）が「テスト上は普通に通る」形で隠れる。
+ * させる。実在しない前提でテストを回すと、**この入口が `authMethod` を
+ * どう扱うか**（RR-5 / RR-21）を 1 本も確かめないまま緑になる。
+ *
+ * **いまは既定を外すだけで足りる。** #337 で `seedLoggedInUser` が
+ * `isAdmin` と `authMethod` を受け取るようになったので、ここで行を
+ * 更新し直す必要がなくなった。
+ *
+ * **`passkey` 固定なので、このヘルパを使うテストは決定 8 を確かめない。**
+ * 旗が立っていても OTP のセッションでは通らないことは、下の
+ * 「OTP のセッションでは、旗が立っていても通らない」が別に見ている。
  */
 async function seedAdmin(options: { readonly authTime?: Date } = {}): Promise<SeededUser> {
-  const user = await seedLoggedInUser(options);
-  await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
-  await db()
-    .update(sessions)
-    .set({ authMethod: "passkey" })
-    .where(eq(sessions.id, user.sessionId))
-    .run();
-  return user;
+  return seedLoggedInUser({ ...options, isAdmin: true, authMethod: "passkey" });
 }
 
 /** 既定のパラメータで 1 つ登録する。 */
@@ -151,12 +152,32 @@ describe("管理者でないセッションは弾かれる", () => {
   it("管理者の判定は実際の users.is_admin を見ている", async () => {
     // 常に false を返すよう壊しても上の 3 つは緑のままなので、
     // 「立てれば通る」側も固定する。
-    const user = await seedLoggedInUser();
+    const user = await seedLoggedInUser({ authMethod: "passkey" });
     expect((await rpc.listOAuthClients({ sessionToken: user.sessionToken })).ok).toBe(false);
 
     await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
 
     expect((await rpc.listOAuthClients({ sessionToken: user.sessionToken })).ok).toBe(true);
+  });
+
+  it("OTP のセッションでは、旗が立っていても通らない", async () => {
+    // **決定 8（#337 / RR-5）がこの入口にも効いていること。**
+    //
+    // `requireAdminSession` は `GetSessionUseCase` の `isAdmin` を見ており、
+    // あれは `User.actsAsAdminWith(authMethod)` —— 旗が立っていることと、
+    // **このセッションで管理者として振る舞ってよいこと**は別である。
+    // 判定を書き足していないので「たまたま効いている」ように見えるが、
+    // **効いていることを確かめずに置くと、`actsAsAdminWith` を
+    // `isAdmin` だけ見る形に戻したときに管理領域だけが黙って開く。**
+    //
+    // 上の `seedAdmin` は `passkey` 固定なので、この 1 本が無いと
+    // そちらの差し戻しを誰も捕まえない。
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "email_otp" });
+
+    const result = await rpc.listOAuthClients({ sessionToken: user.sessionToken });
+
+    // 一般利用者と同じ応答に畳む。「方式が足りない」と教えない。
+    expect(!result.ok && result.error.code).toBe("not_found");
   });
 });
 

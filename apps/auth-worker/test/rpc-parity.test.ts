@@ -280,8 +280,7 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
   it("登録には再認証が要る（管理者でも古いセッションでは通らない）", async () => {
     // **再認証の判定が片方の入口にしか無い**のがこのファイルの見張る形。
     // 登録はいま RPC からしか叩けないので、ここが唯一の固定になる。
-    const admin = await seedLoggedInUser({ authTime: STALE });
-    await db().update(users).set({ isAdmin: true }).where(eq(users.id, admin.userId)).run();
+    const admin = await seedLoggedInUser({ authTime: STALE, isAdmin: true, authMethod: "passkey" });
 
     const result = await adminRpc.createOAuthClient({
       sessionToken: admin.sessionToken,
@@ -296,8 +295,7 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
   });
 
   it("管理者なら通る", async () => {
-    const user = await seedLoggedInUser();
-    await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "passkey" });
 
     const result = await adminRpc.listOAuthClients({
       sessionToken: user.sessionToken,
@@ -305,6 +303,26 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
     });
 
     expect(result.ok).toBe(true);
+  });
+
+  it("旗が立っていても、OTP のセッションでは not_found になる", async () => {
+    // **`users.is_admin` が true でも、このセッションでは管理者ではない**
+    // （決定 8 / RR-5。`User.actsAsAdminWith`）。`requireAdminSession` は
+    // `GetSessionUseCase` の返す `isAdmin` を見ているので、ここは
+    // **判定を書き足さなくても効いている** —— 効いていることを固定する。
+    //
+    // **これが抜けると、管理領域だけが決定 8 の外に残る。** 上の「管理者なら
+    // 通る」は `authMethod: "passkey"` で seed しているので、`actsAsAdminWith`
+    // を `isAdmin` だけ見る形に戻しても緑のままになる。
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "email_otp" });
+
+    const result = await adminRpc.listOAuthClients({
+      sessionToken: user.sessionToken,
+      caller: "dashboard-worker",
+    });
+
+    // 一般利用者とまったく同じ応答。「管理者だが方式が足りない」とは言わない。
+    expect(!result.ok && result.error.code).toBe("not_found");
   });
 });
 
