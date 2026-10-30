@@ -9,6 +9,7 @@ import {
 } from "../session-cookie";
 import type { AppBindings } from "../types";
 import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH } from "./asset-paths";
+import { DEFAULT_LANDING_PATH } from "./landing";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import {
   LoginPage,
@@ -321,10 +322,11 @@ uiRoutes.post("/login/verify", pageSecurityHeaders, async (c) => {
   // 303 でやり直し不能にする。POST の結果をそのまま描くと、再読み込みで
   // 使用済みの OTP が再送され、利用者には失敗としか見えない。
   //
-  // 戻り先は `sanitizeReturnTo` を通した値だけ（`/oauth/authorize` で始まる
-  // 相対パス）。それ以外は null に落ちてログイン済み画面へ行くので、
-  // ここが外部サイトへのリダイレクタになることはない（ui/return-to.ts）。
-  return c.redirect(returnTo ?? "/login", 303);
+  // 戻り先は `sanitizeReturnTo` を通した値だけ（`/oauth/authorize` または
+  // `/account` で始まる相対パス）。それ以外は null に落ちて既定の着地点へ
+  // 行くので、ここが外部サイトへのリダイレクタになることはない
+  // （ui/return-to.ts）。既定が `/account` である理由は ui/landing.ts。
+  return c.redirect(returnTo ?? DEFAULT_LANDING_PATH, 303);
 });
 
 /**
@@ -455,10 +457,10 @@ uiRoutes.post("/signup/verify", pageSecurityHeaders, async (c) => {
   );
   rotateCsrfToken(c);
 
-  // 戻り先が無ければアカウント画面へ送る。**ログインと違って `/login` へ
-  // 戻さない** —— いま作ったばかりのアカウントで、利用者が次にやることは
-  // 自分の情報を確かめるかパスキーを足すことなので、そこへ着地させる。
-  return c.redirect(returnTo ?? "/account", 303);
+  // 戻り先が無ければ既定の着地点へ送る。**ログインと同じ場所**になる
+  // （以前はここだけが `/account` で、ログインは `/login` へ戻していた）。
+  // 理由は ui/landing.ts に 1 か所だけ書いてある。
+  return c.redirect(returnTo ?? DEFAULT_LANDING_PATH, 303);
 });
 
 /**

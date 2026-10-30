@@ -13,6 +13,12 @@ import {
  * import しない（`packages/web-ui/test/island-classes.test.ts` が見ている）。
  */
 import { BUTTON_CLASS, ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
+/*
+ * **ここも何も引き連れてこない。** `../landing` は import を持たないので、
+ * バンドルに入るのは文字列 1 つだけ。着地点をサーバーと共有するのが目的で、
+ * 詳しい理由はそのファイルに書いてある。
+ */
+import { DEFAULT_LANDING_PATH } from "../landing";
 
 /**
  * ログイン画面の Passkey アイランド（仕様書 14-1 の決定 4）。
@@ -104,7 +110,7 @@ function PasskeyLogin({ returnTo }: { returnTo: string }) {
       }
 
       // セッション Cookie は Set-Cookie で入っている。認可フローの途中なら
-      // 元の `/oauth/authorize` へ、そうでなければ `/login`（＝ログイン済み画面）へ。
+      // 元の `/oauth/authorize` へ、そうでなければアカウント画面へ。
       //
       // 戻り先は**サーバーが data 属性に入れた値だけ**を使い、ここでは
       // `location.search` を読まない。クライアント側で URL を解釈すると、
@@ -146,11 +152,16 @@ function PasskeyLogin({ returnTo }: { returnTo: string }) {
 
 const mount = document.getElementById("passkey-island");
 if (mount !== null && supportsPasskey()) {
-  // サーバーが検証済みの戻り先を置いていればそれを使う。無ければ /login。
+  // サーバーが検証済みの戻り先を置いていればそれを使う。
+  //
+  // **いまのサーバーは戻り先が無いときも既定値を書いて寄こす**ので、
+  // ここが使われるのは属性ごと失われた場合だけ。それでも同じ既定値を
+  // 持っておく —— 「どこへ飛ぶか分からない」より「サーバーと同じ場所へ
+  // 飛ぶ」ほうがよい（ui/landing.ts）。
   const returnTo =
     mount instanceof HTMLElement && typeof mount.dataset["returnTo"] === "string"
       ? mount.dataset["returnTo"]
-      : "/login";
+      : DEFAULT_LANDING_PATH;
   // サーバーが入れておいた「この端末では使えないかもしれない」旨の代替表示を
   // 置き換える。JS が落ちた場合はその代替表示が残る。
   mount.textContent = "";
