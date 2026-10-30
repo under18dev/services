@@ -1,4 +1,5 @@
 import type {
+  AuditLogEntryAdmin,
   OAuthClientSummary,
   SuspendReason,
   UserAdminSummary,
@@ -140,4 +141,19 @@ export interface IdentityAdminGateway {
     sessionToken: string,
     userId: string,
   ): Promise<IdentityOutcome<{ revokedSessions: number }>>;
+  /**
+   * 監査ログの閲覧（#375 / #382）。再認証は要求していない
+   * （読み取りだけで状態を変えない。`listUsers` と同じ扱い）。
+   */
+  listAuditLogs(
+    sessionToken: string,
+    criteria: {
+      readonly event?: string;
+      readonly userId?: string;
+      readonly outcome?: "success" | "failure";
+      readonly cursor?: string;
+    },
+  ): Promise<
+    IdentityOutcome<{ entries: readonly AuditLogEntryAdmin[]; nextCursor: string | null }>
+  >;
 }

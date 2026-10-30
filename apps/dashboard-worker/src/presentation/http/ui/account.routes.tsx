@@ -10,6 +10,8 @@ import type { IdentityFailure } from "../../../domain/errors";
 import type { AppBindings } from "../types";
 import { HomePage } from "./home-page";
 import {
+  ADMIN_AUDIT_ROUTE,
+  ADMIN_AUDIT_SEARCH_ROUTE,
   ADMIN_CLIENTS_CREATE_ROUTE,
   ADMIN_USERS_ACTION_ROUTE,
   ADMIN_USERS_ROUTE,
@@ -33,6 +35,7 @@ import { ProfilePage } from "./profile-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
 import { AdminClientsPage, AdminNotFoundPage, type CreatedClient } from "./admin-clients-page";
 import { AdminUsersPage } from "./admin-users-page";
+import { AdminAuditPage } from "./admin-audit-page";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "../csrf";
 import { SessionsPage } from "./sessions-page";
 import { returnToForCurrentRequest } from "@u18/contracts";
@@ -315,6 +318,43 @@ export const accountUiRoutes = new Hono<AppBindings>()
     // 権限の境界をまたぐ操作が通ったので、トークンを入れ替える。
     rotateCsrfToken(c);
     return renderAdminUsers(c, token, { notice: manageNotice(action, outcome.value) });
+  })
+
+  /**
+   * 監査ログの閲覧（#375 / #382）。**管理者だけ。**
+   *
+   * `ADMIN_USERS_ROUTE` と同じ形 —— GET は絞り込みを受け取らず、
+   * 絞り込みと続きの読み込みは POST の本文で渡す。
+   */
+  .get(ADMIN_AUDIT_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    return renderAdminAudit(c, token, {});
+  })
+
+  /** 絞り込みと、続きの読み込み（#375）。 */
+  .post(ADMIN_AUDIT_SEARCH_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const form = await c.req.parseBody();
+    if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
+      return renderAdminAudit(c, token, { error: CSRF_REJECTED_MESSAGE });
+    }
+
+    const event = (field(form, "event") ?? "").trim();
+    const userId = (field(form, "user_id") ?? "").trim();
+    const cursor = (field(form, "cursor") ?? "").trim();
+    const outcomeRaw = field(form, "outcome");
+    const outcome = outcomeRaw === "success" || outcomeRaw === "failure" ? outcomeRaw : undefined;
+
+    return renderAdminAudit(c, token, {
+      ...(event === "" ? {} : { event }),
+      ...(userId === "" ? {} : { userId }),
+      ...(outcome === undefined ? {} : { outcome }),
+      ...(cursor === "" ? {} : { cursor }),
+    });
   })
 
   /**
@@ -656,6 +696,45 @@ function manageFailureMessage(action: string | undefined, failure: IdentityFailu
     }
   }
   return "いま操作できません。しばらく待ってからもう一度お試しください。";
+}
+
+/**
+ * 監査ログの一覧を描く（#375）。**GET と POST が共有する。**
+ */
+async function renderAdminAudit(
+  c: Context<AppBindings>,
+  token: string,
+  options: {
+    event?: string;
+    userId?: string;
+    outcome?: "success" | "failure";
+    cursor?: string;
+    error?: string;
+  },
+): Promise<Response> {
+  const [flags, page] = await Promise.all([
+    navFlags(c, token),
+    c.get("identityAdmin").listAuditLogs(token, {
+      ...(options.event === undefined ? {} : { event: options.event }),
+      ...(options.userId === undefined ? {} : { userId: options.userId }),
+      ...(options.outcome === undefined ? {} : { outcome: options.outcome }),
+      ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+    }),
+  ]);
+  if (!page.ok) return renderAdminFailure(c, page);
+
+  return c.html(
+    <AdminAuditPage
+      isAdmin={flags.isAdmin}
+      csrfToken={ensureCsrfToken(c)}
+      entries={page.value.entries}
+      nextCursor={page.value.nextCursor}
+      {...(options.event === undefined ? {} : { event: options.event })}
+      {...(options.userId === undefined ? {} : { userId: options.userId })}
+      {...(options.outcome === undefined ? {} : { outcome: options.outcome })}
+      {...(options.error === undefined ? {} : { error: options.error })}
+    />,
+  );
 }
 
 /**

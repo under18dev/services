@@ -84,6 +84,34 @@ export class RpcIdentityAdminGateway implements IdentityAdminGateway {
     return this.call(() => this.admin.revokeUserSessions(this.input({ sessionToken, userId })));
   }
 
+  listAuditLogs(
+    sessionToken: string,
+    criteria: {
+      readonly event?: string;
+      readonly userId?: string;
+      readonly outcome?: "success" | "failure";
+      readonly cursor?: string;
+    },
+  ) {
+    return this.call(() =>
+      this.admin.listAuditLogs(
+        this.input({
+          sessionToken,
+          ...(criteria.event === undefined || criteria.event === ""
+            ? {}
+            : { event: criteria.event }),
+          ...(criteria.userId === undefined || criteria.userId === ""
+            ? {}
+            : { userId: criteria.userId }),
+          ...(criteria.outcome === undefined ? {} : { outcome: criteria.outcome }),
+          ...(criteria.cursor === undefined || criteria.cursor === ""
+            ? {}
+            : { cursor: criteria.cursor }),
+        }),
+      ),
+    );
+  }
+
   listUsers(sessionToken: string, criteria: { readonly query?: string; readonly cursor?: string }) {
     return this.call(() =>
       this.admin.listUsers(
