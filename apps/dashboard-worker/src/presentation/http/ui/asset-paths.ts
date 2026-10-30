@@ -129,6 +129,30 @@ export const APPS_ROUTE = "/apps";
 export const APPS_PATH = `${ACCOUNT_BASE_PATH}${APPS_ROUTE}` as const;
 
 /**
+ * OAuth クライアントの管理（#308 / #333）。**管理者だけ。**
+ *
+ * **`/account/admin` そのものは作らない。** 作ると、サイドバーから
+ * 辿れないページが 1 枚できる（`account-nav.ts` の「押しても何も無い
+ * リンクを置かない」の裏返しで、こちらは「辿れないページを置かない」）。
+ * 管理の節には**行き先のある項目だけ**が並ぶ。
+ *
+ * 更新系はこの下にぶら下げる。**別の接頭辞に置かない** —— 管理の経路が
+ * 2 か所に散ると、`isAdmin` の確認を片方だけ忘れた状態が作れる。
+ */
+export const ADMIN_CLIENTS_ROUTE = "/admin/clients";
+export const ADMIN_CLIENTS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_ROUTE}` as const;
+
+/** 登録（form POST）。応答に `client_secret` の平文が 1 度だけ出る。 */
+export const ADMIN_CLIENTS_CREATE_ROUTE = "/admin/clients/create";
+export const ADMIN_CLIENTS_CREATE_PATH =
+  `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_CREATE_ROUTE}` as const;
+
+/** 失効（form POST）。冪等。 */
+export const ADMIN_CLIENTS_DISABLE_ROUTE = "/admin/clients/disable";
+export const ADMIN_CLIENTS_DISABLE_PATH =
+  `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_DISABLE_ROUTE}` as const;
+
+/**
  * NFC カードの管理画面。**この Worker は配信しない** —— nfc-worker が
  * `auth.under18.dev/account/nfc` で持っている（#31、あちらの
  * `wrangler.jsonc` の production routes が `/account/*` より長いので、

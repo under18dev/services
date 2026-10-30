@@ -39,8 +39,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-/** RPC のエラー契約を、この Worker のドメイン語彙へ翻訳する。 */
-function toFailure(error: RpcError): IdentityFailure {
+/**
+ * RPC のエラー契約を、この Worker のドメイン語彙へ翻訳する。
+ *
+ * **`identity-admin.gateway.ts` も同じものを使う。** 翻訳を 2 本持つと、
+ * `not_found` の扱いが片方だけずれる形が作れる。
+ */
+export function toFailure(error: RpcError): IdentityFailure {
   switch (error.code) {
     case "unauthenticated":
       return { kind: "unauthenticated" };

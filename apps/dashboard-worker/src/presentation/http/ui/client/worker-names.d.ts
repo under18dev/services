@@ -26,6 +26,12 @@
  * 同じスコープで Worker の API を呼ぶことになり、それはブラウザでは
  * 存在しない。ここで欲しいのは**名前が解決すること**だけなので、
  * 本物の形を写していない。写すと二重管理になり、ずれても誰も気づかない。
+ *
+ * **それでも binding の「名前」は要る。** `container.ts` が
+ * `env.IDENTITY_ADMIN` を読む以上、プロパティが無ければここで落ちる ——
+ * #333 で実際に落ちた。**型は `Fetcher`（= `unknown`）のままでよい。**
+ * ここで欲しいのは名前の解決だけで、形の正しさは
+ * `worker-configuration.d.ts` を読む本体側が見ている。
  */
 
 declare type Fetcher = unknown;
@@ -33,4 +39,6 @@ declare type Fetcher = unknown;
 declare interface Env {
   readonly ENVIRONMENT: string;
   readonly IDENTITY: Fetcher;
+  /** 管理用 Entrypoint（#333）。**名前だけ。** 本体は別 binding である。 */
+  readonly IDENTITY_ADMIN: Fetcher;
 }

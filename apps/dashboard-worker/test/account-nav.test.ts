@@ -76,12 +76,20 @@ describe("管理者にだけ出す項目", () => {
     expect(accountNavFor(true)).toEqual(ACCOUNT_NAV_GROUPS);
   });
 
-  it("本物の並びに adminOnly がまだ 1 つも無い", () => {
-    // **これが落ちたら、画面を足した人へ**: `adminOnly` の項目が入った。
-    // この行を消して、代わりに**その項目がサイドバーに出る / 出ない**を
-    // 実際に画面を引いて確かめる検査を足すこと（`ui-pages.test.ts`）。
-    // **いまは 0 件なので、本物での出し分けを誰も見ていない。**
+  it("本物の並びの adminOnly は、画面がある項目だけである", () => {
+    // **かつてここは「本物に adminOnly が 1 つも無い」を見ていた。**
+    // 0 件のあいだは出し分けが「何を壊しても緑」なので、最初の 1 件が
+    // 入ったら**画面を引いて確かめる検査へ置き換えること**が
+    // 書いてあった。置き換え先は `admin-clients.test.ts` の
+    // 「サイドバーの管理の節」で、**実際に HTML を引いて**管理者には
+    // 出る / 出ないを見ている。
+    //
+    // ここに残すのは、**行き先が `/account/` の下にあること**だけ。
+    // 外のパスを `adminOnly` で足すと、`check-app-catalog-routes.mjs` が
+    // 解決する先が変わる。
     const adminItems = ACCOUNT_NAV_GROUPS.flatMap((g) => g.items.filter((i) => i.adminOnly));
-    expect(adminItems).toEqual([]);
+
+    expect(adminItems.length).toBeGreaterThan(0);
+    for (const item of adminItems) expect(item.href.startsWith("/account/")).toBe(true);
   });
 });
