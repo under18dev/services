@@ -152,6 +152,19 @@ export interface CardRepository {
   disable(cardId: string, ownerUserId: string, reason: string, now: Date): Promise<boolean>;
 
   /**
+   * 運営による無効化（#382「他人のカードへの操作」）。
+   *
+   * **`disable` との違いは `ownerUserId` を WHERE 句に持たないことだけ。**
+   * 所有者を問わず、`active` であることだけを条件にする。所有者判定を
+   * ここで外すのは、**管理者判定を UseCase の中だけに置く**という
+   * `cards.routes.ts` の方針（判定をルートに書くと経路が増えたときに
+   * 素通りする形を作る）を、Repository 層まで一貫させるため ——
+   * 「誰のカードか」という条件自体を無くし、「管理者かどうか」の判定は
+   * `AdminDisableCardUseCase` の `requireAdminUserId` だけに置く。
+   */
+  disableAsAdmin(cardId: string, reason: string, now: Date): Promise<boolean>;
+
+  /**
    * 未紐づけのカードの所有者を確定する（#358）。
    *
    * **「まだ誰のものでもない」を WHERE 句に入れること。** アプリ側で

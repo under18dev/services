@@ -92,7 +92,10 @@ function toDate(iso: string): string {
   return iso.split("T")[0] ?? iso;
 }
 
-const AdminCardRow: FC<{ readonly card: AdminCardView }> = ({ card }) => (
+const AdminCardRow: FC<{ readonly card: AdminCardView; readonly csrfToken: string }> = ({
+  card,
+  csrfToken,
+}) => (
   <div class="flex flex-col gap-1">
     <div class="flex flex-wrap items-center gap-2">
       <span class="font-mono text-sm font-medium">{card.cardId}</span>
@@ -124,6 +127,32 @@ const AdminCardRow: FC<{ readonly card: AdminCardView }> = ({ card }) => (
       {card.claimedAt === null ? null : ` ・ ${toDate(card.claimedAt)} に紐づけ`}
       {card.disabledAt === null ? null : ` ・ ${toDate(card.disabledAt)} に無効化`}
     </p>
+
+    {/*
+      **他人のカードへの操作、1 本目**（#382）。`active` のカードにだけ
+      出す —— `issued` はまだ誰のものでもなく、`disabled` は既に止まって
+      いる。出しても必ず失敗する入口を描かない（`cards-page.tsx` と
+      同じ判断）。
+
+      **行ごとに独立した form。** `admin-page.tsx` はまだ島を持たないので
+      （冒頭を参照）、JS を新しく要求しない。`csrfToken` は画面に 1 つしか
+      無いが、**form が複数あっても同じ値を使い回してよい** —— CSRF
+      トークンは Cookie と対になっているセッション単位の値で、form ごとに
+      別の値が要るものではない（同意画面・ログイン画面も同じ値を複数の
+      submit ボタンで共有している）。
+    */}
+    {card.status === "active" && (
+      <form method="post" action={`${ADMIN_UI_PATH}/${card.cardId}/disable`} class="mt-2">
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <button
+          type="submit"
+          class="rounded-lg border border-destructive/40 bg-background-subtle px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+          aria-label={`${card.cardId} を無効化する`}
+        >
+          無効化する
+        </button>
+      </form>
+    )}
   </div>
 );
 
@@ -339,7 +368,7 @@ export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls, csrfToken, issued
               <li key={card.cardId}>
                 {/* **区切りは 1 件目の前に置かない**（`cards-page.tsx` と同じ）。 */}
                 {index > 0 && <Separator class="my-3" />}
-                <AdminCardRow card={card} />
+                <AdminCardRow card={card} csrfToken={csrfToken} />
               </li>
             ))}
           </ul>
@@ -355,9 +384,9 @@ export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls, csrfToken, issued
       <CardHeader>
         <CardTitle>この画面からできないこと</CardTitle>
         <CardDescription>
-          他の人のカードの遷移先の変更・無効化・所有者の付け替えは、まだこの画面からは 行えません。
-          <strong>API にもありません</strong> —— いまの API は、どれも自分が
-          所有者であるカードにしか効きません（裏側から作る必要があります）。
+          他の人のカードの遷移先の変更・所有者の付け替えは、まだこの画面からは行えません。
+          <strong>無効化はできます</strong>（上の一覧）。残り 2 つは API にもありません ——
+          自分が所有者であるカードにしか効きません（裏側から作る必要があります）。
         </CardDescription>
       </CardHeader>
     </Card>

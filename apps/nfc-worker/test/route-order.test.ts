@@ -58,6 +58,9 @@ describe("ルートの登録順", () => {
       // 発行の form POST（#382）。2 行あるのは上と同じ事情。
       "POST /account/nfc/admin",
       "POST /account/nfc/admin",
+      // 他人のカードの無効化（#382）。2 行あるのは上と同じ事情。
+      "POST /account/nfc/admin/:cardId/disable",
+      "POST /account/nfc/admin/:cardId/disable",
       // 紐づけ画面（#358）。**画面より後ろに居る。** `/account/nfc` と
       // `/account/nfc/claim` は別パスなので順序に守りの意味は無いが、
       // 変わったら気づく。POST はこの Worker で唯一の form 送信。

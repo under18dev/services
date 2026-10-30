@@ -1,7 +1,10 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
-import { ADMIN_UI_PATH } from "../src/presentation/http/base-path";
+import { ADMIN_UI_PATH, CARDS_UI_PATH } from "../src/presentation/http/base-path";
+import { db } from "./helpers";
+import { nfcCardEvents } from "@u18/nfc-db";
+import { desc, eq } from "drizzle-orm";
 import { MAX_ADMIN_LIST } from "../src/application/use-cases/list-all-cards.use-case";
 import {
   ORIGIN,
@@ -385,5 +388,205 @@ describe("描かれた form だけで発行する", () => {
     const html = await response.text();
     expect(html).not.toContain("evil");
     expect(html).not.toContain("枚発行しました");
+  });
+});
+
+/**
+ * **描かれた form だけで他人のカードを無効化する**（#382「他人のカードへの
+ * 操作」1 本目）。
+ *
+ * 運用者から緊急の要望が来た実例 ——「一人やばそうな用途をしそうな人が
+ * いる」ので、所有者本人を介さずに止める必要がある。`consent.form-drive.
+ * test.ts` / 発行の form-drive テストと同じ形で、**画面を読まずに画面の
+ * テストを名乗らない。**
+ */
+describe("描かれた form だけで他人のカードを無効化する", () => {
+  type Form = {
+    readonly action: string;
+    readonly method: string;
+    readonly fields: Readonly<Record<string, string>>;
+  };
+
+  /** HTML から、`action` に `needle` を含む form を 1 つ取り出す。 */
+  function formWithAction(html: string, needle: string): Form | undefined {
+    const tags = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g)];
+    const found = tags.find(([, attrs]) => (attrs ?? "").includes(needle));
+    if (found === undefined) return undefined;
+
+    const [, attrs = "", body = ""] = found;
+    const fields: Record<string, string> = {};
+    for (const [, tag] of [...body.matchAll(/(<input\b[^>]*>)/g)]) {
+      const name = /\bname="([^"]*)"/.exec(tag ?? "")?.[1];
+      if (name === undefined) continue;
+      fields[name] = /\bvalue="([^"]*)"/.exec(tag ?? "")?.[1] ?? "";
+    }
+
+    return {
+      action: /\baction="([^"]*)"/.exec(attrs)?.[1] ?? "",
+      method: (/\bmethod="([^"]*)"/.exec(attrs)?.[1] ?? "").toLowerCase(),
+      fields,
+    };
+  }
+
+  /** 管理画面を開いて、指定したカードの無効化 form と Cookie 列を取り出す。 */
+  async function openDisableForm(
+    cardId: string,
+    cookie = cookieFor(ADMIN),
+  ): Promise<{ form: Form | undefined; cookie: string }> {
+    const response = await open(cookie);
+    expect(response.status, "管理画面が 200 で出ていない").toBe(200);
+
+    const csrfCookie = response.headers
+      .getSetCookie()
+      .map((raw) => raw.split(";")[0] ?? "")
+      .filter((pair) => pair.startsWith("u18_csrf="));
+
+    return {
+      form: formWithAction(await response.text(), `${cardId}/disable`),
+      cookie: [cookie, ...csrfCookie].join("; "),
+    };
+  }
+
+  /** form が言っているとおりに送る。**こちらでパスも名前も足さない。** */
+  async function send(
+    form: Form,
+    filled: Readonly<Record<string, string>>,
+    cookie: string,
+  ): Promise<Response> {
+    return await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}${form.action}`, {
+        method: form.method,
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+          Cookie: cookie,
+        },
+        body: new URLSearchParams({ ...form.fields, ...filled }).toString(),
+      }),
+      env,
+      executionContext(),
+    );
+  }
+
+  it("active なカードにだけ、無効化 form が出る", async () => {
+    const active = await seedActiveCard("usr_taro", "https://example.com/taro");
+    const issued = await seedIssuedCard();
+    const disabled = await seedActiveCard("usr_hanako");
+    await repository().disable(disabled, "usr_hanako", "lost", new Date());
+
+    const response = await open(cookieFor(ADMIN));
+    const html = await response.text();
+
+    expect(formWithAction(html, `${active}/disable`), "active に form が無い").not.toBeUndefined();
+    expect(formWithAction(html, `${issued}/disable`), "issued に form がある").toBeUndefined();
+    expect(formWithAction(html, `${disabled}/disable`), "disabled に form がある").toBeUndefined();
+  });
+
+  it("form が POST で、CSRF トークンを hidden で運んでいる", async () => {
+    const active = await seedActiveCard("usr_taro");
+    const { form } = await openDisableForm(active);
+
+    expect(form, "form が見つからない").not.toBeUndefined();
+    expect(form?.method, "method が post でない（既定の GET になる）").toBe("post");
+    expect(form?.action, "action が空").not.toBe("");
+    expect(form?.fields["csrf_token"], "CSRF トークンが hidden に無い").toBeTruthy();
+  });
+
+  it("押すだけで、他人のカードも無効化される", async () => {
+    const active = await seedActiveCard("usr_taro", "https://example.com/taro");
+    const { form, cookie } = await openDisableForm(active);
+
+    const response = await send(form!, {}, cookie);
+
+    // **PRG。** 一覧の「無効化済み」バッジで結果が見える。
+    expect(response.status, "無効化の応答が 303 でない").toBe(303);
+    expect(response.headers.get("Location")).toBe(ADMIN_UI_PATH);
+
+    const after = await repository().findById(active);
+    expect(after?.isDisabled, "カードが無効化されていない").toBe(true);
+  });
+
+  it("監査: actorUserId は運営の userId で、所有者とは別人だと分かる", async () => {
+    const active = await seedActiveCard("usr_taro");
+    const { form, cookie } = await openDisableForm(active);
+
+    await send(form!, {}, cookie);
+
+    const rows = await db()
+      .select()
+      .from(nfcCardEvents)
+      .where(eq(nfcCardEvents.cardId, active))
+      .orderBy(desc(nfcCardEvents.id))
+      .all();
+    const disabledEvent = rows.find((row) => row.event === "card.disabled");
+
+    expect(disabledEvent, "card.disabled イベントが記録されていない").toBeDefined();
+    // **運営の userId であって、カードの所有者（usr_taro）ではない。**
+    expect(disabledEvent?.actorUserId).toBe("usr_admin");
+    expect(disabledEvent?.actorUserId).not.toBe("usr_taro");
+    // **「所有者が止めた」と区別できるメタデータ。**
+    // `metadata` 列は `{ mode: "json" }` なので、Drizzle が既に object へ
+    // 復元している（自分で `JSON.parse` しない）。
+    expect(disabledEvent?.metadata?.["actingAsAdmin"], "actingAsAdmin が記録されていない").toBe(
+      true,
+    );
+  });
+
+  it("CSRF トークンが無ければ無効化しない", async () => {
+    const active = await seedActiveCard("usr_taro");
+    const { form, cookie } = await openDisableForm(active);
+
+    const response = await send(form!, { csrf_token: "" }, cookie);
+
+    expect(response.status).toBe(403);
+    const after = await repository().findById(active);
+    expect(after?.isDisabled, "403 を返しつつ無効化していた").toBe(false);
+  });
+
+  it("一般利用者は、正しい CSRF トークンを持っていても無効化できない", async () => {
+    const active = await seedActiveCard("usr_taro");
+    const { form, cookie } = await openDisableForm(active);
+
+    const response = await send(
+      form!,
+      {},
+      `${cookieFor(TARO)}; ${cookie.split("; ").slice(1).join("; ")}`,
+    );
+
+    // 管理者でないので 404（403 にしない。#331 / #333 の判断）。
+    expect(response.status).toBe(404);
+    const after = await repository().findById(active);
+    expect(after?.isDisabled, "一般利用者が無効化できてしまった").toBe(false);
+  });
+
+  it("既に無効化済みのカードへもう一度送っても失敗しない（冪等）", async () => {
+    const active = await seedActiveCard("usr_taro");
+    const { form, cookie } = await openDisableForm(active);
+
+    await send(form!, {}, cookie);
+    // 2 回目は form 自体が消えているはずだが、**値を直接送った場合も壊れない**
+    // ことを見る（押し直し・二重送信を想定）。
+    const second = await send(form!, {}, cookie);
+
+    expect(second.status, "2 回目が失敗にされている").toBe(303);
+  });
+
+  it("所有者の一覧にも「無効化済み」と出て、運営によるものと分かる", async () => {
+    const active = await seedActiveCard("usr_taro", "https://example.com/taro");
+    const { form, cookie } = await openDisableForm(active);
+    await send(form!, {}, cookie);
+
+    // **所有者本人の画面**（`cards-page.tsx`）。運営が黙って止めると
+    // 問い合わせが来る —— ここに理由が出ることが、その唯一の読み場所。
+    const ownerView = await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}${CARDS_UI_PATH}`, { headers: { Cookie: cookieFor(TARO) } }),
+      env,
+      executionContext(),
+    );
+    const html = await ownerView.text();
+
+    expect(html, "無効化済みと出ていない").toContain("無効化済み");
+    expect(html, "運営によるものだと所有者が読み取れない").toContain("運営により無効化されました");
   });
 });
