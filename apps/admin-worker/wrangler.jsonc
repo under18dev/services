@@ -6,13 +6,35 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
-  // **u18 Identity への Service Binding は持たない。**
+  // **CI の deploy ジョブは `pnpm exec wrangler deploy` を直接呼ぶ**ので
+  // npm スクリプトを迂回し、生成を忘れると本番デプロイが
+  // `Could not resolve "./generated/kiwa-stylesheet"` で落ちる
+  // （nfc-worker / auth-worker / dashboard-worker が同じ形を踏んでいる）。
+  // 生成を Worker のビルド定義に置けば、dev / deploy / dry-run の
+  // どの経路から入っても必ず走る。
+  //
+  // `watch_dir` は既定（src 全体）から広げない。既定の監視範囲に
+  // 出力（`src/presentation/http/ui/generated/`）が含まれるので、
+  // 広げると 生成 -> 変更検知 -> 再生成 が無限に続く（#138）。
+  // **この Worker にはまだアイランドが無い**ので、nfc-worker のように
+  // `src/presentation/http/ui/client` を監視対象へ足す必要も無い。
+  "build": {
+    "command": "node scripts/build-client.mjs",
+  },
+
+  // **u18 Identity（auth-worker）への Service Binding は持たない。**
   //
   // 運用者の判断（2026-10-30 夜）で、u18 Identity 側には「誰が管理画面を
   // 使ってよいか」の情報を一切足さない——admin-worker はただの OIDC
   // クライアントの 1 つで、IdentityRPC / IdentityAdminRPC を呼ぶ理由が
   // 無い。「誰が使ってよいか」の記憶は、下の `ADMIN_DB`（admin-worker
   // 専用の D1）だけが持つ。
+  //
+  // **nfc-worker への Service Binding は持つ**（#382 / #390 決定 16 ③）。
+  // あちらの `NfcAdminDelegatedRPC` を束縛し、他人のカードの無効化・
+  // 遷移先の書き換え・一覧・発行を呼ぶ。認可（管理者かどうか）は
+  // admin-worker 側（上のセッションガード + 承認リスト）で完結している
+  // ので、nfc-worker 側では検証しない（`docs/threat-model.md` N-10）。
   "d1_databases": [
     {
       "binding": "ADMIN_DB",
@@ -21,6 +43,14 @@
       // （`docs/admin-worker-setup.md`）。
       "database_id": "984cc109-cfa3-421e-b984-f7252af80652",
       "migrations_dir": "../../packages/admin-db/drizzle",
+    },
+  ],
+
+  "services": [
+    {
+      "binding": "NFC_ADMIN_DELEGATED",
+      "service": "u18-nfc",
+      "entrypoint": "NfcAdminDelegatedRPC",
     },
   ],
 
@@ -36,6 +66,9 @@
     "ADMIN_ORIGIN": "http://localhost:8790",
     // OAuth クライアント ID。**秘密ではない。** 秘密は `OIDC_CLIENT_SECRET`。
     "OIDC_CLIENT_ID": "u18-admin",
+    // NFC カードのタグに焼く URL のホスト（#382）。nfc-worker の
+    // `wrangler.jsonc` と同じ値を持つ——`cardTapUrl()` 相当の組み立てに使う。
+    "SHORT_URL_ORIGIN": "http://localhost:8789",
     "ENVIRONMENT": "development",
   },
 
@@ -56,10 +89,22 @@
           "migrations_dir": "../../packages/admin-db/drizzle",
         },
       ],
+      "services": [
+        {
+          "binding": "NFC_ADMIN_DELEGATED",
+          // `wrangler deploy --env production` は Worker 名を
+          // "<name>-<env>" に派生させるため、本番の nfc-worker は
+          // "u18-nfc-production" になる。development と同じ理由
+          // （dashboard-worker の IDENTITY と同じ）で明示する。
+          "service": "u18-nfc-production",
+          "entrypoint": "NfcAdminDelegatedRPC",
+        },
+      ],
       "vars": {
         "AUTH_ISSUER": "https://auth.under18.dev",
         "ADMIN_ORIGIN": "https://admin.under18.dev",
         "OIDC_CLIENT_ID": "u18-admin",
+        "SHORT_URL_ORIGIN": "https://go.under18.dev",
         "ENVIRONMENT": "production",
       },
       "routes": [

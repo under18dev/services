@@ -1,40 +1,12 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
-import type { ApprovalRepository } from "../src/application/ports/approval.repository";
 import type { Clock } from "../src/composition/container";
 import { createFakeIdp } from "./fake-idp";
-
-const ORIGIN = env.ADMIN_ORIGIN;
+import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
 
 function fixedClock(ms: number): Clock {
   return { now: () => new Date(ms) };
-}
-
-/** `isApproved` / `isSuperApprover` を固定値で答える fake。D1 を立てずにガードの分岐だけを見る。 */
-function fakeApprovals(
-  approvedSubs: readonly string[],
-  superSubs: readonly string[] = [],
-): ApprovalRepository {
-  return {
-    isApproved: async (sub) => approvedSubs.includes(sub),
-    isSuperApprover: async (sub) => superSubs.includes(sub),
-  };
-}
-
-/** Response の Set-Cookie をすべて取り出し、次の Request へ渡す `Cookie` 文字列を作る。 */
-function cookieHeaderFrom(response: Response): string {
-  return response.headers
-    .getSetCookie()
-    .map((entry) => entry.split(";")[0])
-    .join("; ");
-}
-
-function executionContext(): ExecutionContext {
-  return {
-    waitUntil: () => undefined,
-    passThroughOnException: () => undefined,
-  } as unknown as ExecutionContext;
 }
 
 describe("/health", () => {
@@ -245,31 +217,6 @@ describe("/logout", () => {
 });
 
 describe("承認リスト", () => {
-  async function loginAs(sub: string, approvals: ApprovalRepository): Promise<string> {
-    const idp = await createFakeIdp(env.AUTH_ISSUER);
-    const loginApp = createApp({ fetcher: idp.fetcherReturning("unused"), approvals });
-    const loginResponse = await loginApp.fetch(
-      new Request(`${ORIGIN}/login`),
-      env,
-      executionContext(),
-    );
-    const authorizeUrl = new URL(loginResponse.headers.get("Location") ?? "");
-    const state = authorizeUrl.searchParams.get("state")!;
-    const nonce = authorizeUrl.searchParams.get("nonce")!;
-    const loginStateCookie = cookieHeaderFrom(loginResponse);
-
-    const idToken = await idp.signIdToken({ sub, aud: env.OIDC_CLIENT_ID, nonce });
-    const callbackApp = createApp({ fetcher: idp.fetcherReturning(idToken), approvals });
-    const callbackResponse = await callbackApp.fetch(
-      new Request(`${ORIGIN}/callback?code=c1&state=${state}`, {
-        headers: { Cookie: loginStateCookie },
-      }),
-      env,
-      executionContext(),
-    );
-    return cookieHeaderFrom(callbackResponse);
-  }
-
   it("承認されていなければ / から /pending へ送られる", async () => {
     const approvals = fakeApprovals([]); // 誰も承認されていない
     const sessionCookie = await loginAs("usr_waiting", approvals);
