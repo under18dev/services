@@ -340,14 +340,16 @@ describe("状態を変える操作の CSRF 対策", () => {
   });
 });
 
-describe("紐づけ（初回・移転の受け取り）", () => {
-  it("正しい紐づけコードで自分のものになる", async () => {
-    const { cardId, claimCode } = await seedIssuedCard();
+describe("紐づけ（#358: タップした人のものになる）", () => {
+  it("カード ID を知っていれば、未紐づけのカードは自分のものになる", async () => {
+    // **撤回した決定の裏返しである。** 以前はここに「カード ID を
+    // 知っているだけでは紐づけられない」という検査があった。
+    const cardId = await seedIssuedCard();
 
     const response = await call("/claim", {
       method: "POST",
       cookie: cookieFor(TARO),
-      body: { cardId, claimCode },
+      body: { cardId },
     });
 
     expect(response.status).toBe(200);
@@ -355,42 +357,37 @@ describe("紐づけ（初回・移転の受け取り）", () => {
     expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
   });
 
-  it("カード ID を知っているだけでは紐づけられない", async () => {
-    // NFC タグに書かれているのはカード ID だけ。タグをかざせた人間が
-    // 所有者になれてしまっては「タグ自体を資格情報にしない」が崩れる。
-    const { cardId } = await seedIssuedCard();
+  it("ログインしていなければ紐づけられない", async () => {
+    // **#358 が撤回していない側。** タグはログインの資格情報ではない。
+    const cardId = await seedIssuedCard();
 
-    const response = await call("/claim", {
-      method: "POST",
-      cookie: cookieFor(HANAKO),
-      body: { cardId, claimCode: "wrongcode0000000" },
-    });
+    const response = await call("/claim", { method: "POST", body: { cardId } });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(401);
     expect((await repository().findById(cardId))?.ownerUserId).toBeNull();
   });
 
-  it("紐づけコードは 1 回しか使えない", async () => {
-    const { cardId, claimCode } = await seedIssuedCard();
+  it("2 人目は奪えない", async () => {
+    const cardId = await seedIssuedCard();
 
     const first = await call("/claim", {
       method: "POST",
       cookie: cookieFor(TARO),
-      body: { cardId, claimCode },
+      body: { cardId },
     });
     expect(first.status).toBe(200);
 
-    // 同じ紙片を持っていても、2 人目は奪えない。
     const second = await call("/claim", {
       method: "POST",
       cookie: cookieFor(HANAKO),
-      body: { cardId, claimCode },
+      body: { cardId },
     });
     expect(second.status).toBe(400);
     expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
   });
 
   it("無効化されたカードは紐づけられない", async () => {
+    // **紛失対策の本体。** 拾った人がタップして自分のものにできてはならない。
     const cardId = await seedActiveCard("usr_taro");
     await call(`/${cardId}/disable`, {
       method: "POST",
@@ -401,34 +398,38 @@ describe("紐づけ（初回・移転の受け取り）", () => {
     const response = await call("/claim", {
       method: "POST",
       cookie: cookieFor(HANAKO),
-      body: { cardId, claimCode: "anycode000000000" },
+      body: { cardId },
     });
 
     expect(response.status).toBe(400);
     expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
   });
 
-  it("存在しないカードと間違ったコードの応答が同じ", async () => {
-    const { cardId } = await seedIssuedCard();
+  it.each([
+    ["存在しないカード", "nfc_doesnotexisthere0"],
+    ["形が不正なカード ID", "NOT-A-CARD-ID"],
+  ])("%s の応答が、他人のカードと 1 バイトも変わらない", async (_label, cardId) => {
+    // 区別すると、総当たりしている相手に「その ID は実在する」と教える。
+    const taken = await seedActiveCard("usr_taro");
 
-    const wrongCode = await call("/claim", {
+    const takenResponse = await call("/claim", {
       method: "POST",
-      cookie: cookieFor(TARO),
-      body: { cardId, claimCode: "wrongcode0000000" },
+      cookie: cookieFor(HANAKO),
+      body: { cardId: taken },
     });
-    const missingCard = await call("/claim", {
+    const otherResponse = await call("/claim", {
       method: "POST",
-      cookie: cookieFor(TARO),
-      body: { cardId: "nfc_doesnotexisthere", claimCode: "wrongcode0000000" },
+      cookie: cookieFor(HANAKO),
+      body: { cardId },
     });
 
-    expect(wrongCode.status).toBe(missingCard.status);
-    expect(await wrongCode.json()).toEqual(await missingCard.json());
+    expect(otherResponse.status).toBe(takenResponse.status);
+    expect(await otherResponse.text()).toBe(await takenResponse.text());
   });
 });
 
 describe("所有権の移転", () => {
-  it("手放すと新しい紐づけコードが 1 度だけ返り、受け取った人が紐づけられる", async () => {
+  it("手放すと未紐づけへ戻り、次にタップした人が紐づけられる", async () => {
     const cardId = await seedActiveCard("usr_taro", "https://example.com/taro");
 
     const released = await call(`/${cardId}/release`, {
@@ -436,8 +437,8 @@ describe("所有権の移転", () => {
       cookie: cookieFor(TARO),
     });
     expect(released.status).toBe(200);
-    const { claimCode } = (await released.json()) as { claimCode: string };
-    expect(claimCode).toHaveLength(16);
+    // **#358 で「1 回しか返らない文字列」が無くなった。**
+    expect(await released.json()).toMatchObject({ cardId, status: "issued" });
 
     // 前の所有者の遷移先は消えている。次の所有者のカードが、
     // 本人の知らない URL を配信している状態から始まらないため。
@@ -446,7 +447,7 @@ describe("所有権の移転", () => {
     const claimed = await call("/claim", {
       method: "POST",
       cookie: cookieFor(HANAKO),
-      body: { cardId, claimCode },
+      body: { cardId },
     });
     expect(claimed.status).toBe(200);
 
@@ -468,7 +469,7 @@ describe("所有権の移転", () => {
     expect(response.status).toBe(404);
   });
 
-  it("紐づけコードを含む応答をキャッシュさせない", async () => {
+  it("所有者固有の応答をキャッシュさせない", async () => {
     const cardId = await seedActiveCard("usr_taro");
 
     const response = await call(`/${cardId}/release`, {
@@ -480,7 +481,7 @@ describe("所有権の移転", () => {
   });
 
   it("無効化されたカードは手放せない", async () => {
-    // 手放せると、紛失して止めたカードが再び claim 可能な状態へ戻る。
+    // 手放せると、紛失して止めたカードが再び紐づけ可能な状態へ戻る。
     const cardId = await seedActiveCard("usr_taro");
     await call(`/${cardId}/disable`, {
       method: "POST",
@@ -514,14 +515,28 @@ describe("カード ID から所有者を推測できない", () => {
     expect(a.slice(4, 8)).not.toBe(b.slice(4, 8));
   });
 
-  it("一覧の応答に紐づけコードのハッシュを含めない", async () => {
+  it("一覧の応答が、CardView の項目だけを返す", async () => {
+    // **以前ここは `claimCodeHash` が出ていないことを見ていた。**
+    // #358 であの列ごと消えたので、**その検査は何があっても緑になる** ——
+    // 空振りに気づけない形なので、意図（Entity をそのまま返さない）を
+    // 項目の集合として固定し直した。`toCardView` に 1 行書くまで
+    // 新しい列は外へ出ない（`card-view.ts`）。
     await seedActiveCard("usr_taro");
 
     const response = await call("/", { cookie: cookieFor(TARO) });
-    const text = await response.text();
+    const body = (await response.json()) as { cards: Record<string, unknown>[] };
 
-    expect(text).not.toContain("claimCodeHash");
-    expect(text).not.toContain("ownerUserId");
+    expect(Object.keys(body.cards[0]!).sort()).toEqual([
+      "cardId",
+      "claimedAt",
+      "disabledAt",
+      "disabledReason",
+      "status",
+      "targetUrl",
+      "transferCount",
+    ]);
+    // 所有者は一覧にも出さない。自分のカードしか返らないので要らない。
+    expect(JSON.stringify(body)).not.toContain("ownerUserId");
   });
 });
 

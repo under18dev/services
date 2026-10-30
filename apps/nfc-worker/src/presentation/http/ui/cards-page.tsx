@@ -46,23 +46,29 @@ import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "
  * 入り、**「島だけが使う class」という状態そのものが無くなる**
  * （`ui/island-classes.ts`）。
  *
- * ## 操作はまだ無い
+ * ## 操作はまだ揃っていない
  *
  * API には 5 つの操作（紐づけ・遷移先の変更・無効化・移転・発行）が
- * ある。**いま画面から叩けるのは遷移先の変更 1 本だけ**で、残り 4 本は
+ * ある。**この画面から叩けるのは遷移先の変更 1 本**で、残りは
  * Step 2 / Step 3 で入る（#338）。
  *
+ * **紐づけはこの画面に来ない**（#358）。カードをタップした人が
+ * `/account/nfc/claim` で登録する形になったので、**ここに入口を作ると
+ * 2 つ目の経路**になる。一覧に無いのは「まだできない」ではなく
+ * 「ここではない」である。
+ *
  * **最初に通す 1 本を `target` にしたのは、間違えても戻せるからである。**
- * `disable` は片道、`release` は紐づけコードが 1 回しか返らない。
+ * `disable` は片道、`release` は**戻せるが、手放した瞬間に次にタップした
+ * 人のものになる**（#358 で紐づけコードが無くなった）。
  *
- * **「できない」を黙って出さない** —— 下の案内が、残り 4 本について
- * それを言っている。**できるようになった分はそこから外すこと。**
- * 全部残すと「できるのにできないと書いてある」、全部消すと
- * 「できないのに何も書いていない」になる。
+ * **「できない」を黙って出さない** —— 下の案内がそれを言っている。
+ * **できるようになった分はそこから外すこと。** 全部残すと「できるのに
+ * できないと書いてある」、全部消すと「できないのに何も書いていない」になる。
  *
- * 書き込み経路を 2 本（form POST と JSON）持たないのは、
- * `cards.routes.ts` が既に JSON + Origin 検証で守られていて、並べると
- * **2 つを同期させ続ける必要が出る**ためである。
+ * **この画面は form POST を持たない。** `cards.routes.ts` が既に
+ * JSON + Origin 検証で守られていて、並べると 2 つを同期させ続ける必要が
+ * 出るためである。**紐づけ画面（`claim-page.tsx`）だけが例外で**、
+ * あちらは JS 無しで通る必要がある（`csrf.ts` の冒頭に理由）。
  *
  * ## インラインの `style` を書かない
  *
@@ -212,8 +218,10 @@ export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
     {cards.length === 0 ? (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>紐づけられたカードはありません。</EmptyTitle>
-          <EmptyDescription>カードに同梱された紐づけコードで登録できます。</EmptyDescription>
+          <EmptyTitle>登録されたカードはありません。</EmptyTitle>
+          <EmptyDescription>
+            カードをスマートフォンでタップすると、登録の画面が開きます。
+          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     ) : (
@@ -246,9 +254,10 @@ export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
       <CardHeader>
         <CardTitle>この画面からできないこと</CardTitle>
         <CardDescription>
-          無効化・移転・新しいカードの紐づけ・カードの発行は、まだこの画面からは行えません。
+          無効化・人への譲渡・カードの発行は、まだこの画面からは行えません。
           <code class="font-mono">/account/nfc/cards</code> の API から操作してください。
           <strong>遷移先の変更はこの画面からできます</strong>（上の一覧）。
+          <strong>新しいカードの登録は、カードをタップすると開く画面から行います。</strong>
         </CardDescription>
       </CardHeader>
     </Card>

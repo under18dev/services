@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { claimUrl } from "./base-path";
 import type { AppBindings } from "./types";
 
 /**
@@ -7,17 +8,27 @@ import type { AppBindings } from "./types";
  * `@u18/domain` の `newId()` が作る Crockford base32 + 接頭辞の形に合わせる。
  * ここで弾くのは防御というより無駄打ちの抑制 —— 形の違う入力で D1 を
  * 引きに行かない。**弾いた場合も応答は実在しないカードと同じ**にすること。
+ *
+ * **実際の ID の形とは合っていない**（`newCardId()` は `nfc_` + 20 文字で
+ * ちょうど 24 文字、文字集合も狭い）。目的が防御でないので漏れは無いが、
+ * 同じリテラルが 3 箇所にある。#365。
  * 「形が不正」と「存在しない」を区別すると、総当たりする相手に
  * カード ID の形を教えることになる。
  */
 const CARD_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
 
 /**
- * 見つからない・解決できないカードへの応答。
+ * 何も言わないときの応答。
  *
- * 未発行・未紐づけ・無効化済み・遷移先未設定で**1 バイトも変えない**
+ * **未発行・無効化済み・他人のもの・遷移先未設定で 1 バイトも変えない**
  * （仕様書 9 の列挙対策）。本文にカード ID を含めないのも同じ理由で、
  * 含めるとエラー画面がカード ID の反射先になる。
+ *
+ * **#358 で `issued`（未紐づけ）だけがここから外れた** —— タップした人を
+ * 紐づけ画面へ送るためである。**何を区別して何を区別しないかは
+ * `domain/services/disclosure.ts` が 1 箇所で決めている。**
+ * この定数の役目は「畳んだ先を 1 つにする」ことだけで、
+ * **畳むかどうかはここでは決めていない。**
  */
 const NOT_FOUND_BODY = "このカードは利用できません。";
 
@@ -44,10 +55,11 @@ export function registerRedirectRoutes(app: Hono<AppBindings>): void {
    *
    * ## `Referrer-Policy: no-referrer`
    *
-   * 遷移先のサイトにカード ID を渡さない。カード ID は所有者を特定する
-   * 鍵ではないが、第三者のサイトが集めれば「同じカードから来た訪問者」を
-   * 名寄せできる。未成年利用者を想定している以上（仕様書 9 Privacy）、
-   * 渡す理由の無い識別子は渡さない。
+   * 遷移先のサイトにカード ID を渡さない。**#358 以降、これは名寄せ対策
+   * だけではない** —— 未紐づけのカードは ID を知っていれば取れるので、
+   * **遷移先に ID を渡すことは、そのカードを渡すことに近い。**
+   * 未成年利用者を想定している以上（仕様書 9 Privacy）、渡す理由の無い
+   * 識別子は渡さない。
    */
   app.get("/c/:cardId", async (c) => {
     const cardId = c.req.param("cardId");
@@ -60,13 +72,29 @@ export function registerRedirectRoutes(app: Hono<AppBindings>): void {
 
     if (!CARD_ID_PATTERN.test(cardId)) return notFound();
 
-    const result = await c.get("container").useCases.resolveCard.execute(cardId);
-    if (!result.ok) return notFound();
+    const disclosure = await c.get("container").useCases.resolveCard.execute(cardId);
+
+    // **未紐づけなら紐づけ画面へ送る**（#358）。ここが `issued` を区別する
+    // 唯一の場所で、漏れるのは「この ID は実在し、まだ誰のものでもない」の
+    // 1 ビットである。`disclosure.ts` にその代償と前提が書いてある。
+    if (disclosure.kind === "claimable") {
+      // **`no-referrer` をここにも載せる。** 紐づけ画面は自分のオリジンだが、
+      // 302 の前に見ていた外部ページの URL を渡す理由が無い。
+      // **`no-store` も要る** —— 紐づけが済めば次のタップでは遷移先へ
+      // 行くので、この 302 を端末に握らせない。
+      return c.body(null, 302, {
+        Location: claimUrl(c.env.ACCOUNT_ORIGIN, cardId),
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+      });
+    }
+
+    if (disclosure.kind !== "resolvable") return notFound();
 
     // UseCase が `https:` を保証しているが、`Location` に載せる直前の
     // ここでも確かめる。この 1 行が最後の砦で、ここを通らない限り
     // `javascript:` や `http:` が Location に入ることはない。
-    const target = result.value.targetUrl;
+    const target = disclosure.targetUrl;
     if (!target.startsWith("https://")) return notFound();
 
     // `c.redirect()` を使わず自分で組み立てるのは、Location と一緒に

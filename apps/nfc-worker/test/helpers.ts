@@ -1,17 +1,15 @@
 import { DEV_SESSION_COOKIE_NAME } from "@u18/contracts";
-import { newId } from "@u18/domain";
+import { newCardId } from "@u18/domain";
 import { createNfcDatabase, nfcCardEvents, nfcCards } from "@u18/nfc-db";
 import { env } from "cloudflare:test";
 import type { IdentityGateway, NfcOutcome } from "../src/application/ports";
 import { DrizzleCardRepository } from "../src/infrastructure/persistence/drizzle-card.repository";
-import { WebCryptoClaimCodeService } from "../src/infrastructure/crypto/web-crypto";
 
 /** テスト内のリクエストは常にこの origin から出す。Origin 検証が URL と比べるため。 */
 export const ORIGIN = "http://localhost";
 
 export const db = () => createNfcDatabase(env.NFC_DB);
 export const repository = () => new DrizzleCardRepository(db());
-export const claimCodes = new WebCryptoClaimCodeService();
 
 /** 行を消すだけ。マイグレーションは再適用しない（auth-worker の helpers と同じ方針）。 */
 export async function resetDatabase(): Promise<void> {
@@ -79,37 +77,27 @@ export function executionContext(): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
-export type SeededCard = {
-  readonly cardId: string;
-  readonly claimCode: string;
-};
-
 /**
  * 発行済み（未紐づけ）のカードを 1 枚作る。
  *
- * 発行は運営の操作で HTTP には出していないので、Repository を直接使う。
+ * 発行は運営の操作なので、Repository を直接使う。
+ *
+ * **ID は `newCardId()` で作る。`newId("nfc", 20)` と書かない。**
+ * 以前ここは 20 バイトを直接指定していて、**本番の
+ * `issue-cards.use-case.ts` は既定の 16 バイトを使っていた** ——
+ * 長さが 2 箇所に別々に書かれていたので、テストは一度も本番の ID 長を
+ * 通していなかった（#358）。
  */
-export async function seedIssuedCard(batch: string | null = "test-batch"): Promise<SeededCard> {
-  const cardId = newId("nfc", 20);
-  const claimCode = claimCodes.generate();
-  await repository().issue(
-    { id: cardId, claimCodeHash: await claimCodes.hash(claimCode), batch },
-    new Date(),
-  );
-  return { cardId, claimCode };
+export async function seedIssuedCard(batch: string | null = "test-batch"): Promise<string> {
+  const cardId = newCardId();
+  await repository().issue({ id: cardId, batch }, new Date());
+  return cardId;
 }
 
 /** 指定したユーザーに紐づいた、遷移先**未設定**のカードを作る。 */
 export async function seedClaimedCard(ownerUserId: string): Promise<string> {
-  const { cardId, claimCode } = await seedIssuedCard();
-  const now = new Date();
-  const claimed = await repository().claim(
-    cardId,
-    await claimCodes.hash(claimCode),
-    ownerUserId,
-    new Date(now.getTime() - 1000),
-    now,
-  );
+  const cardId = await seedIssuedCard();
+  const claimed = await repository().claim(cardId, ownerUserId, new Date());
   if (!claimed) throw new Error("seedClaimedCard: claim failed");
   return cardId;
 }

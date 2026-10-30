@@ -47,6 +47,13 @@ describe("ルートの登録順", () => {
       // 画面は 2 回出る（`pageSecurityHeaders` とハンドラ）。
       "GET /account/nfc",
       "GET /account/nfc",
+      // 紐づけ画面（#358）。**画面より後ろに居る。** `/account/nfc` と
+      // `/account/nfc/claim` は別パスなので順序に守りの意味は無いが、
+      // 変わったら気づく。POST はこの Worker で唯一の form 送信。
+      "GET /account/nfc/claim",
+      "GET /account/nfc/claim",
+      "POST /account/nfc/claim",
+      "POST /account/nfc/claim",
     ]);
   });
 

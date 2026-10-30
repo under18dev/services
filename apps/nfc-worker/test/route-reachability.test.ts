@@ -52,14 +52,21 @@ const key = (route: { readonly method: string; readonly path: string }): string 
  * **4 本が「まだ」である。** 理由を書いて済ませられるのは承知のうえで、
  * 効くのは**判断を省略できなくする**ほうである —— 入口を作るときに
  * **理由の 1 行が差分から消える**のが手がかりになる。
+ *
+ * **`claim` の理由だけ種類が違う。** 残り 3 本は「まだ入口が無い」だが、
+ * あれは**入口が島ではない**（#358 の form 画面）。この検査は島しか
+ * 走査しないので、**入口があることを言えていない** —— そちらは
+ * `test/claim.form.test.ts` が見ている。
  */
 const NOT_CALLED_FROM_ISLAND: Readonly<Record<string, string>> = {
   "GET /account/nfc/cards": "一覧はサーバーが描く。画面は RPC ではなく use-case から直接読む",
   "POST /account/nfc/cards": "カードの発行は運営の操作（管理者のみ）。#338 Step 3",
-  "POST /account/nfc/cards/claim": "紐づけ。#338 Step 2",
+  "POST /account/nfc/cards/claim":
+    "紐づけ。**利用者が通るのは form の `POST /account/nfc/claim`**（#358）。こちらは API として残してある",
   "POST /account/nfc/cards/:cardId/disable":
     "無効化。片道の操作なので確認の導線が要る。#338 Step 2",
-  "POST /account/nfc/cards/:cardId/release": "手放す。紐づけコードが 1 回しか返らない。#338 Step 2",
+  "POST /account/nfc/cards/:cardId/release":
+    "手放す。手放した瞬間に次にタップした人のものになるので確認の導線が要る（#358）。#338 Step 2",
 };
 
 describe("API の経路に、利用者の入口があること", () => {

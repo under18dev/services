@@ -29,4 +29,5 @@ declare interface Env {
   readonly NFC_DB: D1Database;
   readonly AUTH_ISSUER: string;
   readonly SHORT_URL_ORIGIN: string;
+  readonly ACCOUNT_ORIGIN: string;
 }

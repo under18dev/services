@@ -1,9 +1,7 @@
-import { CLAIM_CODE_TTL_MS } from "../../domain/entities/card";
 import type {
   CardEventRecorder,
   CardRepository,
   CardView,
-  ClaimCodeService,
   Clock,
   IdentityGateway,
   NfcOutcome,
@@ -15,53 +13,66 @@ import { toCardView } from "./card-view";
 export type ClaimCardInput = {
   readonly sessionToken: string | undefined;
   readonly cardId: string;
-  /** カードに同梱された紐づけコード。タグには書かれていない。 */
-  readonly claimCode: string;
 };
 
 /**
- * カードを自分のアカウントへ紐づける（初回紐づけ・移転の後半）。
+ * カードを自分のアカウントへ紐づける（#358）。
  *
- * ## NFC タグをログイン資格情報にしないということ
+ * ## 文書化された決定を 1 つ撤回している
  *
- * 仕様書 10 の「NFCタグ自体はログイン資格情報にしない」は、
- * 「タグを持っていてもログインできない」だけを指していない。
- * **タグを読めることが所有の証明になってはならない**、も含む。
- * 一般的な URL タグは誰でもかざせるし、URL は複製できる。
+ * このファイルには以前、こう書いてあった。
  *
- * したがって紐づけに必要なものは 2 つある。
+ * > 仕様書 10 の「NFC タグ自体はログイン資格情報にしない」は、「タグを
+ * > 持っていてもログインできない」だけを指していない。**タグを読めることが
+ * > 所有の証明になってはならない**、も含む。
  *
- * 1. **u18 Identity のセッション** — 誰のアカウントに結ぶかを決める。
- *    これは auth-worker が検証したものしか受け取らない。
- * 2. **タグに書かれていない紐づけコード** — どのカードを結ぶかを決める。
- *    配布時に封緘・スクラッチで渡し、ハッシュだけを保存する。
+ * **後半を撤回した**（#358、運用者の判断 2026-10-30）。
+ * **前半は撤回していない** —— タグは依然としてログインの資格情報ではなく、
+ * この経路は必ずセッションを要求する。変わったのは「**所有の主張**」に
+ * 何が要るかだけである。
  *
- * この 2 つを分けることで、「カード読み取り」と「アカウント認証」の責務が
- * 分かれる（仕様書 10 の最後の項目）。片方だけでは何も起きない。
+ * ## 撤回の理由は運用である
+ *
+ * 以前は「タグに書かれていない紐づけコード」を封緘・スクラッチで添えていた。
+ * ノベルティとして配る前提でこれを持つと、**封緘・スクラッチ・紛失時の
+ * 再発行が配布物の印刷に乗ってくる。** 守っていたのは「配布済み・未紐づけ」の
+ * 窓だけで、しかもその窓は管理者が付け替えられる（`ReleaseCardUseCase`）。
+ *
+ * **取り返しのつく危険に、取り返しのつかないコスト（印刷）を払っていた。**
+ *
+ * ## いま紐づけに要るもの
+ *
+ * 1. **u18 Identity のセッション** —— 誰のアカウントに結ぶかを決める。
+ *    auth-worker が検証したものしか受け取らない（`requireUserId`）。
+ * 2. **カード ID を知っていること** —— どのカードを結ぶかを決める。
+ *    タップすれば読める値なので、**実質「カードを持っていること」である。**
+ *
+ * 2 が秘密として成り立つ前提は `newCardId()` の 100 ビットにある。
+ * 詳しくは `domain/services/disclosure.ts`。
  *
  * ## 失敗の理由を区別しない
  *
- * カードが無い・既に誰かのもの・コードが違う・期限切れをすべて
- * `claim_rejected` にする。区別すると、総当たりしている相手に
- * 「カード ID は当たっている」と教えることになる。
+ * カードが無い・既に誰かのもの・無効化済みをすべて `claim_rejected` にする。
+ * 区別すると、総当たりしている相手に「カード ID は当たっている」と教える。
  *
- * ## 残余リスク: 紐づけコードの総当たり
+ * **`issued` だけは外から区別が付く**（タップした人を紐づけ画面へ送るため）が、
+ * **その判断はこの UseCase には無い。** `domain/services/disclosure.ts` が
+ * 1 箇所で決めており、ここは「紐づけが通ったか」しか言わない。
  *
- * ここにはレート制限が無い。#21 で auth-worker の `/api/auth/email/*` と
- * `/api/auth/passkeys/login/verify` には入ったが、**nfc-worker はどの経路にも
- * かかっていない**（binding も持っていない）。コード自体が十分長い乱数なので
- * 現実的な脅威は小さいが、試行回数の制限は別途必要。残件として #31 に残す。
+ * ## 残余リスク: 配布前のカード
  *
- * 入れるときは auth-worker の `RateLimitPolicy` と同じ形（`wrangler.jsonc` の
- * `ratelimits` + ポリシー定数 + 設定照合テスト）に揃えること。binding の
- * `period` が 10 / 60 秒しか取れないので、持続的な総当たりには別の層が要る。
+ * **ID を知っていれば誰でも自分のものにできる。** したがって
+ * 「配布済み・未紐づけ」の窓にあるカードは、**ID が漏れた時点で奪われる。**
+ * レート制限は無いが、総当たりは 100 ビットに阻まれる（`disclosure.ts`）。
+ * 現実的な脅威は**総当たりではなく、配布前の束を見られること**なので、
+ * 手当ては運用側にある（`docs/runbook.md`）。奪われた場合は、管理者が
+ * `release` で付け替えられる。
  */
 export class ClaimCardUseCase {
   constructor(
     private readonly identity: IdentityGateway,
     private readonly cards: CardRepository,
     private readonly events: CardEventRecorder,
-    private readonly claimCodes: ClaimCodeService,
     private readonly clock: Clock,
   ) {}
 
@@ -69,29 +80,16 @@ export class ClaimCardUseCase {
     const actor = await requireUserId(this.identity, input.sessionToken);
     if (!actor.ok) return actor;
 
-    if (input.claimCode === "") return outcomeErr({ kind: "claim_rejected" });
-
-    const now = this.clock.now();
-    const claimableSince = new Date(now.getTime() - CLAIM_CODE_TTL_MS);
-    const codeHash = await this.claimCodes.hash(input.claimCode);
-
-    // 状態・ハッシュ一致・期限をすべて WHERE 句で判定する。
-    // アプリ側で確かめてから UPDATE すると、同じコードを同時に出した
-    // 2 人が両方成功しうる（仕様書 7.3 の単回消費と同じ問題）。
-    const claimed = await this.cards.claim(
-      input.cardId,
-      codeHash,
-      actor.value,
-      claimableSince,
-      now,
-    );
+    // **状態の確認はしない。** `findById` して `isClaimable()` を見てから
+    // UPDATE すると、同じカードを同時にタップした 2 人が両方成功する。
+    // 前提は全部 WHERE 句にある（`CardRepository.claim`）。
+    const claimed = await this.cards.claim(input.cardId, actor.value, this.clock.now());
     if (!claimed) return outcomeErr({ kind: "claim_rejected" });
 
     await this.events.record({
       cardId: input.cardId,
       event: "card.claimed",
       actorUserId: actor.value,
-      // 紐づけコードは metadata にも書かない。
     });
 
     const fresh = await this.cards.findById(input.cardId);

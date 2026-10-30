@@ -10,11 +10,16 @@ import { readTargetUpdate } from "./target-update";
  *
  * ## いま叩けるのは 1 本だけ
  *
- * `PUT /account/nfc/cards/:cardId/target`（遷移先の変更）。残り 4 本
- * （紐づけ・無効化・手放す・発行）は Step 2 / Step 3 で入る。
+ * `PUT /account/nfc/cards/:cardId/target`（遷移先の変更）。無効化・手放す・
+ * 発行の 3 本は Step 2 / Step 3 で入る。
+ *
+ * **紐づけはここに来ない**（#358）。カードをタップした人が
+ * `/account/nfc/claim` の form で登録する —— **JavaScript 無しで通る必要が
+ * あるので、島にしていない**（`presentation/http/csrf.ts` に理由）。
  *
  * **最初に通す 1 本を `target` にしたのは、間違えても戻せるからである。**
- * `disable` は片道、`release` は紐づけコードが 1 回しか返らない。
+ * `disable` は片道、`release` は**戻せるが、手放した瞬間に次にタップした
+ * 人のものになる**（#358 で紐づけコードが無くなった）。
  *
  * ## 目印は `data-*` で引く
  *

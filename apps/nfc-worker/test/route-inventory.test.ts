@@ -5,6 +5,7 @@ import { env } from "cloudflare:test";
 import {
   CARD_API_ROUTES,
   CARD_ASSET_ROUTES,
+  CARD_CLAIM_ROUTES,
   CARD_PAGE_ROUTES,
   CARD_ROUTES,
   EXPECTED_ROUTES,
@@ -58,6 +59,7 @@ describe("公開面の一覧", () => {
       ["CARD_API_ROUTES", CARD_API_ROUTES],
       ["CARD_PAGE_ROUTES", CARD_PAGE_ROUTES],
       ["CARD_ASSET_ROUTES", CARD_ASSET_ROUTES],
+      ["CARD_CLAIM_ROUTES", CARD_CLAIM_ROUTES],
     ] as const) {
       expect(routes.length, `${name} が空`).toBeGreaterThan(0);
     }
@@ -93,7 +95,7 @@ describe("区分どおりの応答が返る", () => {
    */
   const BODIES: Record<string, unknown> = {
     "POST /account/nfc/cards": { count: 1 },
-    "POST /account/nfc/cards/claim": { cardId: "doesnotexist", claimCode: "x" },
+    "POST /account/nfc/cards/claim": { cardId: "doesnotexist" },
     "PUT /account/nfc/cards/:cardId/target": { targetUrl: "https://example.com/" },
   };
 
@@ -126,6 +128,32 @@ describe("区分どおりの応答が返る", () => {
       expect(response.headers.get("Location")).toContain("/login?return_to=");
     },
   );
+
+  it("GET /account/nfc/claim は Cookie 無しでログインへ送る", async () => {
+    // **カードを引く前にログインを要求している**ことの裏返し。先に引くと、
+    // 未認証の相手にも「この ID は紐づけられる」が見える（#358）。
+    const response = await callAnonymously("GET", "/account/nfc/claim");
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toContain("/login?return_to=");
+  });
+
+  it("POST /account/nfc/claim は Cookie 無しで 400（CSRF が先に落とす）", async () => {
+    // **401 ではない。** セッションを見る前にトークンを確かめているので、
+    // ここが 401 に変わったら順序が入れ替わっている。
+    const response = await callAnonymously("POST", "/account/nfc/claim");
+
+    expect(response.status).toBe(400);
+  });
+
+  it("CARD_CLAIM_ROUTES の区分が、API と画面のどちらとも重なっていない", () => {
+    const others = [...CARD_API_ROUTES, ...CARD_PAGE_ROUTES].map(
+      (route) => `${route.method} ${route.path}`,
+    );
+    for (const route of CARD_CLAIM_ROUTES) {
+      expect(others).not.toContain(`${route.method} ${route.path}`);
+    }
+  });
 
   it("CARD_ASSET_ROUTES は Cookie 無しで 200（公開アセット）", async () => {
     // **ハッシュ付きの実パスで叩く。** 一覧側は `<hash>` で伏せてあるので、

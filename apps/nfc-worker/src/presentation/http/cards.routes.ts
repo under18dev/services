@@ -28,6 +28,7 @@ import type { AppBindings } from "./types";
  * `domain/services/target-url.ts` に経緯を書いてある。
  */
 
+/** 実際の ID の形とは合っていない。目的は無駄打ちの抑制（#365、`redirect.routes.ts`）。 */
 const cardIdSchema = z.string().regex(/^[a-z0-9_]{1,64}$/);
 
 const updateTargetSchema = z.object({
@@ -50,7 +51,6 @@ const issueSchema = z.object({
 
 const claimSchema = z.object({
   cardId: cardIdSchema,
-  claimCode: z.string().min(1).max(64),
 });
 
 function statusFor(failure: NfcFailure): 400 | 401 | 403 | 404 | 503 {
@@ -137,9 +137,10 @@ function createCardsApi() {
        * ここには無い —— ルートに書くと、経路が増えたときに素通りする形を
        * 作る（#186 の `rpc-parity.test.ts` で確かめた話と同じ）。
        *
-       * **応答に平文の紐づけコードが載る。** DB にはハッシュしか入らないので、
-       * この応答を取りこぼしたカードは配れない（再発行するしかない）。
-       * `Cache-Control: no-store` が全経路に付いていることが効く場面でもある。
+       * **#358 以降、応答に秘密は載らない。** 返るのはカード ID だけで、
+       * 取りこぼしても一覧から引き直せる。ただし**未紐づけのカードは
+       * ID を知っている人がタップすれば、その人のものになる** ——
+       * この応答は配布物そのものと同じ扱いにすること。
        */
       .post("/", async (c) => {
         const parsed = issueSchema.safeParse(await c.req.json().catch(() => null));
@@ -165,18 +166,28 @@ function createCardsApi() {
         return c.json({ cards: result.value });
       })
 
-      /** カードを自分のアカウントへ紐づける（初回紐づけ・移転の受け取り側）。 */
+      /**
+       * カードを自分のアカウントへ紐づける（#358）。
+       *
+       * **利用者が通るのはこちらではない。** タップした人が使うのは
+       * `GET/POST /account/nfc/claim`（`ui/cards-ui.routes.tsx`）の form で、
+       * **JavaScript 無しで通る。** こちらは API として残してある。
+       *
+       * **2 本あるが、認可は 1 箇所にある** —— どちらも `ClaimCardUseCase` を
+       * 呼ぶだけで、セッションの検証も「まだ誰のものでもない」の判定も
+       * UseCase と WHERE 句が持っている。`cards-page.tsx` が「書き込み経路を
+       * 2 本持たない」と書いているのは**検証を 2 箇所に持つこと**を指していて、
+       * ここで重複しているのは本文の読み方だけである。
+       */
       .post("/claim", async (c) => {
         const parsed = claimSchema.safeParse(await readJson(c.req.raw));
         // 入力の形が不正でも `claim_rejected` に畳む。「形は合っているが
-        // コードが違う」と区別できると、コードの形を教えることになる。
+        // そのカードは紐づけられない」と区別できると、カード ID の形を教える。
         if (!parsed.success) return c.json({ error: "claim_rejected" }, 400);
 
         const result = await c.get("container").useCases.claimCard.execute({
           sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
           cardId: parsed.data.cardId,
-          // 紙から転記する値なので、大文字と前後の空白だけ吸収する。
-          claimCode: parsed.data.claimCode.trim().toLowerCase(),
         });
         if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
         return c.json(result.value);
@@ -224,8 +235,9 @@ function createCardsApi() {
       /**
        * 所有権を手放す（移転の前半）。
        *
-       * 応答の `claimCode` は**この 1 回しか返らない**。保存しているのは
-       * ハッシュだけで、再発行は release をもう一度行うしかない。
+       * **#358 で「1 回しか返らない文字列」を返さなくなった。** カードは
+       * 未紐づけへ戻り、**次にタップした人のものになる** ——
+       * 手放すのは相手に渡す直前にすること（`ReleaseCardUseCase`）。
        */
       .post("/:cardId/release", async (c) => {
         const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
@@ -237,7 +249,9 @@ function createCardsApi() {
         });
         if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
 
-        // 平文の紐づけコードを含むので、中間キャッシュにも残さない。
+        // 所有者固有の状態なので中間キャッシュに残さない。他の経路にも
+        // 同じ理由があるが、`Cache-Control` が経路ごとに書かれたままなのは
+        // 脅威モデル §3.7 が未解決として挙げているとおりである。
         return c.json(result.value, 200, { "Cache-Control": "no-store" });
       })
   );

@@ -97,6 +97,13 @@
     // IdP 自身と、この Worker 自身の短縮 URL ホスト。
     "AUTH_ISSUER": "http://localhost:8787",
     "SHORT_URL_ORIGIN": "http://localhost:8789",
+    // 未紐づけのカードをタップした人を送る先（#358）。
+    //
+    // **`AUTH_ISSUER` を流用しない。** 本番では両方 auth.under18.dev に
+    // なるが、**開発では別のポートである** —— /account/nfc/* を出すのは
+    // この Worker 自身（8789）で、AUTH_ISSUER（8787）は auth-worker である。
+    // 流用すると本番だけ動き、開発では紐づけ画面に辿り着けない。
+    "ACCOUNT_ORIGIN": "http://localhost:8789",
     "ENVIRONMENT": "development",
   },
 
@@ -193,13 +200,18 @@
         "AUTH_ISSUER": "https://auth.under18.dev",
         // 短縮 URL のオリジン。自分自身への遷移（リダイレクト連鎖）を禁止する。
         "SHORT_URL_ORIGIN": "https://go.under18.dev",
+        // 紐づけ画面のオリジン（#358）。本番では AUTH_ISSUER と同じ値だが、
+        // **同じ値だから省略できるわけではない** —— vars は env に継承
+        // されないので、ここに書かないと本番だけ undefined になる。
+        "ACCOUNT_ORIGIN": "https://auth.under18.dev",
         "ENVIRONMENT": "production",
       },
     },
   },
 
   // Secrets は持たない。
-  // 紐づけコードはハッシュだけを D1 に保存し、鍵もペッパーも使わない
-  // （高エントロピーな乱数なので SHA-256 で足りる。
-  //  src/infrastructure/crypto/web-crypto.ts を参照）。
+  // **#358 以降、この Worker は秘密を 1 つも保存しない。** 紐づけコードを
+  // 廃止したので、ハッシュを置く列も、それを作る鍵もペッパーも無い。
+  // 所有の根拠はカード ID（`newCardId()` の 100 ビット）だけで、
+  // それはタグに書いてある値である。
 }

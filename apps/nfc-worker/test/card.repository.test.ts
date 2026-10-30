@@ -1,7 +1,6 @@
-import { newId } from "@u18/domain";
+import { newCardId } from "@u18/domain";
 import { beforeEach, describe, expect, it } from "vitest";
-import { CLAIM_CODE_TTL_MS } from "../src/domain/entities/card";
-import { claimCodes, repository, resetDatabase, seedActiveCard, seedIssuedCard } from "./helpers";
+import { repository, resetDatabase, seedActiveCard, seedIssuedCard } from "./helpers";
 
 /**
  * 状態遷移の前提条件が **WHERE 句に入っていること**を、本物の D1 で確かめる。
@@ -29,7 +28,7 @@ describe("updateTarget", () => {
   });
 
   it("未紐づけのカードは更新できない", async () => {
-    const { cardId } = await seedIssuedCard();
+    const cardId = await seedIssuedCard();
 
     const updated = await repository().updateTarget(
       cardId,
@@ -43,7 +42,7 @@ describe("updateTarget", () => {
 
   it("存在しないカードでも例外を投げない", async () => {
     const updated = await repository().updateTarget(
-      newId("nfc", 20),
+      newCardId(),
       "usr_taro",
       "https://example.com/x",
       new Date(),
@@ -54,67 +53,68 @@ describe("updateTarget", () => {
 });
 
 describe("claim", () => {
-  it("期限切れの紐づけコードは通らない", async () => {
-    const { cardId, claimCode } = await seedIssuedCard();
+  it("未紐づけなら、カード ID を知っているだけで通る", async () => {
+    // **#358 の本体。** 以前は紐づけコードの一致を WHERE 句で要求していた。
+    const cardId = await seedIssuedCard();
 
-    // 未使用のコードが印刷物として残り続けることを避けるための期限。
-    const claimableSince = new Date(Date.now() + 1000);
-    const claimed = await repository().claim(
-      cardId,
-      await claimCodes.hash(claimCode),
-      "usr_taro",
-      claimableSince,
-      new Date(),
-    );
-
-    expect(claimed).toBe(false);
-    expect((await repository().findById(cardId))?.ownerUserId).toBeNull();
+    expect(await repository().claim(cardId, "usr_taro", new Date())).toBe(true);
+    expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
   });
 
-  it("期限内なら通る", async () => {
-    const { cardId, claimCode } = await seedIssuedCard();
+  it("所有者がいるカードは奪えない", async () => {
+    const cardId = await seedActiveCard("usr_taro");
 
-    const claimed = await repository().claim(
-      cardId,
-      await claimCodes.hash(claimCode),
-      "usr_taro",
-      new Date(Date.now() - CLAIM_CODE_TTL_MS),
-      new Date(),
-    );
-
-    expect(claimed).toBe(true);
+    expect(await repository().claim(cardId, "usr_hanako", new Date())).toBe(false);
+    expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
   });
 
-  it("成功したらコードを消費する", async () => {
-    const { cardId, claimCode } = await seedIssuedCard();
-    const hash = await claimCodes.hash(claimCode);
-    const claimableSince = new Date(Date.now() - CLAIM_CODE_TTL_MS);
+  it("無効化済みのカードは紐づけられない", async () => {
+    // **紛失対策の本体。** 拾った人がタップして自分のものにできてはならない。
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().disable(cardId, "usr_taro", "lost", new Date());
 
-    expect(await repository().claim(cardId, hash, "usr_taro", claimableSince, new Date())).toBe(
-      true,
-    );
-    // 消費しないと、同じ紙片を持つ相手が release 後に何度でも claim し直せる。
-    expect((await repository().findById(cardId))?.claimCodeHash).toBeNull();
+    expect(await repository().claim(cardId, "usr_hanako", new Date())).toBe(false);
+    expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
+  });
+
+  it("存在しないカードでも例外を投げない", async () => {
+    expect(await repository().claim(newCardId(), "usr_taro", new Date())).toBe(false);
+  });
+
+  it("同じカードを 2 人が同時にタップしても、通るのは 1 人だけ", async () => {
+    // **これが WHERE 句に前提を入れている理由である。** #358 で紐づけ
+    // コードが無くなり、ID を知っていれば誰でも投げられるようになったので、
+    // 競合は以前より起こしやすい。
+    const cardId = await seedIssuedCard();
+
+    const results = await Promise.all([
+      repository().claim(cardId, "usr_taro", new Date()),
+      repository().claim(cardId, "usr_hanako", new Date()),
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 
   it("初回の紐づけは移転として数えない", async () => {
-    const { cardId, claimCode } = await seedIssuedCard();
-    await repository().claim(
-      cardId,
-      await claimCodes.hash(claimCode),
-      "usr_taro",
-      new Date(Date.now() - CLAIM_CODE_TTL_MS),
-      new Date(),
-    );
+    const cardId = await seedIssuedCard();
+    await repository().claim(cardId, "usr_taro", new Date());
 
     expect((await repository().findById(cardId))?.transferCount).toBe(0);
+  });
+
+  it("手放したあとの紐づけは移転として数える", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().release(cardId, "usr_taro", new Date());
+
+    expect(await repository().claim(cardId, "usr_hanako", new Date())).toBe(true);
+    expect((await repository().findById(cardId))?.transferCount).toBe(1);
   });
 });
 
 describe("disable / release", () => {
   it("無効化しても所有者を残す", async () => {
-    // 所有者を外すと `issued` と区別が付かなくなり、拾った人間が
-    // 紐づけコードを持っていた場合に自分のものにできてしまう。
+    // 所有者を外すと `issued` と区別が付かなくなり、**#358 以降は拾った人が
+    // タップするだけで自分のものにできてしまう。**
     const cardId = await seedActiveCard("usr_taro");
 
     await repository().disable(cardId, "usr_taro", "lost", new Date());
@@ -125,24 +125,34 @@ describe("disable / release", () => {
     expect(card?.isResolvable()).toBe(false);
   });
 
-  it("手放すと issued に戻り、新しいコードが入る", async () => {
+  it("手放すと issued に戻り、遷移先が消える", async () => {
     const cardId = await seedActiveCard("usr_taro");
 
-    const released = await repository().release(cardId, "usr_taro", "newhash", new Date());
+    const released = await repository().release(cardId, "usr_taro", new Date());
 
     expect(released).toBe(true);
     const card = await repository().findById(cardId);
     expect(card?.status).toBe("issued");
     expect(card?.ownerUserId).toBeNull();
+    // 次の所有者のカードが、本人の知らない URL を配信した状態で始まらない。
     expect(card?.targetUrl).toBeNull();
-    expect(card?.claimCodeHash).toBe("newhash");
+    // **#358 以降、手放した瞬間から誰でも紐づけられる。**
+    expect(card?.isClaimable()).toBe(true);
   });
 
   it("所有者でなければ手放せない", async () => {
     const cardId = await seedActiveCard("usr_taro");
 
-    expect(await repository().release(cardId, "usr_hanako", "newhash", new Date())).toBe(false);
+    expect(await repository().release(cardId, "usr_hanako", new Date())).toBe(false);
     expect((await repository().findById(cardId))?.ownerUserId).toBe("usr_taro");
+  });
+
+  it("無効化済みのカードは手放せない", async () => {
+    // 手放せると、紛失して止めたカードが再び紐づけ可能な状態へ戻る。
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().disable(cardId, "usr_taro", "lost", new Date());
+
+    expect(await repository().release(cardId, "usr_taro", new Date())).toBe(false);
   });
 });
 

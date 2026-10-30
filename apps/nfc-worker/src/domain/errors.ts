@@ -19,7 +19,14 @@ export type NfcFailure =
   | { readonly kind: "card_not_found" }
   /** 入力が不正。理由コードは所有者本人にだけ返す。 */
   | { readonly kind: "invalid_target_url"; readonly reason: string }
-  /** 紐づけコードが違う・期限切れ・既に使用済み。理由は区別しない。 */
+  /**
+   * 紐づけが通らなかった。**理由は区別しない**（#358）。
+   *
+   * カードが無い・既に誰かのもの・無効化済みをすべてここへ畳む。
+   * 区別すると、カード ID を総当たりする相手に「その ID は実在する」と
+   * 教える。**何を区別して何を区別しないかは
+   * `domain/services/disclosure.ts` が 1 箇所で決めている。**
+   */
   | { readonly kind: "claim_rejected" }
   /**
    * 管理者だけが行える操作を、管理者でない利用者が叩いた（#187）。
