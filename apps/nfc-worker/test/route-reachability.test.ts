@@ -49,9 +49,12 @@ const key = (route: { readonly method: string; readonly path: string }): string 
  * dashboard の `NOT_CALLED_FROM_ISLAND` と同じ形。**新しい API を足すと、
  * 呼ぶ側を書くか、ここに理由を書くまで落ちる。**
  *
- * **4 本が「まだ」である。** 理由を書いて済ませられるのは承知のうえで、
- * 効くのは**判断を省略できなくする**ほうである —— 入口を作るときに
- * **理由の 1 行が差分から消える**のが手がかりになる。
+ * **2 本が「まだ」である。** #382 で `disable` と `release` に入口が
+ * できたので、**理由の 2 行が差分から消えた** —— 狙っていたとおりの
+ * 動き方をしている。
+ *
+ * 理由を書いて済ませられるのは承知のうえで、効くのは**判断を省略できなく
+ * する**ほうである。
  *
  * **`claim` の理由だけ種類が違う。** 残り 3 本は「まだ入口が無い」だが、
  * あれは**入口が島ではない**（#358 の form 画面）。この検査は島しか
@@ -63,10 +66,6 @@ const NOT_CALLED_FROM_ISLAND: Readonly<Record<string, string>> = {
   "POST /account/nfc/cards": "カードの発行は運営の操作（管理者のみ）。#338 Step 3",
   "POST /account/nfc/cards/claim":
     "紐づけ。**利用者が通るのは form の `POST /account/nfc/claim`**（#358）。こちらは API として残してある",
-  "POST /account/nfc/cards/:cardId/disable":
-    "無効化。片道の操作なので確認の導線が要る。#338 Step 2",
-  "POST /account/nfc/cards/:cardId/release":
-    "手放す。手放した瞬間に次にタップした人のものになるので確認の導線が要る（#358）。#338 Step 2",
 };
 
 describe("API の経路に、利用者の入口があること", () => {
@@ -99,6 +98,22 @@ describe("API の経路に、利用者の入口があること", () => {
 
     expect(target).toBeDefined();
     expect(target && CARDS_ISLAND_JS.includes(chainFor(target))).toBe(true);
+  });
+
+  it("呼ばれている経路に、免除の理由が残っていない", () => {
+    // **#382 で踏みかけた形。** `disable` と `release` に入口を作ったとき、
+    // 理由の行を消し忘れても**どの検査も落ちなかった** —— 免除は
+    // 「呼ばれていないこと」しか見ていないので、両方あっても通る。
+    //
+    // **残ると、次にその経路の入口が消えたときに黙って免除される。**
+    const stale = CARD_API_ROUTES.filter(
+      (route) => CARDS_ISLAND_JS.includes(chainFor(route)) && key(route) in NOT_CALLED_FROM_ISLAND,
+    ).map(key);
+
+    expect(
+      stale,
+      "島から呼ばれているのに NOT_CALLED_FROM_ISLAND に残っている（理由の行を消すこと）",
+    ).toEqual([]);
   });
 
   it("理由の側に、実在しない経路が残っていない", () => {

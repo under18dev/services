@@ -218,3 +218,47 @@ describe("ページが参照するアセット", () => {
     }
   });
 });
+
+describe("片道の操作（#382）", () => {
+  it("有効なカードには、止める／ゆずるの入口が出る", async () => {
+    const cardId = await seedActiveCard("usr_taro", "https://example.com/taro");
+
+    const html = await (await open(cookieFor(TARO))).text();
+
+    expect(html).toContain("このカードを止める");
+    expect(html).toContain("人にゆずる");
+    // どのカードに対する操作かが、読み上げにも分かること。
+    expect(html).toContain(`${cardId} をこのカードを止める`);
+  });
+
+  it("未紐づけ・無効化済みには出さない", async () => {
+    // **出しても必ず失敗する入口を描かない。** `issued` はまだ誰のものでも
+    // なく、`disabled` は既に止まっている。
+    const disabled = await seedActiveCard("usr_taro");
+    await repository().disable(disabled, "usr_taro", "lost", new Date());
+
+    const html = await (await open(cookieFor(TARO))).text();
+
+    expect(html).not.toContain("このカードを止める");
+    expect(html).not.toContain("人にゆずる");
+  });
+
+  it("「この画面からできないこと」の節が消えている", async () => {
+    // **#382 の完了条件。** 残り 2 本が入ったので、あの節に書くことが
+    // 無くなった —— **「できるのにできないと書いてある」を作らない。**
+    await seedActiveCard("usr_taro");
+
+    const html = await (await open(cookieFor(TARO))).text();
+
+    expect(html).not.toContain("この画面からできないこと");
+    expect(html).not.toContain("API から操作してください");
+  });
+
+  it("JS が無いときに、操作が要ることを言う", async () => {
+    await seedActiveCard("usr_taro");
+
+    const html = await (await open(cookieFor(TARO))).text();
+
+    expect(html).toContain("カードを止めたり人にゆずったりするには JavaScript が必要です");
+  });
+});

@@ -48,3 +48,52 @@ export const UPDATE_TARGET_COPY = {
   /** 想定していない応答。**「成功したかもしれない」と思わせない。** */
   unknown: "変更できませんでした。もう一度お試しください。",
 } as const;
+
+/**
+ * 片道の操作の文言（#382）。
+ *
+ * ## 確認に「本当によろしいですか」と書かない
+ *
+ * dashboard-worker の `ACTIONS` と同じ方針で、**何が起きるかを書く。**
+ * 「本当によろしいですか」だけでは、押す人は**何を失うのか分からないまま
+ * 判断する**ことになる。
+ *
+ * ## 2 つは戻せ方が違う。文言も分ける
+ *
+ * **止める**のは片道で、本人には戻す手段が無い。
+ * **ゆずる**のは戻せるが、**手放した瞬間に次にタップした人のものになる**
+ * （#358 で紐づけコードが無くなった）。**「あとで取り消せる」と読ませない。**
+ *
+ * ## `confirm` の文面に Markdown を書かないこと
+ *
+ * `window.confirm` はネイティブのダイアログで、**`**強調**` はそのまま
+ * アスタリスクとして出る。** このファイルの他の文言（画面に出すもの）とは
+ * 扱いが違う。改行は `\n` で入れる。
+ */
+export const CARD_ACTION_COPY = {
+  disable: {
+    label: "このカードを止める",
+    /** @param cardId 押す前に、どのカードかを見せる。 */
+    confirm: (cardId: string) =>
+      `カード ${cardId} を止めます。\n\n` +
+      "タップしてもどこへも飛ばなくなります。\n" +
+      "自分では元に戻せません。戻すには運営への連絡が必要です。",
+    failed: "このカードを止められませんでした。もう一度お試しください。",
+  },
+  release: {
+    label: "人にゆずる",
+    confirm: (cardId: string) =>
+      `カード ${cardId} を手放します。\n\n` +
+      "あなたのものではなくなり、次にタップした人のものになります。\n" +
+      "設定していた遷移先も消えます。\n\n" +
+      "渡す相手が決まっていて、いま手渡せるときだけ実行してください。",
+    failed: "このカードを手放せませんでした。もう一度お試しください。",
+  },
+} as const;
+
+/** 片道の操作に共通の失敗。`UPDATE_TARGET_COPY` と同じ語彙に揃える。 */
+export const CARD_ACTION_SHARED_COPY = {
+  unauthenticated: UPDATE_TARGET_COPY.unauthenticated,
+  notFound: UPDATE_TARGET_COPY.notFound,
+  unavailable: UPDATE_TARGET_COPY.unavailable,
+} as const;

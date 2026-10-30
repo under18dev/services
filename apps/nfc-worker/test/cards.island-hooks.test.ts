@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { CARDS_UI_PATH, createApp } from "../src/presentation/http/app";
 import { CARDS_ISLAND_JS } from "../src/presentation/http/ui/generated/cards-island.bundle";
 import {
+  ACTION_STATUS,
+  ACTIONS_ROW,
   CARD_ID,
+  DISABLE_BUTTON,
+  RELEASE_BUTTON,
   TARGET_FORM,
   TARGET_INPUT,
   TARGET_SAVE,
@@ -56,7 +60,19 @@ describe("島が掴む目印を、サーバーが実際に描いている", () =
 
     const page = await html(cookieFor(TARO));
 
-    for (const hook of [TARGET_FORM, CARD_ID, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS]) {
+    for (const hook of [
+      TARGET_FORM,
+      CARD_ID,
+      TARGET_INPUT,
+      TARGET_SAVE,
+      TARGET_STATUS,
+      // 片道の操作（#382）。**同じ表に足す** —— 別の検査にすると、
+      // 片方だけが「島は引くがサーバーが描いていない」に落ちうる。
+      ACTIONS_ROW,
+      DISABLE_BUTTON,
+      RELEASE_BUTTON,
+      ACTION_STATUS,
+    ]) {
       expect(page, `${hook} が出ていない`).toContain(hook);
     }
     // **カード ID が実際に載っていること。** 属性だけ出て中身が空だと、
@@ -80,9 +96,16 @@ describe("島が掴む目印を、サーバーが実際に描いている", () =
     await seedActiveCard("usr_taro");
 
     const page = await html(cookieFor(TARO));
-    const inIsland = [TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS].filter((hook) =>
-      CARDS_ISLAND_JS.includes(hook),
-    );
+    const inIsland = [
+      TARGET_FORM,
+      TARGET_INPUT,
+      TARGET_SAVE,
+      TARGET_STATUS,
+      ACTIONS_ROW,
+      DISABLE_BUTTON,
+      RELEASE_BUTTON,
+      ACTION_STATUS,
+    ].filter((hook) => CARDS_ISLAND_JS.includes(hook));
 
     expect(inIsland.length, "島のバンドルに目印が 1 つも出ていない").toBeGreaterThan(0);
     for (const hook of inIsland) {

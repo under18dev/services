@@ -19,7 +19,18 @@ import type { CardView } from "../../../application/ports";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
 import { TARGET_INPUT_CLASS } from "./island-classes";
-import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "./island-hooks";
+import {
+  ACTION_STATUS,
+  ACTIONS_ROW,
+  CARD_ID,
+  DISABLE_BUTTON,
+  RELEASE_BUTTON,
+  TARGET_FORM,
+  TARGET_INPUT,
+  TARGET_SAVE,
+  TARGET_STATUS,
+} from "./island-hooks";
+import { CARD_ACTION_COPY } from "./client/messages";
 
 /**
  * 自分のカード一覧（Phase 4 / #31、#338 で Kiwa UI へ）。
@@ -46,24 +57,26 @@ import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "
  * 入り、**「島だけが使う class」という状態そのものが無くなる**
  * （`ui/island-classes.ts`）。
  *
- * ## 操作はまだ揃っていない
+ * ## 所有者がこの画面でできること（#382）
  *
- * API には 5 つの操作（紐づけ・遷移先の変更・無効化・移転・発行）が
- * ある。**この画面から叩けるのは遷移先の変更 1 本**で、残りは
- * Step 2 / Step 3 で入る（#338）。
+ * **遷移先の変更・止める・人にゆずる**の 3 つ。所有者が自分のカードに
+ * 対してできる操作は、**これで全部である。**
  *
- * **紐づけはこの画面に来ない**（#358）。カードをタップした人が
- * `/account/nfc/claim` で登録する形になったので、**ここに入口を作ると
- * 2 つ目の経路**になる。一覧に無いのは「まだできない」ではなく
- * 「ここではない」である。
+ * **以前あった「この画面からできないこと」の節は消した。** 残り 2 本が
+ * 入ったので、あそこに書くことが無くなった —— **「できるのにできないと
+ * 書いてある」を作らない。**
  *
- * **最初に通す 1 本を `target` にしたのは、間違えても戻せるからである。**
- * `disable` は片道、`release` は**戻せるが、手放した瞬間に次にタップした
- * 人のものになる**（#358 で紐づけコードが無くなった）。
+ * **紐づけと発行はここに来ない。** 紐づけはカードをタップした人が
+ * `/account/nfc/claim` で行い（#358）、発行は管理者だけの操作で運営の
+ * 画面にある（`admin-page.tsx`）。**一覧に無いのは「まだできない」では
+ * なく「ここではない」である。**
  *
- * **「できない」を黙って出さない** —— 下の案内がそれを言っている。
- * **できるようになった分はそこから外すこと。** 全部残すと「できるのに
- * できないと書いてある」、全部消すと「できないのに何も書いていない」になる。
+ * ## 片道の 2 本には確認を挟む
+ *
+ * `target` は何度でもやり直せるので確認を出さない。**`disable` は片道**で
+ * 本人には戻す手段が無く、**`release` は戻せるが手放した瞬間に次にタップ
+ * した人のものになる**（#358 で紐づけコードが無くなった）。
+ * **戻せないものに、戻せるものと同じ形を使わない。**
  *
  * **この画面は form POST を持たない。** `cards.routes.ts` が既に
  * JSON + Origin 検証で守られていて、並べると 2 つを同期させ続ける必要が
@@ -93,6 +106,18 @@ import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "
  * サーバー側のこのファイルで文字列にしてしまえば、島には何も増えない。
  */
 const SAVE_BUTTON_CLASS = getButtonClasses("default", "sm");
+
+/**
+ * 片道の操作のボタン（#382）。
+ *
+ * **止めるほうだけ `destructive`。** 状態バッジが `disabled` にだけ
+ * `destructive` を使っているのと揃える —— **色で良し悪しを言わない**
+ * （design.md の "No colorful UI."）が、**戻せないことは言う。**
+ *
+ * **ゆずるほうは中立。** 戻せる操作なので、止めると同じ見た目にしない。
+ */
+const DISABLE_BUTTON_CLASS = getButtonClasses("destructive", "sm");
+const RELEASE_BUTTON_CLASS = getButtonClasses("outline", "sm");
 
 const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
   issued: "未紐づけ",
@@ -183,6 +208,49 @@ const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
       </div>
     )}
 
+    {/*
+      **片道の操作**（#382）。`active` のカードにだけ出す ——
+      `issued` はまだ誰のものでもなく、`disabled` は既に止まっている。
+      **出しても必ず失敗する入口を描かない。**
+
+      `TARGET_FORM` と入れ物を分けているのは、**結果を出す行が別**だから。
+      遷移先の保存の結果と、止めた／手放した結果が同じ行に出ると、
+      どちらの話か読めなくなる。
+    */}
+    {card.status === "active" && (
+      <div
+        class="mt-3 flex flex-col gap-2"
+        {...{ [ACTIONS_ROW]: "" }}
+        {...{ [CARD_ID]: card.cardId }}
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class={RELEASE_BUTTON_CLASS}
+            aria-label={`${card.cardId} を${CARD_ACTION_COPY.release.label}`}
+            {...{ [RELEASE_BUTTON]: "" }}
+          >
+            {CARD_ACTION_COPY.release.label}
+          </button>
+          <button
+            type="button"
+            class={DISABLE_BUTTON_CLASS}
+            aria-label={`${card.cardId} を${CARD_ACTION_COPY.disable.label}`}
+            {...{ [DISABLE_BUTTON]: "" }}
+          >
+            {CARD_ACTION_COPY.disable.label}
+          </button>
+        </div>
+        {/* 失敗だけを出す行。**成功したら読み込み直す**ので、ここは空のまま。 */}
+        <p class={ITEM_META_CLASS} {...{ [ACTION_STATUS]: "" }}></p>
+        <noscript>
+          <p class={ITEM_META_CLASS}>
+            カードを止めたり人にゆずったりするには JavaScript が必要です。
+          </p>
+        </noscript>
+      </div>
+    )}
+
     {(card.claimedAt !== null || card.transferCount > 0 || card.disabledAt !== null) && (
       <p class="text-xs text-foreground-soft">
         {card.claimedAt === null ? null : `${toDate(card.claimedAt)} に紐づけ`}
@@ -254,17 +322,5 @@ export const CardsPage: FC<CardsPageProps> = ({ cards, isAdmin }) => (
         </CardContent>
       </Card>
     )}
-
-    <Card>
-      <CardHeader>
-        <CardTitle>この画面からできないこと</CardTitle>
-        <CardDescription>
-          無効化・人への譲渡・カードの発行は、まだこの画面からは行えません。
-          <code class="font-mono">/account/nfc/cards</code> の API から操作してください。
-          <strong>遷移先の変更はこの画面からできます</strong>（上の一覧）。
-          <strong>新しいカードの登録は、カードをタップすると開く画面から行います。</strong>
-        </CardDescription>
-      </CardHeader>
-    </Card>
   </KiwaShell>
 );
