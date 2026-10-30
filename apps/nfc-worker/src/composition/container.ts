@@ -2,6 +2,8 @@ import { systemClock } from "@u18/domain";
 import { createNfcDatabase } from "@u18/nfc-db";
 import type { CardRepository, ExpiredEventPurger, IdentityGateway } from "../application/ports";
 import { AdminDisableCardUseCase } from "../application/use-cases/admin-disable-card.use-case";
+import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-disable-card.use-case";
+import { DelegatedUpdateCardTargetUseCase } from "../application/use-cases/delegated-update-card-target.use-case";
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
 import { IssueCardsUseCase } from "../application/use-cases/issue-cards.use-case";
@@ -83,6 +85,15 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       disableCard: new DisableCardUseCase(identity, cards, events, clock),
       // 運営が他人のカードを無効化する（#382）。**管理者判定は UseCase の中。**
       adminDisableCard: new AdminDisableCardUseCase(identity, cards, events, clock),
+      // admin-worker からの delegated RPC 専用（#382 / #390 決定 16 ③）。
+      // **`identity` を渡さない** —— 認可は admin-worker 側で済んでいる。
+      delegatedDisableCard: new DelegatedDisableCardUseCase(cards, events, clock),
+      delegatedUpdateCardTarget: new DelegatedUpdateCardTargetUseCase(
+        cards,
+        events,
+        clock,
+        blockedTargetOrigins(env),
+      ),
       claimCard: new ClaimCardUseCase(identity, cards, events, clock),
       issueCards: new IssueCardsUseCase(identity, cards, events, clock),
       releaseCard: new ReleaseCardUseCase(identity, cards, events, clock),
