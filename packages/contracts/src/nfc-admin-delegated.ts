@@ -51,6 +51,14 @@ export const updateCardTargetDelegatedInputSchema = z.object({
 export type UpdateCardTargetDelegatedInput = z.infer<typeof updateCardTargetDelegatedInputSchema>;
 export type UpdateCardTargetDelegatedResult = RpcResult<null>;
 
+export const releaseCardDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  cardId: z.string().min(1),
+});
+
+export type ReleaseCardDelegatedInput = z.infer<typeof releaseCardDelegatedInputSchema>;
+export type ReleaseCardDelegatedResult = RpcResult<null>;
+
 /**
  * 一覧・発行で使う、運営向けの表示用データ。
  *
@@ -102,6 +110,12 @@ export type IssueCardsDelegatedResult = RpcResult<{
 export interface NfcAdminDelegatedRpcContract {
   disableCard(input: DisableCardDelegatedInput): Promise<DisableCardDelegatedResult>;
   updateCardTarget(input: UpdateCardTargetDelegatedInput): Promise<UpdateCardTargetDelegatedResult>;
+  /**
+   * 所有権を剥奪し、`issued`（未紐づけ）へ戻す（#422）。**「付け替え」
+   * ではない。** 直接別の利用者へ束縛する口は持たない——次にタップした
+   * 人のものになる。理由は `DelegatedReleaseCardUseCase` の冒頭を参照。
+   */
+  releaseCard(input: ReleaseCardDelegatedInput): Promise<ReleaseCardDelegatedResult>;
   /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;

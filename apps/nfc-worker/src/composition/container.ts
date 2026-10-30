@@ -11,6 +11,7 @@ import { AdminDisableCardUseCase } from "../application/use-cases/admin-disable-
 import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-disable-card.use-case";
 import { DelegatedIssueCardsUseCase } from "../application/use-cases/delegated-issue-cards.use-case";
 import { DelegatedListAllCardsUseCase } from "../application/use-cases/delegated-list-all-cards.use-case";
+import { DelegatedReleaseCardUseCase } from "../application/use-cases/delegated-release-card.use-case";
 import { DelegatedUpdateCardTargetUseCase } from "../application/use-cases/delegated-update-card-target.use-case";
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
@@ -105,6 +106,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       // admin-worker からの delegated RPC 専用（#382 / #390 決定 16 ③）。
       // **`identity` を渡さない** —— 認可は admin-worker 側で済んでいる。
       delegatedDisableCard: new DelegatedDisableCardUseCase(cards, events, clock),
+      delegatedReleaseCard: new DelegatedReleaseCardUseCase(cards, events, clock),
       delegatedListAllCards: new DelegatedListAllCardsUseCase(cards, cardTaps),
       delegatedIssueCards: new DelegatedIssueCardsUseCase(cards, events, clock),
       delegatedUpdateCardTarget: new DelegatedUpdateCardTargetUseCase(

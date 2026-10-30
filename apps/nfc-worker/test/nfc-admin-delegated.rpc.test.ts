@@ -87,6 +87,84 @@ describe("disableCard", () => {
   });
 });
 
+describe("releaseCard", () => {
+  it("他人のカードを手放させ、issued へ戻し、遷移先を消す", async () => {
+    const cardId = await seedActiveCard("usr_taro", "https://example.com/taro");
+
+    const result = await rpc.releaseCard({ actorUserId: ACTOR, cardId });
+
+    expect(result.ok, "releaseCard が失敗した").toBe(true);
+
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("issued");
+    expect(card?.ownerUserId).toBeNull();
+    expect(card?.targetUrl).toBeNull();
+  });
+
+  it("付け替えない。直接別の利用者には束縛しない", async () => {
+    // **これが #422 の核心である。** 入力に宛先の userId を受け取る
+    // フィールドが無いことそのものが、直接付け替えない設計の表明。
+    const cardId = await seedActiveCard("usr_taro");
+
+    await rpc.releaseCard({ actorUserId: ACTOR, cardId });
+
+    const card = await repository().findById(cardId);
+    expect(card?.ownerUserId).toBeNull();
+  });
+
+  it("actorUserId をそのまま監査へ残し、本人の release とは metadata で区別する", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+
+    await rpc.releaseCard({ actorUserId: ACTOR, cardId });
+
+    const rows = await db()
+      .select()
+      .from(nfcCardEvents)
+      .where(eq(nfcCardEvents.cardId, cardId))
+      .orderBy(desc(nfcCardEvents.id))
+      .all();
+    const releasedEvent = rows.find((row) => row.event === "card.released");
+
+    // **イベント名は増やさない。** `AdminDisableCardUseCase` と同じ判断——
+    // 本人の release と同じ `card.released` を使い回し、`actingAsAdmin`
+    // で区別する。
+    expect(releasedEvent?.actorUserId).toBe(ACTOR);
+    expect(releasedEvent?.metadata?.["actingAsAdmin"]).toBe(true);
+  });
+
+  it("既に issued のカードへもう一度叩いても失敗にしない（冪等）", async () => {
+    const cardId = await seedIssuedCard();
+
+    const result = await rpc.releaseCard({ actorUserId: ACTOR, cardId });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("無効化済みのカードは手放せない", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+    await rpc.disableCard({ actorUserId: ACTOR, cardId });
+
+    const result = await rpc.releaseCard({ actorUserId: ACTOR, cardId });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("存在しないカードは not_found", async () => {
+    const result = await rpc.releaseCard({ actorUserId: ACTOR, cardId: "nfc_does_not_exist" });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("入力の形が崩れていれば invalid_input で落ちる", async () => {
+    const result = await rpc.releaseCard({ actorUserId: "", cardId: "" });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+  });
+});
+
 describe("updateCardTarget", () => {
   it("他人のカードの遷移先を書き換え、actorUserId を監査へ残す", async () => {
     const cardId = await seedActiveCard("usr_taro", "https://example.com/old");
