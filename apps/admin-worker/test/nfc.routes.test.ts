@@ -8,6 +8,7 @@ import type {
   IssueCardsDelegatedResult,
   ListAllCardsDelegatedResult,
   NfcAdminDelegatedRpcContract,
+  ReinstateCardDelegatedInput,
   ReleaseCardDelegatedInput,
   UpdateCardTargetDelegatedInput,
 } from "@u18/contracts";
@@ -47,6 +48,7 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     updateCardTarget: UpdateCardTargetDelegatedInput[];
     issueCards: IssueCardsDelegatedInput[];
     releaseCard: ReleaseCardDelegatedInput[];
+    reinstateCard: ReinstateCardDelegatedInput[];
   };
 } {
   const calls = {
@@ -54,6 +56,7 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     updateCardTarget: [] as UpdateCardTargetDelegatedInput[],
     issueCards: [] as IssueCardsDelegatedInput[],
     releaseCard: [] as ReleaseCardDelegatedInput[],
+    reinstateCard: [] as ReinstateCardDelegatedInput[],
   };
 
   const rpc: NfcAdminDelegatedRpcContract = {
@@ -73,6 +76,10 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     },
     releaseCard: async (input) => {
       calls.releaseCard.push(input);
+      return rpcOk(null);
+    },
+    reinstateCard: async (input) => {
+      calls.reinstateCard.push(input);
       return rpcOk(null);
     },
     ...overrides,
@@ -124,6 +131,37 @@ describe("GET /nfc", () => {
     expect(html).not.toContain(`${env.SHORT_URL_ORIGIN}/c/nfc_active`);
     // CSRF の hidden input が、発行フォームに描かれていること。
     expect(html).toMatch(/name="csrf_token"/);
+  });
+
+  it("disabled のカードには復帰フォームだけを出す。active には出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_disabled", status: "disabled" }),
+            card({ cardId: "nfc_active", status: "active", ownerUserId: "usr_taro" }),
+          ],
+          truncated: false,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('action="/nfc/nfc_disabled/reinstate"');
+    // **復帰フォームには無効化・遷移先の書き換え・手放させるを出さない。**
+    // 「戻したい」と「渡したい」は別の操作（nfc-page.tsx の CardActions）。
+    expect(html).not.toContain('action="/nfc/nfc_disabled/disable"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/release"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/target"');
+    // active には復帰フォームを出さない。
+    expect(html).not.toContain('action="/nfc/nfc_active/reinstate"');
   });
 
   it("truncated が true なら打ち切りの注記を出す", async () => {
@@ -456,6 +494,93 @@ describe("POST /nfc/:cardId/release", () => {
 
     const response = await app.fetch(
       new Request(`${ORIGIN}/nfc/nfc_missing/release`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ csrf_token: csrfToken }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("そのカードは見つかりませんでした。");
+  });
+});
+
+describe("POST /nfc/:cardId/reinstate", () => {
+  it("CSRF トークンが無ければ 403 で、reinstateCard を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_disabled/reinstate`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({}),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.reinstateCard).toHaveLength(0);
+  });
+
+  it("CSRF が通れば reinstateCard を session.sub で呼び、/nfc へ戻す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_disabled/reinstate`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ csrf_token: csrfToken }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/nfc");
+    expect(calls.reinstateCard).toEqual([{ actorUserId: SUB, cardId: "nfc_disabled" }]);
+  });
+
+  it("見つからなければ、画面を描き直して文言を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      reinstateCard: async () => rpcErr(RpcErrorCode.NotFound, "not_found"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_missing/reinstate`, {
         method: "POST",
         headers: {
           Cookie: `${sessionCookie}; ${csrfCookie}`,

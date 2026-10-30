@@ -218,6 +218,17 @@ export interface CardRepository {
    * （`DelegatedReleaseCardUseCase` の冒頭を参照）。
    */
   releaseAsAdmin(cardId: string, now: Date): Promise<boolean>;
+
+  /**
+   * 無効化されたカードを `active` へ戻す（#427）。
+   *
+   * **`disable` 系は `ownerUserId` / `targetUrl` を触らない**（`disable` /
+   * `disableAsAdmin` を参照）ので、復帰は `status` と `disabledAt` /
+   * `disabledReason` を戻すだけでよい——元の所有者・遷移先はそのまま
+   * 残っている。WHERE 句は `disabled` であることだけを条件にする
+   * （`releaseAsAdmin` が `active` だけを条件にするのと対称）。
+   */
+  reinstateAsAdmin(cardId: string, now: Date): Promise<boolean>;
 }
 
 /** カードに起きたことの記録（`nfc_card_events`）。 */

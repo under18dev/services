@@ -1,6 +1,7 @@
 import {
   disableCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
+  reinstateCardDelegatedInputSchema,
   releaseCardDelegatedInputSchema,
   rpcErr,
   rpcOk,
@@ -12,6 +13,8 @@ import {
   type IssueCardsDelegatedResult,
   type ListAllCardsDelegatedResult,
   type NfcAdminDelegatedRpcContract,
+  type ReinstateCardDelegatedInput,
+  type ReinstateCardDelegatedResult,
   type ReleaseCardDelegatedInput,
   type ReleaseCardDelegatedResult,
   type RpcErrorCode,
@@ -143,6 +146,25 @@ export class NfcAdminDelegatedRPC
 
     const container = createContainer(this.env);
     const result = await container.useCases.delegatedReleaseCard.execute({
+      actorUserId: parsed.data.actorUserId,
+      cardId: parsed.data.cardId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(null);
+  }
+
+  /**
+   * 無効化されたカードを `active` へ戻す（#427）。`active` へ戻すだけで
+   * `issued`（手放す）とはまとめない。理由は
+   * `DelegatedReinstateCardUseCase` の冒頭を参照。
+   */
+  async reinstateCard(input: ReinstateCardDelegatedInput): Promise<ReinstateCardDelegatedResult> {
+    const parsed = reinstateCardDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or cardId is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedReinstateCard.execute({
       actorUserId: parsed.data.actorUserId,
       cardId: parsed.data.cardId,
     });

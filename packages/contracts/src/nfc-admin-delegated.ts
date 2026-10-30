@@ -59,6 +59,14 @@ export const releaseCardDelegatedInputSchema = z.object({
 export type ReleaseCardDelegatedInput = z.infer<typeof releaseCardDelegatedInputSchema>;
 export type ReleaseCardDelegatedResult = RpcResult<null>;
 
+export const reinstateCardDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  cardId: z.string().min(1),
+});
+
+export type ReinstateCardDelegatedInput = z.infer<typeof reinstateCardDelegatedInputSchema>;
+export type ReinstateCardDelegatedResult = RpcResult<null>;
+
 /**
  * 一覧・発行で使う、運営向けの表示用データ。
  *
@@ -116,6 +124,19 @@ export interface NfcAdminDelegatedRpcContract {
    * 人のものになる。理由は `DelegatedReleaseCardUseCase` の冒頭を参照。
    */
   releaseCard(input: ReleaseCardDelegatedInput): Promise<ReleaseCardDelegatedResult>;
+  /**
+   * 無効化されたカードを `active` へ戻す（#427、`go.under18.dev/docs` の
+   * 「止めたカードは、自分では元に戻せません。戻したいときは運営に連絡
+   * してください。」に対応する口）。
+   *
+   * **`active` へ戻すだけで、`issued`（手放す）とはまとめない。** 「戻し
+   * たい」と「渡したい」は運営側の判断が違う場面で、1 操作に混ぜると
+   * 復帰のつもりが次の拾得者へ渡る事故を作れる。渡したい場合は、復帰
+   * させたあとであらためて `releaseCard` を呼ぶ——弱い操作を 2 つ並べる
+   * ほうが、強い操作を 1 つ作るより安全（#422 の `releaseCard` と同じ
+   * 判断）。理由は `DelegatedReinstateCardUseCase` の冒頭を参照。
+   */
+  reinstateCard(input: ReinstateCardDelegatedInput): Promise<ReinstateCardDelegatedResult>;
   /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;
