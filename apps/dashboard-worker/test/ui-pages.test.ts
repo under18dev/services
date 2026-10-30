@@ -24,6 +24,7 @@ import {
 } from "../src/presentation/http/ui/app-catalog";
 import { AppsPage } from "../src/presentation/http/ui/apps-page";
 import { ORIGIN, envWith, executionContext, neverCalled } from "./helpers";
+import { PAGES } from "./pages";
 
 /**
  * アカウント管理画面（#9）。
@@ -65,7 +66,9 @@ const FULL_IDENTITY = {
   listGrants: async () => rpcOk([] as GrantListItem[]),
 };
 
-const PAGES = [OVERVIEW_PATH, PROFILE_PATH, PASSKEYS_PATH, SESSIONS_PATH, GRANTS_PATH, APPS_PATH];
+// 一覧は `kiwa-stylesheet.test.ts` と共有する（`./pages` の冒頭）。
+// **2 つのテストが同じ 6 枚を違う角度から見ているので、片方にしか
+// 無い画面があるとその画面だけ片目で見ていることになる。**
 
 describe("画面が HTML を返す", () => {
   it.each(PAGES)("%s", async (path) => {
