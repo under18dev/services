@@ -6,6 +6,7 @@
  *   node scripts/backup-d1.mjs export  [--db identity|nfc|all] [--local] [--out DIR]
  *   node scripts/backup-d1.mjs upload  --file F [--dry-run]
  *   node scripts/backup-d1.mjs run     [--db all] [--out DIR] [--dry-run]
+ *                                      [--encrypt-to age1... | --allow-plaintext]
  *   node scripts/backup-d1.mjs list    [--prefix P]
  *   node scripts/backup-d1.mjs restore --key K [--out DIR]
  *
@@ -46,12 +47,14 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveSigningKey, signRequest, SIGNING_KEY_VECTORS } from "./lib/aws-sigv4.mjs";
+import { ageBinary, assertAgeBytes, assertRecipient } from "./lib/age.mjs";
 import { reorderDump } from "./lib/d1-dump.mjs";
+import { rehearseRestore } from "./lib/restore-rehearsal.mjs";
 import { assertHttpsEndpoint } from "./lib/s3-endpoint.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -60,8 +63,24 @@ const PREFIX = "d1-backups";
 
 /** 退避する D1。**両方取ること**（上記「2 つの DB を必ず揃えて取る」）。 */
 const DATABASES = {
-  identity: { name: "u18-identity", dir: join(ROOT, "apps/auth-worker") },
-  nfc: { name: "u18-nfc", dir: join(ROOT, "apps/nfc-worker") },
+  identity: {
+    name: "u18-identity",
+    dir: join(ROOT, "apps/auth-worker"),
+    // **リハーサルで行があることを要求するテーブル**（#325）。
+    // 空の DB では復元検査が自動的に通ってしまうので、#165 が壊れていた
+    // 「親より先に子の INSERT」が実際に起こりうる状態であることを要求する。
+    requireRows: ["users", "user_emails"],
+  },
+  nfc: {
+    name: "u18-nfc",
+    dir: join(ROOT, "apps/nfc-worker"),
+    // **こちらは要求しない。** カードは本番でも正当に 0 件でありうるので、
+    // 行を要求すると偽陽性になる。`nfc_cards.owner_user_id` が指す先は
+    // **別の D1 の users** で、SQLite の外部キーとしては張られていない
+    // （#325 / runbook 12.4 (5)）。したがって #165 の形も起こらない。
+    // **空でも通る、という弱さは承知のうえで受け入れている。**
+    requireRows: [],
+  },
 };
 
 function parseArgs(argv) {
@@ -78,6 +97,8 @@ function parseArgs(argv) {
     else if (arg === "--file") flags.file = argv[++i];
     else if (arg === "--key") flags.key = argv[++i];
     else if (arg === "--prefix") flags.prefix = argv[++i];
+    else if (arg === "--encrypt-to") flags.encryptTo = argv[++i];
+    else if (arg === "--allow-plaintext") flags.allowPlaintext = true;
     else rest.push(arg);
   }
   return { flags, rest };
@@ -135,11 +156,110 @@ function wrangler(args, { cwd = ROOT, capture = false } = {}) {
   return result.stdout ?? "";
 }
 
-/** `d1-backups/2026/10/24/u18-identity-2026-10-24T12-34-56-789Z.sql` */
-function backupKey(databaseName, at) {
+/**
+ * `d1-backups/2026/10/24/u18-identity-2026-10-24T12-34-56-789Z.sql.age`
+ *
+ * **拡張子を引数に取るのは、暗号化したものを `.sql` として置かないため。**
+ * キーだけを見て平文だと思った人が、開けると思って取りに来る。
+ */
+function backupKey(databaseName, at, ext = ".sql") {
   const iso = at.toISOString();
   const [date] = iso.split("T");
-  return `${PREFIX}/${date.replaceAll("-", "/")}/${databaseName}-${iso.replace(/[:.]/g, "-")}.sql`;
+  return `${PREFIX}/${date.replaceAll("-", "/")}/${databaseName}-${iso.replace(/[:.]/g, "-")}${ext}`;
+}
+
+/**
+ * 取ったダンプを**実際に流し込んで**復元できることを確かめる（#325）。
+ *
+ * **「取れた」と「戻せる」は別である。** #164 / #165 がまさにそれで、
+ * ダンプは毎回取れていたのに復元できなかった。自動化するとその嘘が
+ * 毎日出続けるので、**取得と同じ実行の中で、封をする前に確かめる。**
+ *
+ * ## なぜ暗号化する前なのか
+ *
+ * 暗号化は age の**公開鍵**で行い、秘密鍵は運用者の手元にしか無い
+ * （runbook 12.11）。つまり **CI は自分が作ったバックアップを開けない。**
+ * 保管物に対してリハーサルすることは原理的にできないので、
+ * **封をする前の、まさにそのバイト列**に対して行う。保管物と中身が
+ * 同一なので「取れたものは戻せる」が毎回言える。
+ *
+ * **これが証明しないもの**: 暗号化そのものの壊れ方（受信者の取り違え、
+ * age の呼び出しの失敗）と、**運用者の秘密鍵で実際に復号できること。**
+ * 前者は `verifyUploaded()` が部分的に見る。後者は CI では言えないので、
+ * runbook 12.11 の期限として `pnpm check:deadlines` に見させている。
+ */
+async function rehearseFile({ database, file, requireRows }) {
+  // 保管するのは Cloudflare が吐いた生のダンプだが、**復元時は並べ替える**
+  // （`d1-dump.mjs`）。リハーサルも復元と同じ形に揃える。
+  const ready = reorderDump(readFileSync(file, "utf8"));
+  const result = await rehearseRestore(ready, { requireRows });
+
+  const counted = Object.entries(result.tables)
+    .map(([name, rows]) => `${name}=${rows}`)
+    .join(" ");
+  console.log(
+    `[${database}] リハーサル: ${Object.keys(result.tables).length} テーブル / ${counted}`,
+  );
+
+  if (!result.ok) {
+    // **問題は全部出す。** 1 つ目で打ち切ると、残りを知るために
+    // もう 1 周回すことになる。
+    for (const problem of result.problems) console.error(`  - ${problem}`);
+    throw new Error(`[${database}] 復元リハーサルに失敗した。このダンプは戻せない`);
+  }
+  return result;
+}
+
+/**
+ * age の公開鍵で暗号化する（#325 / runbook 12.11）。
+ *
+ * **CI に置くのは公開鍵だけ。** 共通鍵を CI に置くと鍵も Cloudflare 側の
+ * 管理下に入り、「アカウントごと失う」というバックアップの前提そのものが
+ * 崩れる。復号できるのは運用者の手元の秘密鍵だけにする。
+ *
+ * 鍵そのものはここで作らない。**作った側がそれを見たことになる。**
+ * 生成手順は runbook 12.11 にあり、実行するのは運用者である。
+ */
+function encryptFile(path, recipient) {
+  // **受信者を使う前に形を確かめる。** 秘密鍵を渡していたらここで止まる。
+  const to = assertRecipient(recipient);
+  const out = `${path}.age`;
+  const bin = ageBinary();
+
+  const result = spawnSync(bin, ["--recipient", to, "--output", out, path], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  if (result.error !== undefined && result.error.code === "ENOENT") {
+    throw new Error(`\`${bin}\` が見つからない。age を入れるか AGE_BIN で場所を渡すこと`);
+  }
+  if (result.status !== 0) throw new Error(`age が失敗した (exit ${result.status})`);
+
+  assertAgeBytes(readFileSync(out), out);
+  console.log(`[age] ${path} → ${out} (${statSync(out).size} バイト)`);
+  return out;
+}
+
+/**
+ * 上げたものを取り直して確かめる（#325）。
+ *
+ * **復号はできない**（秘密鍵が無い）ので、見るのは 2 つだけ:
+ * age のヘッダで始まること、バイト長が一致すること。
+ * **0 バイトを put した形と、暗号化されずに上がった形が捕まる。**
+ * それ以上は、鍵を持っている人にしか確かめられない。
+ */
+function verifyUploaded({ key, localPath, expectEncrypted }) {
+  const dir = defaultOutDir("u18-verify-");
+  const path = join(dir, "readback.bin");
+  wrangler(["r2", "object", "get", `${BUCKET}/${key}`, "--file", path, "--remote"]);
+
+  const expected = statSync(localPath).size;
+  const actual = statSync(path).size;
+  if (actual !== expected) {
+    throw new Error(`読み戻しのバイト長が違う: 期待 ${expected} / 実際 ${actual}`);
+  }
+  if (expectEncrypted) assertAgeBytes(readFileSync(path), `r2://${BUCKET}/${key}`);
+  console.log(`[verify] r2://${BUCKET}/${key} (${actual} バイト) を読み戻して確認した`);
+  rmSync(dir, { recursive: true, force: true });
 }
 
 // --- コマンド ---------------------------------------------------------------
@@ -194,7 +314,13 @@ function exportDatabases({ db, remote, out }) {
     const { size } = statSync(file);
     if (size === 0) throw new Error(`${file} が空。エクスポートが成功していない`);
     console.log(`[${database.name}] ${size} バイト`);
-    files.push({ database: database.name, file, bytes: size, exportedAt: at.toISOString() });
+    files.push({
+      database: database.name,
+      file,
+      bytes: size,
+      exportedAt: at.toISOString(),
+      requireRows: database.requireRows,
+    });
   }
 
   // 2 つの DB の取得時刻を 1 箇所に残す。復元時にどこまでずれているかの手掛かり。
@@ -204,14 +330,14 @@ function exportDatabases({ db, remote, out }) {
   return { dir, files, at };
 }
 
-async function uploadFile({ file, at, dryRun, s3 }) {
+async function uploadFile({ file, at, dryRun, s3, ext = ".sql" }) {
   const path = resolve(file);
   const body = readFileSync(path);
   const name = path
     .split("/")
     .pop()
     .replace(/-\d{4}-\d{2}-\d{2}T.*$/, "");
-  const key = backupKey(name, at ?? new Date());
+  const key = backupKey(name, at ?? new Date(), ext);
 
   if (dryRun) {
     console.log(`[dry-run] ${path} (${body.byteLength} バイト) → r2://${BUCKET}/${key}`);
@@ -265,10 +391,49 @@ async function main() {
     }
 
     case "run": {
+      // **鍵が無ければ上げない。** ダンプは全利用者の平文メールアドレスを
+      // 含む。R2 の保存時暗号化だけだと、**R2 のアクセス権を取った相手には
+      // 平文**である（#325 の決定 3）。
+      //
+      // 既定を「暗号化する」にして、平文で上げるには `--allow-plaintext` を
+      // 明示させる。**忘れたときに安全でないほうへ倒れない**ようにするため。
+      const recipient = flags.encryptTo ?? process.env.AGE_RECIPIENT;
+      if (!recipient && !flags.allowPlaintext) {
+        throw new Error(
+          "暗号化の宛先が無い。`--encrypt-to age1...` か環境変数 AGE_RECIPIENT を渡すこと。" +
+            "平文で上げる場合は --allow-plaintext を明示する（runbook 12.11）",
+        );
+      }
+
       const { files, at } = exportDatabases(flags);
+
       for (const entry of files) {
-        const key = await uploadFile({ file: entry.file, at, dryRun: flags.dryRun, s3: flags.s3 });
+        // **封をする前に、戻せることを確かめる。** ここを通らなかったものは
+        // 上げない —— 戻せないバックアップを「取れた」と記録しないため。
+        await rehearseFile(entry);
+
+        const encrypted = recipient ? encryptFile(entry.file, recipient) : null;
+        const payload = encrypted ?? entry.file;
+        const ext = encrypted ? ".sql.age" : ".sql";
+
+        const key = await uploadFile({
+          file: payload,
+          at,
+          dryRun: flags.dryRun,
+          s3: flags.s3,
+          ext,
+        });
         console.log(`  ${entry.database} → r2://${BUCKET}/${key}`);
+
+        // 上げたものを取り直す。dry-run のときは上げていないので飛ばす。
+        // `--s3` 経路は wrangler を使わないため、読み戻しも行わない。
+        if (!flags.dryRun && !flags.s3) {
+          verifyUploaded({ key, localPath: payload, expectEncrypted: encrypted !== null });
+        }
+      }
+
+      if (!recipient) {
+        console.log("\n**平文で上げた。** --allow-plaintext が指定されている（runbook 12.11）。");
       }
       console.log("\n**ローカルに残ったファイルを消すこと。** 平文のメールアドレスが入っている。");
       return;
