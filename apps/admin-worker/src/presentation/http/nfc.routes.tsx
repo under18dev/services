@@ -126,6 +126,28 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     return c.redirect("/nfc", 303);
   });
 
+  app.post("/nfc/:cardId/release", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return c.text("forbidden", 403);
+    }
+
+    const session = c.get("session");
+    const cardId = c.req.param("cardId");
+
+    const container = c.get("container");
+    const result = await container.nfcCards.releaseCard({ actorUserId: session.sub, cardId });
+
+    if (!result.ok) {
+      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect("/nfc", 303);
+  });
+
   app.post("/nfc/:cardId/target", pageSecurityHeaders, async (c) => {
     const form = await c.req.formData().catch(() => null);
 

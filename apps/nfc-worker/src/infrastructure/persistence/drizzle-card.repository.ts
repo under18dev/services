@@ -207,4 +207,22 @@ export class DrizzleCardRepository implements CardRepository {
       .returning({ id: nfcCards.id });
     return rows.length > 0;
   }
+
+  /**
+   * 運営による所有権の剥奪（#422）。**`release` と同じ条件付き UPDATE**
+   * で、違いは所有者を問わないことだけ（`disableAsAdmin` と同じ判断）。
+   */
+  async releaseAsAdmin(cardId: string, now: Date): Promise<boolean> {
+    const rows = await this.db
+      .update(nfcCards)
+      .set({
+        ownerUserId: null,
+        status: "issued",
+        targetUrl: null,
+        updatedAt: now,
+      })
+      .where(and(eq(nfcCards.id, cardId), eq(nfcCards.status, "active")))
+      .returning({ id: nfcCards.id });
+    return rows.length > 0;
+  }
 }

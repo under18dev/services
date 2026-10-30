@@ -102,11 +102,19 @@ export type NfcPageProps = {
 /**
  * カード 1 行ぶんの操作（Actions 列）。
  *
- * **`active` のカードにだけ無効化・遷移先の書き換えを出す。** 出しても
- * 必ず失敗する入口を描かない（移行元と同じ判断）。
+ * **`active` のカードにだけ無効化・遷移先の書き換え・手放させるを出す。**
+ * 出しても必ず失敗する入口を描かない（移行元と同じ判断）。
  *
- * **所有者の付け替え（release）は無い。** 優先度が低いと判断されて
- * おり（運用者の指示）、裏側の delegated RPC にもまだ無い。
+ * ## 「手放させる」であって「付け替える」ではない（#422）
+ *
+ * 直接別の利用者へ付け替える入口は無い。押すと `issued`（未紐づけ）へ
+ * 戻るだけで、次にタップした人のものになる——理由は delegated RPC 側の
+ * `DelegatedReleaseCardUseCase` の冒頭を参照（NFC カードのセキュリティ
+ * モデルがタップ＝物理的占有の証明であることを壊さないため）。
+ *
+ * **押す前に本人へ連絡すること。** 止める（無効化）と違い、本人の画面
+ * からカードが消える操作で、本人には説明の付かない消え方をする
+ * （`docs/nfc-cards-operations.md` §4 を参照）。
  */
 const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToken: string }> = ({
   card,
@@ -130,6 +138,16 @@ const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToke
         />
         <button type="submit" class={getButtonClasses("outline", "sm")}>
           書き換える
+        </button>
+      </form>
+      <form method="post" action={`/nfc/${card.cardId}/release`}>
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <button
+          type="submit"
+          class={DANGER_BUTTON_CLASS}
+          aria-label={`${card.cardId} を所有者から手放させる`}
+        >
+          手放させる
         </button>
       </form>
       <form method="post" action={`/nfc/${card.cardId}/disable`}>
@@ -337,15 +355,5 @@ export const NfcPage: FC<NfcPageProps> = ({
         </CardContent>
       </Card>
     )}
-
-    <Card>
-      <CardHeader>
-        <CardTitle>この画面からできないこと</CardTitle>
-        <CardDescription>
-          他の人のカードの所有者の付け替え（release）は、まだこの画面からは行えません。 裏側の RPC
-          にもまだありません——優先度が低いと判断されています。
-        </CardDescription>
-      </CardHeader>
-    </Card>
   </KiwaShell>
 );

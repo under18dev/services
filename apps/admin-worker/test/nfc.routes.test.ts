@@ -8,6 +8,7 @@ import type {
   IssueCardsDelegatedResult,
   ListAllCardsDelegatedResult,
   NfcAdminDelegatedRpcContract,
+  ReleaseCardDelegatedInput,
   UpdateCardTargetDelegatedInput,
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
@@ -45,12 +46,14 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     disableCard: DisableCardDelegatedInput[];
     updateCardTarget: UpdateCardTargetDelegatedInput[];
     issueCards: IssueCardsDelegatedInput[];
+    releaseCard: ReleaseCardDelegatedInput[];
   };
 } {
   const calls = {
     disableCard: [] as DisableCardDelegatedInput[],
     updateCardTarget: [] as UpdateCardTargetDelegatedInput[],
     issueCards: [] as IssueCardsDelegatedInput[],
+    releaseCard: [] as ReleaseCardDelegatedInput[],
   };
 
   const rpc: NfcAdminDelegatedRpcContract = {
@@ -66,6 +69,10 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     },
     updateCardTarget: async (input) => {
       calls.updateCardTarget.push(input);
+      return rpcOk(null);
+    },
+    releaseCard: async (input) => {
+      calls.releaseCard.push(input);
       return rpcOk(null);
     },
     ...overrides,
@@ -362,6 +369,93 @@ describe("POST /nfc/:cardId/disable", () => {
 
     const response = await app.fetch(
       new Request(`${ORIGIN}/nfc/nfc_missing/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ csrf_token: csrfToken }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("そのカードは見つかりませんでした。");
+  });
+});
+
+describe("POST /nfc/:cardId/release", () => {
+  it("CSRF トークンが無ければ 403 で、releaseCard を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active/release`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({}),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.releaseCard).toHaveLength(0);
+  });
+
+  it("CSRF が通れば releaseCard を session.sub で呼び、/nfc へ戻す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active/release`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ csrf_token: csrfToken }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/nfc");
+    expect(calls.releaseCard).toEqual([{ actorUserId: SUB, cardId: "nfc_active" }]);
+  });
+
+  it("見つからなければ、画面を描き直して文言を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      releaseCard: async () => rpcErr(RpcErrorCode.NotFound, "not_found"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_missing/release`, {
         method: "POST",
         headers: {
           Cookie: `${sessionCookie}; ${csrfCookie}`,
