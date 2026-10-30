@@ -1,8 +1,10 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { nfcCardTaps } from "@u18/nfc-db";
 import { createApp } from "../src/presentation/http/app";
 import {
   ORIGIN,
+  db,
   executionContext,
   identityWith,
   repository,
@@ -191,6 +193,97 @@ describe("https 以外は Location に載らない", () => {
 
     expect(response.status).toBe(404);
     expect(response.headers.get("Location")).toBeNull();
+  });
+});
+
+/**
+ * タップ回数の記録（#394）。
+ *
+ * **応答は `app.fetch()` が返した時点で完了している** が、記録は
+ * `executionCtx.waitUntil` へ載せてあるので、応答の後にも続く。
+ * `createExecutionContext()` / `waitOnExecutionContext()`
+ * （`@cloudflare/vitest-plugin`）で、本物の Workers ランタイムと同じ形で
+ * 待ち合わせる——`session-timing.test.ts`（auth-worker）と同じ道具立て。
+ */
+describe("タップ回数の記録（#394）", () => {
+  async function getWithRealContext(cardId: string): Promise<{ response: Response }> {
+    const ctx = createExecutionContext();
+    const response = await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}/c/${cardId}`),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    return { response };
+  }
+
+  async function tapRowsFor(cardId: string) {
+    const rows = await db().select().from(nfcCardTaps).all();
+    return rows.filter((row) => row.cardId === cardId);
+  }
+
+  it("resolvable なタップを記録する", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+
+    const { response } = await getWithRealContext(cardId);
+    expect(response.status).toBe(302);
+
+    const rows = await tapRowsFor(cardId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.count).toBe(1);
+  });
+
+  it("同じ日に複数回タップすると加算される", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+
+    await getWithRealContext(cardId);
+    await getWithRealContext(cardId);
+    await getWithRealContext(cardId);
+
+    const rows = await tapRowsFor(cardId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.count).toBe(3);
+  });
+
+  it("claimable（未紐づけ）は数えない", async () => {
+    const cardId = await seedIssuedCard();
+
+    const { response } = await getWithRealContext(cardId);
+    expect(response.status).toBe(302);
+
+    expect(await tapRowsFor(cardId)).toHaveLength(0);
+  });
+
+  it("存在しないカードは数えない", async () => {
+    await getWithRealContext("nfc_doesnotexisthere9");
+
+    // 数える対象になる cardId 自体が無いので、テーブル全体が空のままであること。
+    expect(await db().select().from(nfcCardTaps).all()).toHaveLength(0);
+  });
+
+  it("無効化済みは数えない", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().disable(cardId, "usr_taro", "lost", new Date());
+
+    await getWithRealContext(cardId);
+
+    expect(await tapRowsFor(cardId)).toHaveLength(0);
+  });
+
+  it("書き込みに失敗してもリダイレクト自体は成功する", async () => {
+    // `executionCtx` が無い（= `waitUntilOf` が `undefined` を返す）
+    // 呼び出し方でも、応答そのものは変わらないことを固定する。
+    // 本物のタップ記録は `waitUntil` が取れなければ単に行われない。
+    const cardId = await seedActiveCard("usr_taro");
+
+    const response = await createApp({ identity }).fetch(
+      new Request(`${ORIGIN}/c/${cardId}`),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("https://example.com/taro");
   });
 });
 

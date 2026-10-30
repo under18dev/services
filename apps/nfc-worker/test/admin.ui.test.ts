@@ -16,6 +16,7 @@ import {
   resetDatabase,
   seedActiveCard,
   seedIssuedCard,
+  tapRecorder,
 } from "./helpers";
 
 /**
@@ -67,6 +68,23 @@ describe("管理画面の見え方", () => {
     // 所有者の userId は出す（表示名とメールは引かない。use-case の冒頭）。
     expect(html).toContain("usr_taro");
     expect(html).toContain("lot-a");
+  });
+
+  /**
+   * タップ回数の表示（#394）。
+   *
+   * **所有者には見せない**ので、ここ（運営の画面）でしか確かめられない。
+   */
+  it("タップ回数の合計を出す。記録が無いカードは 0 回", async () => {
+    const tapped = await seedActiveCard("usr_taro", "https://example.com/taro");
+    await seedIssuedCard("lot-b");
+    await tapRecorder().recordTap(tapped, "2026-10-24");
+    await tapRecorder().recordTap(tapped, "2026-10-25");
+
+    const html = await (await open(cookieFor(ADMIN))).text();
+
+    expect(html).toContain("タップ回数: 2 回");
+    expect(html).toContain("タップ回数: 0 回");
   });
 
   /**

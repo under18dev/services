@@ -122,6 +122,13 @@ const AdminCardRow: FC<{ readonly card: AdminCardView; readonly csrfToken: strin
       )}
     </p>
 
+    {/*
+      **タップ回数（#394）。** 解決できたタップだけの合計で、誰が
+      タップしたかは持たない。**所有者には見せない**——この画面（運営向け）
+      だけが出す。
+    */}
+    <p class={ITEM_META_CLASS}>タップ回数: {card.tapCount} 回</p>
+
     <p class="text-xs text-foreground-soft">
       {`${toDate(card.issuedAt)} に発行`}
       {card.claimedAt === null ? null : ` ・ ${toDate(card.claimedAt)} に紐づけ`}

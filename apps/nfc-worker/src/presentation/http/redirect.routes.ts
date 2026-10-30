@@ -1,4 +1,5 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
+import { isoDateUtc } from "../../domain/services/retention-policy";
 import { claimUrl } from "./base-path";
 import type { AppBindings } from "./types";
 
@@ -97,6 +98,18 @@ export function registerRedirectRoutes(app: Hono<AppBindings>): void {
     const target = disclosure.targetUrl;
     if (!target.startsWith("https://")) return notFound();
 
+    // **タップ回数の記録（#394）。応答を遅らせない。** `resolvable` と
+    // 確定したこの 1 行から先でだけ数える——「使用された回数」という
+    // 定義に忠実にするため、`claimable` や 404 は数えない。
+    // `waitUntil` が取れなければ記録を諦める。この経路はレート制限も
+    // 無い（N-5）ので、書き込みを同期させるとリダイレクト自体の遅延・
+    // 失敗につながる。
+    const waitUntil = waitUntilOf(c);
+    if (waitUntil !== undefined) {
+      const { cardTaps } = c.get("container").repositories;
+      waitUntil(cardTaps.recordTap(cardId, isoDateUtc(new Date())));
+    }
+
     // `c.redirect()` を使わず自分で組み立てるのは、Location と一緒に
     // no-store / no-referrer を必ず載せるため。片方だけ付いた応答を
     // 作れる書き方にしない。
@@ -106,4 +119,21 @@ export function registerRedirectRoutes(app: Hono<AppBindings>): void {
       "Referrer-Policy": "no-referrer",
     });
   });
+}
+
+/**
+ * `executionCtx` を安全に取り出す（auth-worker の `request-context.ts` と
+ * 同じ防御）。
+ *
+ * テストの一部の呼び出し方だと `executionCtx` が存在せず、触ると投げる。
+ * 無ければ `undefined` を返し、呼び出し側はタップの記録を諦める——
+ * **この経路はリダイレクトを返すことが本分で、記録はその次**である。
+ */
+function waitUntilOf(c: Context<AppBindings>): ((task: Promise<unknown>) => void) | undefined {
+  try {
+    const ctx = c.executionCtx;
+    return (task) => ctx.waitUntil(task);
+  } catch {
+    return undefined;
+  }
 }

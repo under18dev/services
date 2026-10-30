@@ -123,3 +123,26 @@ export function nfcEventDeadlines(now: Date): ReadonlyMap<NfcCardEventName, Date
   }
   return deadlines;
 }
+
+/**
+ * UTC の日付文字列（`YYYY-MM-DD`）。`nfc_card_taps`（#394）の単位。
+ *
+ * 書き込み側（「今日」を求める）と掃除側（境界日を求める）の両方が
+ * これを呼ぶ。別々に `toISOString().slice(0, 10)` を書くと、片方だけ
+ * 書式を変えたときに文字列としての大小比較がずれる
+ * （`nfc_card_taps.date` の掃除は文字列比較で行うため）。
+ */
+export function isoDateUtc(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * `nfc_card_taps` の保持境界（#394）。
+ *
+ * **新しい区分は作らない。** カードごと・日ごとの集計行で、
+ * `NFC_CARD_EVENTS` のような「誰が何をしたか」の記録ではないが、
+ * 持ち続ける理由も無い。`standard`（180 日）をそのまま使う。
+ */
+export function tapCountDeadline(now: Date): string {
+  return isoDateUtc(new Date(now.getTime() - NfcRetention.standard));
+}
