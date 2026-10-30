@@ -1,0 +1,60 @@
+# 日次バックアップが止まっていないかを、backup.yml とは別の経路で見る（#361）。
+#
+# ## なぜ別のワークフローにするのか
+#
+# **同じ `schedule:` の中に置いた見張りは、自分が走っていないことを
+# 観測できない。** `backup.yml` が止まれば、その中に置いた見張りも一緒に
+# 止まる —— **止まった場合にだけ沈黙する検査**になる
+# （`.github/workflows/README.md` の「緑の見分け方」）。
+#
+# 2 本の `schedule:` が同時に止まる確率は、1 本が止まる確率より低い。
+# **根本解決ではない**（理屈の上では両方とも止まりうる）が、独立した
+# 観測点を増やすことには意味がある。
+#
+# ## 何を見るか
+#
+# 実体は `scripts/check-backup-freshness.mjs`。Cloudflare の R2 API を
+# 直接叩いて、`backup-d1.mjs` の `DATABASES` に並ぶ DB ごとに最新の
+# バックアップが何時間前かを見る。詳しい設計（閾値の根拠、API を選んだ
+# 理由）はスクリプトの冒頭を参照。
+name: Backup monitor
+
+on:
+  schedule:
+    # 03:00 UTC = 12:00 JST。backup.yml（21:00 UTC = 06:00 JST）の 6 時間後。
+    # `security.yml`（Mon 03:17 UTC）と曜日も分も被らない。
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-freshness:
+    name: Check backup freshness
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+
+      - name: 日次バックアップが止まっていないか確かめる
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/check-backup-freshness.mjs
+
+      - name: Report
+        if: failure()
+        run: |
+          {
+            echo "## Backup monitor — 止まっている"
+            echo
+            echo "**日次バックアップのいずれかが、期待される間隔を超えて古い。**"
+            echo "対応は runbook §12.11。まず \`backup.yml\` の Actions タブを開き、"
+            echo "**最後に走った日付**を見ること —— \`schedule:\` 自体が止まっている"
+            echo "可能性がある（public リポジトリは 60 日の非活動で自動停止する）。"
+            echo
+            echo "走ってはいるが失敗している場合は \`backup.yml\` の失敗ログを読むこと。"
+          } >> "$GITHUB_STEP_SUMMARY"
