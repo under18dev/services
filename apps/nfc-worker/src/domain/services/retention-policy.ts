@@ -45,6 +45,8 @@ export const NFC_CARD_EVENTS = [
   "card.target_updated",
   /** 無効化（紛失・不正利用）。運営の操作。 */
   "card.disabled",
+  /** 無効化から `active` への復帰。運営の操作（#427）。 */
+  "card.reinstated",
 ] as const;
 
 export type NfcCardEventName = (typeof NFC_CARD_EVENTS)[number];
@@ -105,6 +107,12 @@ export const NFC_EVENT_RETENTION: Readonly<Record<NfcCardEventName, NfcRetention
    * に残り続ける**ので、消えるのは「いつ止めたか」だけである。
    */
   "card.disabled": "standard",
+  /**
+   * 復帰も `standard`。**`active` に戻っている事実は `nfc_cards.status`
+   * に残り続ける**ので、消えるのは「いつ・誰が戻したか」だけである
+   * （`card.disabled` と対称）。
+   */
+  "card.reinstated": "standard",
 };
 
 /** 1 回の掃除で消す上限。Identity 側の `RETENTION_SWEEP_LIMIT` と同じ根拠。 */

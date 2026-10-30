@@ -115,12 +115,38 @@ export type NfcPageProps = {
  * **押す前に本人へ連絡すること。** 止める（無効化）と違い、本人の画面
  * からカードが消える操作で、本人には説明の付かない消え方をする
  * （`docs/nfc-cards-operations.md` §4 を参照）。
+ *
+ * ## `disabled` のカードには「復帰させる」だけを出す（#427）
+ *
+ * **`active` へ戻すだけ。** 手放す・遷移先を変えるとはまとめない——
+ * 「戻したい」と「渡したい」は運営側の判断が違う場面で、1 操作に混ぜると
+ * 復帰のつもりが次の拾得者へ渡る事故を作れる（delegated RPC 側の
+ * `DelegatedReinstateCardUseCase` の冒頭を参照）。渡したい場合は、復帰
+ * させたあとであらためて「手放させる」を押す——弱い操作を 2 つ並べる
+ * ほうが、強い操作を 1 つ作るより安全という #422 と同じ判断。
  */
 const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToken: string }> = ({
   card,
   csrfToken,
-}) =>
-  card.status !== "active" ? null : (
+}) => {
+  if (card.status === "disabled") {
+    return (
+      <form method="post" action={`/nfc/${card.cardId}/reinstate`}>
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <button
+          type="submit"
+          class={getButtonClasses("outline", "sm")}
+          aria-label={`${card.cardId} を復帰させる`}
+        >
+          復帰させる
+        </button>
+      </form>
+    );
+  }
+
+  if (card.status !== "active") return null;
+
+  return (
     <div class="flex flex-col gap-2">
       <form
         method="post"
@@ -162,6 +188,7 @@ const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToke
       </form>
     </div>
   );
+};
 
 export const NfcPage: FC<NfcPageProps> = ({
   cards,

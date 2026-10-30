@@ -225,4 +225,23 @@ export class DrizzleCardRepository implements CardRepository {
       .returning({ id: nfcCards.id });
     return rows.length > 0;
   }
+
+  /**
+   * 無効化されたカードを `active` へ戻す（#427）。**`ownerUserId` /
+   * `targetUrl` には触らない** —— `disableAsAdmin` がそれらを変えて
+   * いないので、ここで戻す必要も無い。
+   */
+  async reinstateAsAdmin(cardId: string, now: Date): Promise<boolean> {
+    const rows = await this.db
+      .update(nfcCards)
+      .set({
+        status: "active",
+        disabledAt: null,
+        disabledReason: null,
+        updatedAt: now,
+      })
+      .where(and(eq(nfcCards.id, cardId), eq(nfcCards.status, "disabled")))
+      .returning({ id: nfcCards.id });
+    return rows.length > 0;
+  }
 }

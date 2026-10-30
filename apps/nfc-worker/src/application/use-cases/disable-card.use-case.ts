@@ -25,7 +25,7 @@ export type DisableCardInput = {
  * 一度 `disabled` にしたカードを、所有者は自分で戻せない。
  * 戻せるようにすると、無効化が「アカウントを奪われたら無かったことに
  * できる操作」になり、紛失対策として意味を失う。
- * 復帰は運営の操作（DB 直接 or 将来の管理 API）に限る。
+ * 復帰は運営の操作に限る（`DelegatedReinstateCardUseCase`、#427）。
  *
  * ## 所有者を外さない
  *
