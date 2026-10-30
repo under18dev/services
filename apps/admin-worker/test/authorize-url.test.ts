@@ -27,5 +27,25 @@ describe("buildAuthorizationUrl", () => {
     // （decision 9）ので、ここで固定しておく——将来別の値を渡せる形に
     // 変えても、既定が plain に戻らないようにする。
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    // **省けば乗らない。** 呼び出し側が明示しない限り、要求しない
+    // （acr_values の有無がそのまま要求の有無になる）。
+    expect(url.searchParams.has("acr_values")).toBe(false);
+  });
+
+  it("acrValues を渡せば acr_values として乗る（決定 8、#390）", () => {
+    const url = new URL(
+      buildAuthorizationUrl({
+        authorizationEndpoint: "https://auth.under18.dev/oauth/authorize",
+        clientId: "u18-admin",
+        redirectUri: "https://admin.under18.dev/callback",
+        scope: "openid",
+        state: "s1",
+        nonce: "n1",
+        codeChallenge: "c1",
+        acrValues: "passkey",
+      }),
+    );
+
+    expect(url.searchParams.get("acr_values")).toBe("passkey");
   });
 });

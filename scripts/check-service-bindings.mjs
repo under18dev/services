@@ -87,6 +87,13 @@ const EXTERNAL_SERVICES = new Set();
 const ALLOWED_ENTRYPOINT_CONSUMERS = new Map([
   ["IdentityRPC", new Set(["dashboard-worker", "nfc-worker"])],
   ["IdentityAdminRPC", new Set(["dashboard-worker"])],
+  // #390 決定 16 ③。admin-worker が利用者の停止・解除・OAuth クライアント
+  // の登録・失効を呼ぶための delegated RPC。`sessionToken` を要求しない
+  // ので、束縛できるのが admin-worker だけであることがここでしか
+  // 保証されない——信頼境界はこの Service Binding そのもの
+  // （`IdentityAdminDelegatedRpcContract` の冒頭、`docs/threat-model.md`
+  // RR-21）。
+  ["IdentityAdminDelegatedRPC", new Set(["admin-worker"])],
   // #382 / #390 決定 16 ③。admin-worker が他人のカードの無効化・
   // 遷移先の書き換え・一覧・発行を呼ぶための delegated RPC。
   // **admin-worker だけ。** 他の Worker がここを束縛すると、認可を

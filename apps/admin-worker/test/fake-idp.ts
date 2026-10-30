@@ -23,8 +23,13 @@ export async function createFakeIdp(issuer: string) {
     readonly sub: string;
     readonly aud: string;
     readonly nonce: string;
+    /** u18 Identity の #390 拡張。省けば「Passkey で入らなかった」を模す。 */
+    readonly acr?: string;
   }): Promise<string> {
-    return new SignJWT({ nonce: claims.nonce })
+    return new SignJWT({
+      nonce: claims.nonce,
+      ...(claims.acr === undefined ? {} : { acr: claims.acr }),
+    })
       .setProtectedHeader({ alg: "ES256", kid })
       .setSubject(claims.sub)
       .setIssuer(issuer)

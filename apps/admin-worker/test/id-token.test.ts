@@ -22,6 +22,41 @@ describe("verifyIdToken", () => {
     expect(result.sub).toBe("usr_abc");
   });
 
+  it("acr があれば取れる（#390、Passkey で入ったことの印）", async () => {
+    const idp = await createFakeIdp(ISSUER);
+    const idToken = await idp.signIdToken({
+      sub: "usr_abc",
+      aud: AUDIENCE,
+      nonce: "n1",
+      acr: "passkey",
+    });
+
+    const result = await verifyIdToken({
+      idToken,
+      jwks: idp.jwks,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      nonce: "n1",
+    });
+
+    expect(result.acr).toBe("passkey");
+  });
+
+  it("acr が無ければ null（claim 自体が無いことと「満たさなかった」を区別しない）", async () => {
+    const idp = await createFakeIdp(ISSUER);
+    const idToken = await idp.signIdToken({ sub: "usr_abc", aud: AUDIENCE, nonce: "n1" });
+
+    const result = await verifyIdToken({
+      idToken,
+      jwks: idp.jwks,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      nonce: "n1",
+    });
+
+    expect(result.acr).toBeNull();
+  });
+
   it("nonce が違えば拒否する（リプレイ対策）", async () => {
     const idp = await createFakeIdp(ISSUER);
     const idToken = await idp.signIdToken({ sub: "usr_abc", aud: AUDIENCE, nonce: "n1" });

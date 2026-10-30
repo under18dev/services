@@ -22,15 +22,22 @@
     "command": "node scripts/build-client.mjs",
   },
 
-  // **u18 Identity（auth-worker）への Service Binding は持たない。**
+  // **`IdentityRPC` / `IdentityAdminRPC`（dashboard-worker 向け）は
+  // 束縛しない。** 運用者の判断（2026-10-30 夜）で、u18 Identity 側には
+  // 「誰が管理画面を使ってよいか」の情報を一切足さない——admin-worker は
+  // ただの OIDC クライアントの 1 つで、`sessionToken` が無いこの Worker は
+  // そもそもその 2 つを呼べない。「誰が使ってよいか」の記憶は、下の
+  // `ADMIN_DB`（admin-worker 専用の D1）だけが持つ。
   //
-  // 運用者の判断（2026-10-30 夜）で、u18 Identity 側には「誰が管理画面を
-  // 使ってよいか」の情報を一切足さない——admin-worker はただの OIDC
-  // クライアントの 1 つで、IdentityRPC / IdentityAdminRPC を呼ぶ理由が
-  // 無い。「誰が使ってよいか」の記憶は、下の `ADMIN_DB`（admin-worker
-  // 専用の D1）だけが持つ。
+  // **`IdentityAdminDelegatedRPC` は束縛する**（#390 決定 16 ③）。
+  // `sessionToken` を要求しない delegated 契約で、利用者の停止・解除・
+  // OAuth クライアントの登録・失効を呼ぶ。信頼境界はこの Service Binding
+  // そのもの——auth-worker 側は `actorUserId` の実在だけを確かめ、
+  // 「管理者かどうか」は検証しない（`IdentityAdminDelegatedRpcContract`
+  // の冒頭）。admin-worker 側（上のセッションガード + 承認リスト + `acr`
+  // 確認）が認可の全体を持つ。
   //
-  // **nfc-worker への Service Binding は持つ**（#382 / #390 決定 16 ③）。
+  // **nfc-worker への Service Binding も持つ**（#382 / #390 決定 16 ③）。
   // あちらの `NfcAdminDelegatedRPC` を束縛し、他人のカードの無効化・
   // 遷移先の書き換え・一覧・発行を呼ぶ。認可（管理者かどうか）は
   // admin-worker 側（上のセッションガード + 承認リスト）で完結している
@@ -47,6 +54,11 @@
   ],
 
   "services": [
+    {
+      "binding": "IDENTITY_ADMIN_DELEGATED",
+      "service": "u18-auth",
+      "entrypoint": "IdentityAdminDelegatedRPC",
+    },
     {
       "binding": "NFC_ADMIN_DELEGATED",
       "service": "u18-nfc",
@@ -90,6 +102,15 @@
         },
       ],
       "services": [
+        {
+          "binding": "IDENTITY_ADMIN_DELEGATED",
+          // `wrangler deploy --env production` は Worker 名を
+          // "<name>-<env>" に派生させるため、本番の auth-worker は
+          // "u18-auth-production" になる（dashboard-worker の IDENTITY
+          // と同じ理由で明示する）。
+          "service": "u18-auth-production",
+          "entrypoint": "IdentityAdminDelegatedRPC",
+        },
         {
           "binding": "NFC_ADMIN_DELEGATED",
           // `wrangler deploy --env production` は Worker 名を

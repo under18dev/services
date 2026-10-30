@@ -57,6 +57,9 @@ describe("/login", () => {
     // という運用者の判断（2026-10-30 夜）——admin-worker はただの
     // OIDC クライアントの 1 つで、「誰か」が分かれば十分である。
     expect(location.searchParams.get("scope")).toBe("openid");
+    // **決定 8（#390）。** 要求するだけでは強制にならない——拒むのは
+    // `/callback` の仕事（下の別 describe）。
+    expect(location.searchParams.get("acr_values")).toBe("passkey");
 
     const cookies = response.headers.getSetCookie();
     expect(cookies.some((c) => c.includes("u18_admin_login_state="))).toBe(true);
@@ -91,7 +94,13 @@ describe("/callback — 全体の往復", () => {
     const loginStateCookie = cookieHeaderFrom(loginResponse);
 
     // ② 偽 IdP が、この nonce に対応する ID Token を発行する想定で作り直す。
-    const idToken = await idp.signIdToken({ sub: "usr_admin_1", aud: env.OIDC_CLIENT_ID, nonce });
+    // `acr: "passkey"` が無いと決定 8 の確認（下の別 describe）で弾かれる。
+    const idToken = await idp.signIdToken({
+      sub: "usr_admin_1",
+      aud: env.OIDC_CLIENT_ID,
+      nonce,
+      acr: "passkey",
+    });
     const appWithRealToken = createApp({
       fetcher: idp.fetcherReturning(idToken),
       clock,
@@ -200,6 +209,71 @@ describe("/callback — 全体の往復", () => {
     );
 
     expect(response.status).toBe(400);
+  });
+});
+
+/**
+ * 決定 8（管理者は Passkey のセッションでしか振る舞えない、#390）。
+ *
+ * **`IdentityAdminDelegatedRPC` には再認証も管理者判定も無い**
+ * （`app.ts` の `REQUIRED_ACR` の JSDoc を参照）ので、ここで弾かないと
+ * admin-worker 経由だけメール OTP でも利用者の停止や OAuth クライアント
+ * の登録ができてしまう。
+ */
+describe("acr の確認（決定 8、#390）", () => {
+  async function callbackWith(acr: string | undefined): Promise<Response> {
+    const idp = await createFakeIdp(env.AUTH_ISSUER);
+    const app = createApp({ fetcher: idp.fetcherReturning("unused") });
+
+    const loginResponse = await app.fetch(new Request(`${ORIGIN}/login`), env, executionContext());
+    const authorizeUrl = new URL(loginResponse.headers.get("Location") ?? "");
+    const state = authorizeUrl.searchParams.get("state")!;
+    const nonce = authorizeUrl.searchParams.get("nonce")!;
+    const loginStateCookie = cookieHeaderFrom(loginResponse);
+
+    const idToken = await idp.signIdToken({
+      sub: "usr_otp",
+      aud: env.OIDC_CLIENT_ID,
+      nonce,
+      ...(acr === undefined ? {} : { acr }),
+    });
+    const appWithToken = createApp({ fetcher: idp.fetcherReturning(idToken) });
+
+    return appWithToken.fetch(
+      new Request(`${ORIGIN}/callback?code=c1&state=${state}`, {
+        headers: { Cookie: loginStateCookie },
+      }),
+      env,
+      executionContext(),
+    );
+  }
+
+  it("acr が無ければ（メール OTP 相当）403 で、セッションを作らない", async () => {
+    const response = await callbackWith(undefined);
+
+    expect(response.status).toBe(403);
+    expect(response.headers.getSetCookie().some((c) => c.includes("u18_admin_session="))).toBe(
+      false,
+    );
+    // 攻撃ではなく本人の選択なので、やり直し方を具体的に伝える
+    // （`fail()` の「画面に理由を出さない」方針とは別——`app.ts` を参照）。
+    expect(await response.text()).toContain("パスキー");
+  });
+
+  it("acr が u18 の定義する水準と違えば 403", async () => {
+    // 将来 u18 以外の値が IdP から返る可能性（規格上は自由記述）に備える。
+    const response = await callbackWith("mfa");
+
+    expect(response.status).toBe(403);
+  });
+
+  it('acr が "passkey" なら通る', async () => {
+    const response = await callbackWith("passkey");
+
+    expect(response.status).toBe(303);
+    expect(response.headers.getSetCookie().some((c) => c.includes("u18_admin_session="))).toBe(
+      true,
+    );
   });
 });
 
