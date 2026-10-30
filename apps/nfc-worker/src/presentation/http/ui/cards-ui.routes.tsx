@@ -1,6 +1,7 @@
 import { loginUrlWithReturnTo, returnToForCurrentRequest, sessionCookieName } from "@u18/contracts";
-import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
-import { STYLESHEET_PATH } from "./asset-paths";
+import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
+import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppBindings } from "../types";
@@ -26,18 +27,21 @@ import { CardsPage } from "./cards-page";
  */
 export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): void {
   /**
-   * 共有スタイルシート。
+   * Kiwa UI のスタイルシート（#332 / #338）。
    *
    * **auth-worker から借りるのをやめた**（#211）。理由は
    * `ui/asset-paths.ts` に書いてある。URL に内容ハッシュが入っているので
    * `immutable` で配信してよい。
    *
+   * **手書きの `u18.css` はもう配信していない。** この Worker の画面が
+   * 1 枚も読まなくなったので、配信ルートだけが残る形を避けた。
+   *
    * この画面が返す HTML は `no-store` のままである（カードの状態は
    * 所有者固有）。ここだけが例外で、**中身は全利用者に同じ CSS で、
    * 個人情報を 1 文字も含まない。**
    */
-  app.get(STYLESHEET_PATH, (c) =>
-    c.body(UI_STYLESHEET, 200, {
+  app.get(KIWA_STYLESHEET_PATH, (c) =>
+    c.body(KIWA_STYLESHEET, 200, {
       "Content-Type": "text/css; charset=utf-8",
       "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
     }),

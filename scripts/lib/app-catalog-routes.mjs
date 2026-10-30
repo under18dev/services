@@ -180,6 +180,38 @@ export function readInventoryPaths(text) {
 }
 
 /**
+ * `ACCOUNT_NAV_GROUPS` から `href` を拾う（#338）。
+ *
+ * **カタログと同じ罠にかかる 2 本目のリストである。** サイドバーの
+ * `/account/nfc` に答えるのは nfc-worker で、dashboard-worker の
+ * テストは何も言わない。あちらが route を動かした瞬間、ダッシュボードの
+ * サイドバーに 404 のリンクが並ぶ。
+ *
+ * **`readCatalogUrls` と違い定数参照を解かない。** 並びは
+ * `@u18/contracts` にあり、Worker ごとの接頭辞から組み立てられない
+ * （持ち主が 2 人いる）ので、**値は必ずリテラルで書かれている。**
+ * 定数参照が現れたら、それは「組み立ててしまった」ということなので、
+ * ここで拾えずに 0 件になる —— 下の「0 件は読めていない」が落とす。
+ *
+ * @param {string} text `account-nav.ts` の中身
+ * @returns {string[] | null} 読めなければ `null`
+ */
+export function readNavHrefs(text) {
+  const block = /export const ACCOUNT_NAV_GROUPS[^=]*=\s*\[([\s\S]*?)\n\];/.exec(text);
+  if (block === null) return null;
+
+  const hrefs = [...block[1].matchAll(/href:\s*"([^"]*)"/g)].map((m) => m[1]);
+  const keys = [...block[1].matchAll(/key:\s*"([^"]*)"/g)].length;
+
+  // **項目の数と href の数が合わなければ読めていない。** 書き方が
+  // 変わって片方だけ拾えなくなると、**検査は緑のまま本番だけが 404**
+  // を出す（`readCatalogUrls` と同じ理由）。
+  if (keys === 0 || hrefs.length !== keys) return null;
+
+  return hrefs;
+}
+
+/**
  * 突き合わせ本体。
  *
  * @param {string[]} paths カタログの `/` 始まりの url

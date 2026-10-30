@@ -1,8 +1,8 @@
+import { ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import type { AccountNavCurrent } from "@u18/contracts";
 import { Layout } from "@u18/web-ui";
 import type { Child, FC } from "hono/jsx";
 import { LOGIN_PATH, OVERVIEW_PATH, STYLESHEET_PATH } from "./asset-paths";
-import { DASHBOARD_NAV_GROUPS } from "./dashboard-nav";
-import type { DashboardNavKey } from "./dashboard-nav";
 
 /**
  * ダッシュボードの外枠（#308）。
@@ -29,11 +29,12 @@ import type { DashboardNavKey } from "./dashboard-nav";
  */
 
 /**
- * **並びは `dashboard-nav.ts` にある。** #332 の移行中は外枠が 2 つ
- * （この手書き CSS 版と Kiwa 版）あり、両方に書くと片方にだけ項目を
- * 足した状態が作れてしまう。あちらの冒頭を参照。
+ * **並びは `@u18/contracts` の `ACCOUNT_NAV_GROUPS` にある**（#338）。
+ *
+ * 移行中は外枠が 2 つ（この手書き CSS 版と `KiwaShell`）あり、さらに
+ * **`/account/nfc` は nfc-worker が答える。** 3 箇所に書くと、どれか 1 つ
+ * にだけ項目を足した状態が作れてしまう。あちらの冒頭を参照。
  */
-export type { DashboardNavKey };
 
 export type DashboardShellProps = {
   readonly title: string;
@@ -42,7 +43,7 @@ export type DashboardShellProps = {
    * 障害時の画面）。**行き先が無い状態でナビだけ出すと、押すたびに
    * 同じエラーへ戻る。**
    */
-  readonly current?: DashboardNavKey;
+  readonly current?: AccountNavCurrent;
   /** 見出し。ページごとに 1 つ。 */
   readonly heading: string;
   readonly lead?: string;
@@ -56,12 +57,12 @@ export type DashboardShellProps = {
   readonly children?: Child;
 };
 
-const Sidebar: FC<{ readonly current: DashboardNavKey }> = ({ current }) => (
+const Sidebar: FC<{ readonly current: AccountNavCurrent }> = ({ current }) => (
   <nav class="dash-side" aria-label="ダッシュボード">
     <a class="side-brand" href={OVERVIEW_PATH}>
       u18 Identity
     </a>
-    {DASHBOARD_NAV_GROUPS.map((group) => (
+    {ACCOUNT_NAV_GROUPS.map((group) => (
       <div key={group.label} class="side-group">
         <p class="side-group-label">{group.label}</p>
         <ul class="side-links">

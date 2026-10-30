@@ -59,10 +59,37 @@ diff に出る。** CSP は `style-src 'self'` で、インライン `style=` �
 
 ## 変えてあるところ
 
-`theme.css` だけ。色は design.md（`under18dev/under18dev`）の値で、
-Inter の外部読み込み・ライトパレット・グラデーションは落としてある。
-理由はあのファイルの冒頭に書いてある。
+**`.prettierignore` に並んでいるのが「上流のまま」のファイルの一覧である。**
+整形もしていないので、上流から取り直したときの diff が中身の違いだけになる。
 
-`*.tsx` は import の書き方以外に手を入れていない。**上流から取り直したときに
-diff が出ないようにしておく**ため。見た目を変えたくなったら、
+### `theme.css`
+
+色は design.md（`under18dev/under18dev`）の値で、Inter の外部読み込み・
+ライトパレット・グラデーションは落としてある。理由はあのファイルの冒頭。
+
+### `badge.tsx` —— `border-subtle` -> `border-border-subtle`（#338）
+
+**1 語だけ直してある。** 上流の `border-subtle` は Tailwind の
+ユーティリティとして存在せず（トークンは `--color-border-subtle`）、
+そのままだと `variant="secondary"` のバッジから枠線が消える。
+**class は HTML に出るのに CSS が無い**という、#320 と同じ形である。
+
+`apps/nfc-worker/test/kiwa-stylesheet.test.ts` が実際にこれで落ちた。
+**取り込んだ 6 つの class 文字列 207 個を端から端まで調べて、効いていない
+ものはこれ 1 つだけだった。**
+
+**上流から取り直すときは、この 1 語を当て直すこと。** 当て直さなくても
+落ちるのは、その class を使うページがある場合だけである。
+
+### それ以外
+
+`*.tsx` は import の書き方以外に手を入れていない。見た目を変えたくなったら、
 コンポーネントではなく `theme.css` か、呼び出し側の `class` で行うこと。
+
+## 効いていない class を見つける
+
+画面ごとの検査（`test/kiwa-stylesheet.test.ts`）は**描かれた class** しか
+見ない。取り込んだコンポーネント全体を調べたいときは、class 文字列を
+並べたファイルを `@source` の走査範囲（このディレクトリ）に置いて
+`build-client.mjs` を回し、出てきた CSS と突き合わせる。`border-subtle`
+はその方法で確かめた。

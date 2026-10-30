@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "node scripts/build-client.mjs && wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "build": "node scripts/build-client.mjs && wrangler deploy --dry-run --outdir dist",
+    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json",
+    "test": "node scripts/build-client.mjs && vitest run",
     "cf-typegen": "wrangler types",
     "migrate:local": "wrangler d1 migrations apply u18-nfc --local",
-    "migrate:remote": "wrangler d1 migrations apply u18-nfc --remote"
+    "migrate:remote": "wrangler d1 migrations apply u18-nfc --remote",
+    "build:client": "node scripts/build-client.mjs"
   },
   "dependencies": {
     "@u18/contracts": "workspace:*",
@@ -26,6 +27,10 @@
     "@cloudflare/vitest-plugin": "1.4.7",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
-    "wrangler": "4.152.0"
+    "wrangler": "4.152.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "postcss": "8.5.31",
+    "tailwindcss": "4.3.3",
+    "@u18/testing": "workspace:*"
   }
 }

@@ -1,5 +1,6 @@
-import { hashedFileName, UI_STYLESHEET } from "@u18/web-ui";
+import { hashedFileName } from "@u18/web-ui";
 import { CARDS_UI_PATH } from "../base-path";
+import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 
 /**
  * この Worker が配信する静的アセットのパス。
@@ -25,10 +26,36 @@ import { CARDS_UI_PATH } from "../base-path";
  * 「両方が同じ関数を呼んでいる」ことしか保証せず、auth が配信をやめた
  * 瞬間にまた黙って壊れる。借りる関係そのものを消すほうを選んだ。
  *
- * 代償は、同じ CSS を 2 つの Worker が配信することである。中身は
- * `@u18/web-ui` の 1 つで、どちらもバンドルに文字列として持っている
- * （dashboard-worker も同じ形）。
+ * **この判断は Kiwa UI へ移っても変わらない**（#338）。配信する中身が
+ * 手書きの `UI_STYLESHEET` から Tailwind の出力に替わっただけで、
+ * 「自分の画面が読むものは自分で配信する」は同じである。共有している
+ * のはトークンと primitives（`@u18/web-ui`）のほうで、**URL は共有
+ * しない。**
+ *
+ * ## `u18.css` はもう配信していない（#338）
+ *
+ * カード一覧が Kiwa UI へ移り、**この Worker の画面は手書き CSS を 1 枚も
+ * 読まなくなった。** 配信ルートだけを残すと「誰も参照しないアセット」に
+ * なる —— `test/asset-coverage.test.ts` がまさにそれを落とす検査なので、
+ * 残すなら理由を宣言することになる。宣言できる理由が無いので消した。
  */
 
-export const STYLESHEET_ROUTE = `/ui/${hashedFileName("u18.css", UI_STYLESHEET)}`;
-export const STYLESHEET_PATH = `${CARDS_UI_PATH}${STYLESHEET_ROUTE}`;
+/**
+ * Kiwa UI のスタイルシート（#332 / #338）。
+ *
+ * ## 中身はビルドが作るが、ハッシュはここが計算する
+ *
+ * `scripts/build-client.mjs` が Tailwind を回して
+ * `generated/kiwa-stylesheet.ts` を書く。**ハッシュをビルドに計算させて
+ * いない** —— `hashedFileName` が**配信するのと同じ文字列**から出すので、
+ * 生成が古くても URL が古いほうのハッシュになる（#211 / #132）。
+ *
+ * ## dashboard-worker と同じ内容だが、URL は別である
+ *
+ * 走査対象が Worker ごとに違うので、**出力が一致する保証は無い**
+ * （あちらの画面にしか無い class は、こちらの CSS に入らない）。
+ * ハッシュが偶然一致することはあっても、**それに依って借りないこと。**
+ * 上の #211 がその形で壊れている。
+ */
+export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
+export const KIWA_STYLESHEET_PATH = `${CARDS_UI_PATH}${KIWA_STYLESHEET_ROUTE}`;
