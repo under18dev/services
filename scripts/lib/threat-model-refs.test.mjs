@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { findReferences, parseDefinedIds } from "./threat-model-refs.mjs";
+import { findReferences, parseDefinedIds, SCAN_GLOBS } from "./threat-model-refs.mjs";
 
 describe("parseDefinedIds", () => {
   it("見出しで定義された単独の脅威を拾う", () => {
@@ -118,5 +118,41 @@ describe("実物の docs/threat-model.md", () => {
     assert.ok(defined.size > 10, "見出しの書き方を変えたなら、このパターンも直すこと");
     assert.ok(defined.has("T-1"));
     assert.ok(defined.has("RR-1"));
+  });
+});
+
+/**
+ * `SCAN_GLOBS` が実際に対象を拾えているかを、作り物の glob パターンではなく
+ * **実物のディレクトリに対して**確かめる（#371 のレビューで指摘された
+ * `packages/*\/test` の抜けと同じ形の穴を、次に開く前に閉じる）。
+ *
+ * **各ルートに最低 1 ファイルあることを期待値にしている。** ゼロ件は
+ * 「対象ディレクトリが無くなった」と「glob が拾えていない」を区別できない
+ * ので、`apps/*\/src` のような実在が保証された場所だけを選んでいる。
+ */
+describe("SCAN_GLOBS が実物のディレクトリを拾う", () => {
+  const roots = [
+    "apps/*/src/**/*.ts",
+    "apps/*/test/**/*.ts",
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "scripts/**/*.mjs",
+  ];
+
+  for (const root of roots) {
+    it(`${root} に少なくとも 1 ファイルある`, () => {
+      assert.ok(
+        globSync(root).length > 0,
+        `${root} が 0 件。ディレクトリ構成が変わったなら SCAN_GLOBS も見直すこと`,
+      );
+    });
+  }
+
+  it("SCAN_GLOBS 自身が apps と packages の両方の test を含む", () => {
+    // **ここが #371 のレビューで実際に抜けていた行。** 文字列として
+    // 「含まれているか」まで固定する——glob の数を数えるだけだと、
+    // 似た別のパターンに差し替えられても検出できない。
+    assert.ok(SCAN_GLOBS.includes("apps/*/test/**/*.{ts,tsx}"));
+    assert.ok(SCAN_GLOBS.includes("packages/*/test/**/*.ts"));
   });
 });
