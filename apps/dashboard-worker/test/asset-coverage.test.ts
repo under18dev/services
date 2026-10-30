@@ -53,13 +53,25 @@ const IDENTITY = {
   listPasskeys: async () => rpcOk([]),
   listSessions: async () => rpcOk([]),
   listGrants: async () => rpcOk([]),
+  getSession: async () => rpcOk(null),
+};
+
+/**
+ * 管理画面も 200 で引けるようにする（#333）。
+ *
+ * **このファイルは「参照されていないアセット」を探すのが目的**なので、
+ * 中身は空でよい。**ただし 200 である必要がある** —— 503 だと参照が
+ * 読めず、「アセットを 1 つも参照していない画面」と区別が付かない。
+ */
+const IDENTITY_ADMIN = {
+  listOAuthClients: async () => rpcOk([]),
 };
 
 /** 未認証で引いたときの参照。**本番のアセット検査が見るのはこちら。** */
 async function refsWithoutSession(path: string): Promise<readonly string[]> {
   const response = await createApp().fetch(
     new Request(`${ORIGIN}${path}`),
-    envWith(IDENTITY as never),
+    envWith(IDENTITY as never, undefined, IDENTITY_ADMIN as never),
     executionContext(),
   );
   // 401 でも画面は返る（ログイン導線）。本文が読めることだけ確かめる。
@@ -72,7 +84,7 @@ async function refsOf(path: string): Promise<readonly string[]> {
     new Request(`${ORIGIN}${path}`, {
       headers: { Cookie: `${DEV_SESSION_COOKIE_NAME}=token-value` },
     }),
-    envWith(IDENTITY as never),
+    envWith(IDENTITY as never, undefined, IDENTITY_ADMIN as never),
     executionContext(),
   );
   // 200 でなければ参照が読めない。**0 件と区別が付かない**ので先に落とす。

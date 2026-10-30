@@ -1,4 +1,4 @@
-import type { IdentityRpcContract } from "@u18/contracts";
+import type { IdentityAdminRpcContract, IdentityRpcContract } from "@u18/contracts";
 
 /**
  * `IdentityRpcContract` の fake を仕込んだ `Env` を作る。
@@ -12,11 +12,26 @@ import type { IdentityRpcContract } from "@u18/contracts";
 export function envWith(
   identity: Partial<IdentityRpcContract>,
   environment: string = "development",
+  /**
+   * 管理用 Entrypoint の偽物（#333）。
+   *
+   * **既定は「何も実装していない」** —— 呼ぶと
+   * `TypeError: ... is not a function` になり、`RpcIdentityAdminGateway`
+   * がそれを `identity_unavailable` へ畳む。管理画面を見ないテストは
+   * 渡さなくてよい。
+   *
+   * **`identity` を流用しない。** 流用すると、本番で分けてある 2 本の
+   * binding がテストの中だけ 1 本になり、**`IDENTITY` に管理用の
+   * メソッドを生やしても誰も気づかない**（境界が消えたことが
+   * テストから見えなくなる）。
+   */
+  identityAdmin: Partial<IdentityAdminRpcContract> = {},
 ): Env {
   return {
     ENVIRONMENT: environment,
     AUTH_ISSUER: "http://localhost:8787",
     IDENTITY: identity,
+    IDENTITY_ADMIN: identityAdmin,
   } as unknown as Env;
 }
 

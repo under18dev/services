@@ -101,9 +101,22 @@ function collectFormCsrfSites(dir: string, root: string): FormCsrfScan {
     let enclosing = "";
     for (const line of lines) {
       // **経路の登録だけを拾う。** `c.get("identity")` のような
-      // Context の取り出しと区別が要るので、第 1 引数が `/` で始まる
-      // 文字列であることまで見る。
-      const route = /\.(get|post|put|patch|delete|all)\(\s*["'`]\//.exec(line);
+      // Context の取り出しと区別が要る。
+      //
+      // **文字列リテラルだけを見ていた時期がある。** この Worker は
+      // 経路を `*_ROUTE` の定数で登録しているので、**1 本も一致せず、
+      // `enclosing` が空のままだった** —— つまり `rotate` の判定は
+      // 「どの経路の中か分からない」＝常に unguarded で、**この Worker
+      // には `rotateCsrfToken` の呼び出しが 1 つも無かったから緑だった。**
+      // #333 で最初の 1 つが入って初めて分かった（`filesScanned` が
+      // 0 件を捕まえるのと同じ形の穴が、ここにも残っていた）。
+      //
+      // 定数も拾う。`c.get(` と紛れないよう、**`_ROUTE` / `_PATH` で
+      // 終わる大文字の識別子**に限る（このリポジトリの命名）。
+      const route =
+        /\.(get|post|put|patch|delete|all)\(\s*(?:["'`]\/|[A-Z][A-Z0-9_]*_(?:ROUTE|PATH)\b)/.exec(
+          line,
+        );
       if (route !== null) enclosing = route[1]!;
       // 定義そのものは呼び出しではない。
       if (/function rotateCsrfToken\(/.test(line)) continue;
@@ -126,9 +139,11 @@ const formCsrfScan = collectFormCsrfSites(join(workerRoot, "src"), workerRoot);
 /**
  * **走査そのものが効いていることを確かめるための見本。**
  *
- * `src` 側はいま 0 件なので、**正規表現を壊しても 0 件のまま緑になる。**
- * 「違反が無い」と「何も見ていない」が同じ観測値になる形なので、
- * わざと違反した見本を別に置いて、そちらが拾えることを見る。
+ * **#333 で `src` 側に form POST が入るまで 0 件だった。** 0 件のあいだは
+ * **正規表現を壊しても 0 件のまま緑になる** —— 「違反が無い」と「何も
+ * 見ていない」が同じ観測値になる形なので、わざと違反した見本を別に置いて、
+ * そちらが拾えることを見る。**実物が入ったいまも見本は残す** ——
+ * 実物が守られている限り、やはり違反 0 件だからである。
  */
 const formCsrfFixtureScan = collectFormCsrfSites(
   join(workerRoot, "test/fixtures/csrf-scan"),

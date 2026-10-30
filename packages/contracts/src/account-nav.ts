@@ -40,7 +40,8 @@
  * dashboard 側のテストは何も言わない（#211 / #327 の家系）。
  */
 
-export type AccountNavKey = "profile" | "passkeys" | "sessions" | "grants" | "apps" | "nfc";
+export type AccountNavKey =
+  "profile" | "passkeys" | "sessions" | "grants" | "apps" | "nfc" | "clients";
 
 export type AccountNavItem = {
   readonly key: AccountNavKey;
@@ -71,8 +72,10 @@ export type AccountNavGroup = {
  *
  * **押しても何も無いリンクを置かない** —— パスキーの登録ボタンが
  * 「API はあるのに入口が無い」まま残っていた #306 と、向きは逆だが
- * 同じ種類の嘘になる。「開発」（OAuth クライアントの管理、#331）は
- * まだ画面が無いので置いていない。
+ * 同じ種類の嘘になる。「管理」の節は #373 で RPC が入り、#333 で画面が
+ * 入ったので置いた。**節の名前は「開発」ではない** —— OAuth クライアント
+ * だけを想定していたときはそう呼んでいたが、NFC カードの管理
+ * （`/account/nfc/admin`）が同じ節に入るので合わなくなった。
  *
  * ## 管理者向けの項目も、ここに足す（#333）
  *
@@ -81,9 +84,9 @@ export type AccountNavGroup = {
  * `check-app-catalog-routes.mjs` の走査から外れ、**行き先が実在する
  * ことを誰も見なくなる。**
  *
- * **いま 1 つも無いのは、画面がまだ無いから**である。上の規則は
- * 管理者向けにも同じく当てはまる —— **画面が入る PR で、その PR が
- * ここへ足すこと。**
+ * 上の規則は管理者向けにも同じく当てはまる —— **画面が入る PR で、
+ * その PR がここへ足すこと。** 最初の 1 つは `clients`（#333）で、
+ * 画面（`/account/admin/clients`）と同じ PR で入った。
  */
 export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
   {
@@ -116,6 +119,32 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
        * サイドバーからは辿れなかった）。
        */
       { key: "nfc", href: "/account/nfc", label: "NFC カード" },
+    ],
+  },
+  {
+    /**
+     * **管理者にだけ出る節**（#333）。
+     *
+     * **「アカウント」「サービス」と分ける。** あの 2 つは「自分のもの」を
+     * 扱う場所で、ここは **u18 そのものの設定**を扱う。同じ並びに混ぜると、
+     * 管理者には「自分の連携アプリ」と「u18 に登録されたクライアント」が
+     * 隣り合って見え、**取り消すつもりで失効させる**ことが起こりうる。
+     *
+     * 節ごと `adminOnly` なので、非管理者には**見出しごと消える**
+     * （`accountNavFor`）。見出しだけ残すと、隠している意味が無くなる。
+     *
+     * **NFC カードの管理（`/account/nfc/admin`）も同じ節に入る**
+     * （持ち主は nfc-worker）。グループ名が 1 文字でも違うと
+     * **管理の節が 2 つ並ぶ**ので、ここの文字列は動かさないこと。
+     */
+    label: "管理",
+    items: [
+      {
+        key: "clients",
+        href: "/account/admin/clients",
+        label: "OAuth クライアント",
+        adminOnly: true,
+      },
     ],
   },
 ];

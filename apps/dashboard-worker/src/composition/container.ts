@@ -1,5 +1,9 @@
-import type { IdentityGateway } from "../application/ports";
+import type { IdentityAdminGateway, IdentityGateway } from "../application/ports";
 import { RpcIdentityGateway, asIdentityRpc } from "../infrastructure/rpc/identity.gateway";
+import {
+  RpcIdentityAdminGateway,
+  asIdentityAdminRpc,
+} from "../infrastructure/rpc/identity-admin.gateway";
 
 /**
  * 依存性の組み立て（仕様書 2.3）。
@@ -14,6 +18,15 @@ import { RpcIdentityGateway, asIdentityRpc } from "../infrastructure/rpc/identit
  */
 export type Container = {
   readonly identity: IdentityGateway;
+  /**
+   * 管理用（#333）。**別の binding（`IDENTITY_ADMIN`）から組み立てる。**
+   *
+   * ここで `env.IDENTITY` を渡しても型は通る（どちらも `Fetcher`）が、
+   * **呼んだ先に管理用のメソッドは無い**ので実行時に落ちる。
+   * `asIdentityAdminRpc` を分けてあるのはその取り違えを 1 箇所に
+   * 閉じ込めるためで、**渡す binding を間違えないのはここの責任である。**
+   */
+  readonly identityAdmin: IdentityAdminGateway;
 };
 
 /**
@@ -23,5 +36,8 @@ export type Container = {
  * キャッシュしない。生成コストはオブジェクト確保のみ。
  */
 export function createContainer(env: Env): Container {
-  return { identity: new RpcIdentityGateway(asIdentityRpc(env.IDENTITY)) };
+  return {
+    identity: new RpcIdentityGateway(asIdentityRpc(env.IDENTITY)),
+    identityAdmin: new RpcIdentityAdminGateway(asIdentityAdminRpc(env.IDENTITY_ADMIN)),
+  };
 }

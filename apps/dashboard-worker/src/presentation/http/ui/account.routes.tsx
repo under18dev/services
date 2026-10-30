@@ -6,9 +6,13 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { IdentityOutcome } from "../../../application/ports";
+import type { IdentityFailure } from "../../../domain/errors";
 import type { AppBindings } from "../types";
 import { HomePage } from "./home-page";
 import {
+  ADMIN_CLIENTS_CREATE_ROUTE,
+  ADMIN_CLIENTS_DISABLE_ROUTE,
+  ADMIN_CLIENTS_ROUTE,
   APPS_ROUTE,
   GRANTS_ROUTE,
   ISLAND_ROUTE,
@@ -24,6 +28,8 @@ import { GrantsPage } from "./grants-page";
 import { PasskeysPage } from "./passkeys-page";
 import { ProfilePage } from "./profile-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
+import { AdminClientsPage, AdminNotFoundPage, type CreatedClient } from "./admin-clients-page";
+import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "../csrf";
 import { SessionsPage } from "./sessions-page";
 import { returnToForCurrentRequest } from "@u18/contracts";
 
@@ -206,6 +212,146 @@ export const accountUiRoutes = new Hono<AppBindings>()
   })
 
   /**
+   * OAuth クライアントの管理（#308 / #333）。**管理者だけ。**
+   *
+   * ## 守っているのはここではない
+   *
+   * 管理者でないセッションには auth-worker が `not_found` を返す
+   * （`application/use-cases/admin-access.ts`）。**この画面はその答えを
+   * 人が読む形にしているだけ**で、ここを迂回しても通らない。
+   *
+   * `isAdmin` を見て先に弾く形にはしていない。**判定が 2 か所になると、
+   * 片方だけが古くなる** —— #337 で `isAdmin` の意味が「旗が立っている」
+   * から「このセッションで管理者として振る舞ってよい」へ変わったとき、
+   * 画面側に写しを持っていたらそこだけ古い意味で弾き続けた。
+   *
+   * ## `not_found` は 404 で返す
+   *
+   * 503（`UnavailablePage`）に畳むと、**管理者でない人には「いまは
+   * 見られない」と読める** —— あとで見られるようになると思わせない。
+   */
+  .get(ADMIN_CLIENTS_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const [flags, clients] = await Promise.all([
+      navFlags(c, token),
+      c.get("identityAdmin").listOAuthClients(token),
+    ]);
+    if (!clients.ok) return renderAdminFailure(c, clients);
+
+    return c.html(
+      <AdminClientsPage
+        isAdmin={flags.isAdmin}
+        csrfToken={ensureCsrfToken(c)}
+        clients={clients.value}
+      />,
+    );
+  })
+
+  /**
+   * クライアントの登録（#308 / #333）。
+   *
+   * ## リダイレクトしない
+   *
+   * **`client_secret` の平文は、この応答にしか存在しない。** PRG を挟むと
+   * 次の GET へ運ぶ必要があり、クエリにもパスにも Cookie にも置けない。
+   * 200 でそのまま描く。
+   *
+   * **再読み込みで再送される。** `client_id` は一意制約を持つので 2 件目は
+   * `conflict` になり、画面には「その client_id は使われています」と出る。
+   * `Idempotency-Key` は要らない（鍵を呼ぶ側が決めているため）。
+   *
+   * ## 失敗しても一覧は出す
+   *
+   * 入力を直してやり直す画面なので、**一覧ごと消さない。** 一覧が取れない
+   * ときだけ失敗の画面へ回す。
+   */
+  .post(ADMIN_CLIENTS_CREATE_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const form = await c.req.parseBody();
+    if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
+      return renderAdminPage(c, token, { error: "もう一度お試しください。" });
+    }
+
+    const redirectUris = (field(form, "redirect_uris") ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+    const scopes = (field(form, "scopes") ?? "")
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter((scope) => scope !== "");
+    const logoUrl = (field(form, "logo_url") ?? "").trim();
+    const clientType = field(form, "client_type");
+
+    if (clientType !== "confidential" && clientType !== "public") {
+      return renderAdminPage(c, token, { error: "種別を選んでください。" });
+    }
+
+    const created = await c.get("identityAdmin").createOAuthClient(token, {
+      clientId: (field(form, "client_id") ?? "").trim(),
+      name: (field(form, "name") ?? "").trim(),
+      clientType,
+      redirectUris,
+      // **空なら渡さない。** 空配列を渡すと「0 個の scope を要求した」に
+      // なり、既定（openid profile email）が効かない。
+      ...(scopes.length === 0 ? {} : { scopes }),
+      ...(logoUrl === "" ? {} : { logoUrl }),
+    });
+
+    if (!created.ok) {
+      if (created.failure.kind === "unauthenticated") return renderFailure(c, created);
+      if (created.failure.kind === "not_found") return c.html(<AdminNotFoundPage />, 404);
+      return renderAdminPage(c, token, { error: createFailureMessage(created.failure.kind) });
+    }
+
+    // 権限の境界をまたぐ操作が通ったので、トークンを入れ替える
+    // （auth-worker がログイン後に回しているのと同じ考え方）。
+    rotateCsrfToken(c);
+    return renderAdminPage(c, token, { created: created.value });
+  })
+
+  /**
+   * クライアントの失効（#308 / #333）。**冪等。**
+   *
+   * **秘密を返さないのでリダイレクトしてよい**が、していない ——
+   * 失効は一覧の見た目が変わる操作で、**同じ画面を描き直すほうが
+   * 「何が変わったか」が見える。** 再読み込みで再送されても、
+   * 2 度目は `disabled: false` になるだけで状態は動かない。
+   */
+  .post(ADMIN_CLIENTS_DISABLE_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const form = await c.req.parseBody();
+    if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
+      return renderAdminPage(c, token, { error: "もう一度お試しください。" });
+    }
+
+    const result = await c
+      .get("identityAdmin")
+      .disableOAuthClient(token, (field(form, "client_id") ?? "").trim());
+
+    if (!result.ok) {
+      if (result.failure.kind === "unauthenticated") return renderFailure(c, result);
+      if (result.failure.kind === "not_found") return c.html(<AdminNotFoundPage />, 404);
+      return renderAdminPage(c, token, { error: disableFailureMessage(result.failure.kind) });
+    }
+
+    rotateCsrfToken(c);
+    return renderAdminPage(c, token, {
+      // **「失効しました」と言い切らない。** 冪等なので 2 度目は何も
+      // 変わっておらず、`disabled: false` が返る。嘘にならない形にする。
+      notice: result.value.disabled
+        ? "失効させました。以後このクライアントでの新しい認可は通りません。"
+        : "このクライアントは既に失効しています。",
+    });
+  })
+
+  /**
    * Kiwa UI のスタイルシート（#332）。
    *
    * **この Worker が配信する唯一のスタイルシートである。** 6 枚とも
@@ -304,4 +450,89 @@ function renderFailure(
     return c.html(<SignInRequiredPage returnTo={returnToForCurrentRequest(c.req.url)} />, 401);
   }
   return c.html(<UnavailablePage />, 503);
+}
+
+/** form の値を 1 つ取り出す。ファイルが来たら無いものとして扱う。 */
+function field(form: Record<string, unknown>, name: string): string | undefined {
+  const value = form[name];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * 管理画面を描き直す。**更新系の 2 本が共有する。**
+ *
+ * **一覧をもう一度引く。** 直前の操作の結果を手で足すのではなく、
+ * auth-worker にもう一度聞く —— 足す形だと、**登録に成功したのに
+ * 一覧へ出ない**（あるいはその逆）という食い違いが作れる。
+ */
+async function renderAdminPage(
+  c: Context<AppBindings>,
+  token: string,
+  extra: { created?: CreatedClient; error?: string; notice?: string },
+): Promise<Response> {
+  const [flags, clients] = await Promise.all([
+    navFlags(c, token),
+    c.get("identityAdmin").listOAuthClients(token),
+  ]);
+  if (!clients.ok) return renderAdminFailure(c, clients);
+
+  return c.html(
+    <AdminClientsPage
+      isAdmin={flags.isAdmin}
+      csrfToken={ensureCsrfToken(c)}
+      clients={clients.value}
+      {...(extra.created === undefined ? {} : { created: extra.created })}
+      {...(extra.error === undefined ? {} : { error: extra.error })}
+      {...(extra.notice === undefined ? {} : { notice: extra.notice })}
+    />,
+  );
+}
+
+/**
+ * 管理画面が一覧を取れなかったときの応答。
+ *
+ * **`not_found` を 404 にするのがここだけの違いである。** 他の画面は
+ * `not_found` を「一時的に表示できません」へ畳んでよい（利用者にできる
+ * ことが無いので）が、ここでは **`not_found` が「管理者ではない」の
+ * 畳んだ値**なので、503 にすると「あとで見られる」と読める。
+ */
+function renderAdminFailure(
+  c: Context<AppBindings>,
+  outcome: Extract<IdentityOutcome<unknown>, { ok: false }>,
+): Response | Promise<Response> {
+  if (outcome.failure.kind === "not_found") return c.html(<AdminNotFoundPage />, 404);
+  return renderFailure(c, outcome);
+}
+
+/**
+ * 登録が通らなかった理由を、人が読む 1 文にする。
+ *
+ * **内部の事情は書かない。** `identity_unavailable` の `detail` は画面に
+ * 出さない（`message-page.tsx` と同じ判断）。
+ */
+function createFailureMessage(kind: IdentityFailure["kind"]): string {
+  switch (kind) {
+    case "conflict":
+      return "その client_id は既に使われています。別の値で登録してください。";
+    case "reauthentication_required":
+      // **窓は 5 分**（`hasFreshAuthentication`）。盗んだ Cookie 1 枚で
+      // 認可コードの宛先を登録されないための要求である（RR-21 の緩和 1）。
+      return "登録にはログインし直しが必要です。もう一度ログインしてから操作してください。";
+    case "forbidden":
+      return "入力に問題があります。Redirect URI は https の絶対 URI で、1 行に 1 つ書いてください。";
+    default:
+      return "いま登録できません。しばらく待ってからもう一度お試しください。";
+  }
+}
+
+/** 失効が通らなかった理由。**一次パーティは `conflict` で返る。** */
+function disableFailureMessage(kind: IdentityFailure["kind"]): string {
+  switch (kind) {
+    case "conflict":
+      return "u18 公式のクライアントは、この画面からは失効させられません。";
+    case "reauthentication_required":
+      return "失効にはログインし直しが必要です。もう一度ログインしてから操作してください。";
+    default:
+      return "いま失効させられません。しばらく待ってからもう一度お試しください。";
+  }
 }

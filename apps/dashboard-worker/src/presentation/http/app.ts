@@ -380,7 +380,11 @@ export function createApp(): Hono<AppBindings> {
   // 組み立てをミドルウェアに閉じ込め、各ルートは `c.get("identity")` だけを
   // 見る。ルートから `Env` を直接触らせない。
   root.use("*", async (c, next) => {
-    c.set("identity", createContainer(c.env).identity);
+    // **2 つとも置く。** 管理用だけルートの中で組み立てると、`Env` を
+    // 触ってよい層が 1 つ増える。どちらを使うかはルートが選ぶ。
+    const container = createContainer(c.env);
+    c.set("identity", container.identity);
+    c.set("identityAdmin", container.identityAdmin);
     await next();
   });
 

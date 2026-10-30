@@ -1,4 +1,5 @@
 import type {
+  OAuthClientSummary,
   PasskeySummary,
   GrantListItem,
   IdentityPing,
@@ -64,4 +65,48 @@ export interface IdentityGateway {
    * 監視から見て「落ちている」と「遅い」の区別が付かなくなる。
    */
   pingIdentity(): Promise<IdentityOutcome<IdentityPing>>;
+}
+
+/**
+ * 管理者だけが使う Identity の口（#308 / #333）。
+ *
+ * ## なぜ `IdentityGateway` と分けるのか
+ *
+ * **向こう側が別の Entrypoint だから**である。auth-worker は
+ * `IdentityRPC` と `IdentityAdminRPC` を分けており、束縛の単位は
+ * Entrypoint なので、**どちらを呼べるかは `wrangler.jsonc` で決まる**
+ * （`scripts/check-service-bindings.mjs` が静的に検査する）。
+ * 1 つの Port にまとめると、その境界がこちら側の型から消える。
+ *
+ * ## 認可はこちらで決めていない
+ *
+ * 管理者でないセッションには auth-worker が `not_found` を返す
+ * （`application/use-cases/admin-access.ts`）。**この Port を呼べること
+ * と、呼んで通ることは別である。** 画面が `isAdmin` を見て入口を隠すのは
+ * 利用者のための配慮で、守っているのは向こう側。
+ */
+export interface IdentityAdminGateway {
+  listOAuthClients(sessionToken: string): Promise<IdentityOutcome<readonly OAuthClientSummary[]>>;
+  /**
+   * クライアントを登録する。**冪等でない**ので adapter は自動リトライしない。
+   *
+   * 戻り値の `clientSecret` は**平文で、この応答にしか存在しない**
+   * （public クライアントでは null）。**ログにも画面の URL にも載せないこと。**
+   */
+  createOAuthClient(
+    sessionToken: string,
+    input: {
+      readonly clientId: string;
+      readonly name: string;
+      readonly clientType: "confidential" | "public";
+      readonly redirectUris: readonly string[];
+      readonly scopes?: readonly string[];
+      readonly logoUrl?: string | null;
+    },
+  ): Promise<IdentityOutcome<{ client: OAuthClientSummary; clientSecret: string | null }>>;
+  /** 失効させる。冪等（2 度目は `disabled: false`）。 */
+  disableOAuthClient(
+    sessionToken: string,
+    clientId: string,
+  ): Promise<IdentityOutcome<{ disabled: boolean }>>;
 }
