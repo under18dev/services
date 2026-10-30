@@ -108,12 +108,24 @@ describe("キャッシュしてよい経路はスタイルシートだけ", () =
     // ここが 200 を返すなら、古い URL も生かしていることになり、
     // #211 で消したはずの「古いものが使われ続ける窓」が戻る。
     const response = await createApp().fetch(
-      new Request(`${ORIGIN}${ACCOUNT_BASE_PATH}/ui/u18.css`),
+      new Request(`${ORIGIN}${ACCOUNT_BASE_PATH}/ui/kiwa.css`),
       envWith({} as never),
       executionContext(),
     );
 
     expect(response.status).toBe(404);
+
+    // `u18.css` は**ハッシュの有無に関わらず存在しない**（#332 の P1 で
+    // 配信を止め、P2 で `styles.ts` ごと消した）。上とは別のことを
+    // 言っているので分けてある —— こちらは「消えたまま」、上は
+    // 「配信しているものに、ハッシュ無しの入口を作っていない」。
+    const gone = await createApp().fetch(
+      new Request(`${ORIGIN}${ACCOUNT_BASE_PATH}/ui/u18.css`),
+      envWith({} as never),
+      executionContext(),
+    );
+
+    expect(gone.status).toBe(404);
   });
 
   it("Cookie を送っても応答が変わらない", async () => {
