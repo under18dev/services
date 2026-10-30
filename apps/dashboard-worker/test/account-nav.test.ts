@@ -41,7 +41,10 @@ const FIXTURE: readonly AccountNavGroup[] = [
 ];
 
 /** テスト用の並びで `accountNavFor` と同じ畳み方をする。 */
-function filtered(isAdmin: boolean, groups: readonly AccountNavGroup[]): readonly AccountNavGroup[] {
+function filtered(
+  isAdmin: boolean,
+  groups: readonly AccountNavGroup[],
+): readonly AccountNavGroup[] {
   if (isAdmin) return groups;
   return groups
     .map((g) => ({ ...g, items: g.items.filter((i) => i.adminOnly !== true) }))
