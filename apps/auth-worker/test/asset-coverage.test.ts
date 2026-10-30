@@ -1,7 +1,7 @@
 import { collectAssetRefs, normalizeAssetHash } from "@u18/web-ui";
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { ASSET_ROUTES, PROBE_PAGES } from "./route-inventory";
+import { ASSET_ROUTES, EXTERNALLY_UNVERIFIABLE_ASSETS, PROBE_PAGES } from "./route-inventory";
 
 /**
  * アセット → ページの向き（#313）。
@@ -34,6 +34,15 @@ describe("本番検査が引くページで、アセットを全部覆える", (
     expect(PROBE_PAGES.length).toBeGreaterThan(0);
   });
 
+  it("外から確かめられないアセットには、実在する名前と理由が書いてある", () => {
+    for (const [asset, reason] of Object.entries(EXTERNALLY_UNVERIFIABLE_ASSETS)) {
+      // 一覧に無い名前を宣言すると、**綴りを間違えたまま除外が効き続ける。**
+      expect(EXPECTED_ASSETS, `${asset} は一覧に無い`).toContain(asset);
+      // 空で通すと「確かめられない」が「確かめなくてよい」にすり替わる。
+      expect(reason.trim().length, `${asset}: 理由が短すぎる`).toBeGreaterThan(20);
+    }
+  });
+
   it("PROBE_PAGES の参照だけで一覧のアセットを全部覆う", async () => {
     const seen = new Set<string>();
     for (const page of PROBE_PAGES) {
@@ -43,11 +52,18 @@ describe("本番検査が引くページで、アセットを全部覆える", (
       for (const ref of collectAssetRefs(await response.text())) seen.add(ref);
     }
 
-    const uncovered = EXPECTED_ASSETS.filter((asset) => !seen.has(asset));
+    // **宣言したものは除く。** 「外から確かめられない」と書いてあるものと、
+    // 黙って外れたものを分ける（`route-inventory.ts` の
+    // `EXTERNALLY_UNVERIFIABLE_ASSETS`）。
+    const declared = Object.keys(EXTERNALLY_UNVERIFIABLE_ASSETS);
+    const uncovered = EXPECTED_ASSETS.filter(
+      (asset) => !seen.has(asset) && !declared.includes(asset),
+    );
     expect(
       uncovered,
       `PROBE_PAGES（${PROBE_PAGES.join(" ")}）がこのアセットを参照していません。` +
-        `本番検査の視界から外れます。`,
+        `本番検査の視界から外れます。外から確かめられないなら、` +
+        `EXTERNALLY_UNVERIFIABLE_ASSETS に理由を書くこと。`,
     ).toEqual([]);
   });
 });

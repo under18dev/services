@@ -1,7 +1,9 @@
 // @ts-check
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { build } from "esbuild";
+import postcss from "postcss";
+import tailwindcss from "@tailwindcss/postcss";
 
 /**
  * クライアントアイランド（hono/jsx/dom）をブラウザ向けにバンドルする。
@@ -49,6 +51,43 @@ const result = await build({
   write: false,
   logLevel: "warning",
 });
+
+/**
+ * Kiwa UI のスタイルシートを Tailwind v4 で組む（#332 の P2）。
+ *
+ * ## ハッシュをここで計算していない
+ *
+ * `@u18/web-ui` の `asset-hash.ts` は「**配信する文字列そのもの**から
+ * 実行時にハッシュを計算する」設計で、理由は #132 —— 生成物とハッシュが
+ * ずれると、ブラウザから見て「中身が変わったのに URL が同じ」になる。
+ *
+ * ここが作るのは「CSS を入れた `.ts`」だけで、ハッシュは
+ * `hashedFileName("kiwa.css", KIWA_STYLESHEET)` が**配信するのと同じ
+ * 文字列から**出す（`ui/asset-paths.ts`）。
+ *
+ * dashboard-worker / nfc-worker と同じ形である。
+ */
+async function buildStylesheet() {
+  const entry = join(root, "src/presentation/http/ui/kiwa.css");
+  const processed = await postcss([tailwindcss({ optimize: true })]).process(
+    await readFile(entry, "utf8"),
+    // **`from` を渡す。** `@import` と `@source` の相対パスはこのファイル
+    // からの相対で解かれる。渡さないと `tailwindcss` 自体が見つからない。
+    { from: entry },
+  );
+
+  await mkdir(join(root, "src/presentation/http/ui/generated"), { recursive: true });
+  await writeFile(
+    join(root, "src/presentation/http/ui/generated/kiwa-stylesheet.ts"),
+    "// 生成物。手で編集しない。scripts/build-client.mjs が作る。\n" +
+      `export const KIWA_STYLESHEET = ${JSON.stringify(processed.css)};\n`,
+    "utf8",
+  );
+  return processed.css;
+}
+
+const stylesheet = await buildStylesheet();
+console.log(`built kiwa stylesheet: ${(stylesheet.length / 1024).toFixed(1)} KiB`);
 
 const [output] = result.outputFiles ?? [];
 if (output === undefined) throw new Error("esbuild produced no output");

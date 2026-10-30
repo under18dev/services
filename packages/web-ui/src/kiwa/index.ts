@@ -14,6 +14,7 @@ export * from "./alert";
 export * from "./badge";
 export * from "./button";
 export * from "./card";
+export * from "./card-shell";
 export * from "./empty";
 export * from "./separator";
 export * from "./shell";

@@ -36,27 +36,9 @@
  * **`@source` を 1 行消せば黙って効かなくなる**ことは変わらない。
  */
 
-/**
- * ボタンのクラス。**`getButtonClasses()` の戻り値をリテラルで写したもの。**
- *
- * `test/island-classes.test.ts` が突き合わせているので、Kiwa 側が
- * 変わればそこで落ちる。写し間違いも同じところで落ちる。
- */
-const BUTTON_BASE =
-  "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium " +
-  "transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] " +
-  "focus-visible:ring-ring/20 aria-invalid:ring-destructive/20 " +
-  "dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive " +
-  "disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none " +
-  '[&_svg:not([class*="size-"])]:size-4 shrink-0 [&_svg]:shrink-0';
-
-const BUTTON_OUTLINE = "border border-border bg-card hover:bg-secondary hover:text-foreground";
-const BUTTON_SIZE_SM = "h-8 rounded-lg gap-1.5 px-3 has-[>svg]:px-2.5";
-
-/** ふつうのボタン（パスキーの登録、プロフィールの保存）。 */
-export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`;
-
-export const DANGER_BUTTON_CLASS = `${BUTTON_CLASS} text-destructive hover:text-destructive`;
+// ボタンのクラス（`BUTTON_CLASS` / `DANGER_BUTTON_CLASS`）は
+// `@u18/web-ui/kiwa/island-classes` へ移した（#332 の P2）。auth-worker の
+// パスキーの島が同じボタンを出すようになり、使う側が 2 つになったため。
 
 /**
  * プロフィールの編集パネル（#312）。**島が囲いごと作る。**
@@ -89,14 +71,7 @@ export const PANEL_DESC_CLASS = "text-foreground-muted text-sm";
 /** `CardContent` 相当。 */
 export const PANEL_BODY_CLASS = "px-6";
 
-/** 入力欄 1 つ分（ラベル + input）。 */
-export const FIELD_CLASS = "flex flex-col gap-1.5";
-
-/** 入力欄そのもの。`theme.css` のトークンだけで組んである。 */
-export const INPUT_CLASS =
-  "h-9 w-full rounded-lg border border-border bg-background-subtle px-3 text-sm " +
-  "outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] " +
-  "focus-visible:ring-ring/20";
-
-/** 入力欄のラベル。 */
-export const LABEL_CLASS = "text-sm font-medium text-foreground-muted";
+// 入力欄まわり（`FIELD_CLASS` / `INPUT_CLASS` / `LABEL_CLASS`）は
+// `@u18/web-ui/kiwa/island-classes` へ移した（#332 の P2）。auth-worker の
+// ログイン画面が**サーバー側で**同じ形の入力欄を描くようになり、使う側が
+// 2 つになったため。このファイルの冒頭に書いた規則のとおり。

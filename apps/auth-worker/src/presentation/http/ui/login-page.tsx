@@ -1,7 +1,13 @@
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "./csrf";
-import { Layout } from "@u18/web-ui";
-import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
+import { KiwaCardShell, getButtonClasses } from "@u18/web-ui/kiwa";
+import {
+  FIELD_CLASS,
+  INPUT_CLASS,
+  ITEM_META_CLASS,
+  LABEL_CLASS,
+} from "@u18/web-ui/kiwa/island-classes";
+import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH } from "./asset-paths";
 import { loginUrlWithReturnTo, RETURN_TO_FIELD, signupUrlWithReturnTo } from "./return-to";
 
 /**
@@ -101,7 +107,10 @@ const ReturnToField: FC<{ returnTo: string | null }> = ({ returnTo }) =>
 const ErrorMessage: FC<{ message: string | null }> = ({ message }) =>
   message === null ? null : (
     // role="alert" で読み上げへ届ける。文言そのものは中立に保つこと。
-    <p class="error" role="alert">
+    <p
+      class="rounded-lg border border-destructive/40 bg-background-subtle px-3 py-2.5 text-sm text-destructive"
+      role="alert"
+    >
       {message}
     </p>
   );
@@ -113,8 +122,8 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
   mode = "login",
 }) => (
   <>
-    <h2>{mode === "signup" ? "新規登録" : "ログイン"}</h2>
-    <p class="lead">
+    <h2 class="text-xl">{mode === "signup" ? "新規登録" : "ログイン"}</h2>
+    <p class={ITEM_META_CLASS}>
       {mode === "signup"
         ? "メールアドレスだけで登録できます。パスワードはありません。"
         : "u18 のサービスで使うアカウントにログインします。"}
@@ -122,18 +131,19 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
     <ErrorMessage message={view.error} />
     {view.notice === undefined || view.notice === null ? null : (
       // 完了の知らせはエラーではないので role="status"（控えめに読み上げる）。
-      <p class="notice" role="status">
+      <p class={ITEM_META_CLASS} role="status">
         {view.notice}
       </p>
     )}
 
-    <form method="post" action={`/${mode}/start`}>
+    <form method="post" action={`/${mode}/start`} class="flex flex-col gap-4">
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
-      <label class="field" for="email">
-        <span>メールアドレス</span>
+      <label class={FIELD_CLASS} for="email">
+        <span class={LABEL_CLASS}>メールアドレス</span>
         <input
           id="email"
+          class={INPUT_CLASS}
           type="email"
           name="email"
           value={view.email}
@@ -145,10 +155,10 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
           placeholder="you@example.com"
         />
       </label>
-      <button type="submit" class="button">
+      <button type="submit" class={getButtonClasses()}>
         確認コードを送る
       </button>
-      <p class="notice">確認コードをメールでお送りします。</p>
+      <p class={ITEM_META_CLASS}>確認コードをメールでお送りします。</p>
     </form>
 
     {/*
@@ -158,12 +168,21 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
       アカウント画面から追加する（§14.1 決定 2）。
     */}
     {mode === "signup" ? (
-      <p class="links">
+      <p class="text-sm text-foreground-muted [&_a:hover]:text-foreground [&_a]:underline [&_a]:underline-offset-4">
         <a href={loginUrlWithReturnTo(returnTo)}>すでにアカウントをお持ちの方</a>
       </p>
     ) : (
       <>
-        <div class="separator">または</div>
+        {/*
+          **罫線を疑似要素ではなく要素で引く。** 手書き CSS は
+          `.separator::before/::after` で引いていたが、Tailwind に同じ
+          ものは無い。見た目は同じで、読み上げには出ない（`aria-hidden`）。
+        */}
+        <div class="flex items-center gap-3 text-xs text-foreground-soft">
+          <span class="h-px flex-1 bg-border" aria-hidden="true" />
+          または
+          <span class="h-px flex-1 bg-border" aria-hidden="true" />
+        </div>
 
         {/*
       アイランドのマウント先。JS が読み込めなかった場合はこの中身が残るので、
@@ -177,12 +196,12 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
       （ui/page-headers.ts）。
     */}
         <div id="passkey-island" data-return-to={returnTo ?? undefined}>
-          <p class="notice">
+          <p class={ITEM_META_CLASS}>
             パスキーをお使いの場合は、この端末で JavaScript を有効にするとご利用いただけます。
             上のメールアドレスでのログインは JavaScript 無しでも行えます。
           </p>
         </div>
-        <p class="links">
+        <p class="text-sm text-foreground-muted [&_a:hover]:text-foreground [&_a]:underline [&_a]:underline-offset-4">
           <a href={signupUrlWithReturnTo(returnTo)}>アカウントをお持ちでない方</a>
         </p>
       </>
@@ -197,12 +216,12 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
   mode = "login",
 }) => (
   <>
-    <h2>確認コードの入力</h2>
+    <h2 class="text-xl">確認コードの入力</h2>
     {/*
       「送信しました」と断定しない。登録されていないアドレスでも同じ画面を
       返すため、ここで断定すると応答の差がアカウントの有無を表してしまう。
     */}
-    <p class="lead">
+    <p class={ITEM_META_CLASS}>
       {mode === "signup"
         ? "ご入力のアドレスがまだ登録されていない場合、6 桁の確認コードをお送りしました。"
         : "ご入力のアドレスが登録されている場合、6 桁の確認コードをお送りしました。"}
@@ -210,7 +229,7 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
     </p>
     <ErrorMessage message={view.error} />
 
-    <form method="post" action={`/${mode}/verify`}>
+    <form method="post" action={`/${mode}/verify`} class="flex flex-col gap-4">
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
       {/*
@@ -218,11 +237,16 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
         Referer に残るため（OTP やトークンをクエリに載せないのと同じ理由）。
       */}
       <input type="hidden" name="email" value={view.email} />
-      <label class="field" for="code">
-        <span>確認コード</span>
+      <label class={FIELD_CLASS} for="code">
+        <span class={LABEL_CLASS}>確認コード</span>
         <input
           id="code"
-          class="code-input"
+          /*
+            6 桁を拾い読みできるように等幅＋字間。**入力欄の見た目そのものは
+            共有の `INPUT_CLASS` に従う** —— ここで作り直すと、他の入力欄と
+            枠の太さや高さがずれる。
+          */
+          class={`${INPUT_CLASS} text-center font-mono text-lg tracking-[0.4em]`}
           type="text"
           name="code"
           required
@@ -233,17 +257,17 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
           autofocus
         />
       </label>
-      <button type="submit" class="button">
+      <button type="submit" class={getButtonClasses()}>
         ログイン
       </button>
     </form>
 
-    <div class="links">
-      <form method="post" action="/login/start" class="inline-form">
+    <div class="text-sm text-foreground-muted [&_a:hover]:text-foreground [&_a]:underline [&_a]:underline-offset-4 flex flex-wrap items-center gap-1">
+      <form method="post" action="/login/start" class="inline">
         <CsrfField token={csrfToken} />
         <ReturnToField returnTo={returnTo} />
         <input type="hidden" name="email" value={view.email} />
-        <button type="submit" class="link-button">
+        <button type="submit" class={getButtonClasses("link-muted", "sm")}>
           確認コードを再送する
         </button>
       </form>
@@ -261,10 +285,10 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
   returnTo,
 }) => (
   <>
-    <h2>ログイン済みです</h2>
-    <p class="identity">
-      <strong>{view.displayName}</strong>
-      <span>@{view.username}</span>
+    <h2 class="text-xl">ログイン済みです</h2>
+    <p class="flex flex-col gap-0.5 rounded-lg border border-border bg-background-subtle px-3 py-2.5">
+      <strong class="text-sm font-medium">{view.displayName}</strong>
+      <span class="text-sm text-foreground-muted">@{view.username}</span>
     </p>
     {/*
       ここで自動的にどこかへリダイレクトしない。戻り先を決めるのは
@@ -272,16 +296,18 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
       黙って飛ばすと「既にセッションがある」ことが利用者に見えなくなるので、
       明示して切り替え手段を出す。
     */}
-    <p class="lead">別のアカウントでログインする場合は、いったんログアウトしてください。</p>
+    <p class={ITEM_META_CLASS}>
+      別のアカウントでログインする場合は、いったんログアウトしてください。
+    </p>
     {/*
       2 つのボタンを**同じ form**に置く。別の form に分けると CSRF トークンと
       戻り先を 2 組持つことになり、片方だけ直される余地ができる。送る値が
       違うだけなので、submit の `name`/`value` で分ける。
     */}
-    <form method="post" action="/login/logout">
+    <form method="post" action="/login/logout" class="flex flex-col gap-3">
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
-      <button type="submit" class="button button-secondary">
+      <button type="submit" class={getButtonClasses("secondary")}>
         ログアウトして別のアカウントでログイン
       </button>
       {/*
@@ -300,11 +326,11 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
         type="submit"
         name={LOGOUT_ALL_FIELD}
         value={LOGOUT_ALL_VALUE}
-        class="button button-danger"
+        class={getButtonClasses("destructive")}
       >
         すべての端末からログアウト
       </button>
-      <p class="notice">
+      <p class={ITEM_META_CLASS}>
         身に覚えのない端末がある場合は、すべての端末からログアウトしてください。
         この端末も含めて、いますぐ使えなくなります。
       </p>
@@ -313,16 +339,16 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
 );
 
 export const LoginPage: FC<LoginPageProps> = (props) => (
-  <Layout
+  <KiwaCardShell
     title={props.mode === "signup" ? "新規登録" : "ログイン"}
     // Passkey のアイランドだけが JS を必要とする。ログイン済み画面と
     // コード入力画面には読み込ませない（不要な攻撃面を増やさない）。
-    stylesheet={STYLESHEET_PATH}
+    stylesheet={KIWA_STYLESHEET_PATH}
     // 新規登録画面もアイランドを出さないので読み込まない。
     scripts={props.view.kind === "email" && props.mode !== "signup" ? [LOGIN_ISLAND_PATH] : []}
   >
     {props.view.kind === "email" ? <EmailStep {...props} view={props.view} /> : null}
     {props.view.kind === "code" ? <CodeStep {...props} view={props.view} /> : null}
     {props.view.kind === "signed_in" ? <SignedIn {...props} view={props.view} /> : null}
-  </Layout>
+  </KiwaCardShell>
 );

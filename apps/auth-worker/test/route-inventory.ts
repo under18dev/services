@@ -51,7 +51,12 @@ export const PUBLIC_ROUTES: readonly Route[] = [
 
   // 静的アセット。**URL に内容ハッシュが入る**（#211）ので、照合側で
   // `<hash>` に正規化している。
+  // 手書きの共有スタイルシート。**いま読んでいるのは同意画面だけ**
+  // （#332 の P2 でログイン画面が Kiwa へ移った）。P2 の残りで消える。
   { method: "GET", path: "/ui/u18.<hash>.css" },
+  // Kiwa UI のスタイルシート（#332）。ログイン・新規登録・コード入力・
+  // ログイン済みの 4 つの見え方が、どれもこれを読む。
+  { method: "GET", path: "/ui/kiwa.<hash>.css" },
   { method: "GET", path: "/ui/login-island.<hash>.js" },
 
   // form 経路（JS 無しで完結する）。CSRF トークンと Origin の二重で守る。
@@ -121,6 +126,28 @@ export const ASSET_ROUTES: readonly Route[] = PUBLIC_ROUTES.filter((route) =>
  * （`asset-coverage.test.ts` が確かめる）。
  */
 export const PROBE_PAGES: readonly string[] = ["/login"];
+
+/**
+ * **本番検査が外から確かめられないアセット**と、その理由（#332）。
+ *
+ * ## 黙って外れるのと、宣言して外れるのは違う
+ *
+ * `PROBE_PAGES` は未認証で引けるページしか持てない。ここに書かないと
+ * 「外から確かめられていないアセット」が検査から**静かに消える** ——
+ * dashboard-worker が #313 で同じ仕組みを置いたのと同じ理由である
+ * （あちらの `EXTERNALLY_UNVERIFIABLE_ASSETS`）。
+ *
+ * 書いてあれば、**その配信が壊れても本番検査は気づかない**ことが
+ * 読んだ人に伝わる。
+ */
+export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
+  "/ui/u18.<hash>.css":
+    "手書きのスタイルシートを読むのは同意画面だけになった（#332 の P2 で" +
+    "ログイン画面が Kiwa へ移った）。同意画面は妥当な認可要求が無いと開けず、" +
+    "未認証で引ける PROBE_PAGES には置けない。" +
+    "**P2 の残り（同意画面の移行）が終わればこのアセットごと消える**ので、" +
+    "そのときこの宣言も消すこと。",
+};
 
 export const EXPECTED_ROUTES: readonly Route[] = [
   ...PUBLIC_ROUTES,
