@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
@@ -27,13 +27,87 @@ import { defineConfig } from "vitest/config";
  * 使えず、Node 側であるこのファイルから渡すしかない。JSONC なので
  * `JSON.parse` は通らず、`@u18/testing` の `parseJsonc()` で読む。
  */
+/**
+ * form POST が CSRF の判定を通っているかを走査する（仕様書 9 CSRF）。
+ *
+ * **この Worker には form POST がまだ 1 本も無い。** 守る対象が無いうちに
+ * 仕組みだけ入れると、**1 本目を書く人が仕組みの存在を知らないまま
+ * 素の form を置ける。** 文書に「CSRF を通すこと」と書く形は守られない
+ * （`apps/auth-worker/test/helpers.ts` の #253）。走査で落ちる形にする。
+ *
+ * 見るのは 2 つ。
+ *
+ * - **form を描いているのに `name={CSRF_FIELD_NAME}` を描いていない**
+ * - **本文を読んでいる（`parseBody` / `formData`）のに `isValidCsrf()` を
+ *   同じファイルで呼んでいない**
+ *
+ * ファイル単位の粗い判定である。同じファイルに 2 つ form があって片方だけ
+ * 守られている形は拾えない。**拾えるのは「いちばんありそうな形」までで、
+ * それは『1 本目を素で置く』である。**
+ *
+ * **散文は数えない。** `collectAuditEventNames` と同じ理由で、JSDoc に
+ * 例として書いた `<form method="post">` が違反として出てしまう。
+ *
+ * 走査は Node 側でしかできない（テスト本体は workerd の中で動く）。
+ * 照合は `test/form-csrf.test.ts`。
+ */
+function collectFormCsrfSites(dir: string, root: string): FormCsrfSite[] {
+  const sites: FormCsrfSite[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      sites.push(...collectFormCsrfSites(path, root));
+      continue;
+    }
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
+
+    const source = readFileSync(path, "utf8");
+    const code = source
+      .split("\n")
+      .filter((line) => !/^\s*\*/.test(line))
+      .map((line) => line.split("//")[0] ?? "")
+      .join("\n");
+
+    const file = relative(root, path);
+    if (/<form[\s>]/.test(code)) {
+      // **`CSRF_FIELD_NAME` が出てくるかではなく、描いているかを見る。**
+      // import しただけ・別の用途に使っただけで「守られている」と読むと、
+      // 検査が一番見つけたい形（hidden input を置き忘れた form）を見逃す。
+      sites.push({ file, kind: "render", guarded: /name=\{CSRF_FIELD_NAME\}/.test(code) });
+    }
+    if (/\.(parseBody|formData)\(/.test(code)) {
+      // 同じ理由で、`isValidCsrf` を import しただけでは通さない。
+      sites.push({ file, kind: "read", guarded: /isValidCsrf\(/.test(code) });
+    }
+  }
+  return sites;
+}
+
+type FormCsrfSite = { file: string; kind: "render" | "read"; guarded: boolean };
+
+const workerRoot = import.meta.dirname;
+const formCsrfSites = collectFormCsrfSites(join(workerRoot, "src"), workerRoot);
+/**
+ * **走査そのものが効いていることを確かめるための見本。**
+ *
+ * `src` 側はいま 0 件なので、**正規表現を壊しても 0 件のまま緑になる。**
+ * 「違反が無い」と「何も見ていない」が同じ観測値になる形なので、
+ * わざと違反した見本を別に置いて、そちらが拾えることを見る。
+ */
+const formCsrfFixtureSites = collectFormCsrfSites(
+  join(workerRoot, "test/fixtures/csrf-scan"),
+  workerRoot,
+);
+
 export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
         bindings: {
-          TEST_WRANGLER_JSONC: readFileSync(join(import.meta.dirname, "wrangler.jsonc"), "utf8"),
+          TEST_WRANGLER_JSONC: readFileSync(join(workerRoot, "wrangler.jsonc"), "utf8"),
+          TEST_FORM_CSRF_SITES: formCsrfSites,
+          TEST_FORM_CSRF_FIXTURE_SITES: formCsrfFixtureSites,
         },
         workers: [
           {
