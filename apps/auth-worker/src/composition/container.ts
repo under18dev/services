@@ -47,6 +47,12 @@ import { ListOAuthClientsUseCase } from "../application/use-cases/list-oauth-cli
 import { ListUsersUseCase } from "../application/use-cases/list-users.use-case";
 import { ManageUserUseCase } from "../application/use-cases/manage-user.use-case";
 import { ListAuditLogsUseCase } from "../application/use-cases/list-audit-logs.use-case";
+import { DelegatedListUsersUseCase } from "../application/use-cases/delegated-list-users.use-case";
+import { DelegatedManageUserUseCase } from "../application/use-cases/delegated-manage-user.use-case";
+import { DelegatedListOAuthClientsUseCase } from "../application/use-cases/delegated-list-oauth-clients.use-case";
+import { DelegatedCreateOAuthClientUseCase } from "../application/use-cases/delegated-create-oauth-client.use-case";
+import { DelegatedDisableOAuthClientUseCase } from "../application/use-cases/delegated-disable-oauth-client.use-case";
+import { DelegatedListAuditLogsUseCase } from "../application/use-cases/delegated-list-audit-logs.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -172,6 +178,13 @@ export type Container = {
     readonly listAuditLogs: ListAuditLogsUseCase;
     readonly createOAuthClient: CreateOAuthClientUseCase;
     readonly disableOAuthClient: DisableOAuthClientUseCase;
+    // admin-worker 専用（#390 決定 16 ③）。`IdentityAdminDelegatedRPC` だけが呼ぶ。
+    readonly delegatedListUsers: DelegatedListUsersUseCase;
+    readonly delegatedManageUser: DelegatedManageUserUseCase;
+    readonly delegatedListOAuthClients: DelegatedListOAuthClientsUseCase;
+    readonly delegatedCreateOAuthClient: DelegatedCreateOAuthClientUseCase;
+    readonly delegatedDisableOAuthClient: DelegatedDisableOAuthClientUseCase;
+    readonly delegatedListAuditLogs: DelegatedListAuditLogsUseCase;
   };
 };
 
@@ -497,6 +510,28 @@ export function createContainer(
         audit,
         clients: oauthClients,
         clock,
+      }),
+      // admin-worker 専用（#390 決定 16 ③）。**`getSession` を渡さない** ——
+      // 認可は Service Binding と admin-worker の承認リストに委ねており、
+      // ここに `requireAdminSession` 相当の判定は無い。
+      delegatedListUsers: new DelegatedListUsersUseCase({ users }),
+      delegatedManageUser: new DelegatedManageUserUseCase({ users, sessions, clock, audit }),
+      delegatedListOAuthClients: new DelegatedListOAuthClientsUseCase({ clients: oauthClients }),
+      delegatedCreateOAuthClient: new DelegatedCreateOAuthClientUseCase({
+        users,
+        clients: oauthClients,
+        tokens,
+        hasher,
+        audit,
+      }),
+      delegatedDisableOAuthClient: new DelegatedDisableOAuthClientUseCase({
+        users,
+        clients: oauthClients,
+        clock,
+        audit,
+      }),
+      delegatedListAuditLogs: new DelegatedListAuditLogsUseCase({
+        auditLogs: new DrizzleAuditLogReader(db),
       }),
     },
   };
