@@ -661,7 +661,8 @@ PR の表示: タイトルも本文も b1d9d3f のもの
 
 ```bash
 # **40 桁のフル SHA が要る。** 短縮形は受け付けない（下記）
-full="$(gh pr view <N> --json headRefOid -q .headRefOid)"
+# **`gh pr view` から取らないこと。** 理由は下の「同じ井戸から汲む」。
+full="$(git ls-remote origin "refs/heads/<branch>" | cut -f1)"
 gh pr merge <N> --squash --match-head-commit "$full"
 ```
 
@@ -670,7 +671,60 @@ gh pr merge <N> --squash --match-head-commit "$full"
 > `--match-head-commit SHA` Commit SHA that the pull request head must match to allow merge
 
 **head が動いていれば押せない。** 「押す前に SHA を確かめる」を覚えておく
-必要がなくなる。
+必要がなくなる —— **ただし、照合する値の出どころが正しければ。**
+
+#### 同じ井戸から汲むと、照合は成立したまま古い木が入る（2026-10-30、#369）
+
+**実際に起きた。** `--match-head-commit` を**使って**押して、**3 コミット前の
+木が main に入った。**
+
+```console
+$ git ls-remote origin refs/heads/docs/336-same-face
+ad5a22b...              # ← ブランチの実体
+
+$ gh pr view 369 --json headRefOid -q .headRefOid
+1850e7c...              # ← 3 コミット遅れている
+
+$ gh api repos/<owner>/<repo>/pulls/369 -q .head.sha
+1850e7c...              # ← REST も同じ
+```
+
+**20 秒おきに 3 回引いて変わらなかった。** `gh` のキャッシュではなく、
+**GitHub が持っている PR の head が遅れている。**
+
+**そして CI も、新しい 3 コミットに 1 本も走っていなかった。**
+
+```console
+$ gh run list --branch docs/336-same-face --json headSha,name
+1850e7c  CI        # これだけ
+1850e7c  Security
+```
+
+`gh pr checks` の「10 pass」は、**3 コミット前のものを繰り返し見ていた。**
+**「10 pass」は嘘を言っていない** —— `1850e7c` については本当に全部通って
+いる。**答えている対象が別だというだけ**である。
+
+| 値                      | 中身      |
+| ----------------------- | --------- |
+| 作った人が伝えた SHA    | `ad5a22b` |
+| `gh pr view` の head    | `1850e7c` |
+| `gh pr checks` が見た先 | `1850e7c` |
+| 実際にマージされた木    | `1850e7c` |
+
+**`--match-head-commit 1850e7c` は成功した。** サーバ側の head も
+`1850e7c` だったからである。**2 つ照合して一致したが、同じ遅れた井戸から
+汲んでいた。** 「2 つ一致したから正しい」は通らない。
+
+**合わせる先は `git ls-remote`（または `git fetch` 後のブランチ tip）に
+すること。** あれだけが**ref の実体**を返す。
+
+**そして押す前に、CI がその SHA に走ったかを見ること。**
+
+```bash
+gh run list --branch "<branch>" --json headSha,conclusion | grep "$(git ls-remote …)"
+```
+
+**緑があることと、その緑が押す木のものであることは別である。**
 
 ### 実測した範囲（2026-10-30、#316 をこれで押した）
 
