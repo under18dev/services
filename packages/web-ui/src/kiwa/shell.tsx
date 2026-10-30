@@ -42,7 +42,13 @@ import { SidebarItem } from "./sidebar-item";
  *
  * ## サイドバーは JS を 1 行も要求しない
  *
- * `<a>` の並びで、開閉も折りたたみも無い。**中身のほうは画面次第**で、
+ * スマホ幅では `<details>`/`<summary>` で開閉する（運用者の指摘、
+ * 2026-10-30——`md:` 未満で `flex-col` になり、サイドバーが本文の上に
+ * 積まれていた）。**開閉はブラウザが持つ機能で、JS もインライン `style`
+ * も使わない。** `md:` 以上では `<summary>` を隠し、中身を常に
+ * `md:flex` で強制する（`Sidebar` の実装コメントに詳しい）。
+ *
+ * 項目そのものは `<a>` の並びのまま。**中身のほうは画面次第**で、
  * アイランドを読むなら `scripts` を渡す（`<script type="module" defer>`
  * が出る。インラインは CSP が禁じている）。
  *
@@ -100,42 +106,73 @@ type SidebarProps = {
 };
 
 const Sidebar: FC<SidebarProps> = ({ nav, current, brandHref }) => (
-  <nav
-    class="shrink-0 border-b border-border px-3 py-5 md:w-64 md:border-r md:border-b-0 md:py-8"
-    aria-label="ダッシュボード"
-  >
-    {/*
-      **ホームに居るときはここが現在地である。** ホームは並びの項目では
-      なくブランドのリンクなので、`aria-current` を付ける先もここになる。
-      付けないと、ホームの画面だけサイドバー全体がどこも現在地でない
-      状態になる。
-    */}
-    <a
-      href={brandHref}
-      class="mb-6 block px-3 text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground"
-      {...(current === "home" ? { "aria-current": "page" } : {})}
+  /**
+   * **`<details>` でスマホの開閉を作る。JavaScript を 1 行も使わない。**
+   *
+   * `md:` 未満では `flex-col`（`KiwaShell` 本体）になるので、サイドバーが
+   * 本文の上に積まれる。項目数（3 グループ・最大 8 項目）に対して、
+   * 開いたままは画面がサイドバーから始まることになる——スマホでは
+   * 既定で閉じ、`<summary>` を押したときだけ中身を見せる。
+   *
+   * **Kiwa の `sidebar-collapsible`（上流）は使えない。** `style="max-height:
+   * 0px"` をインライン属性で出すので、本番の CSP（`style-src 'self'`、
+   * `style-src-attr` を別立てしていないので `style-src` がそのまま効く）に
+   * 属性ごと握り潰される。`hidden` だけが残り、**閉じた状態から二度と
+   * 開けない。**（#332 の下調べで実測。）
+   *
+   * `<details>`/`<summary>` はブラウザが開閉を持つ要素で、JS もインライン
+   * `style` も要らない。`md:` 以上では `<summary>` を隠し、中身を常に
+   * `md:flex` で強制する——**`[open]` の有無に関係なく見える**ようにする。
+   * デスクトップでは開閉という概念自体を無くす。
+   */
+  <details class="group shrink-0 border-b border-border md:w-64 md:border-r md:border-b-0">
+    <summary class="flex cursor-pointer list-none items-center gap-2 px-3 py-3 text-sm font-medium text-foreground select-none md:hidden [&::-webkit-details-marker]:hidden">
+      {/* アイコンは装飾。読み上げるのは隣のテキストだけでよい。 */}
+      <span aria-hidden="true" class="group-open:hidden">
+        ☰
+      </span>
+      <span aria-hidden="true" class="hidden group-open:inline">
+        ✕
+      </span>
+      メニュー
+    </summary>
+    <nav
+      class="hidden flex-col gap-0.5 px-3 pb-5 group-open:flex md:flex md:py-8"
+      aria-label="ダッシュボード"
     >
-      u18 Identity
-    </a>
-    {nav.map((group) => (
-      <div key={group.label} class="mb-6 last:mb-0">
-        <p class="mb-2 px-3 text-xs font-medium text-foreground-soft">{group.label}</p>
-        <ul class="flex flex-col gap-0.5">
-          {group.items.map((item) => (
-            <li key={item.key}>
-              <SidebarItem
-                href={item.href}
-                active={item.key === current}
-                {...(item.key === current ? { "aria-current": "page" } : {})}
-              >
-                {item.label}
-              </SidebarItem>
-            </li>
-          ))}
-        </ul>
-      </div>
-    ))}
-  </nav>
+      {/*
+        **ホームに居るときはここが現在地である。** ホームは並びの項目では
+        なくブランドのリンクなので、`aria-current` を付ける先もここになる。
+        付けないと、ホームの画面だけサイドバー全体がどこも現在地でない
+        状態になる。
+      */}
+      <a
+        href={brandHref}
+        class="mb-6 block px-3 text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground"
+        {...(current === "home" ? { "aria-current": "page" } : {})}
+      >
+        u18 Identity
+      </a>
+      {nav.map((group) => (
+        <div key={group.label} class="mb-6 last:mb-0">
+          <p class="mb-2 px-3 text-xs font-medium text-foreground-soft">{group.label}</p>
+          <ul class="flex flex-col gap-0.5">
+            {group.items.map((item) => (
+              <li key={item.key}>
+                <SidebarItem
+                  href={item.href}
+                  active={item.key === current}
+                  {...(item.key === current ? { "aria-current": "page" } : {})}
+                >
+                  {item.label}
+                </SidebarItem>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  </details>
 );
 
 export const KiwaShell: FC<KiwaShellProps> = ({
