@@ -195,7 +195,6 @@ describe("createOAuthClient / disableOAuthClient", () => {
 
     const result = await rpc.createOAuthClient({
       actorUserId: admin.userId,
-      clientId: "delegated-client",
       name: "admin-worker から登録",
       clientType: "confidential",
       redirectUris: ["https://app.example/cb"],
@@ -204,6 +203,7 @@ describe("createOAuthClient / disableOAuthClient", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.client.isFirstParty).toBe(false);
+    expect(result.value.client.clientId).toMatch(/^app_/);
     expect(typeof result.value.clientSecret).toBe("string");
   });
 
@@ -212,7 +212,6 @@ describe("createOAuthClient / disableOAuthClient", () => {
 
     const result = await rpc.createOAuthClient({
       actorUserId: admin.userId,
-      clientId: "delegated-bad-uri",
       name: "x",
       clientType: "public",
       redirectUris: ["http://cdn.example/cb"],
@@ -226,7 +225,6 @@ describe("createOAuthClient / disableOAuthClient", () => {
     const admin: SeededUser = await seedLoggedInUser();
     const created = await rpc.createOAuthClient({
       actorUserId: admin.userId,
-      clientId: "delegated-to-disable",
       name: "x",
       clientType: "public",
       redirectUris: ["https://app.example/cb"],

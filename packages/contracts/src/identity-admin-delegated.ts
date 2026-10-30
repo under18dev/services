@@ -103,12 +103,9 @@ export type ListOAuthClientsDelegatedResult = RpcResult<readonly OAuthClientSumm
 export const createOAuthClientDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   /**
-   * **呼び出し元から受け取る。** `IdentityAdminRpcContract` 側は自動生成に
-   * 変わったが（#408）、admin-worker の画面がまだ無いので、同じ判断を
-   * 先回りしない。画面が固まったら、同じ判断（自動生成するか）をここでも
-   * 下すこと。
+   * `client_id` は受け取らない。**`IdentityAdminRpcContract` 側（#408）と
+   * 揃えた** —— `CreateOAuthClientUseCase` と同じ理由で自動生成する。
    */
-  clientId: z.string().min(1).max(255),
   name: z.string().min(1).max(255),
   clientType: z.enum(["confidential", "public"]),
   redirectUris: z.array(z.string().min(1).max(2048)).min(1).max(16),

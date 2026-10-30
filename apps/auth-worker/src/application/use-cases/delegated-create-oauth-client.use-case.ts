@@ -1,4 +1,4 @@
-import { newClientId } from "@u18/domain";
+import { newClientId, newPublicClientId } from "@u18/domain";
 import type { OAuthClient, OAuthClientType } from "../../domain/entities/oauth-client";
 import { validateLogoUrl } from "../../domain/services/logo-url";
 import { validateRedirectUriForRegistration } from "../../domain/services/redirect-uri";
@@ -13,7 +13,6 @@ import { err, ok, type UseCaseResult } from "./types";
 
 export type DelegatedCreateOAuthClientCommand = {
   readonly actorUserId: string;
-  readonly clientId: string;
   readonly name: string;
   readonly clientType: OAuthClientType;
   readonly redirectUris: readonly string[];
@@ -56,12 +55,11 @@ const MAX_REDIRECT_URIS = 16;
  * **`is_first_party` を受け取らないのも同じ。** `CreateOAuthClientUseCase`
  * の JSDoc を参照 —— 「登録できる」と「同意を省略できる」は別の権限。
  *
- * **`client_id` は呼び出し元から受け取る。** `CreateOAuthClientUseCase`
- * 側は自動生成に変わったが（#408）、この入口は admin-worker からしか
- * 呼ばれず、画面の「二重送信で気づかれない重複ができる」問題がそのまま
- * 当てはまるかは admin-worker 側の UI 次第である。admin-worker の画面が
- * 固まったら、同じ判断（自動生成するか、受け取ったままにするか）を
- * ここでも下すこと。
+ * **`client_id` も自動生成する**（`newPublicClientId()`、#408 と同じ）。
+ * 書いたときは「admin-worker の画面が固まってから決める」としていたが、
+ * #408 が merge されて判断の根拠（二重送信で気づかれない重複ができる、
+ * だから自動生成にして実害の小さい重複を許容する）がそのまま使えるように
+ * なったので、先送りにする理由が無い。
  */
 export class DelegatedCreateOAuthClientUseCase {
   constructor(private readonly deps: DelegatedCreateOAuthClientDeps) {}
@@ -73,8 +71,13 @@ export class DelegatedCreateOAuthClientUseCase {
     if (!actor.ok) return actor;
     const actorUserId = actor.value.userId;
 
+    // **ここで生成する。** 失敗しても捨てるだけで害は無い（DB へは
+    // まだ書いていない）。どの失敗記録にも同じ値を渡せる
+    // （`CreateOAuthClientUseCase` と同じ判断）。
+    const clientId = newPublicClientId();
+
     if (command.redirectUris.length === 0 || command.redirectUris.length > MAX_REDIRECT_URIS) {
-      await this.record(actorUserId, "failure", command.clientId, { reason: "redirect_uri_count" });
+      await this.record(actorUserId, "failure", clientId, { reason: "redirect_uri_count" });
       return err("invalid_input", "redirect_uris must contain 1..16 entries");
     }
 
@@ -82,7 +85,7 @@ export class DelegatedCreateOAuthClientUseCase {
     for (const uri of command.redirectUris) {
       const result = validateRedirectUriForRegistration(uri);
       if (!result.ok) {
-        await this.record(actorUserId, "failure", command.clientId, {
+        await this.record(actorUserId, "failure", clientId, {
           reason: "invalid_redirect_uri",
           metadata: { rejection: result.reason },
         });
@@ -95,7 +98,7 @@ export class DelegatedCreateOAuthClientUseCase {
     if (logoUrl !== null) {
       const logo = validateLogoUrl(logoUrl);
       if (!logo.ok) {
-        await this.record(actorUserId, "failure", command.clientId, {
+        await this.record(actorUserId, "failure", clientId, {
           reason: "invalid_logo_url",
           metadata: { rejection: logo.reason },
         });
@@ -106,7 +109,7 @@ export class DelegatedCreateOAuthClientUseCase {
     const scopes = command.scopes ?? DEFAULT_SCOPES;
     const unsupported = unsupportedScopes(scopes);
     if (unsupported.length > 0) {
-      await this.record(actorUserId, "failure", command.clientId, {
+      await this.record(actorUserId, "failure", clientId, {
         reason: "unsupported_scope",
         metadata: { unsupported },
       });
@@ -120,7 +123,7 @@ export class DelegatedCreateOAuthClientUseCase {
 
     const created = await this.deps.clients.create({
       id: newClientId(),
-      clientId: command.clientId,
+      clientId,
       name: command.name,
       clientType: command.clientType,
       clientSecretHash,
@@ -131,13 +134,13 @@ export class DelegatedCreateOAuthClientUseCase {
     });
 
     if (created === null) {
-      await this.record(actorUserId, "failure", command.clientId, {
+      await this.record(actorUserId, "failure", clientId, {
         reason: "duplicate_client_id",
       });
       return err("conflict", "client_id is already registered");
     }
 
-    await this.record(actorUserId, "success", command.clientId, {
+    await this.record(actorUserId, "success", clientId, {
       metadata: {
         internalId: created.id,
         clientType: created.clientType,

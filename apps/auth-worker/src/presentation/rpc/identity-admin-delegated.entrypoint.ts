@@ -176,7 +176,6 @@ export class IdentityAdminDelegatedRPC
     const container = createContainer(this.env, {}, this.context());
     const result = await container.useCases.delegatedCreateOAuthClient.execute({
       actorUserId: parsed.data.actorUserId,
-      clientId: parsed.data.clientId,
       name: parsed.data.name,
       clientType: parsed.data.clientType,
       redirectUris: parsed.data.redirectUris,
