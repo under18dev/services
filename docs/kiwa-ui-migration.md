@@ -1,462 +1,543 @@
-# Kiwa UI 移行 —— 棚卸しと対応表
+# Kiwa UI 移行 —— 残り 5 枚の下調べ
 
 - Status: 設計（実装前）
 - Date: 2026-10-30
-- 追跡 issue: [#332](https://github.com/under18dev/services/issues/332)（移行本体） / [#338](https://github.com/under18dev/services/issues/338)（NFC）
-- 対象: `packages/web-ui/src/styles.ts` の手書き CSS を読んでいる全画面
-
-本書は「いま何を使っていて、それを Kiwa の何に置き換えるか」だけを書く。
-Tailwind v4 のビルド経路・`registry/ui` の取り込み方・`@theme` へのトークン移植は
-**#332 の P0 の担当範囲**なので、ここでは決めない。P0 が決めた import の形に合わせて
-本書の「置き換え先」を読み替えること。
-
-調査時点の Kiwa: `kiwa-ui/kiwa-ui` の `registry/ui`（54 ファイル）と `registry/lib`（2 ファイル）。
-MIT のこの 2 つだけを見ている。Pro のブロック（sidebar layouts / page headers / data tables /
-settings pages）は対象外。
+- **改訂: #342（P0）のマージ後に書き直した。** 初版は P0 の前に書いたもので、「Tailwind をどう繋ぐか」「どの primitive を取り込むか」が未定という前提だった。**それらは決着したので、本書は決まったものの上で残りを設計する。** 初版との差は §7。
+- 追跡 issue: [#332](https://github.com/under18dev/services/issues/332)
+- 対象: **残り 5 枚**（`/account` ホーム / profile / passkeys / sessions / grants）と、**同じ URL に出る `message-page.tsx`**
 
 ---
 
 ## 0. 先に結論
 
-1. **パネル・ボタン・バッジ・フォームは Kiwa にそのままある。** `.panel*` → `Card*`、
-   `.button*` → `Button`、`.badge*` → `Badge`、`.field` → `FormField` + `Input`。
-2. **骨格（`.dash` / `.stack` / `.cards` / `.page-head`）は無い。** 組み上がったレイアウトは
-   Pro 側にある。MIT で手に入るのは部品だけなので、骨格は Tailwind のユーティリティで組む。
-3. **一覧（`.list` / `.item-*` / `.facts` / `.scopes`）に対応する primitive も無い。**
-   `Table` はあるが、この 4 つはどれも 0 件になりうる一覧なので表には向かない（§3）。
-4. **Kiwa の primitive のうち 5 つは CSP で使えない**（インライン `style=` を出す）。
-   #332 が候補に挙げている `sidebar-collapsible` がそこに含まれる（§5）。
-5. **auth-worker が移るまで、手書き CSS は 1 行も消せない。** スタイルシートは
-   `UI_STYLESHEET` という 1 つの定数で、auth / dashboard / nfc が同じものを配っている（§4）。
+1. **取り込んである 6 つでは足りない。足りないのは 1 つ、`button.tsx` だけ。**
+   5 枚すべてにボタンがある（ホームの導線 `<a>`、取り消し、パスキー登録、保存）、
+   いま押せるものを描く手段が無い（§3.1）。
+2. **`KiwaShell` に `scripts` と `<noscript>` が無い。** 残り 5 枚のうち 4 枚は
+   アイランドを読み、3 枚は外枠に `<noscript>` を出させている。**見本の 1 枚が
+   JS を 1 行も使わない画面だったので、まだ要らなかっただけ**である（§3.2）。
+3. **アイランドの本当の問題はクラス名ではなく、セレクタである。**
+   `querySelector(".item-main")` のように**見た目のクラスで DOM を引いている**。
+   Tailwind へ移すと一致しなくなるが、`?.` で繋いであるので**例外も出ずに
+   黙って何もしない。** クラス名の定数化より先にこちらを直す（§4.2）。
+4. **5 枚を移しても `styles.ts` は消えない。** auth-worker が 17 個のクラスと
+   `:root` のトークン一式を握っている。消えるのはダッシュボード専用の 36 個（§5）。
+5. **`Badge variant="secondary"` は使えない。** 上流の綴りが `border-subtle` で、
+   このトークンは存在しない。**class は出るが CSS が無い**（§3.5）。`SidebarItemBadge`
+   がこの variant を直に指定しているので、巻き込まれる。
 
 ---
 
-## 1. 移行対象の棚卸し
+## 1. P0 で決まったこと（本書の前提）
 
-### 1.1 画面と、いま使っているクラス
-
-`class="..."` の literal と、アイランドが実行時に書く `className = "..."` の両方を数えた。
-
-| Worker    | ファイル                         | 使っているクラス                                                                                                                                                                                                  |
-| --------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| web-ui    | `packages/web-ui/src/layout.tsx` | `brand` `card` `shell` `page-shell` `page-dash`                                                                                                                                                                   |
-| dashboard | `ui/dashboard-shell.tsx`         | `dash` `dash-side` `dash-main` `dash-inner` `page-head` `side-brand` `side-group` `side-group-label` `side-links` `side-link` `notice`                                                                            |
-| dashboard | `ui/home-page.tsx`               | `stack` `cards` `cards-3` `panel` `panel-header` `panel-title` `panel-desc` `panel-body` `stat` `stat-value` `stat-label` `list` `item-main` `item-title` `item-meta` `button` `button-secondary` `button-small`  |
-| dashboard | `ui/profile-page.tsx`            | `panel` `panel-body` `facts` `badge` `badge-warn` `notice`                                                                                                                                                        |
-| dashboard | `ui/passkeys-page.tsx`           | `panel` `panel-body` `panel-footer` `list` `item-main` `item-title` `item-meta` `empty`                                                                                                                           |
-| dashboard | `ui/sessions-page.tsx`           | `panel` `panel-body` `section-lead` `list` `item-main` `item-title` `item-meta` `item-raw` `badge` `empty`                                                                                                        |
-| dashboard | `ui/grants-page.tsx`             | `panel` `panel-body` `list` `item-main` `item-title` `item-meta` `scopes` `empty`                                                                                                                                 |
-| dashboard | `ui/message-page.tsx`            | `panel` `panel-body` `section-lead` `links`                                                                                                                                                                       |
-| dashboard | `ui/apps-page.tsx`               | `stack` `panel` `panel-header` `panel-title` `panel-desc` `panel-body` `list` `item-main` `item-title` `item-meta` `item-raw` `badge` `empty` `notice`                                                            |
-| dashboard | `ui/client/account-island.ts`    | `panel` `panel-header` `panel-title` `panel-desc` `panel-body` `list` `item-main` `item-title` `item-meta` `item-actions` `item-error` `empty` `field` `button` `button-secondary` `button-small` `button-danger` |
-| nfc       | `ui/cards-page.tsx`              | `lead` `identity` `scopes` `notice`                                                                                                                                                                               |
-| auth      | `ui/login-page.tsx`              | `lead` `field` `code-input` `error` `identity` `button` `button-secondary` `button-danger` `link-button` `links` `inline-form` `separator` `notice`                                                               |
-| auth      | `ui/consent-page.tsx`            | `lead` `identity` `scopes` `error` `button` `button-secondary` `notice`                                                                                                                                           |
-| auth      | `ui/client/login-island.tsx`     | `button` `button-secondary` `notice` `passkey`                                                                                                                                                                    |
-
-`apps-page.tsx` は **#332 の P0 の見本ページ**なので、本書の対応表は使われず P0 の実装が正になる。
-ここには棚卸しの完全性のためだけに載せている。
-
-### 1.2 クラス別に見た使用元
-
-`styles.ts` で定義しているクラスを、使っている Worker で引いたもの。
-**移行の順番はこの表で決まる** —— auth の列が付いているものは dashboard を移しても消せない。
-
-| クラス                                                                             | auth | dashboard  | nfc | web-ui |
-| ---------------------------------------------------------------------------------- | :--: | :--------: | :-: | :----: |
-| `brand` `card` `shell` `page-shell` `page-dash`                                    |      |            |     |   ○    |
-| `button` `button-secondary` `button-danger`                                        |  ○   |     ○      |     |        |
-| `field`                                                                            |  ○   | ○ (island) |     |        |
-| `links`                                                                            |  ○   |     ○      |     |        |
-| `notice`                                                                           |  ○   |     ○      |  ○  |        |
-| `scopes`                                                                           |  ○   |     ○      |  ○  |        |
-| `identity`                                                                         |  ○   |            |  ○  |        |
-| `lead`                                                                             |  ○   |            |  ○  |        |
-| `error` `code-input` `separator` `inline-form` `link-button`                       |  ○   |            |     |        |
-| `dash` `dash-side` `dash-main` `dash-inner` `page-head`                            |      |     ○      |     |        |
-| `side-brand` `side-group` `side-group-label` `side-links` `side-link`              |      |     ○      |     |        |
-| `stack` `cards` `cards-3`                                                          |      |     ○      |     |        |
-| `panel` `panel-header` `panel-title` `panel-desc` `panel-body` `panel-footer`      |      |     ○      |     |        |
-| `stat` `stat-value` `stat-label`                                                   |      |     ○      |     |        |
-| `list` `item-main` `item-title` `item-meta` `item-raw` `item-actions` `item-error` |      |     ○      |     |        |
-| `facts` `section-lead` `empty` `badge` `badge-warn` `button-small`                 |      |     ○      |     |        |
-
-### 1.3 棚卸しで出た不整合
-
-移行とは独立に直せるもの。**移行と混ぜないこと**（レビューが読めなくなる）。
-
-| 種別                         | 対象                     | 状況                                                                                    |
-| ---------------------------- | ------------------------ | --------------------------------------------------------------------------------------- |
-| 定義があるのに使われていない | `.nav`                   | `account-shell.tsx` が `dashboard-shell.tsx` に置き換わった時点で用済み                 |
-| 同上                         | `.section`               | `.panel` に置き換わった。`.section-lead` だけが生き残っている                           |
-| 同上                         | `.badge-muted`           | 定義だけある                                                                            |
-| 到達経路が無い               | `.shell` / `.page-shell` | `Layout` の `frame="shell"` を渡している呼び出しが 1 つも無い                           |
-| 使われているのに定義が無い   | `.passkey`               | `login-island.tsx` が `<div class="passkey">` を出すが `styles.ts` に `.passkey` は無い |
-
-### 1.4 アイランドが実行時にクラス名を書いている
-
-`apps/dashboard-worker/src/presentation/http/ui/client/account-island.ts` は、
-22 箇所で `node.className = "..."` と**文字列リテラルを直接代入している**。
+### 1.1 入口と、取り込んである primitive
 
 ```
-account-island.ts:148   button.className = "button button-secondary button-small button-danger";
-account-island.ts:397   panel.className = "panel";
+import { … } from "@u18/web-ui/kiwa";
 ```
 
-これは移行で 2 つの問題になる。
+| ファイル           | export                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `alert.tsx`        | `Alert` `AlertContent` `AlertTitle` `AlertDescription` `AlertClose`                       |
+| `badge.tsx`        | `Badge`                                                                                   |
+| `card.tsx`         | `Card` `CardHeader` `CardTitle` `CardDescription` `CardAction` `CardContent` `CardFooter` |
+| `empty.tsx`        | `Empty` `EmptyHeader` `EmptyMedia` `EmptyTitle` `EmptyDescription` `EmptyContent`         |
+| `separator.tsx`    | `Separator`                                                                               |
+| `sidebar-item.tsx` | `SidebarItem` `SidebarItemButton` `SidebarItemBadge` `sidebarItemVariants`                |
+| `utils.ts`         | `cn`                                                                                      |
 
-1. **Tailwind の content 検出に `client/**/*.ts` を含めないと、島が使うユーティリティが
-   出力から落ちる。** 画面は正しいのに、JS が描いた部分だけ素の HTML になる。
-2. **島の中で `cn()` は使いにくい。** `clsx` + `tailwind-merge` を島のバンドルへ同梱する
-   ことになる。
+**本体（`@u18/web-ui`）からは再 export されていない。** どちらの流儀で書かれた画面かを
+import から読めるようにするためで、移行が終わるまでこの形が続く（`kiwa/index.ts`）。
 
-推奨: **クラス文字列をサーバー側のコンポーネントと共有する定数として export し、
-島はそれを import する。** そうすれば文字列は静的に 1 箇所へ集まり、content 検出にも
-素直に載る。島の中で `cn()` を呼ぶ必要も消える（組み合わせは定数側で済ませる）。
+足すときの手順は `packages/web-ui/src/kiwa/README.md` にある。
+**`registry/blocks/pro/` は持ってこないこと**（別ライセンス）。
+
+### 1.2 初版が「決めてほしい」と書いた 2 点の答え
+
+| 初版の問い                           | P0 の答え                                                                                                                                                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Card` に枠線を足すか                | **足さない。** `theme.css` が `--shadow-sm: 0 0 0 1px var(--border)` にしてあり、`Card` の既定の `shadow-sm` がそのまま `.panel` の `1px solid var(--border)` と同じ輪郭を出す。`class="border border-border"` を書くと**二重になる** |
+| 素の要素セレクタとカスケードレイヤー | **混ぜない形で回避した。** 1 枚のページは片方の CSS しか読まない。`ui-pages.test.ts` が `<link rel="stylesheet">` が**ちょうど 1 本**であることを見ている（§6.1）                                                                     |
+
+### 1.3 `/account/apps` が作った前例
+
+**残り 5 枚はこの書き方に揃える。** ばらけると「同じサイトで画面ごとに流儀が違う」になる。
+
+| 事柄              | 前例                                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 一覧の行の区切り  | `<ul class="flex flex-col">` + `{index > 0 && <Separator class="my-3" />}`。**1 件目の前に置かない**（`CardHeader` の下線と線が 2 本並ぶ） |
+| 0 件              | `Empty` + `EmptyHeader` + `EmptyTitle` + `EmptyDescription`。**0 件のときは `Card` を描かない**                                            |
+| 補足の警告        | `Alert`（既定）+ `AlertDescription`                                                                                                        |
+| バッジ            | `<Badge>`（既定 = `bg-primary-soft` の塗り）。初版が薦めた `variant="outline-primary"` は**採られていない**                                |
+| 本文中のリンク    | `class="text-foreground underline underline-offset-4"`                                                                                     |
+| 外部 URL の文字列 | `class="font-mono text-xs break-all text-foreground-soft"`                                                                                 |
+| テストの目印      | **`data-slot` を見る。見た目の class を目印にしない**（`ui-pages.test.ts` のコメント）                                                     |
+
+### 1.4 トークンで気をつけること
+
+- **`--success` / `--warning` / `--info` に色が当たっていない**（`--foreground-muted` に倒してある）。
+  `variant="success"` は**既定と同じ見た目になる**。壊れはしないが、色で状態は言えない。
+  **色で言いたければ design.md に色を足す決定が先**（`theme.css` の当該コメント）
+- 有彩色は `--primary`（青）と `--destructive`（赤）の 2 つだけ
+- **`theme.css` に無いトークンのユーティリティは Tailwind が生成しない。**
+  class は HTML に出るのに CSS が無い、という #320 と同じ形になる
 
 ---
 
-## 2. 対応表 —— 既存クラス → Kiwa primitive
+## 2. 5 枚の棚卸しと対応表
 
-「置き換え先」の列は、`registry/ui` の**ファイル名と export 名**で書いている。
-import のパス（`@/components/ui/...` のままか、`@u18/web-ui` 配下に寄せるか）は P0 が決める。
+### 2.1 画面ごと
 
-### 2.1 そのまま置き換わるもの
+| 画面               | いま使っているクラス                                                                                                                                                                                             | アイランド | `<noscript>` |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------: | :----------: |
+| `/account`（home） | `stack` `cards` `cards-3` `panel` `panel-header` `panel-title` `panel-desc` `panel-body` `stat` `stat-value` `stat-label` `list` `item-main` `item-title` `item-meta` `button` `button-secondary` `button-small` |     —      |      —       |
+| profile            | `panel` `panel-body` `facts` `badge` `badge-warn` `notice`                                                                                                                                                       |     ○      |      ○       |
+| passkeys           | `panel` `panel-body` `panel-footer` `list` `item-main` `item-title` `item-meta` `empty`                                                                                                                          |     ○      |      ○       |
+| sessions           | `panel` `panel-body` `section-lead` `list` `item-main` `item-title` `item-meta` `item-raw` `badge` `empty`                                                                                                       |     ○      |      ○       |
+| grants             | `panel` `panel-body` `list` `item-main` `item-title` `item-meta` `scopes` `empty`                                                                                                                                |     ○      |      ○       |
+| **message-page**   | `panel` `panel-body` `section-lead` `links`                                                                                                                                                                      |     —      |      —       |
 
-| 既存クラス                      | 置き換え先                                                     | 備考                                                                                                                                                                                                               |
-| ------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `.panel`                        | `card.tsx` `Card`                                              | **`Card` は枠線を持たない**（`bg-card` + `shadow-sm`）。`.panel` は `1px solid var(--border)` なので、`class="border border-border"` を足すか、`@theme` 側で影ではなく枠線で段差を作ると決めるか、P0 で揃える      |
-| `.panel-header`                 | `CardHeader`                                                   | 下線は `class="border-b"`。`CardHeader` は `[.border-b]:pb-6` を持っていて、**下線を引いたときの余白まで面倒を見る作りになっている**                                                                               |
-| `.panel-title`                  | `CardTitle`                                                    | `<h3>` を出す。見出し階層を変えたくない箇所では `as` が無いので要注意（§3）                                                                                                                                        |
-| `.panel-desc`                   | `CardDescription`                                              |                                                                                                                                                                                                                    |
-| `.panel-body`                   | `CardContent`                                                  |                                                                                                                                                                                                                    |
-| `.panel-footer`                 | `CardFooter`                                                   | 上線は `class="border-t"`（`[.border-t]:pt-6`）                                                                                                                                                                    |
-| `.button`                       | `button.tsx` `Button`                                          | 幅 100% は `class="w-full"`。`.button` は既定で全幅だが Kiwa は `inline-flex`                                                                                                                                      |
-| `.button-secondary`             | `Button variant="outline"`                                     | `.button-secondary` は透明背景 + `--border` 枠。`outline` が一致する（`secondary` は塗りが入る）                                                                                                                   |
-| `.button-danger`                | `Button variant="destructive"`                                 | ただし `destructive` は**塗り**。`.button-danger` は文字色と枠線だけなので、design.md の "No colorful UI." に寄せるなら `variant="outline" class="text-destructive border-destructive/35 hover:bg-destructive/10"` |
-| `.button-small`                 | `Button size="sm"`                                             |                                                                                                                                                                                                                    |
-| `.link-button`                  | `Button variant="link-muted"`                                  | `<button>` のまま。`.link-button` と同じく muted → hover で foreground                                                                                                                                             |
-| `.badge`                        | `badge.tsx` `Badge variant="outline-primary"`                  | `.badge` は塗らずに文字色だけアクセント。`variant="default"` は `bg-primary-soft` で**塗る**ので使わない                                                                                                           |
-| `.badge-warn`                   | `Badge variant="outline-destructive"`                          | 同上。`destructive` / `destructive-soft` は塗る                                                                                                                                                                    |
-| `.error`                        | `alert.tsx` `Alert variant="destructive"` + `AlertDescription` | `role="alert"` は `Alert` が自分で付ける。既存の `<p class="error" role="alert">` から重複を外す                                                                                                                   |
-| `.field`                        | `form-field.tsx` `FormField` + `input.tsx` `Input`             | `FormField` が label / description / error をまとめて持つ。`<label><span>…</span><input></label>` から `id` 紐づけへ変わる                                                                                         |
-| `.side-link`                    | `sidebar-item.tsx` `SidebarItem`                               | `active` prop がある。**`aria-current="page"` は自分で渡すこと** —— `SidebarItem` が出すのは `data-active` だけで、支援技術には届かない                                                                            |
-| `.side-group-label`             | `sidebar-menu-button.tsx` `SidebarMenuSectionLabel`            |                                                                                                                                                                                                                    |
-| `.separator`（`<hr>` 的な用途） | `separator.tsx` `Separator`                                    | ただし auth の `.separator` は**中央に文字が入る**形なので対象外（§3）                                                                                                                                             |
-| `.inline-form`                  | ユーティリティ `inline`                                        |                                                                                                                                                                                                                    |
+`<noscript>` の出どころは 2 つある。passkeys / sessions / grants は外枠（`DashboardShell` の
+`hasRevokeActions`）が出し、**profile だけは画面が自分で書いている**。移すときに
+profile のぶんを見落としやすい。
 
-### 2.2 ユーティリティで書くもの（primitive が要らない）
+**`message-page.tsx` を 5 枚と一緒に移すこと（§2.2）。**
 
-| 既存クラス              | 置き換え                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `.stack`                | `grid gap-5`                                                                                                       |
-| `.cards`                | `grid gap-5`                                                                                                       |
-| `.cards-3`              | `grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]`                                                                   |
-| `.lead` `.section-lead` | `text-sm text-foreground-muted`                                                                                    |
-| `.notice`               | `mt-3 text-sm text-foreground-muted`（§3 も読むこと）                                                              |
-| `.links`                | `mt-6 text-sm`                                                                                                     |
-| `.item-main`            | `min-w-0`                                                                                                          |
-| `.item-title`           | `font-medium [overflow-wrap:anywhere]`                                                                             |
-| `.item-meta`            | `mt-1 text-[0.8125rem] text-foreground-soft [overflow-wrap:anywhere]`                                              |
-| `.item-raw`             | `mt-0.5 font-mono text-xs leading-normal text-foreground-muted [overflow-wrap:anywhere]`                           |
-| `.item-actions`         | `shrink-0`                                                                                                         |
-| `.item-error`           | `mt-1.5 text-[0.8125rem] text-destructive`                                                                         |
-| `.side-brand`           | `block mb-7 px-2.5 text-xs font-medium uppercase tracking-[0.12em] text-foreground-soft no-underline`              |
-| `.side-group`           | `mb-6`                                                                                                             |
-| `.side-links`           | `flex flex-col gap-0.5`（`<ul>` のまま）                                                                           |
-| `.page-head`            | `mb-8` + `<h1 class="text-2xl font-semibold tracking-tight">` + `<p class="mt-1.5 text-sm text-foreground-muted">` |
-| `.code-input`           | `Input class="text-center font-mono text-xl tracking-[0.4em]"`                                                     |
-| `.brand`                | `mb-8 text-xs font-medium uppercase tracking-[0.12em] text-foreground-soft`                                        |
+### 2.2 6 枚目がある —— `message-page.tsx`
 
-`overflow-wrap: anywhere` に対応するユーティリティは Tailwind v4 に無い（`break-words` は
-`overflow-wrap: break-word`）。上の表は arbitrary property で書いている。**長い User-Agent や
-client_id が横にはみ出す画面なので、`break-words` で代用しないこと。**
+`SignInRequiredPage` と `UnavailablePage` は、**上の 6 つの URL すべてで出る**
+（`account.routes.tsx` の `signInRequired` / `renderFailure`。401 と 503）。
+`DashboardShell`（手書き CSS）で組まれているので、いまこうなっている。
 
-### 2.3 Kiwa の MIT 側に無く、ユーティリティで組む骨格
+> **`/account/apps` は、ログインしていれば Kiwa、ログインしていなければ手書き CSS。**
+> 同じ URL で、見た目の流儀が 2 つある。
 
-| 既存クラス                          | 組み方                                                                                                                                                                                      |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.dash`                             | `grid grid-cols-[15rem_minmax(0,1fr)] min-h-dvh`、狭い画面は `max-[52rem]:grid-cols-[minmax(0,1fr)]`                                                                                        |
-| `.dash-side`                        | `border-r border-border bg-background-subtle px-4 py-6`。幅の定数は `sidebar-menu-button.tsx` が `dashboardSidebarWidthClasses` として export しているので、`w-64` を直書きせずそちらを使う |
-| `.dash-main`                        | `min-w-0 px-10 pt-10 pb-20`                                                                                                                                                                 |
-| `.dash-inner`                       | `w-full max-w-[46rem]`                                                                                                                                                                      |
-| `.card`（Layout の `frame="card"`） | `Card class="w-full max-w-md p-10"`                                                                                                                                                         |
+`ui-pages.test.ts` の `EXPECTED_STYLESHEET` は**必ず Cookie を付けて**取りに行くので、
+この経路を見ていない。**P0 の落ち度ではなく、見本 1 枚では現れない形**である。
+5 枚を移すときに `message-page.tsx` も一緒に移し、**401 / 503 側も見るように
+テストを足すこと**（§6.1）。
 
-`sidebar-menu-button.tsx` は `dashboardTopChromeClasses` / `dashboardSidebarWidthClasses` を
-export している。**ダッシュボードの寸法を揃えるための定数が MIT 側にも置いてある**ので、
-レイアウトを手で組む場合もここから取ること。Pro を買わずに寸法だけ揃えられる。
+### 2.3 クラス → 置き換え
+
+`/account/apps` の前例（§1.3）に揃えたもの。初版から変わった行には ← を付けた。
+
+| 既存クラス                                                     | 置き換え                                                                                             |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `.panel`                                                       | `Card`。**枠線を足さない**（§1.2）←                                                                  |
+| `.panel-header` / `.panel-title` / `.panel-desc`               | `CardHeader` / `CardTitle` / `CardDescription`                                                       |
+| `.panel-body` / `.panel-footer`                                | `CardContent` / `CardFooter class="border-t"`                                                        |
+| `.list`                                                        | `<ul class="flex flex-col">` + 間に `<Separator class="my-3" />`。**初版の `divide-y` は採らない** ← |
+| `.list > li`                                                   | `<li>` + `<div class="flex items-start justify-between gap-5">`                                      |
+| `.item-main`                                                   | `min-w-0`                                                                                            |
+| `.item-title`                                                  | `font-medium break-all`（`/account/apps` が `break-all` を使っている）←                              |
+| `.item-meta`                                                   | `text-sm/relaxed text-foreground-muted` ←                                                            |
+| `.item-raw`                                                    | `font-mono text-xs break-all text-foreground-soft` ←                                                 |
+| `.item-actions`                                                | `shrink-0`                                                                                           |
+| `.empty`                                                       | `Empty` + `EmptyHeader` + `EmptyTitle`（**ただし §4.5 を読むこと**）←                                |
+| `.badge`                                                       | `<Badge>`（既定）←                                                                                   |
+| `.badge-warn`                                                  | `<Badge variant="destructive">`。**`variant="warning"` は無彩色なので「注意」に読めない**（§1.4）←   |
+| `.notice`（`<noscript>` の中）                                 | `Alert` + `AlertDescription`                                                                         |
+| `.section-lead` / `.lead`                                      | `text-sm/relaxed text-foreground-muted`                                                              |
+| `.links`                                                       | `text-sm` + リンクに `text-foreground underline underline-offset-4`                                  |
+| `.stack`                                                       | `KiwaShell` が本文に `flex flex-col gap-8` を持っているので**不要**。直接子を並べる ←                |
+| `.cards` `.cards-3`                                            | `grid gap-5 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]`                                          |
+| `.button` `.button-secondary` `.button-small` `.button-danger` | **`button.tsx` を取り込む**（§3.1）                                                                  |
+| `.facts`                                                       | primitive 無し。§3.3                                                                                 |
+| `.stat` `.stat-value` `.stat-label`                            | primitive 無し。§3.3                                                                                 |
+| `.scopes`                                                      | primitive 無し。§3.3                                                                                 |
 
 ---
 
-## 3. 置き換えられないもの
+## 3. 6 つで足りるか
 
-**ここに挙げたものに `styles.ts` のクラスを足して対応しないこと。**
-手書きデザインを止めるのが今回の発端なので、足した瞬間に移行の意味が消える。
-既存 primitive の組み合わせかユーティリティで組む。
+### 3.1 足りないのは `button.tsx` 1 つ
 
-### 3.1 一覧（`.list` / `.item-*`）—— 対応する primitive が無い
+**5 枚すべてにボタンがある。**
 
-Kiwa には `Table` があるが、`.list` の用途（パスキー・セッション・連携アプリ・カタログ）は
-**どれも 0 件になりうる**。`sessions-page.tsx` のコメントが「項目数が 0 件になりうるので
-表より素直になる」と書いているとおり、ヘッダ行だけが残る表は読みづらい。
+| 画面                         | 何のボタンか                                               | いまのクラス                                         |
+| ---------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| home                         | 「パスキーの設定へ」（**`<a>`**、パスキー 0 件のときだけ） | `button button-secondary button-small`               |
+| passkeys                     | 「パスキーを登録」（アイランド）                           | `button button-secondary`                            |
+| profile                      | 「保存」（アイランド）                                     | `button`                                             |
+| passkeys / sessions / grants | 取り消し（アイランド）                                     | `button button-secondary button-small button-danger` |
 
-**案: `<ul>` を保ち、行の中身を `Card` の兄弟として組む。**
+`registry/ui/button.tsx` は **CSP にも JS 無しにも引っかからない**
+（インライン `style=` を出さず、`data-*` のトリガも持たない）。
 
-```
-<ul class="divide-y divide-border">
-  <li class="flex items-start justify-between gap-5 py-4 first:pt-0 last:pb-0">
-    <div class="min-w-0">…</div>
-    <div class="shrink-0">…</div>
-  </li>
-</ul>
-```
+**取り込む価値が特に高い理由が 1 つある。**
 
-`divide-y` で `.list > li { border-top }` の形がそのまま出る。
-`first:pt-0 last:pb-0` が `.list > li:first-child` / `:last-child` に対応する。
-
-**行を `Card` にしない。** `Card` は `bg-card` を持つので、`CardContent` の中に
-並べると面が二重になって境界が読めなくなる。
-
-### 3.2 `.facts`（プロフィールの定義リスト）—— 無い
-
-`<dl>` に当たる primitive は `registry/ui` に無い。`Table` で組むと
-「表示名 / ユーザー名 / メール / 登録日」の 4 行に `<thead>` が要らない表ができる。
-
-**案: `<dl>` のままユーティリティで組む。**
-`divide-y divide-border` + `<div class="flex gap-5 py-3">` +
-`<dt class="w-30 shrink-0 text-sm text-foreground-muted">` + `<dd class="m-0 min-w-0">`。
-
-### 3.3 `.scopes`（同意画面と連携アプリの scope 一覧）—— 無い
-
-箇条書きの primitive は無い。`.scopes` は 2 つの文脈で見た目が違う
-（単独 = `padding-left: 1.25rem`、`.list` の中 = 詰めて `--muted-deep`）。
-**この「文脈で変わる」部分は CSS の子孫セレクタでやっていたので、移行先では
-呼び出し側が明示的にクラスを分ける必要がある。**
-
-**案:** 単独は `<ul class="mb-7 pl-5 text-foreground-muted [&>li]:mb-2">`、
-行内は `<ul class="mt-1.5 pl-5 text-[0.8125rem] text-foreground-soft [&>li]:mb-0.5">`。
-
-### 3.4 `.stat`（ホームの数値タイル）—— 無い
-
-数値タイル（KPI）は Pro 側。MIT には `DisplayCard` があるが、これは
-title / description を持つ汎用の箱で、「数を大きく、意味を小さく」の形は持っていない。
-
-**案: `Card` + `<a>` を 1 枚ずつ。** リンク全体が押せる形（`.stat` は `<a>` そのもの）を保つ。
-
-```
-<Card class="border border-border p-0">
-  <a href={…} class="block px-6 py-5 no-underline text-inherit hover:bg-secondary">
-    <span class="block text-[1.75rem] font-semibold tracking-tight">{value}</span>
-    <span class="mt-0.5 block text-[0.8125rem] text-foreground-muted">{label}</span>
-  </a>
-</Card>
+```ts
+export const buttonBaseStyles = cn(…);
+export function getButtonClasses(variant = "default", size = "default"): string;
 ```
 
-**`DisplayCard variant="primary"` は使わない** —— `bg-primary-mesh` が入る（§5）。
+**クラス文字列を関数として export している。** ほかの primitive は class を
+コンポーネントの中に埋めているので、**DOM を手で組むアイランドからは使えない。**
+`button.tsx` だけはアイランドからも同じ見た目を出せる（§4.3）。
 
-### 3.5 `.separator`（auth の「または」）—— `Separator` では足りない
+対応は `.button*` の 4 つに対してこうなる。
 
-Kiwa の `Separator` は 1px の棒を 1 本出すだけで、**中央に文字を置く口が無い**。
-`.separator` は `::before` / `::after` で左右に線を伸ばして間に文字を挟んでいる。
+| 既存                | `button.tsx`                                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `.button`           | `variant="default"`                                                                                        |
+| `.button-secondary` | `variant="outline"`（`secondary` は塗りが入る）                                                            |
+| `.button-small`     | `size="sm"`                                                                                                |
+| `.button-danger`    | `variant="outline" class="text-destructive"`。**`variant="destructive"` は塗り**で、既存は文字色と枠線だけ |
 
-**案: `Separator` を 2 つ並べる。**
-`<div class="my-7 flex items-center gap-3 text-xs text-foreground-soft">` の中に
-`<Separator class="flex-1" />` / テキスト / `<Separator class="flex-1" />`。
-擬似要素が消えるので、文字がテキストノードとして読める利点もある。
+home の導線は `<a>` のままにして `class={getButtonClasses("outline", "sm")}` を当てる。
+**`<button>` にしない** —— 遷移であって操作ではないので、中クリックや
+新しいタブで開けなくなる。
 
-### 3.6 `.identity`（「誰として操作しているか」の枠）—— 一致する primitive が無い
+### 3.2 `KiwaShell` に足りない 2 つ
 
-`sidebar-menu-button.tsx` の `SidebarMenuDropdownProfile` が形としては近いが、
-**`Avatar` を必ず出す**のでアバターを持たないこの画面には重い。
+```ts
+export type KiwaShellProps = {
+  title;
+  current?;
+  heading;
+  lead?;
+  children?;
+};
+```
 
-**案: `Card class="mb-6 border border-border p-3.5"` + `<strong class="block font-medium">` +
-`<span class="text-sm text-foreground-muted">`。**
+`DashboardShell` が持っていて `KiwaShell` に無いものが 2 つある。
 
-**nfc の `cards-page.tsx` は `.identity` を「1 件を枠で囲む」目的で借りている。**
-こちらは意味が違う（本来は本人確認の表示）ので、`Card` へ移すときに
-**借り物をやめてカード 1 枚 = `Card` 1 枚にする**こと。
+1. **`scripts`。** 残り 5 枚のうち 4 枚が `scripts={[ISLAND_PATH]}` を渡す。
+   `Layout` 側は `scripts` を受け取れるので、`KiwaShell` が素通しするだけでよい
+2. **`hasRevokeActions`（`<noscript>` の案内）。** passkeys / sessions / grants の 3 枚が
+   「取り消しには JS が要る」「全端末ログアウトは JS 無しでも使える」を出している。
+   **消さずに `Alert` + `AlertDescription` で組み直す**
 
-### 3.7 `.empty`（0 件の表示）—— `Empty` はあるが重さが違う
+**見本の 1 枚が JS を使わない画面だったので要らなかっただけ**で、`KiwaShell` の
+設計ミスではない。P1 の最初の 1 コミットで足すのが素直。
 
-Kiwa の `Empty` は `rounded-2xl border border-dashed p-6 md:p-12` の**大きな空状態の箱**。
-既存の `.empty` は `CardContent` の中に出る 1 行の中央寄せテキスト。
-そのまま差し替えると、パネルの中に破線の箱が入れ子になる。
+なお `kiwa-shell.tsx` の冒頭が「NFC（#338）が同じ外枠を読むので packages 側へ移る見込み。
+そのとき `stylesheet` と並びを**引数で受け取る形**にすること」と書いている。
+**NFC は別のセッションが担当している**ので、`KiwaShell` に手を入れるときは
+そちらと衝突しないか先に確かめること。
 
-**案は 2 つ。P0 の見本（`/account/apps`）がどちらを採ったかに揃えること。**
+### 3.3 primitive が無いまま組むもの（追加の取り込みは不要）
 
-- **A: パネルをやめて `Empty` を出す。** 0 件のときだけ `Card` を描かず
-  `Empty` + `EmptyHeader` + `EmptyTitle` + `EmptyDescription` を出す。Kiwa の意図に沿う
-- **B: 1 行のまま。** `<p class="py-6 text-center text-sm text-foreground-soft">`
+| 対象                           | 組み方                                                                                                                                                                                                                                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.facts`（profile の `<dl>`）  | 定義リストの primitive は `registry/ui` に無い。`Card` > `CardContent` > `<dl>`、行は `<div class="flex gap-5 py-3">` + `<dt class="w-30 shrink-0 text-sm text-foreground-muted">` + `<dd class="m-0 min-w-0 break-all">`、行間に `<Separator />`                                                     |
+| `.stat`（home の数値タイル）   | 数値タイルは Pro 側。`Card class="p-0"` の中に `<a class="block px-6 py-5 hover:bg-secondary">`、`<span class="block text-[1.75rem] font-semibold tracking-tight">` + `<span class="mt-0.5 block text-sm text-foreground-muted">`。**リンク全体が押せる形を保つ**（いまの `.stat` が `<a>` そのもの） |
+| `.scopes`（grants の権限一覧） | 箇条書きの primitive は無い。`<ul class="mt-1.5 flex flex-col gap-0.5 pl-5 text-sm text-foreground-soft list-disc">`                                                                                                                                                                                  |
 
-ただし **B を採ると、アイランドが「最後の 1 件を消したあと」に作る空表示（`account-island.ts:137`）
-も B で書くことになる。** A を採るなら島側も `Empty` の DOM を組む必要があり、島が太る。
-**この一点だけで B を推す。**
+**この 3 つのために primitive を取りに行かないこと。** `registry/ui` にある
+それらしいもの（`table.tsx` / `display-card.tsx` / `content-card.tsx`）は、
+どれも**この 3 つとは別の形**で、合わせるほうが手間が増える。
 
-### 3.8 `.notice`（補足テキスト）—— `Alert` は強すぎる場合がある
+- `table.tsx` —— `.facts` も `.list` も**0 件になりうる**。ヘッダ行だけが残る表になる
+- `display-card.tsx` —— `variant="primary"` が `bg-primary-mesh`（グラデーション）。
+  `theme.css` は**このトークンを持ってきていない**ので、使うと CSS の無い class が出る
 
-`.notice` は 2 つの用途で使われている。
+### 3.4 取り込まないもの（検討して外したもの）
 
-- **`<noscript>` の中の「JS が無いとできないこと」の説明**（`dashboard-shell.tsx`）
-  → `Alert variant="default"` + `AlertDescription` が合う。注意を引くべき内容である
-- **同意画面・NFC の末尾の補足**（「このアプリを知らない場合は…」）
-  → 箱にすると注意が過剰になる。`text-sm text-foreground-muted` のユーティリティで足りる
+| 候補                                                                                                    | 外す理由                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sidebar-collapsible.tsx`                                                                               | `style="max-height: 0px"` を出す。CSP で捨てられ、`hidden` だけが残って**中身が出ない**。畳みたくなったら `<details>` / `<summary>` で組む                                                                               |
+| `progress.tsx` `slider.tsx` `placeholder-gradient.tsx` `blog-post-card.tsx`                             | 同じくインライン `style=`。後ろ 2 つはグラデーションでもある                                                                                                                                                             |
+| `tabs.tsx` `dialog.tsx` `accordion.tsx` `collapsible.tsx` `dropdown-menu.tsx` `popover.tsx` `sheet.tsx` | JS が無いと中身が `hidden` のまま消える。**5 枚はどれも「一覧が JS 無しで読める」が要件**                                                                                                                                |
+| `tooltip.tsx`                                                                                           | JS は不要（`group-hover` だけ）だが hover 限定で、**キーボードとタッチで到達できない。** 5 枚に必要な場面が無い                                                                                                          |
+| `input.tsx` `label.tsx` `form-field.tsx`                                                                | profile の編集フォームは**アイランドが DOM で組む**。この 3 つは class をコンポーネントの中に埋めていて、**JS からは文字列を取り出せない**（§3.1 の `button.tsx` との違い）。取り込んでも使えないので、§4.3 の定数で持つ |
 
-**1 つのクラスが 2 つの役割を持っていたので、移行時に 2 つへ割れる。** 同じ置き換えにしない。
+### 3.5 使えない variant
 
-### 3.9 `.page-head` / `.dash*` —— §2.3 のとおり MIT 側に無い
+| 使えないもの                                                      | 理由                                                                                                                                                                       |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`Badge variant="secondary"`**                                   | 上流が `border-subtle` と書いている。トークンは `--color-border-subtle` であって `--color-subtle` は無いので、**Tailwind がこのユーティリティを生成しない。** 枠線が消える |
+| **`SidebarItemBadge`**                                            | 中で `<Badge variant="secondary">` を指定している。上と同じものを踏む                                                                                                      |
+| `variant="success"` / `"warning"` / `"info"`（`Alert` / `Badge`） | トークンが無彩色。**既定と同じ見た目になる**（§1.4）                                                                                                                       |
 
-組み上がった page header / sidebar layout は Pro。#332 が「ダッシュボードを組むのに必要な
-ものは無料側にある」と書いているのは部品のことで、**骨格は自分で組む**という理解で正しい。
+`border-subtle` が生成されていないことは、いまの `kiwa.css` の出力で確かめられる
+（`badge.tsx` は `@source` に入っていて、同じファイルの `border-primary/20` は
+生成されている）。**`kiwa-stylesheet.test.ts` は画面が実際に吐いた class しか見ない**ので、
+この variant を使う画面が出るまでは緑のままである。
+
+**上流のファイルは直さないこと。** `README.md` が「上流から取り直したときに diff が
+出ないようにしておく」と書いている。呼び出し側で別の variant を選ぶ。
 
 ---
 
-## 4. 退役できないクラス
+## 4. アイランド —— 22 箇所のクラス名
 
-### 4.1 なぜ消せないのか
+### 4.1 どの画面に効くか
 
-`styles.ts` は `UI_STYLESHEET` という**定数 1 つ**で、auth-worker が `/ui/u18.css`、
-dashboard-worker が `/account/ui/u18.css`、nfc-worker も自分の経路で、
-**同じ中身を各自が配っている**（`styles.ts` の「定義はここ 1 つ。配信は Worker ごとに行う」）。
+`account-island.ts` の 3 つの機能が、5 枚のうち 4 枚に掛かる。
+**home には掛からない**（`HomePage` は `scripts` を渡していない）。
 
-したがって **dashboard だけ Kiwa にしても、消せるのは「dashboard しか使っていないクラス」だけ**。
-#332 の段取りで言えば、**P2（auth-worker）が終わるまで `styles.ts` は空にならない。**
+| 機能                 | 掛かる画面                   | 取っ掛かり                                                             | クラスを書いている行                                                                                                                                         |
+| -------------------- | ---------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **取り消し**         | passkeys / sessions / grants | `li[data-session-id]` `li[data-passkey-id]` `li[data-grant-client-id]` | 119 `item-error` / 137 `empty` / 148 `button button-secondary button-small button-danger` / 190 `item-actions`                                               |
+| **パスキー登録**     | passkeys                     | `[data-passkey-register]`                                              | 252 `item-main` / 254 `item-title` / 257 `item-meta` / 269 `list` / 278 `button button-secondary` / 282 `item-meta` / 285 `item-error` / 296 `item-meta`     |
+| **プロフィール編集** | profile                      | `[data-profile-edit]`                                                  | 381 `field` / 397 `panel` / 399 `panel-header` / 401 `panel-title` / 404 `panel-desc` / 409 `panel-body` / 423 `button` / 427 `item-meta` / 430 `item-error` |
 
-### 4.2 P1（dashboard の 5 ページ）が終わった時点で消せるもの
+**プロフィール編集がいちばん重い。** パネル 1 枚を丸ごと DOM で組んでいるので、
+`Card` / `CardHeader` / `CardTitle` / `CardDescription` / `CardContent` の中身を
+JS 側にもう一度書くことになる。
 
-`.dash` `.dash-side` `.dash-main` `.dash-inner` `.page-head`
-`.side-brand` `.side-group` `.side-group-label` `.side-links` `.side-link`
-`.stack` `.cards` `.cards-3`
-`.panel` `.panel-header` `.panel-title` `.panel-desc` `.panel-body` `.panel-footer`
-`.stat` `.stat-value` `.stat-label`
-`.list` `.item-main` `.item-title` `.item-meta` `.item-raw` `.item-actions` `.item-error`
-`.facts` `.section-lead` `.empty` `.badge` `.badge-warn` `.button-small`
-`body.page-dash` と `@media (max-width: 52rem)` のダッシュボード分
+### 4.2 先に直すのはセレクタ —— クラスで DOM を引いている
 
-**ただし `.empty` と `.button*` は `account-island.ts` も使っている**（§1.4）。
-**島を直さずにクラスだけ消すと、JS で描かれた部分だけが素の HTML になる。**
-サーバー側のテストは緑のままなので、**この壊れ方は CI で拾えない。**
+**クラス名は見た目のためだけに使われているのではない。** アイランドは
+**サーバーが描いた HTML をクラスで引いている。**
 
-### 4.3 NFC（#338 Step 2）が終わっても消えないもの
+| 行  | 引いているもの                                   | 一致しなくなると                                                     |
+| --- | ------------------------------------------------ | -------------------------------------------------------------------- |
+| 117 | `item.querySelector(".item-error")`              | 既存の文言を見つけられず、**エラーが行に増え続ける**                 |
+| 122 | `item.querySelector(".item-main")?.append(node)` | `?.` が効いて**何も起きない。エラーが表示されない**                  |
+| 152 | `item.querySelector(".item-title")?.textContent` | `aria-label` が「この項目 を削除」に落ちる。**読み上げだけが壊れる** |
+| 248 | `document.querySelector("p.empty")`              | 0 件からの登録で**一覧が作られない**                                 |
 
-nfc は `.lead` `.identity` `.scopes` `.notice` の 4 つを使っているが、
-**4 つとも auth-worker も使っている。** NFC を移しても 1 つも消せない。
+**4 つとも例外を投げない。** 型検査もテストも何も言わず、画面も落ちない。
+**初版はこれを「クラス文字列の重複」として書いていたが、重複より先にこちらが問題**である。
 
-加えて、nfc は `Layout` の既定（`frame="card"`）を使っているので
-`.card` と `.brand` も間接的に使っている。`DashboardShell` へ移せば（#338 Step 2）
-この 2 つの利用者は auth だけになるが、**auth が 3 箇所で使っているので消えない。**
+**直し方: `data-*` へ寄せる。** `ui-pages.test.ts` が P0 で同じ判断をしている
+（「`panel-title` を見ていたときは、画面を Kiwa へ移しただけでここが落ちた。
+`data-slot` は上流が構造を表すために置いている属性で、スタイルシートが変わっても
+付いてくる」）。アイランドも同じ理由で同じ向きへ動かす。
 
-### 4.4 最後まで残るもの（auth-worker が移るまで）
+| いま          | 移行後              |
+| ------------- | ------------------- |
+| `.item-error` | `[data-item-error]` |
+| `.item-main`  | `[data-item-main]`  |
+| `.item-title` | `[data-item-title]` |
+| `p.empty`     | `[data-list-empty]` |
 
-| 分類     | 残るもの                                                                                                                          |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 骨格     | `body`（中央寄せ） `.card` `.brand` `h2` `*{box-sizing}` `::selection`                                                            |
-| トークン | `:root` の全変数（`--bg` `--card` `--border` `--fg` `--muted` `--accent` `--danger` `--radius` `--font-sans` `--font-mono` ほか） |
-| フォーム | `input[type="email"]` `input[type="text"]` の素の要素セレクタ、`.field` `.code-input`                                             |
-| ボタン   | `.button` `.button-secondary` `.button-danger` `.link-button`                                                                     |
-| 文字     | `.lead` `.notice` `.links` `.error`                                                                                               |
-| 構造     | `.identity` `.scopes` `.separator` `.inline-form`                                                                                 |
-| focus    | `input:focus-visible, .button:focus-visible, .link-button:focus-visible, a:focus-visible`                                         |
+**`data-slot` を借りないこと。** あれは上流が自分の構造に付けている属性で、
+`[data-slot="card-content"]` で引くと**上流の内部構造に依存する**。
+取り直したときに黙って外れる。こちら側の目印は自分で付ける。
 
-### 4.5 これが P0 に跳ね返る —— 素の要素セレクタとカスケードレイヤー
+### 4.3 クラス文字列を定数にする
 
-**`UI_STYLESHEET` は要素セレクタを持っている。**
+セレクタを直したうえで、**残る重複（サーバーと島の両方が同じ見た目を作る）を定数に寄せる。**
+
+**置き場所: `apps/dashboard-worker/src/presentation/http/ui/ui-classes.ts`**（新規）。
+`kiwa.css` の `@source "./"` がこのディレクトリを再帰で見ているので、
+**走査対象には自動で入る**（`client/` も同じ理由で既に入っている）。
+
+```ts
+// 一覧の行（list / item-*）
+export const LIST_CLASS = "flex flex-col";
+export const LIST_ROW_CLASS = "flex items-start justify-between gap-5";
+export const ITEM_MAIN_CLASS = "min-w-0";
+export const ITEM_TITLE_CLASS = "font-medium break-all";
+export const ITEM_META_CLASS = "text-sm/relaxed text-foreground-muted";
+export const ITEM_RAW_CLASS = "font-mono text-xs break-all text-foreground-soft";
+export const ITEM_ACTIONS_CLASS = "shrink-0";
+export const ITEM_ERROR_CLASS = "text-sm text-destructive";
+
+// 0 件（§4.5 でどちらに決めるかが変わる）
+export const LIST_EMPTY_CLASS = "py-6 text-center text-sm text-foreground-soft";
+
+// プロフィール編集のフォーム（Kiwa の input/label は JS から使えない。§3.4）
+export const FIELD_CLASS = "flex flex-col gap-2";
+export const FIELD_LABEL_CLASS = "text-sm font-medium text-foreground-muted";
+export const FIELD_INPUT_CLASS =
+  "w-full rounded-lg border border-input bg-card px-3 py-1 h-9 text-sm outline-none " +
+  "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20";
+
+// 島が引く目印（サーバーと島で 1 箇所にする）
+export const ITEM_MAIN_ATTR = "data-item-main";
+export const ITEM_TITLE_ATTR = "data-item-title";
+export const ITEM_ERROR_ATTR = "data-item-error";
+export const LIST_EMPTY_ATTR = "data-list-empty";
+```
+
+ボタンは `button.tsx` を取り込めば（§3.1）定数を書かずに済む。
+
+```ts
+import { getButtonClasses } from "@u18/web-ui/kiwa";
+
+export const REVOKE_BUTTON_CLASS = getButtonClasses("outline", "sm") + " text-destructive";
+export const PRIMARY_BUTTON_CLASS = getButtonClasses();
+export const SECONDARY_BUTTON_CLASS = getButtonClasses("outline");
+```
+
+**ただし `cn` を島へ持ち込む代償を見ておくこと。** `getButtonClasses` は `cn`
+（`clsx` + `tailwind-merge`）を呼ぶ。`cn` だけを esbuild で畳むと **27.8 KB**
+になり、**いまの島が 18.4 KiB** なので**2 倍以上に太る。**
+
+| 案                                                                                           | 島の大きさ | 上流との同期                               |
+| -------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------ |
+| A: 島が `getButtonClasses` を import                                                         | +27.8 KB   | 自動で追従する                             |
+| B: 定数を素の文字列リテラルで書く                                                            | ±0         | **手で合わせる。上流が変わると気づけない** |
+| C: サーバー側（`ui-classes.ts`）だけが `getButtonClasses` を呼び、**結果の文字列を島へ渡す** | ±0         | 自動で追従する                             |
+
+**C を推す。** 島が読む `<li>` や mount 要素に `data-button-class="…"` として
+載せれば、`cn` はサーバー側（Worker）でだけ走る。
+**`tailwind-merge` がブラウザへ行く理由はどこにも無い** —— 島が作るクラスは
+重複も上書きも無く、必要なのは「決まった文字列」だけである。
+
+### 4.4 テストが見ていない範囲
+
+`kiwa-stylesheet.test.ts` の「class が 1 つ残らず CSS にある」は、
+**サーバーが吐いた HTML の `class="…"` しか見ない**（`classesIn(html)`）。
+**島が実行時に付けるクラスは 1 つも見ていない。**
+
+つまり §4.3 の定数に綴りの間違いがあっても、**CSS の無い class が本番の
+ブラウザにだけ出る。** これは #320 と同じ形である。
+
+**対策の案:** `ui-classes.ts` が export する文字列を**テストから直接読んで**
+同じ照合に掛ける。画面を描く必要が無く、島を実行する必要も無い。
 
 ```
-body { display: flex; align-items: center; justify-content: center; padding: 2rem 1.5rem; … }
-h2 { margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 600; … }
-input[type="email"], input[type="text"] { width: 100%; padding: 0.7rem 0.85rem; … }
-* { box-sizing: border-box; }
+const used = Object.values(await import("…/ui-classes")).flatMap((v) => v.split(/\s+/));
 ```
 
-Tailwind v4 は出力全体を `@layer theme, base, components, utilities` に入れる。
-**CSS のカスケードでは、レイヤーに属さない規則がすべてのレイヤーより強い。**
-つまり、この手書きシートを Tailwind の出力と素朴に結合すると、
-**`h2 { font-size: 1.5rem }` が `CardTitle` の `text-*` ユーティリティに勝つ。**
-`input[type="text"]` も同様に `Input` の `px-3 py-1 rounded-lg` を上書きする。
+**`@source` の走査と、この照合は別の話である。** 走査は「CSS が生成されるか」、
+照合は「生成されたか確かめたか」。走査に入っていても綴りを間違えれば生成されない。
 
-**症状が出るのは「Kiwa に移したページ」のほうで、原因は「まだ移していない auth 用の規則」にある。**
-移行の途中でしか起きず、しかも原因と症状の置き場所が違うので、追いにくい部類の壊れ方になる。
+### 4.5 0 件の表示が 2 つに割れる
 
-**対応（P0 の判断事項として #332 へ渡す）:**
+**`/account/apps` の前例は「0 件なら `Card` を描かず `Empty` を出す」**（§1.3）。
+これを passkeys / sessions / grants にそのまま当てると、**島と食い違う。**
 
-- `UI_STYLESHEET` を `@layer legacy { … }` で包み、Tailwind より前に `@layer legacy, theme, base, components, utilities;` と順序を宣言する。**クラスを足すのではなく既存の全体をレイヤーに入れるだけ**なので、手書きデザインを増やすことにはならない
-- もしくは、配信を Worker ごとに分け、Kiwa に移したページには手書きシートを配らない。ただし `styles.ts` が「定義を 2 つに分けないこと」と明記しているので、**この方向を採るなら先にその判断を覆す必要がある**
+島の `removeItem`（137 行）は、最後の 1 件を消したときこうしている。
+
+```
+list.replaceWith(empty);   // <ul> を <p class="empty"> に差し替える
+```
+
+差し替えているのは `CardContent` の**中の `<ul>`** である。サーバー側の 0 件が
+「`Card` ごと無い `Empty`」だとすると、
+
+> **最後の 1 件を取り消した直後と、そのあと再読み込みした後で、画面が違う。**
+
+**判断が要る。**
+
+| 案    | 中身                                                                                                                                 | 代償                                                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| A     | 島が `Card` ごと `Empty` の DOM に差し替える                                                                                         | 島が `Empty` / `EmptyHeader` / `EmptyTitle` / `EmptyDescription` の class を**もう一度持つ**。§4.3 の定数が 4 つ増える |
+| **B** | **一覧の 0 件は `Card` の中に置く**（1 行の中央寄せテキスト）。`Empty` は `/account/apps` のような**ページ全体が空**のときだけに使う | `/account/apps` と見た目が割れる                                                                                       |
+
+**B を推す。** 2 つは**違う状態**である。`/account/apps` の空は「u18 がまだ
+アプリを載せていない」で、利用者には何もできない。passkeys / sessions / grants の
+空は「**あなたが全部消した**」で、直前まで中身があった場所である。
+**`Card` ごと消えると、操作した場所そのものが画面から消える。**
+
+B なら島は `list.replaceWith(p)` のまま、`p.className = LIST_EMPTY_CLASS` を
+差し替えるだけで済む。
 
 ---
 
-## 5. 使ってはいけない Kiwa primitive
+## 5. 退役の順序
 
-### 5.1 CSP 違反 —— インライン `style=` を出す（5 ファイル）
+### 5.1 5 枚 + `message-page` が終わった時点で消せるもの（36 個）
 
-画面には `style-src 'self'` が掛かっている。`style-src-attr` を別に指定していないので、
-CSP3 の規定で `style` 属性は `style-src` に落ち、**ブラウザが属性ごと捨てる**。
-`styles.ts` のコメントが書いている「本番で枠線が密着していた」のと同じ経路である。
+```
+dash  dash-side  dash-main  dash-inner  page-head
+side-brand  side-group  side-group-label  side-links  side-link
+stack  cards  cards-3
+panel  panel-header  panel-title  panel-desc  panel-body  panel-footer
+stat  stat-value  stat-label
+list  item-main  item-title  item-meta  item-raw  item-actions  item-error
+facts  section-lead  empty  badge  badge-warn  button-small
+body.page-dash と @media (max-width: 52rem) のダッシュボード分
+```
 
-| ファイル                   | 出す内容                                 | 捨てられたときの症状                                                                        |
-| -------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `sidebar-collapsible.tsx`  | `style="max-height: 0px"`                | `hidden` も一緒に付いているので**中身が出ない**。開く JS も動かないとナビ項目が丸ごと消える |
-| `progress.tsx`             | `style={{ transform: … }}`               | 進捗バーが常に 0%                                                                           |
-| `slider.tsx`               | `style={{ … }}` (2 箇所)                 | つまみの位置が出ない                                                                        |
-| `placeholder-gradient.tsx` | `style={…background-image…}`             | 何も描かれない                                                                              |
-| `blog-post-card.tsx`       | `style="background: linear-gradient(…)"` | 装飾が出ない                                                                                |
+消す**前に**片付けるもの:
 
-**`sidebar-collapsible` は #332 が候補に挙げているが、このままでは使えない。**
-サイドバーを折りたたむ必要が出たら、`<details>` / `<summary>` で組むこと
-（JS 無しで開閉でき、インライン `style=` も要らない）。
+- **`DashboardShell` と `Layout` の `frame="dash"`**（使う側がいなくなる）
+- **`dashboard-shell.tsx` が再 export している `DashboardNavKey`**。
+  実体は `dashboard-nav.ts` にあるので、import 元を付け替える
+- **`account-island.ts` の 22 箇所**（§4）。**ここを直さずにクラスだけ消すと、
+  JS が描いた部分だけ素の HTML になる。** サーバー側のテストは緑のままで、
+  `kiwa-stylesheet.test.ts` も島を見ていない（§4.4）
 
-### 5.2 design.md 違反 —— グラデーション
+### 5.2 消えないもの —— auth-worker が握っている 17 個
 
-- `placeholder-gradient.tsx`（コンポーネント全体が目的からして違反）
-- `blog-post-card.tsx`（`linear-gradient`）
-- `display-card.tsx` の `variant="primary"`（`bg-primary-mesh`）
+5 枚を全部移しても、**`styles.ts` は空にならない。** ログイン画面・同意画面が
+同じ `UI_STYLESHEET` を読んでいる（定義は 1 つ、配信は Worker ごと）。
 
-**"No gradients." / "No rainbow effects." / "No colorful UI." は継続。**
-`DisplayCard` を使う場合は `variant="default"` 固定にする。
+| 分類     | 残るもの                                                                                  | 使っている auth の画面                   |
+| -------- | ----------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 骨格     | `.card` `.brand` `body`（中央寄せ） `h2` `*` `::selection`                                | `Layout` の `frame="card"` を使う 4 箇所 |
+| ボタン   | `.button` `.button-secondary` `.button-danger` `.link-button`                             | login / consent                          |
+| フォーム | `.field` `.code-input` `input[type="email"]` `input[type="text"]`                         | login                                    |
+| 文字     | `.lead` `.notice` `.links` `.error`                                                       | login / consent                          |
+| 構造     | `.identity` `.scopes` `.separator` `.inline-form`                                         | login / consent                          |
+| focus    | `input:focus-visible, .button:focus-visible, .link-button:focus-visible, a:focus-visible` | 全部                                     |
+| トークン | `:root` の全変数                                                                          | 全部                                     |
 
-### 5.3 JS が無いと中身が消えるもの
+**`.scopes` には注意が要る。** grants（移す側）と consent（残る側）の**両方**が使う。
+grants を Kiwa へ移しても `.scopes` は消えない。
 
-「JS 無しで使えること」は #332 / #338 の両方が守るものに挙げている。
-下の 3 つは **JS が落ちると中身が見えなくなる**ので、
-**情報を載せる場所には使えない**（付加的な操作にだけ使う）。
+### 5.3 NFC が絡むもの
 
-| ファイル                                                                        | 無効時の状態                                                                |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `tabs.tsx`                                                                      | `TabsContent` に `hidden` が付いたまま。**全タブの中身が消える**            |
-| `dialog.tsx`                                                                    | `open` でない限り `hidden`。トリガーが押せないボタンになる（#306 と同じ形） |
-| `accordion.tsx` `collapsible.tsx` `dropdown-menu.tsx` `popover.tsx` `sheet.tsx` | 同様に開かない                                                              |
+`cards-page.tsx` が `.lead` `.identity` `.scopes` `.notice` を使っているが、
+**4 つとも auth-worker も使っている。** NFC（別セッション担当）が移っても
+`styles.ts` からは 1 つも消えない。**退役の計画に NFC を数えないこと。**
 
-**`tooltip.tsx` は JS 不要**（`group-hover/tooltip:block` の CSS だけで動く）。
-ただし hover でしか出ないので、**キーボードとタッチで到達できない。**
-消えて困らない補足にだけ使うこと。
+### 5.4 `styles.ts` が消える条件
 
-### 5.4 `cn` を使う以上、`tailwind-merge` が実行時に載る
+**P2（auth-worker のログイン / 登録 / 同意）が終わったときだけ。**
+そのとき同時に消えるもの:
 
-`registry/lib/utils.ts` は `clsx` + `tailwind-merge`。
-**サーバー側（Worker）では問題にならないが、アイランドへ持ち込むとバンドルが太る。**
-§1.4 の「クラス文字列を定数として共有する」案は、ここにも効く。
+- `packages/web-ui/src/styles.ts`（`UI_STYLESHEET`）
+- `Layout` の `frame`（`"card"` / `"shell"` / `"dash"` が全部いなくなり、`"bare"` だけが残る）
+- 各 Worker の `STYLESHEET_ROUTE` / `STYLESHEET_PATH` と、それを配る route
+- `ui-pages.test.ts` の `EXPECTED_STYLESHEET`（全部が同じ 1 本になる）
+
+なお **`.nav` `.section` `.badge-muted` は今でも誰も使っていない**。
+`frame="shell"` も呼び出しが無く、`.shell` `.page-shell` に到達経路が無い。
+`.passkey`（`login-island.tsx`）は使われているのに定義が無い。
+**移行とは独立に消せるが、移行と混ぜないこと**（レビューが読めなくなる）。
 
 ---
 
-## 6. 進め方の提案
+## 6. 1 枚ずつ移すときに通る検査
 
-#332 の段取りを、本書の棚卸しで補ったもの。
+### 6.1 `ui-pages.test.ts` の `EXPECTED_STYLESHEET`
 
-| 段   | 対象                                                           | 本書で見る節                                                               |
-| ---- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| P0   | 基盤 + `/account/apps`（**別セッション担当**）                 | §4.5（レイヤー） §3.7（`Empty` の A/B 決め） §2.1（`Card` の枠線を決める） |
-| P1-a | **nfc `cards-page.tsx`**（#338 Step 2 / 運用者が最優先と指示） | §3.1 §3.6 §3.3                                                             |
-| P1-b | dashboard の残り 5 ページ + `DashboardShell`                   | §2.3 §3.1 §3.4                                                             |
-| P1-c | `account-island.ts` のクラス文字列                             | §1.4 §4.2                                                                  |
-| P2   | auth-worker（ログイン / 登録 / 同意）                          | §4.4 —— **ここが終わって初めて `styles.ts` が消える**                      |
+**1 枚移すたびにこの表の 1 行を書き換える。**
 
-**P0 が §3.7 と §2.1 をどう決めたかで、P1 以降のすべてのページが変わる。**
-`/account/apps` が出てきたら、まずその 2 点を読むこと。
+```
+[OVERVIEW_PATH, STYLESHEET_PATH,      ".dash-side"]   -> [OVERVIEW_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"]
+```
 
-### NFC を組むときの追加の制約（#338）
+この describe が見ているのは 3 つ。
 
-- **遷移先 URL を `<a href>` にしない。** `cards-page.tsx` のコメントのとおり、
-  利用者が自由に入れた外部 URL なので、一覧を開いただけで飛べると**この画面が踏み台になる**。
-  `Table` や `Card` に移しても、`targetUrl` は**文字列のまま**出す
-- **書き込みは JSON API 1 本。** form POST を並べない。操作 UI はアイランドから
-  既存の `cards.routes.ts` を叩く（#338 Step 1 のアイランド基盤が前提）
-- 「このページからは行えません」の案内（`.notice`）は、操作が付いた時点で消す
+1. `EXPECTED_STYLESHEET` が `PAGES` を漏れなく覆っていること（**書き忘れ防止**）
+2. 読む `<link rel="stylesheet">` が**ちょうど 1 本**であること（**混ぜない**）
+3. その先が 200 で、`sentinel` を含むこと（**取り違え防止**）
+
+**「両方読み込む」は 2 で塞がれている。** 1 枚ずつ移すときの一番楽な逃げ道が、
+意図的に通らないようにしてある。
+
+**足すべき行が 1 つある（§2.2）。** いまの表は Cookie 付きでしか取りに行かない。
+**401（`SignInRequiredPage`）と 503（`UnavailablePage`）も同じ 1 本になること**を
+見る行を足すこと。
+
+### 6.2 `kiwa-stylesheet.test.ts`
+
+`/account/apps` だけを見ているので、**移した画面を 1 つずつ足す。**
+`it.each` に変えて `EXPECTED_STYLESHEET` の Kiwa 側から引くのが素直
+（**画面を足して書き忘れる**形を 6.1 と同じ仕掛けで塞げる）。
+
+島のクラスは見ていない（§4.4）。
+
+### 6.3 見た目の class をテストの目印にしない
+
+`ui-pages.test.ts` が P0 で踏んだ形がコメントに残っている。
+
+> `panel-title` を見ていたときは、画面を Kiwa へ移しただけでここが落ちた。
+> 落ちたのは正しいが、**直し先が「次のスタイルシートの class 名」になる**
+
+5 枚を移すときも同じことが起きる。**`data-slot` か、中身の文字列（`>…</p>`）で見る。**
+
+---
+
+## 7. 初版（P0 前）からの差
+
+| 初版                                                  | 本版                                                                                    |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 「`registry/ui` の 54 個から何を取るか」              | **取り込み済みの 6 個が前提。** 足すのは `button.tsx` 1 つ（§3.1）                      |
+| 「`Card` に枠線を足すか決めてほしい」                 | **決着。** `--shadow-sm` がリングで輪郭を出す（§1.2）                                   |
+| 「素の要素セレクタが Tailwind のレイヤーに勝つ」      | **回避済み。** 1 枚 1 本に分けた（§1.2 / §6.1）                                         |
+| 「`.list` は `divide-y` で」                          | **`Separator` + `index > 0`** に変更（`/account/apps` の前例に揃える。§1.3）            |
+| 「`.badge` は `variant="outline-primary"` で」        | **既定の `<Badge>`** に変更（同上）                                                     |
+| 「0 件は `Empty` か 1 行かを P0 が決める」            | **一覧の 0 件は 1 行（案 B）を推す。** 島の `removeItem` と食い違うため（§4.5）         |
+| 「Tailwind の `@source` に `client/**` を含めること」 | **済み。** `@source "./"` が `ui/` を再帰で見ている                                     |
+| 「島のクラス文字列を定数にする」                      | **順番が逆。** 先に**セレクタ**を `data-*` へ移す。クラスの重複より壊れ方が悪い（§4.2） |
+| 対象に NFC を含めていた                               | **NFC は別セッション担当。** 本書は 5 枚 + `message-page` に絞った                      |
