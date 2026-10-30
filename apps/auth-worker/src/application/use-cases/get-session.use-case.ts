@@ -1,5 +1,5 @@
 import type { Session } from "../../domain/entities/session";
-import type { AuditEventName, AuditLogger } from "../ports/audit-log.port";
+import type { AuditLogger, NotPersistedAuditEventName } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { TokenHasher } from "../ports/crypto.port";
 import type { SessionRepository } from "../ports/session.repository";
@@ -135,7 +135,7 @@ export class GetSessionUseCase {
       // ここは応答時間を畳み込んでいる経路で、INSERT を待たせたくない。
       console.warn(
         JSON.stringify({
-          event: "admin.session_not_passkey" satisfies AuditEventName,
+          event: "admin.session_not_passkey" satisfies NotPersistedAuditEventName,
           userId: session.userId,
           sessionId: session.id,
           authMethod: session.authMethod,

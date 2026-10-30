@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { AuditEventName } from "../../application/ports/audit-log.port";
+import type { NotPersistedAuditEventName } from "../../application/ports/audit-log.port";
 import type { RateLimitScope } from "../../domain/services/rate-limit-policy";
 import { problem } from "./problem";
 import type { AppBindings } from "./types";
@@ -77,7 +77,7 @@ export async function enforceIpRateLimit(
     JSON.stringify({
       // 出力先は違うが名前空間は監査イベントと同じなので、登録簿で縛る。
       // 別に持つと片方だけ改名する事故が起きる（audit-log.port.ts）。
-      event: "rate_limit.exceeded" satisfies AuditEventName,
+      event: "rate_limit.exceeded" satisfies NotPersistedAuditEventName,
       scope,
       // 生 IP は出さない（仕様書 9 Privacy）。ログも保存先である。
       ipHash: ip === null ? null : ipKey,

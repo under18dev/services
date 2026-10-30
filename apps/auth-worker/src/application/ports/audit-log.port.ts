@@ -254,7 +254,27 @@ export const AUDIT_EVENTS = [
 export type AuditEventName = (typeof AUDIT_EVENTS)[number];
 
 /**
- * イベントごとの保持区分（#22、仕様書 7.3 / ランブック §7.2）。
+ * イベントが `audit_logs` に書かれるか、それとも Workers のログだけに
+ * 出て D1 には 1 行も残らないか（#381）。
+ *
+ * **保持期間（`AuditRetentionTier`）とは別の軸である。** 以前は
+ * `rate_limit.exceeded` / `csrf.rejected` / `admin.session_not_passkey` /
+ * `admin.denied` の 4 つ —— どれも `audit_logs` に書かない —— に
+ * `"standard"` を置いていた。型の上では「180 日残る」と読めるが、
+ * 実際には**掃除の対象になる行自体が存在しない**。置いた値が何も
+ * 意味しない行が、足すたびに増えていく形だった。
+ *
+ * **`sink: "log"` は `retention` を持たない。** 持たせると、無意味な値を
+ * 置く場所がまた増える（「0 日残す」も「標準どおり残す」も、1 行も
+ * 書かれないことの前では同じく意味が無い）。
+ */
+export type AuditSink = "d1" | "log";
+
+export type AuditClassification =
+  { readonly sink: "d1"; readonly retention: AuditRetentionTier } | { readonly sink: "log" };
+
+/**
+ * イベントごとの保持区分（#22 / #381、仕様書 7.3 / ランブック §7.2）。
  *
  * ## 分け方
  *
@@ -265,10 +285,11 @@ export type AuditEventName = (typeof AUDIT_EVENTS)[number];
  *
  * ## `Record<AuditEventName, ...>` にしてある理由
  *
- * **イベントを 1 つ足すと、ここがコンパイルエラーになる。** 区分を
- * 決めないと通らない。既定値へ黙って落ちる形（`?? "standard"`）にすると、
- * 新しい高リスクイベントが 180 日で消える状態が無言で生まれる ——
- * このリポジトリで繰り返している「宣言はあるが発動しない」と同じ形になる。
+ * **イベントを 1 つ足すと、ここがコンパイルエラーになる。** `sink` /
+ * （`sink: "d1"` なら）`retention` を決めないと通らない。既定値へ黙って
+ * 落ちる形（`?? "standard"`）にすると、新しい高リスクイベントが 180 日で
+ * 消える状態が無言で生まれる —— このリポジトリで繰り返している
+ * 「宣言はあるが発動しない」と同じ形になる。
  *
  * ## 選別は event 名でしかできない
  *
@@ -282,8 +303,16 @@ export type AuditEventName = (typeof AUDIT_EVENTS)[number];
  * 2 年持つ量には見合わない。**分けたいなら専用のイベント名を足すのが
  * 正しい**（issue #22 の本文が挙げていた `passkey.counter_regression`）。
  * 区分ではなく名前の問題なので、ここでは解かない。
+ *
+ * ## `as const satisfies` にしてある理由
+ *
+ * `satisfies` で `Record<AuditEventName, AuditClassification>` との整合を
+ * 確かめつつ、`as const` で各エントリの `sink` リテラルを残す。
+ * `PersistedAuditEventName` / `NotPersistedAuditEventName`（下）が
+ * この値から `sink` ごとにイベント名を抜き出すには、型注釈で
+ * `AuditClassification` へ広げてしまわずリテラルのまま保つ必要がある。
  */
-export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetentionTier>> = {
+export const AUDIT_EVENT_RETENTION = {
   // --- 支配権が変わる操作（2 年） ---
   /**
    * アカウントの新規作成。**支配権が発生した瞬間**で、この系列の起点になる。
@@ -292,45 +321,45 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * 他のイベントを 2 年持つ意味も半減する。量は利用者数と同じで、
    * リクエストごとに増えるものではない。
    */
-  "user.created": "security",
+  "user.created": { sink: "d1", retention: "security" },
   /**
    * 個人情報を落とした。**支配権が変わるどころか、戻せない。**
    *
    * 2 年では短いかもしれないが、区分を増やすほどの根拠がまだ無い。
    * R2 への退避（730 日）と合わせて約 4 年になる（決定 14）。
    */
-  "user.purged": "security",
+  "user.purged": { sink: "d1", retention: "security" },
   /**
    * 本人の退会。**アカウントの支配権が変わる操作**で、しかもこれが
    * 「個人情報を落としてよい」の起点になる（§11.6）。
    */
-  "account.closed": "security",
+  "account.closed": { sink: "d1", retention: "security" },
   /** 管理権限の付与。**アカウントの支配権が変わる操作そのもの**（#270）。 */
-  "ops.admin.granted": "security",
+  "ops.admin.granted": { sink: "d1", retention: "security" },
   /** 剥奪。締め出しの手口でもあるので、付与と同じだけ残す。 */
-  "ops.admin.revoked": "security",
+  "ops.admin.revoked": { sink: "d1", retention: "security" },
   /**
    * **支配権が変わる操作なので長期側。** しかも `ops.user.suspended` は
    * **理由の唯一の保存先**である（`status` は 1 値しか持たない）。
    * 180 日で消えると、「なぜ止まっているのか」が誰にも分からない
    * アカウントが残る。
    */
-  "ops.user.suspended": "security",
+  "ops.user.suspended": { sink: "d1", retention: "security" },
   /** 付与と剥奪を同じだけ残すのと同じ理由（`ops.admin.revoked`）。 */
-  "ops.user.reinstated": "security",
+  "ops.user.reinstated": { sink: "d1", retention: "security" },
   /**
    * **管理者しか起こせないので件数が頭打ちになる。** 外から誘発できる
    * `admin.denied` と違い、`audit_logs` を伸ばす経路にならない。
    */
-  "ops.user.sessions_revoked": "security",
+  "ops.user.sessions_revoked": { sink: "d1", retention: "security" },
   /** 認証器を足した。乗っ取りの最も典型的な足跡。 */
-  "passkey.register": "security",
+  "passkey.register": { sink: "d1", retention: "security" },
   /** 認証器を外した。締め出しの手口でもある。 */
-  "passkey.deleted": "security",
+  "passkey.deleted": { sink: "d1", retention: "security" },
   /** username / displayName の変更。なりすましの足跡。 */
-  "profile.updated": "security",
+  "profile.updated": { sink: "d1", retention: "security" },
   /** 同意の取り消し。第三者アプリの常設アクセスが切れた時点。 */
-  "oauth.grant.revoked": "security",
+  "oauth.grant.revoked": { sink: "d1", retention: "security" },
   /**
    * OAuth クライアントの登録（#308）。**認可コードの宛先が増えた記録**で、
    * `ops.admin.granted` と同じく支配権が変わる操作にあたる。
@@ -339,88 +368,92 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * ここに来ない（`admin.denied` として Workers のログへ出る）ので、
    * 「弾いた回数ぶん行が増える」形にはならない。
    */
-  "oauth.client.created": "security",
+  "oauth.client.created": { sink: "d1", retention: "security" },
   /** 失効。正規のクライアントを止める手口でもあるので、登録と同じだけ残す。 */
-  "oauth.client.disabled": "security",
+  "oauth.client.disabled": { sink: "d1", retention: "security" },
   /** 本人によるセッション失効。「いつ気づいたか」の起点になる。 */
-  "session.revoke": "security",
+  "session.revoke": { sink: "d1", retention: "security" },
   /** ログアウト（全デバイス失効を含む）。乗っ取り後の後始末か本人かを後から分ける。 */
-  "session.logout": "security",
+  "session.logout": { sink: "d1", retention: "security" },
   /**
    * 認可コードの再使用。**単発でも侵害の兆候**で、正常な経路では
    * 起こらない（RFC 6749 §10.5）。量はほぼゼロなので残さない理由が無い。
    */
-  "oauth.code.replayed": "security",
+  "oauth.code.replayed": { sink: "d1", retention: "security" },
   /**
    * 署名カウンタの巻き戻し。**認証器の複製の兆候**で、`oauth.code.replayed` と
    * 同じ性質 —— 正常な経路では起こらず、量はほぼゼロ（#147）。
    */
-  "passkey.counter_regression": "security",
+  "passkey.counter_regression": { sink: "d1", retention: "security" },
 
   // --- それ以外（180 日） ---
   /** ログインのたびに 1 行。直近の異常を見るためのもの。 */
-  "session.issue": "standard",
+  "session.issue": { sink: "d1", retention: "standard" },
   /** 期限切れ Cookie の提示でも出る。最も量が多い部類。 */
-  "session.rejected": "standard",
-  "otp.start": "standard",
-  "otp.verify": "standard",
+  "session.rejected": { sink: "d1", retention: "standard" },
+  "otp.start": { sink: "d1", retention: "standard" },
+  "otp.verify": { sink: "d1", retention: "standard" },
   /** 上記「選別は event 名でしかできない」を参照。 */
-  "passkey.login": "standard",
-  "oauth.client.resolve": "standard",
+  "passkey.login": { sink: "d1", retention: "standard" },
+  "oauth.client.resolve": { sink: "d1", retention: "standard" },
   /** 失敗はなりすまし試行だが、成功が /oauth/token のたびに出るため量が多い。 */
-  "oauth.client.authenticate": "standard",
-  "oauth.authorize.decided": "standard",
-  "oauth.code.issued": "standard",
-  "oauth.token.exchange": "standard",
-  "oauth.token.issued": "standard",
-  "oauth.token.revoked": "standard",
-  "oauth.userinfo": "standard",
+  "oauth.client.authenticate": { sink: "d1", retention: "standard" },
+  "oauth.authorize.decided": { sink: "d1", retention: "standard" },
+  "oauth.code.issued": { sink: "d1", retention: "standard" },
+  "oauth.token.exchange": { sink: "d1", retention: "standard" },
+  "oauth.token.issued": { sink: "d1", retention: "standard" },
+  "oauth.token.revoked": { sink: "d1", retention: "standard" },
+  "oauth.userinfo": { sink: "d1", retention: "standard" },
   /** 15 分おきに 1 行。掃除自身の記録を 2 年持つ理由が無い。 */
-  "retention.sweep": "standard",
+  "retention.sweep": { sink: "d1", retention: "standard" },
+  // --- audit_logs に書かない（#381） ---
   /**
-   * **この行は実際には使われない。** `rate_limit.exceeded` だけは
    * `audit_logs` に書かず Workers のログへ出す（#21。弾いたリクエスト
    * 1 本ごとに D1 へ書くと、レート制限自身が資源枯渇を引き起こす）。
-   * `Record` が網羅を要求するので値を置いているだけで、掃除の対象に
-   * この名前の行が現れることは無い。
+   *
+   * **`retention` を持たない。** 1 行も書かれないので、どの保持期間を
+   * 選んでも意味が無い。
    */
-  "rate_limit.exceeded": "standard",
+  "rate_limit.exceeded": { sink: "log" },
+  /** `rate_limit.exceeded` と同じく `audit_logs` に行が現れない。 */
+  "csrf.rejected": { sink: "log" },
   /**
-   * `rate_limit.exceeded` と同じく**この行は実際には使われない**（ログへ出す
-   * だけで `audit_logs` に行が現れない）。`Record` の網羅のために置いている。
+   * `admin.session_not_passkey` は Workers のログへ出すだけで `audit_logs`
+   * には現れない（決定 8 / RR-5）。
+   *
+   * 仮に `audit_logs` へ書くことにしたら `security` にする —— 件数は
+   * ほぼゼロで、「管理者の前提が崩れていた期間」は後から遡りたい種類の
+   * 情報だからである。
    */
-  "csrf.rejected": "standard",
+  "admin.session_not_passkey": { sink: "log" },
   /**
-   * これも**使われない行**。`admin.session_not_passkey` は Workers のログへ
-   * 出すだけで `audit_logs` に現れない（決定 8 / RR-5）。`Record` の網羅の
-   * ために置いている。
+   * `admin.denied` は `audit_logs` に書かず Workers のログへ出す（#308）。
    *
-   * 仮に書くことにしたら `security` に入れる —— 件数はほぼゼロで、
-   * 「管理者の前提が崩れていた期間」は後から遡りたい種類の情報だからである。
-   * ここが `standard` なのは**出力先の話であって重要度の話ではない。**
-   *
-   * **ここには「次を足すときは、区分を `"not_persisted"` のような値で
-   * 表せないかを先に考えること」と書いてあった。その次がすぐ下の
-   * `admin.denied` で、4 行目になる**（`rate_limit.exceeded` /
-   * `csrf.rejected` / これ / `admin.denied`）。`Record` の網羅が要求する
-   * ので値を置いているが、**置いた値が意味を持たない行が増えていく形**が
-   * そのまま続いている。
-   *
-   * 直すべきなのは型のほうで、いまは「掃除の対象になる期間」と
-   * 「そもそも掃除の対象でない」が同じ型で書かれている。**この PR では
-   * 直さない** —— ここで型を変えると、この PR が触っていない監査イベント
-   * 全部の分類を道連れにする。別で出す。
+   * 仮に `audit_logs` へ書くことにしたとしても `security` には入れない
+   * —— 外から誘発できるイベントを 2 年側へ置くと、掃除が効かないまま
+   * 行が伸びる。
    */
-  "admin.session_not_passkey": "standard",
-  /**
-   * こちらも**実際には使われない行**。`admin.denied` は `audit_logs` に
-   * 書かず Workers のログへ出す（#308）。`Record` の網羅のために置いている。
-   *
-   * 仮に書くことにしたとしても `security` には入れない —— 外から誘発できる
-   * イベントを 2 年側へ置くと、掃除が効かないまま行が伸びる。
-   */
-  "admin.denied": "standard",
-};
+  "admin.denied": { sink: "log" },
+} as const satisfies Readonly<Record<AuditEventName, AuditClassification>>;
+
+/**
+ * 「`audit_logs` に書く」イベント名だけを抜き出す（#381）。
+ *
+ * `AuditEvent.event` をこの型にすることで、`AUDIT_EVENT_RETENTION` で
+ * `sink: "log"` に分類したイベントを `AuditLogger.record()` へ渡すこと
+ * 自体がコンパイルエラーになる。逆に `sink: "log"` のイベントを
+ * `console.warn` 側で使うときは `NotPersistedAuditEventName`（下）を
+ * 使うこと —— 将来そのイベントを `sink: "d1"` へ変えたとき、ここが
+ * 自動的に落ちて「`record()` 側を書き忘れていないか」に気づける。
+ */
+export type PersistedAuditEventName = {
+  [K in AuditEventName]: (typeof AUDIT_EVENT_RETENTION)[K]["sink"] extends "d1" ? K : never;
+}[AuditEventName];
+
+/** `PersistedAuditEventName` の裏返し。Workers のログにしか出ないイベント名。 */
+export type NotPersistedAuditEventName = {
+  [K in AuditEventName]: (typeof AUDIT_EVENT_RETENTION)[K]["sink"] extends "log" ? K : never;
+}[AuditEventName];
 
 /**
  * 既定（`RetentionPolicy.audit_logs`）より長く残すイベントの境界時刻。
@@ -430,18 +463,25 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
  */
 export function auditEventDeadlines(now: Date): ReadonlyMap<AuditEventName, Date> {
   const deadlines = new Map<AuditEventName, Date>();
-  for (const [event, tier] of Object.entries(AUDIT_EVENT_RETENTION) as [
+  for (const [event, classification] of Object.entries(AUDIT_EVENT_RETENTION) as [
     AuditEventName,
-    AuditRetentionTier,
+    AuditClassification,
   ][]) {
-    if (tier === "standard") continue;
-    deadlines.set(event, new Date(now.getTime() - AuditRetention[tier]));
+    // `sink: "log"` は `audit_logs` に行が無いので、境界を計算しても使われない。
+    if (classification.sink !== "d1" || classification.retention === "standard") continue;
+    deadlines.set(event, new Date(now.getTime() - AuditRetention[classification.retention]));
   }
   return deadlines;
 }
 
 export interface AuditEvent {
-  readonly event: AuditEventName;
+  /**
+   * **`AuditEventName` 全体ではない。** `AUDIT_EVENT_RETENTION` で
+   * `sink: "log"` に分類したイベントは、ここへ渡した時点でコンパイル
+   * エラーになる（#381）。`audit_logs` に書かないと決めたイベントを
+   * `AuditLogger.record()` に渡す経路そのものを型で塞ぐ。
+   */
+  readonly event: PersistedAuditEventName;
   readonly userId?: string | undefined;
   readonly actor?: string | undefined;
   readonly outcome: "success" | "failure";

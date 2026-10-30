@@ -640,7 +640,7 @@ describe("監査ログ", () => {
   it.each(["oauth.client.created", "oauth.client.disabled"] as const)(
     "%s は standard に落ちていない",
     (event) => {
-      expect(AUDIT_EVENT_RETENTION[event]).toBe("security");
+      expect(AUDIT_EVENT_RETENTION[event]).toEqual({ sink: "d1", retention: "security" });
     },
   );
 

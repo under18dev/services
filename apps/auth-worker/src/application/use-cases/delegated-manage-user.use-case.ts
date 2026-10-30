@@ -1,4 +1,4 @@
-import type { AuditEventName, AuditLogger } from "../ports/audit-log.port";
+import type { AuditLogger, PersistedAuditEventName } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { SessionRepository } from "../ports/session.repository";
 import type { UserRepository } from "../ports/user.repository";
@@ -136,7 +136,7 @@ export class DelegatedManageUserUseCase {
   }
 
   private async record(
-    event: AuditEventName,
+    event: PersistedAuditEventName,
     actorId: string,
     targetUserId: string,
     metadata: Record<string, unknown>,

@@ -1,5 +1,5 @@
 import { hasFreshAuthentication } from "../../domain/services/reauthentication";
-import type { AuditEventName, AuditLogger } from "../ports/audit-log.port";
+import type { AuditLogger, PersistedAuditEventName } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { SessionRepository } from "../ports/session.repository";
 import type { UserRepository } from "../ports/user.repository";
@@ -212,7 +212,7 @@ export class ManageUserUseCase {
    * 特定できない。**
    */
   private async record(entry: {
-    readonly event: AuditEventName;
+    readonly event: PersistedAuditEventName;
     readonly userId: string;
     readonly outcome: "success" | "failure";
     readonly metadata: Record<string, unknown>;

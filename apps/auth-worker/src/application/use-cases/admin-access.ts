@@ -1,5 +1,5 @@
 import type { Session } from "../../domain/entities/session";
-import type { AuditEventName } from "../ports/audit-log.port";
+import type { NotPersistedAuditEventName } from "../ports/audit-log.port";
 import type { UserRepository } from "../ports/user.repository";
 import type { GetSessionUseCase } from "./get-session.use-case";
 import { err, ok, type UseCaseResult } from "./types";
@@ -87,7 +87,7 @@ export async function requireAdminSession(
       JSON.stringify({
         // 出力先は違うが名前空間は監査イベントと同じなので、登録簿で縛る。
         // 別に持つと片方だけ改名する事故が起きる（audit-log.port.ts）。
-        event: "admin.denied" satisfies AuditEventName,
+        event: "admin.denied" satisfies NotPersistedAuditEventName,
         operation,
         // 内部 ID。呼び出し元が決めた値ではないので、ログ注入にならない。
         userId: auth.value.userId,
