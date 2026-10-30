@@ -1,10 +1,15 @@
 import {
   disableCardDelegatedInputSchema,
+  issueCardsDelegatedInputSchema,
   rpcErr,
   rpcOk,
   updateCardTargetDelegatedInputSchema,
+  type AdminCardStatusDelegated,
   type DisableCardDelegatedInput,
   type DisableCardDelegatedResult,
+  type IssueCardsDelegatedInput,
+  type IssueCardsDelegatedResult,
+  type ListAllCardsDelegatedResult,
   type NfcAdminDelegatedRpcContract,
   type RpcErrorCode,
   type UpdateCardTargetDelegatedInput,
@@ -122,5 +127,52 @@ export class NfcAdminDelegatedRPC
     }
 
     return rpcOk(null);
+  }
+
+  /**
+   * 全カードの一覧（#382）。**入力を検証しない** —— 引数を取らないので
+   * Zod のスキーマも無い。
+   */
+  async listAllCards(): Promise<ListAllCardsDelegatedResult> {
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedListAllCards.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({
+      cards: result.value.cards.map((card) => ({
+        cardId: card.cardId,
+        status: card.status as AdminCardStatusDelegated,
+        ownerUserId: card.ownerUserId,
+        targetUrl: card.targetUrl,
+        batch: card.batch,
+        issuedAt: card.issuedAt,
+        claimedAt: card.claimedAt,
+        disabledAt: card.disabledAt,
+      })),
+      truncated: result.value.truncated,
+    });
+  }
+
+  /**
+   * カードを発行する（#382）。**応答に秘密は無い**（#358 以降と同じ）。
+   * 出すのはタグに書く値そのもの（カード ID）だけで、**発行から配る
+   * までの間、ID の一覧は配布物そのものと同じ扱いにすること**
+   * （admin-worker 側の画面に明記する）。
+   */
+  async issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult> {
+    const parsed = issueCardsDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return rpcErr("invalid_input", "actorUserId, count or batch is malformed");
+    }
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedIssueCards.execute({
+      actorUserId: parsed.data.actorUserId,
+      count: parsed.data.count,
+      batch: parsed.data.batch,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({ cards: result.value.map((card) => ({ cardId: card.cardId })) });
   }
 }
