@@ -4,6 +4,7 @@ import { DashboardShell } from "./dashboard-shell";
 import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 import { summarizeUserAgent } from "./user-agent";
+import { EMPTY_ATTR, EMPTY_TEXT_ATTR, ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 
 /**
  * ログイン中の端末（`/account/sessions`）。
@@ -54,11 +55,13 @@ export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
         </p>
         {sessions.length === 0 ? (
           // 自分のセッションで見ている以上、普通は 0 件にならない。
-          <p class="empty">表示できるセッションがありません。</p>
+          <p class="empty" {...{ [EMPTY_ATTR]: "" }}>
+            表示できるセッションがありません。
+          </p>
         ) : (
           // `data-*` はアイランドがボタンを付ける目印（`client/account-island.ts`）。
           // 空になったときの文言もここに置く —— アイランドに日本語を持たせない。
-          <ul class="list" data-empty-text="表示できるセッションがありません。">
+          <ul class="list" {...{ [EMPTY_TEXT_ATTR]: "表示できるセッションがありません。" }}>
             {sessions.map((session) => (
               <li
                 key={session.sessionId}
@@ -67,8 +70,8 @@ export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
                 // アイランドはログイン画面へ送る必要がある。
                 data-current={session.current ? "true" : "false"}
               >
-                <div class="item-main">
-                  <div class="item-title">
+                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
                     {titleFor(session.userAgent)}
                     {session.current && <span class="badge">このブラウザ</span>}
                   </div>

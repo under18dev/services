@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import { GRANTS_PATH, PASSKEYS_PATH, PROFILE_PATH, SESSIONS_PATH } from "./asset-paths";
 import { DashboardShell } from "./dashboard-shell";
+import { ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 
 /**
  * ダッシュボードのホーム（`/account`、#308）。
@@ -92,24 +93,24 @@ export const HomePage: FC<HomePageProps> = ({
           <div class="panel-body">
             <ul class="list">
               <li>
-                <div class="item-main">
-                  <div class="item-title">
+                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
                     <a href={PROFILE_PATH}>プロフィール</a>
                   </div>
                   <p class="item-meta">表示名・ユーザー名・メールアドレス</p>
                 </div>
               </li>
               <li>
-                <div class="item-main">
-                  <div class="item-title">
+                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
                     <a href={SESSIONS_PATH}>ログイン中の端末</a>
                   </div>
                   <p class="item-meta">身に覚えのない端末を切る</p>
                 </div>
               </li>
               <li>
-                <div class="item-main">
-                  <div class="item-title">
+                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
                     <a href={GRANTS_PATH}>連携アプリ</a>
                   </div>
                   <p class="item-meta">アクセスを許可したアプリと、その権限</p>

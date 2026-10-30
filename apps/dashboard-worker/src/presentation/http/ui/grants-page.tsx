@@ -4,6 +4,7 @@ import type { FC } from "hono/jsx";
 import { DashboardShell } from "./dashboard-shell";
 import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { EMPTY_ATTR, EMPTY_TEXT_ATTR, ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 
 /**
  * 連携を許可したアプリ（`/account/grants`、#18）。
@@ -39,13 +40,17 @@ export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
     <div class="panel">
       <div class="panel-body">
         {grants.length === 0 ? (
-          <p class="empty">連携を許可したアプリはありません。</p>
+          <p class="empty" {...{ [EMPTY_ATTR]: "" }}>
+            連携を許可したアプリはありません。
+          </p>
         ) : (
-          <ul class="list" data-empty-text="連携を許可したアプリはありません。">
+          <ul class="list" {...{ [EMPTY_TEXT_ATTR]: "連携を許可したアプリはありません。" }}>
             {grants.map((grant) => (
               <li key={grant.clientId} data-grant-client-id={grant.clientId}>
-                <div class="item-main">
-                  <div class="item-title">{grant.clientName}</div>
+                <div class="item-main" {...{ [ITEM_BODY_ATTR]: "" }}>
+                  <div class="item-title" {...{ [ITEM_TITLE_ATTR]: "" }}>
+                    {grant.clientName}
+                  </div>
                   <p class="item-meta">許可 {formatDateTime(grant.grantedAt)}</p>
                   {/*
                   同意画面と**同じ文言**を使う（`@u18/web-ui` の `scopeLabel`）。

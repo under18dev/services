@@ -11,6 +11,7 @@ import {
   SESSIONS_PATH,
 } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, envWith, executionContext } from "./helpers";
+import { EMPTY_ATTR } from "../src/presentation/http/ui/island-hooks";
 
 /**
  * 取り消し操作のアイランドと、サーバーが返す HTML の噛み合わせ（#9）。
@@ -231,6 +232,20 @@ describe("空になったときの文言をサーバーと揃える", () => {
   // アイランドは最後の 1 件を消したあと `data-empty-text` を出す。
   // そこがサーバーの「ありません」と違うと、**操作の前後で文言が変わる。**
   // アイランドに日本語を持たせず属性で渡しているのはそのため。
+
+  /**
+   * 0 件の表示の文言。**`data-empty` で引く**（#332）。
+   *
+   * 以前は `<p class="empty">...</p>` を丸ごと突き合わせていた。
+   * **見た目のクラスとタグ名に依っていた**ので、画面を Kiwa へ移すと
+   * ここが落ちる —— 落ちるのは正しいが、直し先が「次のスタイルシートの
+   * class 名」になり、移行のたびに同じ書き換えが要る。
+   *
+   * 継ぎ目は `island-hooks.ts` の `data-*` なので、そちらで引く。
+   * **`data-empty-text` に当たらないよう、後ろに `-` が来ないことまで見る。**
+   */
+  const emptyTextIn = (page: string): string | undefined =>
+    new RegExp(`<[a-z]+[^>]*\\b${EMPTY_ATTR}(?![-\\w])[^>]*>([^<]*)<`).exec(page)?.[1];
   it.each([
     [PASSKEYS_PATH, { ...IDENTITY, listPasskeys: async () => rpcOk([] as PasskeySummary[]) }],
     [SESSIONS_PATH, { listSessions: async () => rpcOk([] as SessionListItem[]) }],
@@ -241,6 +256,6 @@ describe("空になったときの文言をサーバーと揃える", () => {
     expect(emptyText, `${path} に data-empty-text が無い`).toBeDefined();
 
     const whenEmpty = await html(path, emptyIdentity);
-    expect(whenEmpty).toContain(`<p class="empty">${emptyText as string}</p>`);
+    expect(emptyTextIn(whenEmpty), `${path} の 0 件表示が見つからない`).toBe(emptyText);
   });
 });
