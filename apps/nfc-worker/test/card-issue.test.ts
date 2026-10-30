@@ -59,7 +59,7 @@ describe("管理者だけが発行できる（#187 の受け入れ条件）", ()
     const response = await issue(cookieFor(ADMIN), { count: 2, batch: "bunkasai-2026" });
 
     expect(response.status).toBe(201);
-    const body = (await response.json()) as { cards: { cardId: string; claimCode: string }[] };
+    const body = (await response.json()) as { cards: { cardId: string }[] };
     expect(body.cards).toHaveLength(2);
 
     const rows = await db().select().from(nfcCards).all();
@@ -77,39 +77,50 @@ describe("管理者だけが発行できる（#187 の受け入れ条件）", ()
   });
 });
 
-describe("紐づけコードの扱い", () => {
-  it("平文は応答にだけ出て、DB にはハッシュしか残らない", async () => {
-    // **この応答を取りこぼすと、そのカードは配れない。**
-    const response = await issue(cookieFor(ADMIN));
-    const body = (await response.json()) as { cards: { cardId: string; claimCode: string }[] };
-    const { claimCode } = body.cards[0]!;
+describe("発行されるカード ID", () => {
+  it("文書が言う 100 ビットで作る", async () => {
+    // **#358 で、ここが 80 ビットだったことが分かった。** 本番は
+    // `newId("nfc")`（既定の 16 バイト）を呼んでおり、スキーマ・README・
+    // 脅威モデルが揃って言う「100bit 相当」から静かにずれていた。
+    //
+    // 長さを `newCardId()` 1 箇所に寄せたので、ここが見ているのは
+    // 「本番の経路がその 1 箇所を通っているか」である。
+    const response = await issue(cookieFor(ADMIN), { count: 1 });
+    const body = (await response.json()) as { cards: { cardId: string }[] };
 
-    expect(claimCode).toHaveLength(16);
-
-    const rows = await db().select().from(nfcCards).all();
-    expect(rows[0]?.claimCodeHash).not.toBe(claimCode);
-    // 行のどの列にも平文が現れないこと。
-    expect(JSON.stringify(rows)).not.toContain(claimCode);
+    // `nfc_` + 20 文字。1 文字 5 ビット（32 文字集合、256 % 32 == 0 なので
+    // 偏りなし）で 100 ビット。
+    expect(body.cards[0]!.cardId).toMatch(/^nfc_[0-9abcdefghjkmnpqrstvwxyz]{20}$/);
   });
 
-  it("監査イベントにも平文を書かない", async () => {
-    const response = await issue(cookieFor(ADMIN), { count: 1, batch: "lot-a" });
-    const body = (await response.json()) as { cards: { claimCode: string }[] };
+  it("応答のカード ID と DB の行が一致する", async () => {
+    // #358 以降、発行の応答に秘密は無い。取りこぼしても引き直せることを
+    // 言っているのがこの検査である。
+    const response = await issue(cookieFor(ADMIN), { count: 3 });
+    const body = (await response.json()) as { cards: { cardId: string }[] };
+
+    const rows = await db().select().from(nfcCards).all();
+    expect(new Set(rows.map((row) => row.id))).toEqual(
+      new Set(body.cards.map((card) => card.cardId)),
+    );
+  });
+
+  it("カードごとに違う ID になる", async () => {
+    const response = await issue(cookieFor(ADMIN), { count: 5 });
+    const body = (await response.json()) as { cards: { cardId: string }[] };
+
+    expect(new Set(body.cards.map((card) => card.cardId)).size).toBe(5);
+  });
+
+  it("監査イベントは発行を記録するが、カード ID 以外の秘密を持たない", async () => {
+    await issue(cookieFor(ADMIN), { count: 1, batch: "lot-a" });
 
     const events = await db().select().from(nfcCardEvents).all();
     expect(events).toHaveLength(1);
     expect(events[0]?.event).toBe("card.issued");
     expect(events[0]?.actorUserId).toBe("usr_admin");
-    expect(JSON.stringify(events)).not.toContain(body.cards[0]!.claimCode);
     // batch は残す。配布の単位を後から辿るのに要る。
     expect(JSON.stringify(events)).toContain("lot-a");
-  });
-
-  it("カードごとに違うコードになる", async () => {
-    const response = await issue(cookieFor(ADMIN), { count: 5 });
-    const body = (await response.json()) as { cards: { claimCode: string }[] };
-
-    expect(new Set(body.cards.map((card) => card.claimCode)).size).toBe(5);
   });
 });
 
@@ -127,11 +138,24 @@ describe("入力の検証", () => {
     expect(await db().select().from(nfcCards).all()).toHaveLength(0);
   });
 
+  /**
+   * **既定の 5 秒では足りない。** 200 枚を**直列に**入れる（`IssueCardsUseCase`
+   * が並列にしないのは、途中で失敗したときに何枚入ったか分からなくなるため）。
+   * 単独で走らせると 3 秒前後だが、**他の Worker のテストと並行すると
+   * 12 秒かかった**（実測）。
+   *
+   * **枚数は減らせない。** 境界が `MAX_ISSUE_COUNT` ちょうどであることが
+   * このテストの中身なので、減らすと見るものが無くなる。時間のほうを延ばす。
+   *
+   * **#358 より前から同じ形である。** むしろ以前はカード 1 枚ごとに
+   * 紐づけコードの生成と SHA-256 が乗っていたので、**この変更で速くなった**
+   * —— それでも落ちたので、負荷次第で落ちる状態が元からあった。
+   */
   it("上限ちょうどは通る", async () => {
     // 境界の片側だけ見ると、off-by-one を見逃す。
     const response = await issue(cookieFor(ADMIN), { count: MAX_ISSUE_COUNT });
 
     expect(response.status).toBe(201);
     expect(await db().select().from(nfcCards).all()).toHaveLength(MAX_ISSUE_COUNT);
-  });
+  }, 30_000);
 });

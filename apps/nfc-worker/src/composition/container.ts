@@ -9,7 +9,7 @@ import { ReleaseCardUseCase } from "../application/use-cases/release-card.use-ca
 import { PurgeExpiredEventsUseCase } from "../application/use-cases/purge-expired-events.use-case";
 import { ResolveCardUseCase } from "../application/use-cases/resolve-card.use-case";
 import { UpdateCardTargetUseCase } from "../application/use-cases/update-card-target.use-case";
-import { WebCryptoClaimCodeService } from "../infrastructure/crypto/web-crypto";
+import { ViewClaimUseCase } from "../application/use-cases/view-claim.use-case";
 import { DrizzleCardEventRecorder } from "../infrastructure/persistence/drizzle-card-event.recorder";
 import { DrizzleCardRepository } from "../infrastructure/persistence/drizzle-card.repository";
 import { DrizzleExpiredEventPurger } from "../infrastructure/persistence/drizzle-expired-event.purger";
@@ -58,7 +58,6 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
   const cards = overrides.cards ?? new DrizzleCardRepository(db);
   const events = new DrizzleCardEventRecorder(db);
   const identity = overrides.identity ?? new RpcIdentityGateway(asIdentityRpc(env.IDENTITY));
-  const claimCodes = new WebCryptoClaimCodeService();
   // 保持期限を過ぎたカードイベントの掃除。scheduled からしか使わないが、
   // Port の配線先はここ 1 箇所に揃える（auth-worker の purger と同じ）。
   const eventPurger = overrides.eventPurger ?? new DrizzleExpiredEventPurger(db);
@@ -66,7 +65,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
 
   return {
     repositories: { cards },
-    services: { identity, claimCodes, clock },
+    services: { identity, clock },
     useCases: {
       resolveCard: new ResolveCardUseCase(cards),
       listMyCards: new ListMyCardsUseCase(identity, cards),
@@ -78,9 +77,10 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
         blockedTargetOrigins(env),
       ),
       disableCard: new DisableCardUseCase(identity, cards, events, clock),
-      claimCard: new ClaimCardUseCase(identity, cards, events, claimCodes, clock),
-      issueCards: new IssueCardsUseCase(identity, cards, events, claimCodes, clock),
-      releaseCard: new ReleaseCardUseCase(identity, cards, events, claimCodes, clock),
+      claimCard: new ClaimCardUseCase(identity, cards, events, clock),
+      issueCards: new IssueCardsUseCase(identity, cards, events, clock),
+      releaseCard: new ReleaseCardUseCase(identity, cards, events, clock),
+      viewClaim: new ViewClaimUseCase(identity, cards),
       purgeExpiredEvents: new PurgeExpiredEventsUseCase({ purger: eventPurger, clock }),
     },
   };

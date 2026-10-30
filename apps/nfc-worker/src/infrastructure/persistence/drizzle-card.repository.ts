@@ -1,5 +1,5 @@
 import { type NfcDatabase, nfcCards } from "@u18/nfc-db";
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { CardRepository, NewCard } from "../../application/ports";
 import { Card, type CardProps } from "../../domain/entities/card";
 
@@ -11,8 +11,6 @@ function toDomain(row: CardRow): Card {
     ownerUserId: row.ownerUserId,
     targetUrl: row.targetUrl,
     status: row.status,
-    claimCodeHash: row.claimCodeHash,
-    claimCodeIssuedAt: row.claimCodeIssuedAt,
     claimedAt: row.claimedAt,
     transferCount: row.transferCount,
     disabledAt: row.disabledAt,
@@ -63,8 +61,6 @@ export class DrizzleCardRepository implements CardRepository {
       .values({
         id: card.id,
         status: "issued",
-        claimCodeHash: card.claimCodeHash,
-        claimCodeIssuedAt: now,
         batch: card.batch,
         createdAt: now,
         updatedAt: now,
@@ -111,13 +107,7 @@ export class DrizzleCardRepository implements CardRepository {
     return rows.length > 0;
   }
 
-  async claim(
-    cardId: string,
-    claimCodeHash: string,
-    newOwnerUserId: string,
-    claimableSince: Date,
-    now: Date,
-  ): Promise<boolean> {
+  async claim(cardId: string, newOwnerUserId: string, now: Date): Promise<boolean> {
     const rows = await this.db
       .update(nfcCards)
       .set({
@@ -125,36 +115,25 @@ export class DrizzleCardRepository implements CardRepository {
         status: "active",
         claimedAt: now,
         updatedAt: now,
-        // コードを消費する。残したままにすると、同じ紙片を持つ相手が
-        // release 後に何度でも claim し直せる。
-        claimCodeHash: null,
-        claimCodeIssuedAt: null,
         // 初回紐づけ（claimedAt が null）は移転ではないので数えない。
         transferCount: sql`${nfcCards.transferCount} + (case when ${nfcCards.claimedAt} is null then 0 else 1 end)`,
       })
       .where(
         and(
           eq(nfcCards.id, cardId),
-          // ハッシュ一致・状態・期限をすべてここで判定する。
-          // アプリ側で確かめてから UPDATE すると、同じコードを同時に
-          // 出した 2 人が両方成功しうる。
-          eq(nfcCards.claimCodeHash, claimCodeHash),
+          // **前提は全部ここに置く。** アプリ側で確かめてから UPDATE すると、
+          // 同じカードを同時にタップした 2 人が両方成功する（#358 で
+          // 紐づけコードが無くなり、誰でも投げられるようになった）。
           eq(nfcCards.status, "issued"),
-          // 所有者がいるカードは claim できない（念のための二重化）。
+          // `status` と所有者は直交した軸なので、両方見る。
           isNull(nfcCards.ownerUserId),
-          gte(nfcCards.claimCodeIssuedAt, claimableSince),
         ),
       )
       .returning({ id: nfcCards.id });
     return rows.length > 0;
   }
 
-  async release(
-    cardId: string,
-    ownerUserId: string,
-    nextClaimCodeHash: string,
-    now: Date,
-  ): Promise<boolean> {
+  async release(cardId: string, ownerUserId: string, now: Date): Promise<boolean> {
     const rows = await this.db
       .update(nfcCards)
       .set({
@@ -163,8 +142,6 @@ export class DrizzleCardRepository implements CardRepository {
         // 遷移先を消す。次の所有者のカードが、本人の知らない URL を
         // 配信している状態から始まらないようにする。
         targetUrl: null,
-        claimCodeHash: nextClaimCodeHash,
-        claimCodeIssuedAt: now,
         updatedAt: now,
       })
       .where(

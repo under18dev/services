@@ -77,8 +77,11 @@ describe("解決できるカード", () => {
 
 describe("解決しない場合、カードの実在を漏らさない", () => {
   /**
-   * 「存在しない」「未紐づけ」「無効化済み」「遷移先未設定」で
-   * 応答が 1 バイトも変わらないことを固定する（仕様書 9 の列挙対策）。
+   * 「存在しない」「無効化済み」「遷移先未設定」で応答が 1 バイトも
+   * 変わらないことを固定する（仕様書 9 の列挙対策）。
+   *
+   * **#358 で「未紐づけ」だけがここから外れた。** 外れたことは
+   * 下の別の `it` が固定している —— **畳む側の検査から静かに消さない。**
    */
   async function snapshot(cardId: string) {
     const response = await get(cardId);
@@ -90,10 +93,8 @@ describe("解決しない場合、カードの実在を漏らさない", () => {
     };
   }
 
-  it("4 つの状態がすべて同じ応答になる", async () => {
+  it("3 つの状態がすべて同じ応答になる", async () => {
     const missing = await snapshot("nfc_doesnotexisthere1");
-
-    const { cardId: unclaimed } = await seedIssuedCard();
 
     // 所有者はいるが遷移先が未設定（紐づけ直後）。
     const noTarget = await seedClaimedCard("usr_taro");
@@ -101,10 +102,43 @@ describe("解決しない場合、カードの実在を漏らさない", () => {
     const disabledCard = await seedActiveCard("usr_taro");
     await repository().disable(disabledCard, "usr_taro", "lost", new Date());
 
-    expect(await snapshot(unclaimed)).toEqual(missing);
     expect(await snapshot(noTarget)).toEqual(missing);
     expect(await snapshot(disabledCard)).toEqual(missing);
     expect(missing.status).toBe(404);
+  });
+
+  it("未紐づけのカードだけが紐づけ画面へ送られる（#358）", async () => {
+    // **これが #358 で開けた 1 ビットである。** 畳む側の検査から
+    // `issued` を外した以上、外した先をここが押さえる。
+    const unclaimed = await seedIssuedCard();
+
+    const response = await get(unclaimed);
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("Location") ?? "");
+    expect(location.pathname).toBe("/account/nfc/claim");
+    expect(location.searchParams.get("card")).toBe(unclaimed);
+  });
+
+  it("紐づけ画面への 302 にも no-store と no-referrer が付く", async () => {
+    // 紐づけが済めば次のタップは遷移先へ行くので、この 302 を端末に
+    // 握らせない。`no-referrer` は外部ページから来た場合の参照元を渡さない。
+    const unclaimed = await seedIssuedCard();
+
+    const response = await get(unclaimed);
+
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+  });
+
+  it("無効化済みは、未紐づけと同じ扱いにならない", async () => {
+    // **一緒に緩めないこと。** 拾った人間に「このカードは止められている」と
+    // 教えないのが紛失対策の本体で、`issued` を区別する変更に巻き込まれ
+    // やすいのがここである。
+    const disabledCard = await seedActiveCard("usr_taro");
+    await repository().disable(disabledCard, "usr_taro", "lost", new Date());
+
+    expect(await snapshot(disabledCard)).toEqual(await snapshot("nfc_doesnotexisthere2"));
   });
 
   it("無効化されたカードは解決されない", async () => {

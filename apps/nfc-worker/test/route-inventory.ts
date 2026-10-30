@@ -78,6 +78,32 @@ export const CARD_API_ROUTES: readonly Route[] = [
 export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/account/nfc" }];
 
 /**
+ * カードをタップした人が着地する紐づけ画面（#358）。
+ *
+ * **区分を分けてあるのは、応答が上の 2 つのどちらとも違うからである。**
+ *
+ * | | Cookie 無しのとき |
+ * | --- | --- |
+ * | `GET /account/nfc/claim` | **302**（`CARD_PAGE_ROUTES` と同じ） |
+ * | `POST /account/nfc/claim` | **400**（CSRF で先に落ちる。401 でも 302 でもない） |
+ *
+ * POST が 400 なのは、**CSRF の検証がセッションの検証より先**にあるため。
+ * 順序はこれで正しい —— トークンを確かめる前に D1 や Identity を引かない。
+ * **`CARD_API_ROUTES`（401）に混ぜると、下の検査がその場で落ちる。**
+ *
+ * **この Worker で唯一の form POST である。** 2 本目を足す人は、
+ * dashboard-worker の `test/form-csrf.test.ts`（src を走査して guard を
+ * 通っていない form を落とす）を先に移植すること（`http/csrf.ts`）。
+ *
+ * **`go.under18.dev` からも届く。** そちらでは `__Host-` の Cookie が
+ * 送られないので、GET はログインへ送られ、POST は CSRF で落ちる。
+ */
+export const CARD_CLAIM_ROUTES: readonly Route[] = [
+  { method: "GET", path: "/account/nfc/claim" },
+  { method: "POST", path: "/account/nfc/claim" },
+];
+
+/**
  * 画面が読むスタイルシート。**セッションを要求しない。**
  *
  * **これは公開アセットである。** `registerCardsUiRoutes` は
@@ -118,6 +144,7 @@ export const PROBE_PAGES: readonly string[] = [];
 
 export const CARD_ROUTES: readonly Route[] = [
   ...CARD_PAGE_ROUTES,
+  ...CARD_CLAIM_ROUTES,
   ...CARD_ASSET_ROUTES,
   ...CARD_API_ROUTES,
 ];

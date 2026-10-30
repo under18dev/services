@@ -1,23 +1,18 @@
 import type {
   CardEventRecorder,
   CardRepository,
-  ClaimCodeService,
+  CardView,
   Clock,
   IdentityGateway,
   NfcOutcome,
 } from "../ports";
 import { outcomeErr, outcomeOk } from "../ports";
 import { requireUserId } from "./authenticate";
+import { toCardView } from "./card-view";
 
 export type ReleaseCardInput = {
   readonly sessionToken: string | undefined;
   readonly cardId: string;
-};
-
-export type ReleaseCardOutput = {
-  readonly cardId: string;
-  /** 新しい紐づけコード。**この応答でしか返らない。** */
-  readonly claimCode: string;
 };
 
 /**
@@ -33,11 +28,21 @@ export type ReleaseCardOutput = {
  *   カード 1 枚の移転のために、Identity の列挙面を広げる取引は割に合わない。
  * - 宛先を指定する形は誤送信が取り返しのつかない操作になる。
  *
- * 代わりに「現所有者が手放す → 新しい紐づけコードが 1 度だけ返る →
- * 受け取った人が ClaimCardUseCase で紐づける」の 2 段にする。
- * 渡す相手は u18 の外（手渡し）で決まるので、Identity に何も要らない。
- * 受け取る側は自分のセッションで claim するので、
- * 「誰のものになったか」は Identity が保証したままになる。
+ * 代わりに「現所有者が手放す → カードが未紐づけへ戻る → 受け取った人が
+ * タップして紐づける」の 2 段にする。渡す相手は u18 の外（手渡し）で
+ * 決まるので、Identity に何も要らない。受け取る側は自分のセッションで
+ * 紐づけるので、「誰のものになったか」は Identity が保証したままになる。
+ *
+ * ## #358 で「1 回しか返らない文字列」が無くなった
+ *
+ * 以前はここで新しい紐づけコードを生成し、**この応答でしか返らない**値として
+ * 返していた。紐づけコードを廃止したので、**手放したカードは `issued` へ戻り、
+ * 次にタップした人のものになる。**
+ *
+ * **その結果、手放してから手渡すまでの間が無防備になった。** 以前は
+ * コードを渡すまで誰も紐づけられなかったが、いまは ID を知っている人なら
+ * 誰でも先に取れる。**手放すのは相手に渡す直前にする**ことが運用上の前提で、
+ * 画面の案内がそう言う。取られた場合は管理者が付け替えられる。
  *
  * ## 手放すと同時に遷移先を消す
  *
@@ -57,26 +62,14 @@ export class ReleaseCardUseCase {
     private readonly identity: IdentityGateway,
     private readonly cards: CardRepository,
     private readonly events: CardEventRecorder,
-    private readonly claimCodes: ClaimCodeService,
     private readonly clock: Clock,
   ) {}
 
-  async execute(input: ReleaseCardInput): Promise<NfcOutcome<ReleaseCardOutput>> {
+  async execute(input: ReleaseCardInput): Promise<NfcOutcome<CardView>> {
     const actor = await requireUserId(this.identity, input.sessionToken);
     if (!actor.ok) return actor;
 
-    const card = await this.cards.findById(input.cardId);
-    if (card === null || !card.isOwnedBy(actor.value) || card.isDisabled) {
-      return outcomeErr({ kind: "card_not_found" });
-    }
-
-    const claimCode = this.claimCodes.generate();
-    const released = await this.cards.release(
-      input.cardId,
-      actor.value,
-      await this.claimCodes.hash(claimCode),
-      this.clock.now(),
-    );
+    const released = await this.cards.release(input.cardId, actor.value, this.clock.now());
     if (!released) return outcomeErr({ kind: "card_not_found" });
 
     await this.events.record({
@@ -85,8 +78,8 @@ export class ReleaseCardUseCase {
       actorUserId: actor.value,
     });
 
-    // 平文のコードはここでしか存在しない。保存しているのはハッシュだけ
-    // （セッショントークン・OTP と同じ扱い。仕様書 7.1）。
-    return outcomeOk({ cardId: input.cardId, claimCode });
+    const fresh = await this.cards.findById(input.cardId);
+    if (fresh === null) return outcomeErr({ kind: "card_not_found" });
+    return outcomeOk(toCardView(fresh));
   }
 }

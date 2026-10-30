@@ -6,3 +6,4 @@ export * from "./list-cards.use-case";
 export * from "./release-card.use-case";
 export * from "./resolve-card.use-case";
 export * from "./update-card-target.use-case";
+export * from "./view-claim.use-case";

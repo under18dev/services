@@ -389,7 +389,7 @@ services/
 │       ├── src/
 │       │   ├── index.ts              Worker のエクスポートだけ（薄い層）
 │       │   ├── presentation/http/    Hono ルート、Origin / CSRF、リダイレクト解決
-│       │   ├── application/ports.ts  IdentityGateway / CardRepository / ClaimCodeService
+│       │   ├── application/ports.ts  IdentityGateway / CardRepository / CardEventRecorder
 │       │   ├── application/use-cases/ 所有者判定を含むユースケース
 │       │   ├── domain/               Card Entity と遷移先 URL の検証
 │       │   ├── infrastructure/       Drizzle Repository、Service Binding adapter、Web Crypto
@@ -615,9 +615,11 @@ NFC タグ → https://go.under18.dev/c/<random-card-id>
 
 ### 守っている不変条件
 
-- **カード ID はユーザー ID と独立**した 100bit の乱数。タグを読んでも `sub` は分からない
-- **タグ自体は資格情報ではない。** 紐づけには「セッション」と「タグに書かれていない
-  紐づけコード」の両方が要る。カード ID を知っているだけでは自分のものにできない
+- **カード ID はユーザー ID と独立**した 100bit の乱数（`newCardId()`）。タグを読んでも
+  `sub` は分からない。**#358 以降、この ID が唯一の秘密である**
+- **タグ自体はログインの資格情報ではない。** 紐づけには必ずセッションが要る。
+  **「タグを読めることが所有の証明になってはならない」は #358 で撤回した** ——
+  未紐づけのカードは、タップしてログインした人のものになる
 - **遷移先は `https:` のみ。** URL 内の資格情報、IP リテラル、イントラネット名、
   既定以外のポート、IdP 自身のオリジンはすべて拒否する
   （`apps/nfc-worker/src/domain/services/target-url.ts` に理由を書いてある）
@@ -632,8 +634,8 @@ NFC タグ → https://go.under18.dev/c/<random-card-id>
 ### 所有権の移転と紛失
 
 - **紛失** → `POST .../cards/:cardId/disable`。片道の操作で、所有者は自分で戻せない
-- **譲渡** → `POST .../cards/:cardId/release` で手放すと、新しい紐づけコードが
-  **1 度だけ**返る。それを手渡しで受け取った相手が `POST .../cards/claim` する。
+- **譲渡** → `POST .../cards/:cardId/release` で手放すとカードが未紐づけへ戻り、
+  **次にタップした人のものになる**。手放すのは相手に渡す直前にすること。
   相手の userId を指定する API にしていないのは、ユーザー検索の RPC を
   足したくないため（Binding を持つ Worker から任意のユーザーを引ける入口になる）
 

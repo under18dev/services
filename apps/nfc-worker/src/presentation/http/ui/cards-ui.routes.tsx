@@ -5,8 +5,21 @@ import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
+import { CARDS_UI_PATH, CLAIM_CARD_PARAM, CLAIM_UI_PATH } from "../base-path";
+import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "../csrf";
 import type { AppBindings } from "../types";
 import { CardsPage } from "./cards-page";
+import { ClaimPage } from "./claim-page";
+
+/**
+ * 紐づけ画面が受け付けるカード ID の形。
+ *
+ * `cards.routes.ts` の `cardIdSchema` と同じ形。**弾いた場合も
+ * 「紐づけられないカード」と同じ画面にすること** —— 「形が不正」と
+ * 「そんなカードは無い」を区別すると、カード ID の形を教える。
+ * （実際の ID の形と合っていないことと、3 箇所に散っていることは #365。）
+ */
+const CARD_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
 
 /**
  * カード一覧の画面（#31 の管理 API に対する UI）。
@@ -84,5 +97,108 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     // 載ると他人に見える（#125 と同じ理由）。
     c.header("Cache-Control", "no-store");
     return c.html(<CardsPage cards={result.value} />);
+  });
+
+  /**
+   * カードをタップした人の着地点（#358）。
+   *
+   * `go.under18.dev/c/:cardId` が未紐づけのカードについてここへ 302 する
+   * （`redirect.routes.ts`）。**カード ID はクエリで受け取る** ——
+   * パスに置くと CSRF 拒否のログへ落ちる（`base-path.ts` の
+   * `CLAIM_CARD_PARAM` に理由がある）。
+   *
+   * ## 未ログインはログイン画面へ送る。カードを引く前に
+   *
+   * **順序が効く。** 先にカードを引いて出し分けると、未認証の相手にも
+   * 「この ID は紐づけられる」が見える。`ViewClaimUseCase` がセッションを
+   * 先に確かめる形にしてある。
+   *
+   * 戻り先は `returnToForCurrentRequest` が組み立てる。`/account` 接頭辞の
+   * 下にあるので、auth-worker の `sanitizeReturnTo` に**何も足さずに通る。**
+   * 登録から戻ってきた人も同じ URL に着地する。
+   */
+  app.get(CLAIM_UI_PATH, pageSecurityHeaders, async (c) => {
+    const cardId = c.req.query(CLAIM_CARD_PARAM) ?? "";
+
+    const result = await c.get("container").useCases.viewClaim.execute({
+      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+      // 形が違えば D1 を引かずに済ませるが、**応答は畳んだ側と同じ**になる。
+      cardId: CARD_ID_PATTERN.test(cardId) ? cardId : "",
+    });
+
+    if (!result.ok) {
+      if (result.failure.kind === "unauthenticated") {
+        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(c.req.url)), 302);
+      }
+      return c.text("しばらくしてからもう一度お試しください。", 503);
+    }
+
+    // **トークンは押せるときだけ用意する。** 畳んだ側で `Set-Cookie` すると、
+    // 存在しないカードを叩いた相手にも Cookie が増える。
+    const csrfToken = result.value.claimable ? ensureCsrfToken(c) : "";
+
+    c.header("Cache-Control", "no-store");
+    return c.html(
+      <ClaimPage cardId={result.value.claimable ? cardId : null} csrfToken={csrfToken} />,
+    );
+  });
+
+  /**
+   * 紐づけを実行する（#358）。**この Worker で唯一の form POST。**
+   *
+   * ## JavaScript を要求しない
+   *
+   * カードをタップした人が最初に通る経路で、**アカウントがまだ無い人が
+   * 通る**。アイランドにすると、JS が落ちている利用者は「タップはできるが
+   * 自分のものにはできない」になる（`csrf.ts` の冒頭）。
+   *
+   * ## 成功したら 303 で一覧へ送る（PRG）
+   *
+   * 200 で画面を描くと、再読み込みで同じ POST が飛ぶ。2 回目は必ず
+   * 失敗するので実害は無いが、**利用者には「失敗した」と見える。**
+   *
+   * ## 失敗を 1 つに畳む
+   *
+   * 無効化済み・他人のもの・存在しないを**同じ画面**にする。
+   * CSRF で弾いた場合もここへ落ちる —— 理由を画面に書かないのは、
+   * 攻撃者に何を直せばよいか教えないためで、理由はログに出る。
+   */
+  app.post(CLAIM_UI_PATH, pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+    const concealed = () => {
+      c.header("Cache-Control", "no-store");
+      return c.html(<ClaimPage cardId={null} csrfToken="" />, 400);
+    };
+
+    if (form === null) return concealed();
+    if (!isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) return concealed();
+
+    const cardId = form.get("cardId")?.toString() ?? "";
+    if (!CARD_ID_PATTERN.test(cardId)) return concealed();
+
+    const result = await c.get("container").useCases.claimCard.execute({
+      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+      cardId,
+    });
+
+    if (!result.ok) {
+      if (result.failure.kind === "unauthenticated") {
+        // **戻り先は GET の URL にする。** POST の URL へ戻すと、
+        // ログイン直後にカード ID を失った画面へ着地する。
+        return c.redirect(
+          loginUrlWithReturnTo(
+            `${CLAIM_UI_PATH}?${CLAIM_CARD_PARAM}=${encodeURIComponent(cardId)}`,
+          ),
+          302,
+        );
+      }
+      if (result.failure.kind === "identity_unavailable") {
+        return c.text("しばらくしてからもう一度お試しください。", 503);
+      }
+      return concealed();
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect(CARDS_UI_PATH, 303);
   });
 }

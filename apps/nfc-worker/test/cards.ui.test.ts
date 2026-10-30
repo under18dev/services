@@ -61,11 +61,11 @@ describe("カード一覧の画面", () => {
 
   it("1 枚も無ければその旨が出る（空の一覧を黙って返さない）", async () => {
     const html = await (await open(cookieFor(TARO))).text();
-    expect(html).toContain("紐づけコード");
+    expect(html).toContain("カードをスマートフォンでタップすると");
   });
 
   it("未紐づけのカードは所有者が居ないので出ない", async () => {
-    const { cardId } = await seedIssuedCard();
+    const cardId = await seedIssuedCard();
 
     const html = await (await open(cookieFor(TARO))).text();
     expect(html).not.toContain(cardId);

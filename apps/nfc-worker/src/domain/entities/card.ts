@@ -5,9 +5,9 @@ import { isServableTargetUrl } from "../services/target-url";
  *
  * 「所有者がいるか」を `ownerUserId` の null 判定だけに任せず、独立した
  * 状態として持つ理由は `disabled` にある。紛失したカードは
- * 「所有者を外す」だけでは止まらない —— 所有者を外した瞬間に
- * `issued` と区別がつかなくなり、拾った人間が紐づけコードを持っていれば
- * 自分のものにできてしまう。無効化は所有者の有無と直交した軸にする。
+ * 「所有者を外す」だけでは止まらない —— 所有者を外した瞬間に `issued` と
+ * 区別がつかなくなり、**#358 以降は拾った人がタップしてログインするだけで
+ * 自分のものにできてしまう。** 無効化は所有者の有無と直交した軸にする。
  */
 export type CardStatus = "issued" | "active" | "disabled";
 
@@ -16,8 +16,6 @@ export type CardProps = {
   readonly ownerUserId: string | null;
   readonly targetUrl: string | null;
   readonly status: CardStatus;
-  readonly claimCodeHash: string | null;
-  readonly claimCodeIssuedAt: Date | null;
   readonly claimedAt: Date | null;
   readonly transferCount: number;
   readonly disabledAt: Date | null;
@@ -26,16 +24,6 @@ export type CardProps = {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
-
-/**
- * 紐づけコードの有効期間。
- *
- * 発行から 180 日。文化祭で配ったカードを後日ゆっくり紐づける運用を
- * 想定しつつ、無期限にはしない。未使用のコードが印刷物として残り続けると、
- * 「配布ロットごと紛失していたことに後から気付く」場合に、止める手段が
- * ロット単位の無効化しか無くなる。
- */
-export const CLAIM_CODE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 /**
  * NFC カード。
@@ -61,9 +49,6 @@ export class Card {
   }
   get status(): CardStatus {
     return this.props.status;
-  }
-  get claimCodeHash(): string | null {
-    return this.props.claimCodeHash;
   }
   get claimedAt(): Date | null {
     return this.props.claimedAt;
@@ -119,17 +104,26 @@ export class Card {
   }
 
   /**
-   * 紐づけコードを受け付けられる状態か。
+   * いま紐づけを受け付けられるカードか（#358）。
    *
-   * `active` を含めないのは、所有者がいるカードに他人の紐づけコードが
-   * 通ってはならないため。所有権の移転は「現所有者が release する →
-   * 新しいコードが出る」の順でしか起こらない（ReleaseCardUseCase）。
+   * **これが「タップした人のものになる」窓である。** 条件は 2 つだけ ——
+   * `issued` であること、所有者がいないこと。`ownerUserId` の判定が
+   * 重複して見えるが、`status` と所有者は直交した軸なので（上の
+   * `CardStatus` を参照）、片方だけを見ると整合しない行が通る。
+   *
+   * ## `active` を含めない
+   *
+   * 所有者がいるカードを他人が奪えてはならない。所有権の移転は
+   * 「現所有者が手放す（`issued` へ戻る）→ 受け取った人がタップして
+   * 紐づける」の順でしか起こらない（`ReleaseCardUseCase`）。
+   *
+   * ## `disabled` を含めない
+   *
+   * 紛失して止めたカードが、拾った人のものになっては意味が無い。
+   * **ここが `disabled` の本体である。**
    */
-  canBeClaimedAt(now: Date): boolean {
-    if (this.props.status !== "issued") return false;
-    if (this.props.claimCodeHash === null) return false;
-    if (this.props.claimCodeIssuedAt === null) return false;
-    return now.getTime() - this.props.claimCodeIssuedAt.getTime() < CLAIM_CODE_TTL_MS;
+  isClaimable(): boolean {
+    return this.props.status === "issued" && this.props.ownerUserId === null;
   }
 
   snapshot(): CardProps {

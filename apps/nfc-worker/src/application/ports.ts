@@ -26,7 +26,7 @@ export interface IdentityGateway {
   getSession(sessionToken: string): Promise<NfcOutcome<SessionSummary | null>>;
 }
 
-/** カード発行の入力（#187）。ID と紐づけコードは呼び出し側で生成しない。 */
+/** カード発行の入力（#187）。カード ID は呼び出し側で生成しない。 */
 export type IssueCardsInput = {
   /** 何枚発行するか。 */
   readonly count: number;
@@ -34,17 +34,24 @@ export type IssueCardsInput = {
   readonly batch: string | null;
 };
 
-/** 発行結果。**平文の紐づけコードはこの瞬間にしか存在しない。** */
+/**
+ * 発行結果。
+ *
+ * **#358 以降、ここに秘密は無い。** 紐づけコードを廃止したので、
+ * 発行で出るのはカード ID だけ —— **タグに書く値そのもの**である。
+ * 取りこぼしても `listCards` から引き直せる（以前は再発行しかなかった）。
+ *
+ * ただし **`issued` のカードは、ID を知っている人がタップすれば
+ * その人のものになる。** 配布前の束を人目に晒さないことが、
+ * #358 以降の唯一の運用上の守りである（`docs/runbook.md`）。
+ */
 export type IssuedCard = {
   readonly cardId: string;
-  /** 印刷して配る値。DB にはハッシュしか入っていないので再取得できない。 */
-  readonly claimCode: string;
 };
 
 /** 新規発行するカードの初期値。 */
 export type NewCard = {
   readonly id: string;
-  readonly claimCodeHash: string;
   readonly batch: string | null;
 };
 
@@ -58,8 +65,6 @@ export type CardView = {
   readonly transferCount: number;
   readonly disabledAt: string | null;
   readonly disabledReason: string | null;
-  // claimCodeHash は載せない。所有者本人にも返す必要がなく、
-  // 返せばハッシュの総当たり対象を増やすだけになる。
 };
 
 /**
@@ -96,32 +101,27 @@ export interface CardRepository {
   disable(cardId: string, ownerUserId: string, reason: string, now: Date): Promise<boolean>;
 
   /**
-   * 紐づけコードを単回消費して所有者を確定する。
+   * 未紐づけのカードの所有者を確定する（#358）。
    *
-   * ハッシュの一致・状態・期限を WHERE 句に入れること。アプリ側で
-   * 確かめてから UPDATE すると、同じコードを同時に投げた 2 人が
-   * 両方成功しうる。
+   * **「まだ誰のものでもない」を WHERE 句に入れること。** アプリ側で
+   * 確かめてから UPDATE すると、**同じカードを同時にタップした 2 人が
+   * 両方成功する** —— 紐づけコードがあった頃は「同じ紙片を持つ 2 人」
+   * という珍しい話だったが、**#358 以降は ID を知っていれば誰でも投げられる
+   * ので、競合は起こしやすくなっている。**
    */
-  claim(
-    cardId: string,
-    claimCodeHash: string,
-    newOwnerUserId: string,
-    claimableSince: Date,
-    now: Date,
-  ): Promise<boolean>;
+  claim(cardId: string, newOwnerUserId: string, now: Date): Promise<boolean>;
 
   /**
-   * 所有権を手放し、新しい紐づけコードを設定する（移転の前半）。
+   * 所有権を手放して未紐づけへ戻す（移転の前半）。
    *
    * 現在の所有者のときだけ成功する。遷移先もここで消す —— 前の所有者が
    * 設定した URL を、次の所有者のカードがそのまま配信し続けないため。
+   *
+   * **#358 で紐づけコードを返さなくなった。** 手放したカードは
+   * `issued` へ戻り、**次にタップした人のものになる。** 渡す相手に
+   * 手渡しするまでの間が無防備なことは、`ReleaseCardUseCase` に書いてある。
    */
-  release(
-    cardId: string,
-    ownerUserId: string,
-    nextClaimCodeHash: string,
-    now: Date,
-  ): Promise<boolean>;
+  release(cardId: string, ownerUserId: string, now: Date): Promise<boolean>;
 }
 
 /** カードに起きたことの記録（`nfc_card_events`）。 */
@@ -149,12 +149,4 @@ export interface ExpiredEventPurger {
    * @param limit 1 回で消す上限。
    */
   purge(deadlines: ReadonlyMap<string, Date>, limit: number): Promise<number>;
-}
-
-/** 紐づけコードの生成とハッシュ化。実装は Web Crypto に委ねる（仕様書 5.4）。 */
-export interface ClaimCodeService {
-  /** 人が転記できる長さの、十分にランダムなコードを作る。 */
-  generate(): string;
-  /** 保存・照合用のハッシュ。高エントロピーな乱数なので SHA-256 で足りる。 */
-  hash(code: string): Promise<string>;
 }
