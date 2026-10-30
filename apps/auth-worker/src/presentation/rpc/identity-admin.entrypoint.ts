@@ -3,6 +3,9 @@ import {
   disableOAuthClientInputSchema,
   listOAuthClientsInputSchema,
   listUsersInputSchema,
+  reinstateUserInputSchema,
+  revokeUserSessionsInputSchema,
+  suspendUserInputSchema,
   rpcErr,
   rpcOk,
   type CreateOAuthClientInput,
@@ -14,6 +17,12 @@ import {
   type ListOAuthClientsResult,
   type ListUsersInput,
   type ListUsersResult,
+  type ReinstateUserInput,
+  type ReinstateUserResult,
+  type RevokeUserSessionsInput,
+  type RevokeUserSessionsResult,
+  type SuspendUserInput,
+  type SuspendUserResult,
   type UserAdminSummary,
   type OAuthClientSummary,
 } from "@u18/contracts";
@@ -251,5 +260,56 @@ export class IdentityAdminRPC extends WorkerEntrypoint<Env> implements IdentityA
       users: result.value.users.map(toUserAdminSummary),
       nextCursor: result.value.nextCursor,
     });
+  }
+
+  /**
+   * 利用者を停止する（#375）。**管理者のみ。再認証が要る。**
+   *
+   * **理由は `audit_logs` にしか残らない。** `status` は `suspended` の
+   * 1 値で、本人の退会（#318）とも同じ値になる。
+   */
+  async suspendUser(input: SuspendUserInput): Promise<SuspendUserResult> {
+    const parsed = suspendUserInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.manageUser.suspend({
+      sessionToken: parsed.data.sessionToken,
+      userId: parsed.data.userId,
+      reason: parsed.data.reason,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({ revokedSessions: result.value.revokedSessions });
+  }
+
+  /** 停止を解除する（#375）。**`deleted` は戻せない**（`conflict`）。 */
+  async reinstateUser(input: ReinstateUserInput): Promise<ReinstateUserResult> {
+    const parsed = reinstateUserInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.manageUser.reinstate({
+      sessionToken: parsed.data.sessionToken,
+      userId: parsed.data.userId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({});
+  }
+
+  /** セッションを全部切る（#375）。**停止とは別の操作。** */
+  async revokeUserSessions(input: RevokeUserSessionsInput): Promise<RevokeUserSessionsResult> {
+    const parsed = revokeUserSessionsInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.manageUser.revokeSessions({
+      sessionToken: parsed.data.sessionToken,
+      userId: parsed.data.userId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({ revokedSessions: result.value.revokedSessions });
   }
 }

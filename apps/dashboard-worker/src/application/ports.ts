@@ -1,5 +1,6 @@
 import type {
   OAuthClientSummary,
+  SuspendReason,
   UserAdminSummary,
   PasskeySummary,
   GrantListItem,
@@ -121,4 +122,22 @@ export interface IdentityAdminGateway {
     sessionToken: string,
     criteria: { readonly query?: string; readonly cursor?: string },
   ): Promise<IdentityOutcome<{ users: readonly UserAdminSummary[]; nextCursor: string | null }>>;
+  /**
+   * 停止する（#375）。**冪等でない**ので adapter は自動リトライしない。
+   *
+   * **自分は止められない**（`conflict`）。`reason` は `audit_logs` に
+   * しか残らない。
+   */
+  suspendUser(
+    sessionToken: string,
+    userId: string,
+    reason: SuspendReason,
+  ): Promise<IdentityOutcome<{ revokedSessions: number }>>;
+  /** 解除する（#375）。**`deleted` は戻せない**（`conflict`）。 */
+  reinstateUser(sessionToken: string, userId: string): Promise<IdentityOutcome<unknown>>;
+  /** セッションを全部切る（#375）。**停止とは別の操作。** */
+  revokeUserSessions(
+    sessionToken: string,
+    userId: string,
+  ): Promise<IdentityOutcome<{ revokedSessions: number }>>;
 }

@@ -3,6 +3,7 @@ import type { UserAdminSummary } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import {
+  ADMIN_USERS_ACTION_PATH,
   ADMIN_USERS_PATH,
   ADMIN_USERS_SEARCH_PATH,
   PROFILE_PATH,
@@ -77,9 +78,9 @@ async function openPage(admin: object): Promise<{ cookie: string; csrf: string }
   return { cookie: cookieOf(response), csrf: csrfTokenOf(html) };
 }
 
-function post(admin: object, cookie: string, fields: Record<string, string>) {
+function postTo(path: string, admin: object, cookie: string, fields: Record<string, string>) {
   return createApp().fetch(
-    new Request(`${ORIGIN}${ADMIN_USERS_SEARCH_PATH}`, {
+    new Request(`${ORIGIN}${path}`, {
       method: "POST",
       headers: {
         Cookie: cookie,
@@ -91,6 +92,14 @@ function post(admin: object, cookie: string, fields: Record<string, string>) {
     envWith(session(true) as never, undefined, admin as never),
     executionContext(),
   );
+}
+
+function post(admin: object, cookie: string, fields: Record<string, string>) {
+  return postTo(ADMIN_USERS_SEARCH_PATH, admin, cookie, fields);
+}
+
+function act(admin: object, cookie: string, fields: Record<string, string>) {
+  return postTo(ADMIN_USERS_ACTION_PATH, admin, cookie, fields);
 }
 
 describe("GET /account/admin/users", () => {
@@ -256,5 +265,168 @@ describe("サイドバー", () => {
   it("管理者でなければ出ない", async () => {
     const html = await (await get(PROFILE_PATH, false, {})).text();
     expect(html).not.toContain(ADMIN_USERS_PATH);
+  });
+});
+
+describe("POST /account/admin/users/action", () => {
+  const listOnly = { listUsers: async () => rpcOk({ users: [USER], nextCursor: null }) };
+
+  it("停止は理由を添えて渡る", async () => {
+    let received: { userId?: string; reason?: string } | undefined;
+    const admin = {
+      ...listOnly,
+      suspendUser: async (input: { userId: string; reason: string }) => {
+        received = input;
+        return rpcOk({ revokedSessions: 2 });
+      },
+    };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "suspend",
+      reason: "abuse",
+    });
+
+    expect(response.status).toBe(200);
+    expect(received?.userId).toBe(USER.id);
+    // **`status` は 1 値しか持たない。** 理由を渡さないと記録が残らない。
+    expect(received?.reason).toBe("abuse");
+    const html = await response.text();
+    expect(html).toContain("停止しました");
+    // **「切ったから止まる」と書かない。** 止めた時点で通らなくなる。
+    expect(html).not.toContain("切ったので");
+  });
+
+  it("理由を選ばないと RPC を呼ばない", async () => {
+    let calls = 0;
+    const admin = {
+      ...listOnly,
+      suspendUser: () => {
+        calls += 1;
+        return neverCalled("suspendUser");
+      },
+    };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "suspend",
+    });
+
+    // 契約の `z.enum` が弾くと `invalid_input` =「障害」として出る。
+    // 選び忘れは利用者の操作なので、やり直せる文で返す。
+    expect(calls).toBe(0);
+    expect(await response.text()).toContain("操作を選んでください");
+  });
+
+  it("CSRF トークンが無ければ RPC を呼ばない", async () => {
+    let calls = 0;
+    const admin = {
+      ...listOnly,
+      suspendUser: () => {
+        calls += 1;
+        return neverCalled("suspendUser");
+      },
+    };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      user_id: USER.id,
+      action: "suspend",
+      reason: "abuse",
+    });
+
+    expect(calls).toBe(0);
+    expect(await response.text()).toContain("画面を開き直して");
+  });
+
+  it("解除が通ると、またログインできると言う", async () => {
+    const admin = { ...listOnly, reinstateUser: async () => rpcOk({}) };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "reinstate",
+    });
+
+    expect(await response.text()).toContain("またログインできます");
+  });
+
+  it("セッションの失効は「ログインできなくなる」と書かない", async () => {
+    const admin = { ...listOnly, revokeUserSessions: async () => rpcOk({ revokedSessions: 3 }) };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "revoke_sessions",
+    });
+
+    const html = await response.text();
+    // **止めていない。** 本人はログインし直せる。
+    expect(html).toContain("ログインし直せます");
+    expect(html).not.toContain("ログインできなくなります");
+  });
+
+  it("conflict は、やり直せる形の文で返す", async () => {
+    const admin = { ...listOnly, suspendUser: async () => rpcErr("conflict", "not active") };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "suspend",
+      reason: "abuse",
+    });
+
+    const html = await response.text();
+    expect(html).toContain("停止できませんでした");
+    // 一覧ごと消さない。
+    expect(html).toContain(USER.id);
+  });
+
+  it("再認証が要るときは、そう言う", async () => {
+    const admin = {
+      ...listOnly,
+      suspendUser: async () => rpcErr("reauthentication_required", "stale"),
+    };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "suspend",
+      reason: "abuse",
+    });
+
+    expect(await response.text()).toContain("ログインし直し");
+  });
+
+  it("自分の行には停止を出さない", async () => {
+    // 守っているのは auth-worker（`conflict`）。**押せるのに断られる
+    // 形にしない**ための表示上の配慮である。
+    const self: typeof USER = { ...USER, id: "usr_admin" };
+    const response = await get(ADMIN_USERS_PATH, true, {
+      listUsers: async () => rpcOk({ users: [self], nextCursor: null }),
+    });
+
+    const html = await response.text();
+    expect(html).toContain("自分のアカウントは停止できません");
+    expect(html).not.toContain('value="suspend"');
+  });
+
+  it("deleted には操作を出さない", async () => {
+    const response = await get(ADMIN_USERS_PATH, true, {
+      listUsers: async () =>
+        rpcOk({ users: [{ ...USER, status: "deleted" as const }], nextCursor: null }),
+    });
+
+    const html = await response.text();
+    expect(html).toContain("個人情報を削除済み");
+    expect(html).not.toContain('value="reinstate"');
   });
 });

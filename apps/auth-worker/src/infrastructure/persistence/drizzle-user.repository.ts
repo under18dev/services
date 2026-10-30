@@ -276,6 +276,28 @@ export class DrizzleUserRepository implements UserRepository {
   }
 
   /**
+   * 管理者による停止・解除（#375）。
+   *
+   * **`status` の条件を WHERE に入れる。** 読んでから書くまでの隙間で
+   * 状態が変われば 0 行になり、呼ぶ側が `conflict` を返せる。
+   * `closeAccount` が `eq(users.status, "active")` を持つのと同じ形。
+   *
+   * **`deleted` はどちらの `from` にも当たらない。** 型で `"deleted"` を
+   * 受け取らないので、ここに書き足さない限り当たりようがない。
+   */
+  async setStatus(
+    id: string,
+    change: { readonly from: "active" | "suspended"; readonly to: "active" | "suspended" },
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(users)
+      .set({ status: change.to })
+      .where(and(eq(users.id, id), eq(users.status, change.from)))
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  /**
    * 管理画面の一覧（#375）。
    *
    * ## `OFFSET` を使わない

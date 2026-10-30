@@ -172,5 +172,19 @@
  * その代わりに縛ったこと（メールアドレスを URL に載せない）は
  * `identity-admin.ts` の「利用者の管理」の節に書いてある。
  */
-export const CONTRACT_VERSION = "1.7.0" as const;
+/**
+ * ## 1.7.0 → 1.8.0（#375: 利用者の停止・解除・セッションの失効）
+ *
+ * `suspendUser` / `reinstateUser` / `revokeUserSessions` を
+ * `IdentityAdminRpcContract` に足した。`wrangler` での UPDATE でしか
+ * できなかった操作を、**管理者のセッションでだけ**画面から行えるようにする。
+ *
+ * **後方互換な追加**なので MINOR。デプロイ順は auth-worker が先。
+ *
+ * **停止の理由（`SuspendReason`）が契約に出てくる。** `status` は
+ * `suspended` の 1 値しか持たないので、**どの理由で止めたかは
+ * `audit_logs` にしか残らない** —— 呼ぶ側はそれを前提に、画面で
+ * 「凍結されています」と言い切らないこと（本人の退会でも同じ値になる）。
+ */
+export const CONTRACT_VERSION = "1.8.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;
