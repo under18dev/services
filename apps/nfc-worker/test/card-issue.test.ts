@@ -125,6 +125,24 @@ describe("発行されるカード ID", () => {
 });
 
 describe("入力の検証", () => {
+  /**
+   * **定数の値そのものを固定する**（#364）。
+   *
+   * 下の `it.each` も「上限ちょうどは通る」も、`MAX_ISSUE_COUNT` を
+   * **読んで**比べるだけで、値そのものは固定していない。
+   * `docs/threat-model.md` の N-8 が「1 回の上限 200 枚」と書いて
+   * いるので、ここで数字を固定する —— 定数を変えたら、まず
+   * ここが落ちて「文書も直すこと」が分かる形にする。
+   *
+   * **auth-worker の `TokenLifetime` / `OtpPolicy` と同じ理由で足したが、
+   * 検査はこちらの Worker に置く。** 定数（`issue-cards.use-case.ts`）と
+   * 同じ Worker に置かないと、#365 で nfc-worker 側に寄せている判断と
+   * 逆向きになる。
+   */
+  it("上限は 200 枚（threat-model.md N-8 の緩和策 (3)）", () => {
+    expect(MAX_ISSUE_COUNT).toBe(200);
+  });
+
   it.each([
     ["0 枚", { count: 0 }],
     ["負の数", { count: -1 }],
