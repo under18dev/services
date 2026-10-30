@@ -40,6 +40,15 @@ export type IpScope =
   /** 描かれた form だけでログインを完走する検査（#332）。 */
   | "login-form-drive"
   /**
+   * 画面の class が CSS に在ることの検査（#332）。
+   *
+   * **同意画面を引くのに `/oauth/authorize` を通る**ので、
+   * `oauth_authorize` の枠（IP 単位・30 回 / 60 秒）に触れる。
+   */
+  | "kiwa-stylesheet"
+  /** 描かれた form だけで同意を完走する検査（#332）。 */
+  | "consent-form-drive"
+  /**
    * **配らない。直書き用に空けてある範囲。**
    *
    * 巡回させず 1 つの値を書いているファイルがある
@@ -72,6 +81,8 @@ export const RANGES: Readonly<Record<IpScope, Range>> = {
   "rate-limit-form": { prefix: "203.0.113", from: 100, to: 199 },
   "oauth-helpers": { prefix: "198.51.100", from: 100, to: 199 },
   "login-form-drive": { prefix: "192.0.2", from: 200, to: 254 },
+  "kiwa-stylesheet": { prefix: "198.51.100", from: 200, to: 254 },
+  "consent-form-drive": { prefix: "203.0.113", from: 200, to: 254 },
   // **配らない。** 直書きしているファイルのための範囲。
   "fixed-values": { prefix: "198.51.100", from: 1, to: 99 },
 };

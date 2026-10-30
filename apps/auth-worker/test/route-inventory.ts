@@ -142,10 +142,11 @@ export const PROBE_PAGES: readonly string[] = ["/login"];
  */
 export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
   "/ui/u18.<hash>.css":
-    "手書きのスタイルシートを読むのは同意画面だけになった（#332 の P2 で" +
-    "ログイン画面が Kiwa へ移った）。同意画面は妥当な認可要求が無いと開けず、" +
-    "未認証で引ける PROBE_PAGES には置けない。" +
-    "**P2 の残り（同意画面の移行）が終わればこのアセットごと消える**ので、" +
+    "**もう誰も読んでいない。** #332 の P2 で最後の持ち主（同意画面）が " +
+    "Kiwa へ移り、この Worker の画面はすべて kiwa.css だけを読む。" +
+    "配信する route だけが残っている状態で、**本番検査は参照元が無い" +
+    "アセットを引けない**（PROBE_PAGES はページから辿る）。" +
+    "**次の PR（`styles.ts` の削除）でアセットごと消える**ので、" +
     "そのときこの宣言も消すこと。",
 };
 
