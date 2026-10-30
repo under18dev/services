@@ -9,9 +9,9 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
  * ## `*_ROUTE` と `*_PATH` の 2 つがあるのはなぜか
  *
  * ルートは `root.basePath(ACCOUNT_BASE_PATH)` に登録するので、`app.get()` に
- * 渡すのは**接頭辞を除いた**パス（`/ui/u18.css`）。一方 HTML の
+ * 渡すのは**接頭辞を除いた**パス（`/ui/kiwa.<hash>.css`）。一方 HTML の
  * `<link href>` や `<a href>` に書くのは**接頭辞を含む**絶対パス
- * （`/account/ui/u18.css`）である。
+ * （`/account/ui/kiwa.<hash>.css`）である。
  *
  * この 2 つを別々に手で書くと、**片方だけ直してブラウザが 404 を踏む**。
  * スタイルシートなら素の HTML が出るだけ、アイランドなら「ボタンが黙って
@@ -45,7 +45,8 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
  *
  * **`styles.ts` 自体も消えた**（#332 の P2）。最後まで読んでいた
  * auth-worker のログイン画面・同意画面が Kiwa へ移ったため。
- *
+ */
+
 /**
  * Kiwa UI のスタイルシート（#332）。
  *
