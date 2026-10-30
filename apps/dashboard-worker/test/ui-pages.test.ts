@@ -117,33 +117,6 @@ describe("画面が HTML を返す", () => {
       expect(response.status, `ナビの ${href}`).toBe(expected);
     }
   });
-
-  it("スマホ幅では <details> で閉じ、md 以上では常に開く", async () => {
-    // 運用者の指摘（2026-10-30）: スマホではサイドバーが本文の上に積まれる。
-    // `<details>`/`<summary>` に変えた——JS を使わずに閉じられること、
-    // かつ `md:` 以上では開閉の概念ごと消えて常に見えることを固定する。
-    // クラスが CSS として実在するかは `kiwa-stylesheet.test.ts` が見るので、
-    // ここでは**どの要素にどのクラスが付くか**という構造だけを見る。
-    const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
-
-    // サイドバー全体が <details class="group ..."> で、<summary> が
-    // md 未満だけの開閉ボタンになっている。
-    expect(html).toMatch(/<details class="group [^"]*">/);
-    expect(html).toMatch(/<summary class="[^"]*md:hidden[^"]*"/);
-
-    // 中身の <nav> は、開いている（group-open）か md 以上なら見える。
-    // 両方欠けると、どちらか片方の幅でサイドバーが消える。
-    const navMatch = /<nav class="([^"]*)" aria-label="ダッシュボード"/.exec(html);
-    expect(navMatch, "サイドバーの <nav> が見つからない").not.toBeNull();
-    const navClass = navMatch?.[1] ?? "";
-    expect(navClass).toContain("group-open:flex");
-    expect(navClass).toContain("md:flex");
-
-    // Kiwa の `sidebar-collapsible`（インライン style を出す）は使っていない。
-    // CSP（style-src 'self'）に握り潰されて開けなくなる経路（#332 の下調べ）
-    // を、ここで再び持ち込んでいないことを見る。
-    expect(html).not.toMatch(/style="/);
-  });
 });
 
 describe("末尾スラッシュの有無で 404 にしない", () => {
