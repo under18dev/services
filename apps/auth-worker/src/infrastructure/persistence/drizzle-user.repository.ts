@@ -1,6 +1,6 @@
 import { type IdentityDatabase, userEmails, users } from "@u18/db";
 import { newId, newUserId } from "@u18/domain";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import type {
   NewUser,
   UpdateProfileOutcome,
@@ -273,5 +273,63 @@ export class DrizzleUserRepository implements UserRepository {
       .where(and(eq(users.id, id), eq(users.status, "active")))
       .run();
     return result.meta.changes > 0;
+  }
+
+  /**
+   * 管理画面の一覧（#375）。
+   *
+   * ## `OFFSET` を使わない
+   *
+   * `limit/offset` は「何ページ目か」で数えるので、**読んでいる最中に
+   * 行が増えると同じ人が 2 回出たり、1 人飛ばされたりする。** 利用者は
+   * いつでも登録できるので、この形は実際に起きる。最後に見た行より
+   * 古いものを返す（キーセット）ほうが、途中で増えても並びが崩れない。
+   *
+   * ## 照合は完全一致だけ
+   *
+   * `query` はメールアドレスか username の完全一致で引く。
+   * **`like` を使わない** —— `primary_email` と `username` の一意索引が
+   * そのまま効き、全表走査にならない。アドレスは大文字小文字を無視する
+   * （`findByEmail` と同じ扱い）。
+   */
+  async listForAdmin(criteria: {
+    readonly query?: string;
+    readonly after?: { readonly createdAt: Date; readonly id: string };
+    readonly limit: number;
+  }): Promise<readonly User[]> {
+    const conditions = [];
+
+    if (criteria.query !== undefined) {
+      const normalized = criteria.query.trim();
+      conditions.push(
+        or(
+          sql`lower(${users.primaryEmail}) = lower(${normalized})`,
+          eq(users.username, normalized),
+        ),
+      );
+    }
+
+    if (criteria.after !== undefined) {
+      // **`id` を混ぜる。** 同じミリ秒に作られた行が 2 つあると、
+      // `created_at` だけではカーソルがそこで止まる（seed で実際に起きる）。
+      const at = criteria.after.createdAt.getTime();
+      conditions.push(
+        or(
+          lt(users.createdAt, criteria.after.createdAt),
+          and(eq(users.createdAt, criteria.after.createdAt), lt(users.id, criteria.after.id)),
+        ),
+      );
+      void at;
+    }
+
+    const rows = await this.db
+      .select()
+      .from(users)
+      .where(conditions.length === 0 ? undefined : and(...conditions))
+      .orderBy(desc(users.createdAt), desc(users.id))
+      .limit(criteria.limit)
+      .all();
+
+    return rows.map(toDomain);
   }
 }

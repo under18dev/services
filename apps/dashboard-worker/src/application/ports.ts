@@ -1,5 +1,6 @@
 import type {
   OAuthClientSummary,
+  UserAdminSummary,
   PasskeySummary,
   GrantListItem,
   IdentityPing,
@@ -109,4 +110,15 @@ export interface IdentityAdminGateway {
     sessionToken: string,
     clientId: string,
   ): Promise<IdentityOutcome<{ disabled: boolean }>>;
+  /**
+   * 利用者の一覧（#375）。**読み取りだけ。**
+   *
+   * **ここで返る `primaryEmail` は他人のものである。** 画面に出す条件は
+   * 契約（`identity-admin.ts` の「利用者の管理」）を読むこと ——
+   * **URL に載せない**（`csrf.ts` が拒否のログに `pathname` を書く）。
+   */
+  listUsers(
+    sessionToken: string,
+    criteria: { readonly query?: string; readonly cursor?: string },
+  ): Promise<IdentityOutcome<{ users: readonly UserAdminSummary[]; nextCursor: string | null }>>;
 }

@@ -44,6 +44,7 @@ import { CreateOAuthClientUseCase } from "../application/use-cases/create-oauth-
 import { DisableOAuthClientUseCase } from "../application/use-cases/disable-oauth-client.use-case";
 import { ListGrantsUseCase } from "../application/use-cases/list-grants.use-case";
 import { ListOAuthClientsUseCase } from "../application/use-cases/list-oauth-clients.use-case";
+import { ListUsersUseCase } from "../application/use-cases/list-users.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -161,6 +162,7 @@ export type Container = {
     readonly listGrants: ListGrantsUseCase;
     readonly revokeGrant: RevokeGrantUseCase;
     readonly listOAuthClients: ListOAuthClientsUseCase;
+    readonly listUsers: ListUsersUseCase;
     readonly createOAuthClient: CreateOAuthClientUseCase;
     readonly disableOAuthClient: DisableOAuthClientUseCase;
   };
@@ -464,6 +466,7 @@ export function createContainer(
       // #308: OAuth クライアント管理。**管理者のセッションでしか通らない**
       // （判定は UseCase の中。`application/use-cases/admin-access.ts`）。
       listOAuthClients: new ListOAuthClientsUseCase({ getSession, clients: oauthClients }),
+      listUsers: new ListUsersUseCase({ getSession, users }),
       createOAuthClient: new CreateOAuthClientUseCase({
         getSession,
         audit,

@@ -155,5 +155,22 @@
  * ——  **同じ番号に 2 つの意味が付くと、`CONTRACT_VERSION` を見ても
  * どちらが入っているか分からなくなる。**
  */
-export const CONTRACT_VERSION = "1.6.0" as const;
+/**
+ * ## 1.6.0 → 1.7.0（#375: 利用者の一覧を管理用 RPC へ出す）
+ *
+ * `listUsers` を `IdentityAdminRpcContract` に足した。これまで
+ * `wrangler d1 execute` でしかできなかった利用者の照会を、**管理者の
+ * セッションでだけ**画面から行えるようにする。
+ *
+ * **後方互換な追加**なので MINOR。デプロイ順は従来どおり auth-worker が
+ * 先。逆順にすると、新しい dashboard-worker がまだメソッドを持たない
+ * auth-worker を呼び、`identity_unavailable` へ畳まれる —— 管理領域だけが
+ * 無言で壊れた状態がデプロイ完了まで続く（#308 と同じ形）。
+ *
+ * **これは「他人の `userId` を扱う」最初の契約でもある。** これまでの
+ * メソッドは `sessionToken` が指す本人しか扱えなかった。増えた面と、
+ * その代わりに縛ったこと（メールアドレスを URL に載せない）は
+ * `identity-admin.ts` の「利用者の管理」の節に書いてある。
+ */
+export const CONTRACT_VERSION = "1.7.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

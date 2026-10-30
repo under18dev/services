@@ -72,6 +72,24 @@ export class RpcIdentityAdminGateway implements IdentityAdminGateway {
     return this.call(() => this.admin.disableOAuthClient(this.input({ sessionToken, clientId })));
   }
 
+  listUsers(sessionToken: string, criteria: { readonly query?: string; readonly cursor?: string }) {
+    return this.call(() =>
+      this.admin.listUsers(
+        this.input({
+          sessionToken,
+          // **空文字を渡さない。** 契約の `min(1)` に落ちて
+          // `invalid_input` になり、画面には「障害」として出る。
+          ...(criteria.query === undefined || criteria.query === ""
+            ? {}
+            : { query: criteria.query }),
+          ...(criteria.cursor === undefined || criteria.cursor === ""
+            ? {}
+            : { cursor: criteria.cursor }),
+        }),
+      ),
+    );
+  }
+
   /**
    * `RpcIdentityGateway.call` と同じ形。
    *

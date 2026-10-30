@@ -11,6 +11,8 @@ import type { AppBindings } from "../types";
 import { HomePage } from "./home-page";
 import {
   ADMIN_CLIENTS_CREATE_ROUTE,
+  ADMIN_USERS_ROUTE,
+  ADMIN_USERS_SEARCH_ROUTE,
   ADMIN_CLIENTS_DISABLE_ROUTE,
   ADMIN_CLIENTS_ROUTE,
   APPS_ROUTE,
@@ -29,6 +31,7 @@ import { PasskeysPage } from "./passkeys-page";
 import { ProfilePage } from "./profile-page";
 import { SignInRequiredPage, UnavailablePage } from "./message-page";
 import { AdminClientsPage, AdminNotFoundPage, type CreatedClient } from "./admin-clients-page";
+import { AdminUsersPage } from "./admin-users-page";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "../csrf";
 import { SessionsPage } from "./sessions-page";
 import { returnToForCurrentRequest } from "@u18/contracts";
@@ -209,6 +212,52 @@ export const accountUiRoutes = new Hono<AppBindings>()
         isAdmin={flags.isAdmin}
       />,
     );
+  })
+
+  /**
+   * 利用者の一覧（#375 / #382）。**管理者だけ。**
+   *
+   * ## GET は絞り込みを受け取らない
+   *
+   * **検索語がメールアドレスになる。** クエリに置くと履歴にも Referer にも
+   * `csrf.ts` の拒否ログ（`pathname`）にも残りうるので、**絞り込みと
+   * 続きの読み込みは POST 側**（`ADMIN_USERS_SEARCH_ROUTE`）に置いた。
+   * ここは「新しい順の先頭」だけを返す。
+   *
+   * ブックマークできなくなるが、**管理画面の検索結果はブックマークして
+   * よいものではない。**
+   */
+  .get(ADMIN_USERS_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    return renderAdminUsers(c, token, {});
+  })
+
+  /**
+   * 絞り込みと、続きの読み込み（#375）。
+   *
+   * **更新系ではないが POST である。** 理由は上の JSDoc。CSRF の判定は
+   * 置いてある —— **第三者のページから検索を走らせる意味は薄いが、
+   * 「POST を受ける口は守る」を例外付きにしたくない。** 例外を 1 つ作ると、
+   * 次に足す人が「ここも読み取りだから」と広げる。
+   */
+  .post(ADMIN_USERS_SEARCH_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const form = await c.req.parseBody();
+    if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
+      return renderAdminUsers(c, token, { error: CSRF_REJECTED_MESSAGE });
+    }
+
+    const query = (field(form, "query") ?? "").trim();
+    const cursor = (field(form, "cursor") ?? "").trim();
+
+    return renderAdminUsers(c, token, {
+      ...(query === "" ? {} : { query }),
+      ...(cursor === "" ? {} : { cursor }),
+    });
   })
 
   /**
@@ -498,6 +547,38 @@ async function renderAdminPage(
       {...(extra.created === undefined ? {} : { created: extra.created })}
       {...(extra.error === undefined ? {} : { error: extra.error })}
       {...(extra.notice === undefined ? {} : { notice: extra.notice })}
+    />,
+  );
+}
+
+/**
+ * 利用者の一覧を描く（#375）。**GET と POST が共有する。**
+ *
+ * **検索語を画面へ戻す。** 戻さないと、POST のあと入力欄が空になり、
+ * 「続きを読む」が何の続きなのか分からなくなる。
+ */
+async function renderAdminUsers(
+  c: Context<AppBindings>,
+  token: string,
+  options: { query?: string; cursor?: string; error?: string },
+): Promise<Response> {
+  const [flags, page] = await Promise.all([
+    navFlags(c, token),
+    c.get("identityAdmin").listUsers(token, {
+      ...(options.query === undefined ? {} : { query: options.query }),
+      ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+    }),
+  ]);
+  if (!page.ok) return renderAdminFailure(c, page);
+
+  return c.html(
+    <AdminUsersPage
+      isAdmin={flags.isAdmin}
+      csrfToken={ensureCsrfToken(c)}
+      users={page.value.users}
+      nextCursor={page.value.nextCursor}
+      {...(options.query === undefined ? {} : { query: options.query })}
+      {...(options.error === undefined ? {} : { error: options.error })}
     />,
   );
 }

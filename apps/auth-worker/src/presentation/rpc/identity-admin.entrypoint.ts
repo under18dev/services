@@ -2,6 +2,7 @@ import {
   createOAuthClientInputSchema,
   disableOAuthClientInputSchema,
   listOAuthClientsInputSchema,
+  listUsersInputSchema,
   rpcErr,
   rpcOk,
   type CreateOAuthClientInput,
@@ -11,11 +12,15 @@ import {
   type IdentityAdminRpcContract,
   type ListOAuthClientsInput,
   type ListOAuthClientsResult,
+  type ListUsersInput,
+  type ListUsersResult,
+  type UserAdminSummary,
   type OAuthClientSummary,
 } from "@u18/contracts";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createContainer, type RequestContext } from "../../composition/container";
 import type { OAuthClient } from "../../domain/entities/oauth-client";
+import type { User } from "../../domain/entities/user";
 import { toRpcCode } from "./identity.entrypoint";
 
 /**
@@ -29,6 +34,41 @@ import { toRpcCode } from "./identity.entrypoint";
  * ここで落とす判断すら要らない（`DrizzleOAuthClientRepository.toDomain` が
  * 行型から写す時点で切ってある）。
  */
+/**
+ * `User`（Domain）を管理画面の DTO へ写す（#375）。
+ *
+ * **`UserProfile` へ写す関数と別に持つ。** あちらは「本人が見る自分」で、
+ * `identity.entrypoint.ts` にある。同じ関数を共有すると、**本人向けに
+ * 足した項目が管理画面にも自動で出る**（逆も起きる）。
+ *
+ * **ここが他人のメールアドレスを外へ出す唯一の場所である。** 載せる理由と、
+ * 代わりに縛ったこと（URL に載せない）は契約の「利用者の管理」の節。
+ *
+ * **パスキーもセッションも写していない。** `User` がそもそも持っていない
+ * ので、ここで落とす判断は要らない（`toClientSummary` と同じ形）。
+ *
+ * ## `isAdmin` という名前を使っていない
+ *
+ * ここが写すのは **`users.is_admin` の旗**で、「このセッションで管理者
+ * として振る舞えるか」（`actsAsAdminWith`、決定 8 / RR-5）ではない。
+ * 他人の行を見ているので後者は決めようがない。`vitest.config.ts` の
+ * `isAdmin:` 走査（#337）が**正しくここを捕まえた**ので、名前を
+ * `hasAdminFlag` に変えて意味の違いを型に出してある。
+ */
+function toUserAdminSummary(user: User): UserAdminSummary {
+  const props = user.snapshot();
+  return {
+    id: props.id,
+    username: props.username,
+    displayName: props.displayName,
+    primaryEmail: props.email,
+    emailVerified: props.emailVerified,
+    status: props.status,
+    hasAdminFlag: props.isAdmin,
+    createdAt: props.createdAt.toISOString(),
+  };
+}
+
 function toClientSummary(client: OAuthClient): OAuthClientSummary {
   return {
     clientId: client.clientId,
@@ -180,5 +220,36 @@ export class IdentityAdminRPC extends WorkerEntrypoint<Env> implements IdentityA
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk({ disabled: result.value.disabled });
+  }
+
+  /**
+   * 利用者の一覧（#375）。**管理者のみ。**
+   *
+   * **他人を指す最初のメソッドである。** これまでは `sessionToken` が
+   * 誰を指すかを auth-worker が決めており、呼ぶ側は対象を選べなかった。
+   *
+   * **再認証を要求していない。** 読み取りだけで状態を変えないので
+   * `listOAuthClients` と同じ扱いにしてある。凍結やセッションの失効を
+   * 足すときは、**そちらに `hasFreshAuthentication` を付けること。**
+   *
+   * 管理者でないセッションは `not_found` になる。判定は UseCase の中。
+   */
+  async listUsers(input: ListUsersInput): Promise<ListUsersResult> {
+    const parsed = listUsersInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.listUsers.execute({
+      sessionToken: parsed.data.sessionToken,
+      ...(parsed.data.query === undefined ? {} : { query: parsed.data.query }),
+      ...(parsed.data.cursor === undefined ? {} : { cursor: parsed.data.cursor }),
+      ...(parsed.data.limit === undefined ? {} : { limit: parsed.data.limit }),
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({
+      users: result.value.users.map(toUserAdminSummary),
+      nextCursor: result.value.nextCursor,
+    });
   }
 }

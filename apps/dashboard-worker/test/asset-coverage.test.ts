@@ -65,6 +65,7 @@ const IDENTITY = {
  */
 const IDENTITY_ADMIN = {
   listOAuthClients: async () => rpcOk([]),
+  listUsers: async () => rpcOk({ users: [], nextCursor: null }),
 };
 
 /** 未認証で引いたときの参照。**本番のアセット検査が見るのはこちら。** */
