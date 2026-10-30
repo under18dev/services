@@ -87,8 +87,11 @@ npx wrangler d1 migrations apply u18-admin --remote
 ```bash
 cd apps/admin-worker
 
-# 1. まず自分の sub を確かめる。admin.under18.dev でログインし、
-#    「サインインしました: usr_xxx」の画面で表示される値を使う。
+# 1. まず自分の sub を確かめる。admin.under18.dev でログインすると、
+#    承認されていないので /pending へ送られる——この画面が自分の
+#    sub と、そのまま貼れる grant コマンドを出す（ホームの
+#    「サインインしました」は承認された後にしか見えないので、
+#    最初の 1 人はここでは使えない）。
 node scripts/admin-approval.mjs grant \
   --sub usr_xxx --actor <GitHubハンドルなど> --super --remote
 ```

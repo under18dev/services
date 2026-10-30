@@ -283,10 +283,19 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     }
 
     c.header("Cache-Control", "no-store");
+    // **自分の `sub` を出す。** 最初の 1 人を承認リストへ入れる手段は
+    // CLI（`admin-approval.mjs`）しか無く、CLI に渡す `sub` を知る方法が
+    // この画面以外に無い——運用者表を直接引くか、別の管理者になって
+    // 管理画面に入るかの 2 択しか残らず、どちらも筋が悪い。承認済みの
+    // ホーム（下の `/` ハンドラ）が `sub` を出しているのに、未承認の
+    // ここだけ出していなかった（出すべきなのは逆の側だった）。
     return c.html(
-      "<!doctype html><html><body><p>" +
-        "ログインできました。使えるようにするには、承認の権限を持つ人に連絡してください。" +
-        "</p></body></html>",
+      "<!doctype html><html><body>" +
+        "<p>ログインできました。使えるようにするには、承認の権限を持つ人に次の ID を伝えてください。</p>" +
+        `<p>${renderSub(session.sub)}</p>` +
+        "<p>（承認する人向け。最初の 1 人には <code>--super</code> が要ります）</p>" +
+        `<pre><code>node apps/admin-worker/scripts/admin-approval.mjs grant --sub ${escapeHtml(session.sub)} --actor &lt;実行者&gt; --super --remote</code></pre>` +
+        "</body></html>",
     );
   });
 
@@ -298,15 +307,26 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   app.get("/", pageSecurityHeaders, (c) => {
     const session = c.get("session");
     c.header("Cache-Control", "no-store");
-    // `sub` は `newUserId()` の形（英数字と `_`）しか取らないはずだが、
-    // ID Token の検証をすり抜けた値をそのまま HTML へ流し込む経路を
-    // 作らないため、文字参照にしてから埋める。
     return c.html(
-      `<!doctype html><html><body><p>サインインしました: ${escapeHtml(session.sub)}</p></body></html>`,
+      `<!doctype html><html><body><p>サインインしました: ${renderSub(session.sub)}</p></body></html>`,
     );
   });
 
   return app;
+}
+
+/**
+ * `session.sub` を HTML へ埋め込む形を 1 箇所に揃える。
+ *
+ * 承認待ち（`/pending`）と承認済み（`/`）の両方がこれを呼ぶ。別々に
+ * `escapeHtml` を呼ぶ形にすると、書式を変えたとき片方だけ直される——
+ * このリポジトリで繰り返し踏んできた形（#369 の記録を参照）。
+ */
+function renderSub(sub: string): string {
+  // `sub` は `newUserId()` の形（英数字と `_`）しか取らないはずだが、
+  // ID Token の検証をすり抜けた値をそのまま HTML へ流し込む経路を
+  // 作らないため、文字参照にしてから埋める。
+  return `<code>${escapeHtml(sub)}</code>`;
 }
 
 function escapeHtml(value: string): string {
