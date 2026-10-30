@@ -128,9 +128,10 @@
   --radius: 0.625rem;
 
   /*
-   * `styles.ts` の `:root` から。出どころは under18dev/under18dev の
-   * `src/index.css`。**ここで値を作らない** —— ログイン画面
-   * （auth-worker、まだ手書き CSS）と並べたときに別のサイトに見える。
+   * もとは `styles.ts` の `:root`（#332 で消えた）。出どころは
+   * under18dev/under18dev の `src/index.css`。**ここで値を作らない** ——
+   * 3 つの Worker が別々に Tailwind を走らせているので、ここが唯一の
+   * 出どころでなくなった瞬間に、画面ごとに別のサイトに見える。
    */
   --font-sans-stack:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP",
