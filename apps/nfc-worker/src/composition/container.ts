@@ -4,6 +4,7 @@ import type { CardRepository, ExpiredEventPurger, IdentityGateway } from "../app
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
 import { IssueCardsUseCase } from "../application/use-cases/issue-cards.use-case";
+import { ListAllCardsUseCase } from "../application/use-cases/list-all-cards.use-case";
 import { ListMyCardsUseCase } from "../application/use-cases/list-cards.use-case";
 import { ReleaseCardUseCase } from "../application/use-cases/release-card.use-case";
 import { PurgeExpiredEventsUseCase } from "../application/use-cases/purge-expired-events.use-case";
@@ -69,6 +70,8 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
     useCases: {
       resolveCard: new ResolveCardUseCase(cards),
       listMyCards: new ListMyCardsUseCase(identity, cards),
+      // 運営向けの全カード一覧（#338 Step 3）。**管理者判定は UseCase の中。**
+      listAllCards: new ListAllCardsUseCase(identity, cards),
       updateCardTarget: new UpdateCardTargetUseCase(
         identity,
         cards,

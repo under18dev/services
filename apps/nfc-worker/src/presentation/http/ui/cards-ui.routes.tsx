@@ -5,9 +5,16 @@ import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
-import { CARDS_UI_PATH, CLAIM_CARD_PARAM, CLAIM_UI_PATH } from "../base-path";
+import {
+  ADMIN_UI_PATH,
+  CARDS_UI_PATH,
+  CLAIM_CARD_PARAM,
+  CLAIM_UI_PATH,
+  cardTapUrl,
+} from "../base-path";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "../csrf";
 import type { AppBindings } from "../types";
+import { AdminPage } from "./admin-page";
 import { CardsPage } from "./cards-page";
 import { ClaimPage } from "./claim-page";
 
@@ -97,6 +104,59 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     // 載ると他人に見える（#125 と同じ理由）。
     c.header("Cache-Control", "no-store");
     return c.html(<CardsPage cards={result.value} />);
+  });
+
+  /**
+   * 運営向けのカード管理画面（#338 Step 3）。
+   *
+   * ## 管理者以外には 404
+   *
+   * **403 を返さない。** #331 / #333 の判断（「管理画面は管理者以外には
+   * 存在しない」）をこの画面にも適用する。403 は「在るが権限が無い」と
+   * 読めるので、**管理画面の所在を未管理者へ教える。**
+   *
+   * **判定はここに書かない。** `ListAllCardsUseCase` の
+   * `requireAdminUserId` が持っていて、ここは `forbidden` を 404 に
+   * 翻訳するだけである（経路が増えたときに素通りする形を作らないため）。
+   *
+   * ## 未ログインはログインへ。順序に意味がある
+   *
+   * `unauthenticated` だけを `/login` へ送る。**`forbidden` を混ぜて
+   * ログインへ送らないこと** —— 管理者でない利用者が延々とログインし直す。
+   *
+   * ## 焼く用の URL はここで組む
+   *
+   * `cardTapUrl()` が要る `SHORT_URL_ORIGIN` は env にある。
+   * **画面コンポーネントへ env を渡さない** —— ホストを画面が決める形に
+   * なり、焼いたタグだけが古いまま残る（`base-path.ts`）。
+   *
+   * **`issued` だけを入れる。** 紐づけ済みを混ぜると、誰かの手元にある
+   * タグを上書きする形になる（`admin-page.tsx` の冒頭）。
+   */
+  app.get(ADMIN_UI_PATH, pageSecurityHeaders, async (c) => {
+    const result = await c
+      .get("container")
+      .useCases.listAllCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
+
+    if (!result.ok) {
+      if (result.failure.kind === "unauthenticated") {
+        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(c.req.url)), 302);
+      }
+      // **管理者でなければ「無い」。** 本文も 404 のそれに揃える。
+      if (result.failure.kind === "forbidden") {
+        return c.notFound();
+      }
+      return c.text("しばらくしてからもう一度お試しください。", 503);
+    }
+
+    const tapUrls = result.value.cards
+      .filter((card) => card.status === "issued")
+      .map((card) => cardTapUrl(c.env.SHORT_URL_ORIGIN, card.cardId));
+
+    // カードの一覧は運営固有ではないが、**未紐づけの ID が本文に入る。**
+    // 中間キャッシュに残す理由が無い。
+    c.header("Cache-Control", "no-store");
+    return c.html(<AdminPage list={result.value} tapUrls={tapUrls} />);
   });
 
   /**

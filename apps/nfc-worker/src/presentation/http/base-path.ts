@@ -37,6 +37,42 @@ export const CARDS_UI_PATH = "/account/nfc";
 export const CLAIM_UI_PATH = `${CARDS_UI_PATH}/claim`;
 
 /**
+ * 運営向けのカード管理画面（#338 Step 3）。
+ *
+ * **`/account/admin/nfc` ではない。** あちらは dashboard-worker に届くので、
+ * NFC の D1 を持たないあの Worker から**こちらへ Service Binding を増やす**
+ * ことになる。#331 のレビューで `IdentityAdminRPC` を**分離した**のと
+ * 逆向きなので採らない。`/account/nfc/*` は既にこの Worker に来ている。
+ *
+ * **`CARDS_UI_PATH` の下に置く**のは `CLAIM_UI_PATH` と同じ理由 ——
+ * auth-worker の `sanitizeReturnTo` に何も足さずにログインから戻れる。
+ */
+export const ADMIN_UI_PATH = `${CARDS_UI_PATH}/admin`;
+
+/**
+ * 短縮 URL の経路（`redirect.routes.ts` の `GET /c/:cardId`）。
+ *
+ * **タグに焼く値を組み立てるのはここ 1 箇所にする。** 画面側で
+ * テンプレートリテラルを書くと、経路を変えたときに**焼いたタグだけが
+ * 古いまま**になる —— 配布物は回収できない。
+ */
+const SHORT_URL_CARD_PREFIX = "/c/";
+
+/**
+ * NFC タグに焼く URL を組み立てる（#338）。
+ *
+ * **`claimUrl` と対になる。** あちらはタップした人が着地する画面で、
+ * こちらは**タグに書き込む値そのもの**である。
+ *
+ * `origin` には `SHORT_URL_ORIGIN`（`wrangler.jsonc` の vars）を渡すこと。
+ * **ホストを画面に直書きしない** —— 開発と本番で違ううえ、間違えて焼いた
+ * タグは配ったあとに直せない。
+ */
+export function cardTapUrl(shortUrlOrigin: string, cardId: string): string {
+  return new URL(`${SHORT_URL_CARD_PREFIX}${cardId}`, shortUrlOrigin).toString();
+}
+
+/**
  * 紐づけ画面にカード ID を渡すクエリ名。
  *
  * ## **パスではなくクエリに置く。これは安全側の判断である**

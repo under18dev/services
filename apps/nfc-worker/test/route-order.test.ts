@@ -47,6 +47,14 @@ describe("ルートの登録順", () => {
       // 画面は 2 回出る（`pageSecurityHeaders` とハンドラ）。
       "GET /account/nfc",
       "GET /account/nfc",
+      // **運営向けの管理画面（#338 Step 3）。** 2 行あるのは
+      // `pageSecurityHeaders` と本体で、上の一覧と同じ形である。
+      //
+      // **順序に守りの意味は無い** —— `/account/nfc/admin` も
+      // `/account/nfc/claim` も静的なパスで、Hono は完全一致で選ぶ。
+      // 意味があるのは `ALL /account/nfc/cards/*` の門番の位置だけ。
+      "GET /account/nfc/admin",
+      "GET /account/nfc/admin",
       // 紐づけ画面（#358）。**画面より後ろに居る。** `/account/nfc` と
       // `/account/nfc/claim` は別パスなので順序に守りの意味は無いが、
       // 変わったら気づく。POST はこの Worker で唯一の form 送信。

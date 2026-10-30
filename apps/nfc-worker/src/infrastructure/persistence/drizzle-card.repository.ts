@@ -55,6 +55,26 @@ export class DrizzleCardRepository implements CardRepository {
     return rows.map(toDomain);
   }
 
+  /**
+   * 全カード（運営向け、#338 Step 3）。
+   *
+   * **`limit + 1` 件取る。** 呼び出し側が「上限で切れたか」を判定できる
+   * ようにするため（`CardRepository` の宣言を参照）。
+   *
+   * 並びは**発行の新しい順**。所有者向けの `listByOwner` が
+   * `claimedAt` を優先するのと違うのは、運営が探すのが
+   * 「さっき発行したロット」だからである。
+   */
+  async listAll(limit: number): Promise<readonly Card[]> {
+    const rows = await this.db
+      .select()
+      .from(nfcCards)
+      .orderBy(desc(nfcCards.createdAt), desc(nfcCards.id))
+      .limit(limit + 1)
+      .all();
+    return rows.map(toDomain);
+  }
+
   async issue(card: NewCard, now: Date): Promise<void> {
     await this.db
       .insert(nfcCards)

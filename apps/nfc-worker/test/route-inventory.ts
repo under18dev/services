@@ -101,6 +101,22 @@ export const CARD_API_ROUTES: readonly Route[] = [
 export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/account/nfc" }];
 
 /**
+ * 運営向けのカード管理画面（#338 Step 3）。
+ *
+ * **区分を分けてあるのは、Cookie 無しの応答が同じでも、
+ * Cookie 有りの応答が違うからである。**
+ *
+ * | | Cookie 無し | 一般利用者 | 管理者 |
+ * | --- | --- | --- | --- |
+ * | `GET /account/nfc/admin` | **302**（ログインへ） | **404** | 200 |
+ *
+ * **一般利用者に 403 を返さない。** 403 は「在るが権限が無い」と読めるので、
+ * 管理画面の所在を教える（#331 / #333 の判断）。`cards-ui.routes.tsx` が
+ * `forbidden` を 404 に翻訳している。
+ */
+export const CARD_ADMIN_ROUTES: readonly Route[] = [{ method: "GET", path: "/account/nfc/admin" }];
+
+/**
  * カードをタップした人が着地する紐づけ画面（#358）。
  *
  * **区分を分けてあるのは、応答が上の 2 つのどちらとも違うからである。**
@@ -167,6 +183,7 @@ export const PROBE_PAGES: readonly string[] = [];
 
 export const CARD_ROUTES: readonly Route[] = [
   ...CARD_PAGE_ROUTES,
+  ...CARD_ADMIN_ROUTES,
   ...CARD_CLAIM_ROUTES,
   ...CARD_ASSET_ROUTES,
   ...CARD_API_ROUTES,
