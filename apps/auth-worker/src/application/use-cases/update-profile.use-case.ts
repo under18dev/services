@@ -18,6 +18,16 @@ export type UpdateProfileOutput = {
   readonly user: User;
   /** 実際に値が変わった項目。値そのものは返さず、呼び出し元は user を見る。 */
   readonly changedFields: readonly string[];
+  /**
+   * **このセッションで管理者として振る舞ってよいか**（決定 8 / RR-5）。
+   *
+   * `user.isAdmin` をそのまま返す応答にすると、Passkey 以外で張られた
+   * セッションに対しても旗が立って見える。ここで `GetSessionUseCase` が
+   * 出した値を運ぶのは、**Presentation に `user` と認証方式の 2 つを
+   * 渡して組み立てさせない**ため —— 組み立てる場所が増えるほど、
+   * そのうち 1 か所が `user.isAdmin` を直接読む（`identity.entrypoint.ts`）。
+   */
+  readonly isAdmin: boolean;
 };
 
 export type UpdateProfileDeps = {
@@ -88,7 +98,7 @@ export class UpdateProfileUseCase {
     // 送られてきた値が現在と同じだった場合。書き込まずに終える。
     // updatedAt を動かすと OIDC の `updated_at` claim が理由なく進み、
     // 監査ログにも「何も変わっていない変更」が積もる。
-    if (changedFields.length === 0) return ok({ user, changedFields });
+    if (changedFields.length === 0) return ok({ user, changedFields, isAdmin: auth.value.isAdmin });
 
     // 再認証の判定は衝突の確認より前に置く。順序を逆にすると、古い
     // セッションしか持たない相手でも応答の違いから「その username は
@@ -122,7 +132,7 @@ export class UpdateProfileUseCase {
       }),
     );
 
-    return ok({ user: outcome.user, changedFields });
+    return ok({ user: outcome.user, changedFields, isAdmin: auth.value.isAdmin });
   }
 
   private async recordFailure(

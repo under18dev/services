@@ -1,5 +1,5 @@
 import type { Session } from "../../domain/entities/session";
-import type { AuditLogger } from "../ports/audit-log.port";
+import type { AuditEventName, AuditLogger } from "../ports/audit-log.port";
 import type { Clock } from "../ports/clock.port";
 import type { TokenHasher } from "../ports/crypto.port";
 import type { SessionRepository } from "../ports/session.repository";
@@ -15,7 +15,12 @@ export type GetSessionOutput = {
   readonly session: Session;
   readonly userId: string;
   /**
-   * 操作者が管理者か（§14.1 決定 8）。
+   * **このセッションで管理者として振る舞ってよいか**（§14.1 決定 8）。
+   *
+   * `users.is_admin` そのものではない。**Passkey で張られたセッションで
+   * なければ false になる**（`User.actsAsAdminWith`）。アカウントに旗が
+   * 立っていることと、いま目の前の 1 回の操作を管理者として通してよいことは
+   * 別で、ここが返すのは後者である。
    *
    * **`user` ごと返さない。** 呼び出し元が要るのは認可に使う 1 ビットで、
    * `User` を渡すとメールアドレスまで RPC の向こうへ運べてしまう（#187）。
@@ -116,6 +121,28 @@ export class GetSessionUseCase {
       this.deps.sessions.touch(session.id, now),
     );
 
-    return ok({ session, userId: session.userId, isAdmin: user.isAdmin });
+    const isAdmin = user.actsAsAdminWith(session.authMethod);
+    if (user.isAdmin && !isAdmin) {
+      // **ここを無言で false にしない。** 決定 8 は `IssueSessionUseCase` が
+      // 入口で塞いでいるので、この状態は正常な経路では生まれない。出たなら
+      // 付与の 2 文目（`revokeNonPasskeySessionsSql`）が流れていないか、
+      // 付与と OTP ログインが競ったかのどちらかで、**権限を剥がしたまま
+      // 放置された runbook §10.5 の復旧**も同じ形に見える。
+      //
+      // `audit_logs` へは書かない。出せるのは「有効なセッションを持つ
+      // 管理者」だけなので外から誘発できる量ではないが、リクエストごとに
+      // D1 へ 1 行増える形は避ける（`admin.denied` と同じ判断）。しかも
+      // ここは応答時間を畳み込んでいる経路で、INSERT を待たせたくない。
+      console.warn(
+        JSON.stringify({
+          event: "admin.session_not_passkey" satisfies AuditEventName,
+          userId: session.userId,
+          sessionId: session.id,
+          authMethod: session.authMethod,
+        }),
+      );
+    }
+
+    return ok({ session, userId: session.userId, isAdmin });
   }
 }

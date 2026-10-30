@@ -114,9 +114,22 @@ export type SeededUser = {
  * （ログイン経路そのものは `login.ui.test.ts` が通している）。
  */
 export async function seedLoggedInUser(
-  options: { readonly authTime?: Date; readonly status?: "active" | "suspended" } = {},
+  options: {
+    readonly authTime?: Date;
+    readonly status?: "active" | "suspended";
+    /** 管理者として入れる（決定 8 / #83）。既定は一般利用者。 */
+    readonly isAdmin?: boolean;
+    /**
+     * セッションを張った認証方式。
+     *
+     * **既定は `email_otp` のまま。** 既存の呼び出しが前提にしている値で、
+     * ここを `passkey` に変えると「OTP セッションでも通る」ことを確かめている
+     * テストが静かに別のものを確かめ始める。
+     */
+    readonly authMethod?: "passkey" | "email_otp";
+  } = {},
 ): Promise<SeededUser> {
-  const user = aUser({ status: options.status ?? "active" });
+  const user = aUser({ status: options.status ?? "active", isAdmin: options.isAdmin ?? false });
   const authTime = options.authTime ?? new Date();
   const sessionToken = `session-token-${newSessionId()}`;
   const sessionId = newSessionId();
@@ -130,6 +143,7 @@ export async function seedLoggedInUser(
       primaryEmail: user.email,
       emailVerified: user.emailVerified,
       status: user.status,
+      isAdmin: user.isAdmin,
     })
     .run();
 
@@ -140,7 +154,7 @@ export async function seedLoggedInUser(
       userId: user.id,
       tokenHash: await new Sha256TokenHasher().hash(sessionToken),
       expiresAt: new Date(authTime.getTime() + 12 * 60 * 60 * 1000),
-      authMethod: "email_otp",
+      authMethod: options.authMethod ?? "email_otp",
       lastSeenAt: authTime,
       userAgent: "vitest",
       ipHash: null,

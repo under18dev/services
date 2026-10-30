@@ -148,7 +148,11 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       emailVerified: props.emailVerified,
       status: props.status,
       createdAt: props.createdAt.toISOString(),
-      isAdmin: props.isAdmin,
+      // **`props.isAdmin` ではない。** あれは `users` の行の旗で、
+      // 「このセッションで管理者として振る舞ってよいか」ではない（決定 8 /
+      // RR-5）。判定は `GetSessionUseCase` に 1 か所だけ置いてあるので、
+      // ここは運ぶだけにする。
+      isAdmin: session.value.isAdmin,
     });
   }
 
@@ -286,7 +290,9 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
         emailVerified: props.emailVerified,
         status: props.status,
         createdAt: props.createdAt.toISOString(),
-        isAdmin: props.isAdmin,
+        // 同上。`UpdateProfileUseCase` が `GetSessionUseCase` の判定を
+        // そのまま運んでくる。
+        isAdmin: result.value.isAdmin,
       },
       changedFields: [...result.value.changedFields],
     });
