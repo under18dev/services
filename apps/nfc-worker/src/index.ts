@@ -1,6 +1,8 @@
 import { createContainer } from "./composition/container";
 import { createApp } from "./presentation/http/app";
 
+export { NfcAdminDelegatedRPC } from "./presentation/rpc/nfc-admin-delegated.entrypoint";
+
 /**
  * nfc-worker のエントリポイント（仕様書 10 / Phase 4）。
  *
@@ -13,10 +15,11 @@ import { createApp } from "./presentation/http/app";
  * Worker を割るとこの 1 つのテーブルに対する binding が 2 つに増える。
  * Worker の分割はユースケース上の信頼境界で行う（仕様書 2.2 の設計原則 1）。
  *
- * **RPC Entrypoint を公開しない。** NFC のデータを他の Worker へ
- * 開く必要がまだ無いので、`WorkerEntrypoint` を export しない。
- * Service Binding は「使える API」ではなく「侵害時に届く範囲」なので、
- * 要求が出るまで作らない（docs/architecture.md 1.1）。
+ * **RPC Entrypoint を 1 つだけ公開する**（#382 / #390 決定 16 ③）。
+ * `NfcAdminDelegatedRPC` —— admin-worker が他人のカードを操作するための
+ * delegated RPC。**束縛してよいのは admin-worker だけ**
+ * （`scripts/check-service-bindings.mjs` が静的に検査する）。
+ * それ以外の Worker へは引き続き開いていない（docs/architecture.md 1.1）。
  */
 const app = createApp();
 

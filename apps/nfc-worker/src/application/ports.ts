@@ -165,6 +165,18 @@ export interface CardRepository {
   disableAsAdmin(cardId: string, reason: string, now: Date): Promise<boolean>;
 
   /**
+   * 運営による遷移先の変更（#382「他人のカードへの操作」2 本目）。
+   *
+   * **`updateTarget` との違いは所有者を WHERE 句に持たないことだけ**で、
+   * `disableAsAdmin` と同じ考え方。`active` であることは要求する ——
+   * 無効化済みのカードの遷移先を書き換えても、タップは `redirect.routes.ts`
+   * の `resolvable` 判定を通らないので、**遷移先の意味を持たない値を
+   * 書き込むだけになる**（`UpdateCardTargetUseCase` の「無効化済みは
+   * 所有者でも書き換えられない」と同じ理由）。
+   */
+  updateTargetAsAdmin(cardId: string, targetUrl: string, now: Date): Promise<boolean>;
+
+  /**
    * 未紐づけのカードの所有者を確定する（#358）。
    *
    * **「まだ誰のものでもない」を WHERE 句に入れること。** アプリ側で

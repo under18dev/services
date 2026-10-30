@@ -143,6 +143,21 @@ export class DrizzleCardRepository implements CardRepository {
     return rows.length > 0;
   }
 
+  /**
+   * 運営による遷移先の変更（#382）。**所有者を WHERE 句に持たない。**
+   *
+   * `updateTarget` と同じ条件付き UPDATE で、違いは所有者を問わないこと
+   * だけ。`active` であることは要求する（`updateTargetAsAdmin` の宣言）。
+   */
+  async updateTargetAsAdmin(cardId: string, targetUrl: string, now: Date): Promise<boolean> {
+    const rows = await this.db
+      .update(nfcCards)
+      .set({ targetUrl, updatedAt: now })
+      .where(and(eq(nfcCards.id, cardId), eq(nfcCards.status, "active")))
+      .returning({ id: nfcCards.id });
+    return rows.length > 0;
+  }
+
   async claim(cardId: string, newOwnerUserId: string, now: Date): Promise<boolean> {
     const rows = await this.db
       .update(nfcCards)
