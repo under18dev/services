@@ -67,8 +67,15 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUCKET = "u18-identity-archive";
 const PREFIX = "d1-backups";
 
-/** 退避する D1。**全部取ること**（上記「2 つの DB を必ず揃えて取る」）。 */
-const DATABASES = {
+/**
+ * 退避する D1。**全部取ること**（上記「2 つの DB を必ず揃えて取る」）。
+ *
+ * **`export` してある。** `scripts/check-backup-freshness.mjs`（#361）が
+ * 「どの DB を見張るべきか」をここから読む —— 名前を 2 箇所に書くと、
+ * DB が増えたときに片方だけ直される（このリポジトリが何度も踏んでいる
+ * 形）。**ここを直せば、見張りが見る対象も自動で増える。**
+ */
+export const DATABASES = {
   identity: {
     name: "u18-identity",
     dir: join(ROOT, "apps/auth-worker"),
@@ -564,7 +571,18 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`\nエラー: ${error.message}`);
-  process.exitCode = 1;
-});
+/**
+ * **直接実行されたときだけ `main()` を呼ぶ。**
+ *
+ * この guard が無いと、`DATABASES` を読むためだけに import しても
+ * `main()` が走り、`process.argv` を自分のコマンドライン引数として
+ * 読んでしまう（`check-backup-freshness.mjs` からの import で実際に
+ * 踏みかけた —— 引数の形が合わず `default:` 節に落ちて、この docblock を
+ * 標準出力へ吐いて `process.exitCode = 1` にする）。
+ */
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`\nエラー: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

@@ -1,4 +1,5 @@
 import { sessionCookieName } from "@u18/contracts";
+import { isCardId } from "@u18/domain";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { z } from "zod";
@@ -28,8 +29,8 @@ import type { AppBindings } from "./types";
  * `domain/services/target-url.ts` に経緯を書いてある。
  */
 
-/** 実際の ID の形とは合っていない。目的は無駄打ちの抑制（#365、`redirect.routes.ts`）。 */
-const cardIdSchema = z.string().regex(/^[a-z0-9_]{1,64}$/);
+/** カード ID の形の判定は `@u18/domain` の `isCardId()` 1 箇所（#365）。 */
+const cardIdSchema = z.string().refine(isCardId);
 
 const updateTargetSchema = z.object({
   // 長さの上限は Domain 側でも見るが、ここでも切る。

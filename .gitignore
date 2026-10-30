@@ -13,6 +13,15 @@ coverage/
 .env.*
 !.env.example
 
+# Python のバイトコード（scripts/*.py を動かすと CPython が作る）。
+# **#388 でこれが追跡されたまま main に入った。** その時点で
+# .gitignore に Python の行は 1 つも無かった。
+# .gitignore が止められるのは「まだ追跡していないファイル」だけなので、
+# 既に入ってしまったものは git の中身の側を見ないと気づけない
+# （scripts/check-tracked-artifacts.mjs がそちらを見ている）。
+__pycache__/
+*.pyc
+
 # Claude Code がサブエージェント用に作る一時 worktree。
 # リポジトリ内に置かれるので、追跡・整形・lint の対象から外す。
 .claude/worktrees/
