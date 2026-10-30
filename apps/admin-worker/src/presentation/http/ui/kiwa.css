@@ -1,0 +1,35 @@
+/*
+ * admin-worker が配信する Tailwind の入口（#390 決定 16 ③）。
+ *
+ * **auth-worker / dashboard-worker / nfc-worker と同じ形。** 中身がほぼ
+ * 同じなのは偶然ではなく、どの Worker も自分の CSS を自分で配信している
+ * ためである（借りない理由は `ui/asset-paths.ts` の #211 の節）。
+ * 共有しているのはトークンと primitives（`@u18/web-ui`）のほうで、
+ * 走査対象は Worker ごとに違う（ここは admin の画面を見る）。
+ *
+ * `scripts/build-client.mjs` がこのファイルを PostCSS に通し、出てきた
+ * CSS の文字列を `generated/kiwa-stylesheet.ts` へ書く。配信するのは
+ * その文字列で、URL のハッシュも同じ文字列から計算する（#211）。
+ *
+ * ## `source(none)` にして `@source` を自分で書いている
+ *
+ * 既定の自動検出はこの CSS ファイルの置き場所から上へ辿る。ここは
+ * Worker の中なので、放っておくと `node_modules` の外側や他の Worker まで
+ * 対象に入りうる。走査対象は明示する。
+ *
+ * ## 走査対象が 2 つあるのはなぜか
+ *
+ * Tailwind はソースに出てくる文字列を見てユーティリティを生成する。
+ * class を組み立てているのは 2 箇所で、どちらが欠けても
+ * class は HTML に出るのに CSS が無い状態になる（#320 と同じ形）:
+ *
+ *  - この Worker の画面（`./`）
+ *  - `@u18/web-ui` が持つ Kiwa の primitives（`packages/web-ui/src/kiwa/`）
+ */
+
+@import "tailwindcss" source(none);
+
+@source "./";
+@source "../../../../../../packages/web-ui/src/kiwa/";
+
+@import "../../../../../../packages/web-ui/src/kiwa/theme.css";

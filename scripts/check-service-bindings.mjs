@@ -87,6 +87,11 @@ const EXTERNAL_SERVICES = new Set();
 const ALLOWED_ENTRYPOINT_CONSUMERS = new Map([
   ["IdentityRPC", new Set(["dashboard-worker", "nfc-worker"])],
   ["IdentityAdminRPC", new Set(["dashboard-worker"])],
+  // #382 / #390 決定 16 ③。admin-worker が他人のカードの無効化・
+  // 遷移先の書き換え・一覧・発行を呼ぶための delegated RPC。
+  // **admin-worker だけ。** 他の Worker がここを束縛すると、認可を
+  // 検証しない経路（`docs/threat-model.md` N-10）を持ち出せることになる。
+  ["NfcAdminDelegatedRPC", new Set(["admin-worker"])],
 ]);
 
 /** apps/ 配下の Worker 設定をすべて拾う。列挙しないのは Worker が増えたときに漏らさないため。 */

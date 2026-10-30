@@ -22,3 +22,4 @@ coverage/
 apps/auth-worker/src/presentation/http/ui/generated/
 apps/dashboard-worker/src/presentation/http/ui/generated/
 apps/nfc-worker/src/presentation/http/ui/generated/
+apps/admin-worker/src/presentation/http/ui/generated/

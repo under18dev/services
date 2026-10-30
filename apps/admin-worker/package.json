@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "node scripts/build-client.mjs && wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "build": "node scripts/build-client.mjs && wrangler deploy --dry-run --outdir dist",
+    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json",
+    "test": "node scripts/build-client.mjs && vitest run",
+    "build:client": "node scripts/build-client.mjs",
     "cf-typegen": "wrangler types",
     "approval:status": "node scripts/admin-approval.mjs status",
     "approval:list": "node scripts/admin-approval.mjs list",
@@ -28,6 +29,9 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.7",
+    "@tailwindcss/postcss": "4.3.3",
+    "postcss": "8.5.31",
+    "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
     "wrangler": "4.152.0"

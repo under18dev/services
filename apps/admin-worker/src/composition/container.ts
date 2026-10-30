@@ -1,4 +1,6 @@
 import { createAdminDatabase } from "@u18/admin-db";
+import type { NfcAdminDelegatedRpcContract } from "@u18/contracts";
+import { asNfcAdminDelegatedRpc } from "../infrastructure/rpc/nfc-admin-delegated.gateway";
 import type { ApprovalRepository } from "../application/ports/approval.repository";
 import { DrizzleApprovalRepository } from "../infrastructure/persistence/drizzle-approval.repository";
 import { DiscoveryCache } from "../oidc/discovery-cache";
@@ -20,6 +22,8 @@ export type ContainerOverrides = {
   readonly fetcher?: typeof fetch;
   readonly clock?: Clock;
   readonly approvals?: ApprovalRepository;
+  /** nfc-worker への delegated RPC。テストでは fake を差して Service Binding 無しで確かめる。 */
+  readonly nfcCards?: NfcAdminDelegatedRpcContract;
 };
 
 /**
@@ -57,8 +61,9 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
 
   const approvals =
     overrides.approvals ?? new DrizzleApprovalRepository(createAdminDatabase(env.ADMIN_DB));
+  const nfcCards = overrides.nfcCards ?? asNfcAdminDelegatedRpc(env.NFC_ADMIN_DELEGATED);
 
-  return { env, fetcher, clock, discovery, approvals };
+  return { env, fetcher, clock, discovery, approvals, nfcCards };
 }
 
 export type Container = ReturnType<typeof createContainer>;
