@@ -19,7 +19,7 @@
       "database_name": "u18-admin",
       // `wrangler d1 create u18-admin` の出力で置き換える
       // （`docs/admin-worker-setup.md`）。
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "984cc109-cfa3-421e-b984-f7252af80652",
       "migrations_dir": "../../packages/admin-db/drizzle",
     },
   ],
@@ -52,7 +52,7 @@
         {
           "binding": "ADMIN_DB",
           "database_name": "u18-admin",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "984cc109-cfa3-421e-b984-f7252af80652",
           "migrations_dir": "../../packages/admin-db/drizzle",
         },
       ],
