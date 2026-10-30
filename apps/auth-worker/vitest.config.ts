@@ -61,6 +61,51 @@ function collectAuditEventNames(dir: string): string[] {
   return names;
 }
 
+/**
+ * Presentation 層が `isAdmin:` に詰めている右辺を集める（決定 8 / RR-5）。
+ *
+ * **外へ出す `isAdmin` は、`users` の行ではなく UseCase の結果から来ること。**
+ * 旗が立っているかと、このセッションで管理者として振る舞ってよいかは別で、
+ * 後者を決めているのは `GetSessionUseCase` 1 か所しかない
+ * （`User.actsAsAdminWith`）。Presentation が `user.snapshot()` から
+ * 直接詰めると、**そこだけ古い意味の値が外へ出る。**
+ *
+ * 実際に `getUserProfile` と `updateProfile` の 2 か所がそうなっていた。
+ * 型は `boolean` なので入れ替えても何も言われない —— **間違いと正解が
+ * 同じ型をしている**ので、型検査の外でしか見つけられない。
+ *
+ * 走査は Node 側でしかできない（テスト本体は workerd の中で動く）。
+ * 照合は `test/admin-session-passkey.test.ts`。
+ */
+function collectPresentationIsAdminSources(dir: string): string[] {
+  const sources: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      sources.push(...collectPresentationIsAdminSources(path));
+      continue;
+    }
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      // `collectAuditEventNames` と同じ理由で散文を除く。説明のために
+      // `isAdmin: props.isAdmin` と書いた JSDoc が違反として出てしまう。
+      if (/^\s*\*/.test(line)) continue;
+      const code = line.split("//")[0] ?? "";
+      for (const match of code.matchAll(/isAdmin:\s*([^,;\n]+)/g)) {
+        const expression = match[1]!.trim();
+        // 型宣言（`readonly isAdmin: boolean`）は代入ではない。
+        if (expression === "boolean") continue;
+        sources.push(expression);
+      }
+    }
+  }
+  return sources;
+}
+
+const presentationIsAdminSources = collectPresentationIsAdminSources(
+  join(import.meta.dirname, "src/presentation"),
+).sort();
+
 const auditEventNames = [
   ...new Set(collectAuditEventNames(join(import.meta.dirname, "src"))),
 ].sort();
@@ -77,6 +122,7 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
           TEST_WRANGLER_JSONC: wranglerSource,
           TEST_AUDIT_EVENT_NAMES: auditEventNames,
+          TEST_PRESENTATION_IS_ADMIN_SOURCES: presentationIsAdminSources,
           ENVIRONMENT: "development",
           ISSUER: "http://localhost:8787",
           IP_HASH_PEPPER: "test-pepper",

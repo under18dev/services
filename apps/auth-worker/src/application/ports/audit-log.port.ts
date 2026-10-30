@@ -102,6 +102,23 @@ export const AUDIT_EVENTS = [
   "ops.admin.granted",
   /** 管理権限を剥がした。締め出しの手口でもある。 */
   "ops.admin.revoked",
+  /**
+   * 管理者の旗が立ったアカウントが、**Passkey 以外で張られたセッション**で
+   * 現れた（決定 8 / 脅威モデル RR-5）。権限は与えず、その事実だけを出す。
+   *
+   * **正常な経路では起こらない。** `IssueSessionUseCase` が管理者の
+   * `email_otp` ログインを拒否するので、この状態は
+   * `grantAdminSql` と `revokeNonPasskeySessionsSql` の間に張られたセッションか、
+   * 2 文目が流れなかった場合にしか残らない。`oauth.code.replayed` や
+   * `passkey.counter_regression` と同じ「単発でも異常」の側である。
+   *
+   * **`audit_logs` には書かず Workers のログへ出す**
+   * （`application/use-cases/get-session.use-case.ts`）。出せるのは有効な
+   * セッションを持つ管理者だけなので外から誘発できる量ではないが、
+   * `getSession` はリクエストのたびに通る経路で、しかも応答時間を
+   * 畳み込んである（#126）。そこへ INSERT を足さない。
+   */
+  "admin.session_not_passkey",
   /** displayName / username の変更。 */
   "profile.updated",
 
@@ -270,6 +287,24 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
    * だけで `audit_logs` に行が現れない）。`Record` の網羅のために置いている。
    */
   "csrf.rejected": "standard",
+  /**
+   * これも**使われない行**。`admin.session_not_passkey` は Workers のログへ
+   * 出すだけで `audit_logs` に現れない（決定 8 / RR-5）。`Record` の網羅の
+   * ために置いている。
+   *
+   * 仮に書くことにしたら `security` に入れる —— 件数はほぼゼロで、
+   * 「管理者の前提が崩れていた期間」は後から遡りたい種類の情報だからである。
+   * ここが `standard` なのは**出力先の話であって重要度の話ではない。**
+   *
+   * **この「実際には使われない行」はこれで 2 件目である**
+   * （`rate_limit.exceeded` / `csrf.rejected` と合わせて 3 件）。
+   * `Record` の網羅が要求するので値を置いているが、**置いた値が意味を
+   * 持たない行が増えていく形**になっている。3 件目を足すときは、
+   * 区分を `"not_persisted"` のような値で表せないかを先に考えること ——
+   * いまは「掃除の対象になる期間」と「そもそも掃除の対象でない」が
+   * 同じ型で書かれている。
+   */
+  "admin.session_not_passkey": "standard",
 };
 
 /**

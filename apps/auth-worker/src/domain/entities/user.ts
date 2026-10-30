@@ -96,6 +96,36 @@ export class User {
   }
 
   /**
+   * **いま手元にあるこのセッションで、管理者として振る舞ってよいか**
+   * （決定 8 / 脅威モデル RR-5）。
+   *
+   * `isAdmin` と `permitsAuthMethod` を 1 つにまとめただけだが、**この 2 つを
+   * 別々に見るのをやめることがこの関数の目的**である。
+   *
+   * 決定 8 の「管理者は Passkey 必須」は長らく `IssueSessionUseCase` の
+   * 入口側にしか無かった。つまり **`sessions` に OTP の行が無いことが前提**で、
+   * 権限の判定はその前提に寄りかかって `users.is_admin` だけを見ていた。
+   * ところが権限の付与は `grantAdminSql` と `revokeNonPasskeySessionsSql` の
+   * 2 文に分かれており、その間に張られた（あるいは revoke が落ちて
+   * 生き残った）OTP セッションは**前提の外**に出る。前提が崩れた瞬間に
+   * 権限の判定は何も守らなくなる。
+   *
+   * だから**入口ではなく使う側で毎回確かめる**。ログイン時に 1 度通った
+   * ことではなく、**この 1 回の操作がどの認証方式に支えられているか**を
+   * 見る。`sessions.auth_method` は発行時に決まって以後変わらないので、
+   * 追加の問い合わせも要らない。
+   *
+   * **`permitsAuthMethod` に乗せているのは意図的である。** 決定 8 を緩めて
+   * 管理者の OTP ログインを許す日が来たら、権限の判定も同時に緩むべきで、
+   * **片方だけ緩んだ状態（ログインは通るが権限が出ない / その逆）を
+   * 作れないようにしてある。** 逆に言うと、**`permitsAuthMethod` を
+   * 緩めるときは、ここも緩むことを承知で緩めること。**
+   */
+  actsAsAdminWith(method: AuthMethod): boolean {
+    return this.props.isAdmin && this.permitsAuthMethod(method);
+  }
+
+  /**
    * 認証器をあと `remainingAfterRemoval` 本残す形で 1 本外してよいか（#75 / #83）。
    *
    * 一般利用者は 0 本まで外せる。決定 2 によりメール OTP が残るので締め出されず、

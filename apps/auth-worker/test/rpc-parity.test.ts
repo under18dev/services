@@ -1,5 +1,4 @@
-import { passkeys, users } from "@u18/db";
-import { eq } from "drizzle-orm";
+import { passkeys } from "@u18/db";
 import { newId } from "@u18/domain";
 import { SELF, createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -234,8 +233,15 @@ describe("無効なセッションは両方の入口で拒否される", () => {
  *
  * 常に `true` を返すよう壊しても nfc 側のテストは落ちない —— あちらは
  * fake の gateway を使うため。**その境目をこちらで塞ぐ。**
+ *
+ * **ここで `authMethod` を書くようになった経緯**（RR-5）。以前この
+ * describe は `seedLoggedInUser()`（= `email_otp` のセッション）に
+ * `is_admin` を立てて `true` を期待していた。つまり**「OTP セッションの
+ * 管理者に権限が出る」ことをテストが固定していた**。決定 8 がそれを
+ * 禁じているので、期待のほうを直した。条件は
+ * `admin-session-passkey.test.ts` にまとめてある。
  */
-describe("getSession の isAdmin は実際の users.is_admin を返す", () => {
+describe("getSession の isAdmin は、このセッションで管理者として振る舞えるかを返す", () => {
   it("一般利用者は false", async () => {
     const user = await seedLoggedInUser();
 
@@ -245,8 +251,7 @@ describe("getSession の isAdmin は実際の users.is_admin を返す", () => {
   });
 
   it("管理者は true", async () => {
-    const user = await seedLoggedInUser();
-    await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "passkey" });
 
     const result = await rpc.getSession({ sessionToken: user.sessionToken });
 
@@ -255,8 +260,7 @@ describe("getSession の isAdmin は実際の users.is_admin を返す", () => {
 
   it("getUserProfile も同じ値を返す", async () => {
     // 2 箇所に同じ値があるので、片方だけ壊れる形を塞ぐ。
-    const user = await seedLoggedInUser();
-    await db().update(users).set({ isAdmin: true }).where(eq(users.id, user.userId)).run();
+    const user = await seedLoggedInUser({ isAdmin: true, authMethod: "passkey" });
 
     const session = await rpc.getSession({ sessionToken: user.sessionToken });
     const profile = await rpc.getUserProfile({ sessionToken: user.sessionToken });

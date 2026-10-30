@@ -1,11 +1,31 @@
+import {
+  Alert,
+  AlertDescription,
+  Badge,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Separator,
+} from "@u18/web-ui/kiwa";
 import type { FC } from "hono/jsx";
 import type { AppCatalogView } from "./app-catalog";
 import { isExternalUrl } from "./app-catalog";
 import { GRANTS_PATH } from "./asset-paths";
-import { DashboardShell } from "./dashboard-shell";
+import { KiwaShell } from "./kiwa-shell";
 
 /**
  * u18 Identity で使えるアプリ（`/account/apps`、#308）。
+ *
+ * **ダッシュボードで唯一 Kiwa UI で組んである画面である**（#332 の P0）。
+ * 残り 5 枚は手書き CSS の `DashboardShell` のままで、移し替えるのは P1。
+ * ここが見本なので、**P1 はこのファイルの形を真似すればよい**ようにして
+ * ある。
  *
  * ## `/account/grants` との違いを画面でも言う
  *
@@ -18,17 +38,21 @@ import { DashboardShell } from "./dashboard-shell";
  *
  * ## JS を 1 行も要求しない
  *
- * 読むだけの画面なので `scripts` を渡していない。取り消しの操作が無いので
- * `hasRevokeActions` も立てない —— 立てると「JS が無いとできないこと」が
- * あると読めてしまう。
+ * 読むだけの画面なので `KiwaShell` に `scripts` の口すら無い。
+ * Kiwa UI は SSR が既定で、ここで使っている primitives はどれも
+ * クライアント JS を持たない。
  *
  * ## インラインの `style` を書かない
  *
  * **本番の CSP は `style-src 'self'` で `'unsafe-inline'` を含まない**
  * （`@u18/web-ui` の `page-headers.ts`）。`style="..."` はブラウザに
  * 破棄されるので、**ローカルでは効いて本番でだけ崩れる**（ホームが
- * これで本番の枠線を密着させた —— #320）。パネルの間隔は `.stack` が
- * 持つ：**間隔は入れ物の持ち物**で、並ぶ側は何も知らない。
+ * これで本番の枠線を密着させた —— #320）。Tailwind のクラスで書く。
+ *
+ * **クラスを書いても同じ失敗は起こりうる。** `theme.css` に無いトークンを
+ * 使うと（`bg-success-soft` など）Tailwind はそのユーティリティを生成
+ * しないので、**class は HTML に出るのに CSS が無い。** 見え方は #320 と
+ * 同じである。
  *
  * ## 載っている文字列は運用者が書いたものである
  *
@@ -44,105 +68,119 @@ export type AppsPageProps = {
 };
 
 export const AppsPage: FC<AppsPageProps> = ({ view }) => (
-  <DashboardShell
+  <KiwaShell
     title="アプリ"
     heading="u18 Identity で使えるアプリ"
     lead="u18 Identity のアカウントでそのまま使えるアプリの一覧です。あなたがアクセスを許可したアプリは「連携アプリ」で確認できます。"
     current="apps"
   >
-    <div class="stack">
-      {/*
-        **`listGrants` が落ちても一覧は出す。** バッジは付加情報で、
-        本体を道連れにする理由が無い（この画面はダッシュボードで唯一
-        「RPC が失敗しても出せる中身がある」画面である）。
-        ただし**黙って消さない** —— 連携しているのにしていないように
-        見えるので、確認できていないことを言う。
-      */}
-      {!view.grantsKnown && (
-        <p class="notice">
+    {/*
+      **`listGrants` が落ちても一覧は出す。** バッジは付加情報で、
+      本体を道連れにする理由が無い（この画面はダッシュボードで唯一
+      「RPC が失敗しても出せる中身がある」画面である）。
+      ただし**黙って消さない** —— 連携しているのにしていないように
+      見えるので、確認できていないことを言う。
+    */}
+    {!view.grantsKnown && (
+      <Alert>
+        <AlertDescription>
           いまアプリとの連携状況を確認できません。「連携済み」の表示が出ていなくても、
           連携が解除されたわけではありません。
-        </p>
-      )}
+        </AlertDescription>
+      </Alert>
+    )}
 
-      {view.groups.length === 0 ? (
-        <div class="panel">
-          <div class="panel-body">
-            {/*
-              **枠だけ作って埋まっているように見せない。** いま載せられる
-              アプリが無いことは、それ自体が伝えたい状態である（#306）。
-            */}
-            <p class="empty">まだありません。</p>
-          </div>
-        </div>
-      ) : (
-        view.groups.map((group) => (
-          <div key={group.category.key} class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">{group.category.label}</h2>
-              <p class="panel-desc">{group.category.description}</p>
-            </div>
-            <div class="panel-body">
-              <ul class="list">
-                {group.items.map((item) => {
-                  const external = isExternalUrl(item.url);
+    {view.groups.length === 0 ? (
+      /*
+        **枠だけ作って埋まっているように見せない。** いま載せられる
+        アプリが無いことは、それ自体が伝えたい状態である（#306）。
+      */
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>まだありません。</EmptyTitle>
+          <EmptyDescription>
+            u18 Identity のアカウントで使えるアプリを掲載したときに、ここに並びます。
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    ) : (
+      view.groups.map((group) => (
+        <Card key={group.category.key}>
+          <CardHeader>
+            <CardTitle>{group.category.label}</CardTitle>
+            <CardDescription>{group.category.description}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul class="flex flex-col">
+              {group.items.map((item, index) => {
+                const external = isExternalUrl(item.url);
 
-                  return (
-                    <li key={item.id}>
-                      <div class="item-main">
-                        <div class="item-title">
-                          <a
-                            href={item.url}
-                            {...(external
-                              ? // 別ホストへ出すリンクには必ず付ける。`noopener` は
-                                // 遷移先から `window.opener` でこの画面を触らせない
-                                // ため、`noreferrer` は「どの画面から来たか」を
-                                // 相手のサーバーへ渡さないため。
-                                { rel: "noopener noreferrer" }
-                              : {})}
-                          >
-                            {item.name}
-                          </a>
-                          {/*
-                            **`connected` が true のときだけ出す。** false は
-                            「まだ同意していない」、null は「言えない」
-                            （RP でない / `listGrants` が取れなかった）。
-                            どちらも何も出さない —— 「未連携」と書くと嘘になる。
-                          */}
-                          {item.connected === true && <span class="badge">連携済み</span>}
-                        </div>
-                        <p class="item-meta">{item.description}</p>
+                return (
+                  <li key={item.id}>
+                    {/*
+                      **区切りは 1 件目の前に置かない。** 先頭に出すと
+                      `CardHeader` との間に線が 2 本並ぶ。件数で分岐
+                      させずに済むよう、間に入る側だけが描く。
+                    */}
+                    {index > 0 && <Separator class="my-3" />}
+                    <div class="flex flex-col gap-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <a
+                          href={item.url}
+                          class="font-medium underline-offset-4 hover:underline"
+                          {...(external
+                            ? // 別ホストへ出すリンクには必ず付ける。`noopener` は
+                              // 遷移先から `window.opener` でこの画面を触らせない
+                              // ため、`noreferrer` は「どの画面から来たか」を
+                              // 相手のサーバーへ渡さないため。
+                              { rel: "noopener noreferrer" }
+                            : {})}
+                        >
+                          {item.name}
+                        </a>
                         {/*
-                          **URL を文字列で出すのは u18 を出ていくリンクだけ。**
-                          押す前にどこへ行くのか分かる必要があるのはそちらで、
-                          同一オリジンの行き先はダッシュボードの中に留まる
-                          （`href` には同じ値が入っているので、確かめたい人は
-                          読める）。内部にも出すと、`/account/nfc` のような
-                          パスと `https://...` の全体 URL が同じ見た目で
-                          並び、**どれが外部なのかが読めなくなる。**
+                          **`connected` が true のときだけ出す。** false は
+                          「まだ同意していない」、null は「言えない」
+                          （RP でない / `listGrants` が取れなかった）。
+                          どちらも何も出さない —— 「未連携」と書くと嘘になる。
                         */}
-                        {external && <p class="item-raw">{item.url}</p>}
+                        {item.connected === true && <Badge>連携済み</Badge>}
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </div>
-        ))
-      )}
+                      <p class="text-sm/relaxed text-foreground-muted">{item.description}</p>
+                      {/*
+                        **URL を文字列で出すのは u18 を出ていくリンクだけ。**
+                        押す前にどこへ行くのか分かる必要があるのはそちらで、
+                        同一オリジンの行き先はダッシュボードの中に留まる
+                        （`href` には同じ値が入っているので、確かめたい人は
+                        読める）。内部にも出すと、`/account/nfc` のような
+                        パスと `https://...` の全体 URL が同じ見た目で
+                        並び、**どれが外部なのかが読めなくなる。**
+                      */}
+                      {external && (
+                        <p class="font-mono text-xs break-all text-foreground-soft">{item.url}</p>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      ))
+    )}
 
-      <div class="panel">
-        <div class="panel-header">
-          <h2 class="panel-title">連携アプリとの違い</h2>
-          <p class="panel-desc">
-            この一覧は、u18 Identity で使えるアプリとして掲載しているものの案内です。
-            あなたが実際にアクセスを許可したアプリと、その権限の取り消しは
-            <a href={GRANTS_PATH}>連携アプリ</a>
-            で行えます。
-          </p>
-        </div>
-      </div>
-    </div>
-  </DashboardShell>
+    <Card>
+      <CardHeader>
+        <CardTitle>連携アプリとの違い</CardTitle>
+        <CardDescription>
+          この一覧は、u18 Identity で使えるアプリとして掲載しているものの案内です。
+          あなたが実際にアクセスを許可したアプリと、その権限の取り消しは
+          <a href={GRANTS_PATH} class="text-foreground underline underline-offset-4">
+            連携アプリ
+          </a>
+          で行えます。
+        </CardDescription>
+      </CardHeader>
+    </Card>
+  </KiwaShell>
 );

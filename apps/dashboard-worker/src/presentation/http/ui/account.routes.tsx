@@ -1,6 +1,7 @@
 import { sessionCookieName } from "@u18/contracts";
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders, UI_STYLESHEET } from "@u18/web-ui";
 import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
+import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
@@ -11,6 +12,7 @@ import {
   APPS_ROUTE,
   GRANTS_ROUTE,
   ISLAND_ROUTE,
+  KIWA_STYLESHEET_ROUTE,
   OVERVIEW_ROUTE,
   PASSKEYS_ROUTE,
   PROFILE_ROUTE,
@@ -183,6 +185,22 @@ export const accountUiRoutes = new Hono<AppBindings>()
       <AppsPage view={buildAppCatalog(APP_CATALOG, grants.ok ? grants.value : null)} />,
     );
   })
+
+  /**
+   * Kiwa UI のスタイルシート（#332）。**`u18.css` と両方を配信している。**
+   *
+   * いま読んでいるのは `/account/apps` の 1 枚だけ。残り 5 枚は
+   * `u18.css` のままで、1 枚のページが両方を読むことは無い（理由は
+   * `asset-paths.ts`）。P1 / P2 が終わったら下の `u18.css` 側が消える。
+   *
+   * CSS と JS と同じく全利用者に同じ中身で、個人情報を含まない。
+   */
+  .get(KIWA_STYLESHEET_ROUTE, (c) =>
+    c.body(KIWA_STYLESHEET, 200, {
+      "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": ASSET_CACHE_CONTROL,
+    }),
+  )
 
   /** 共有スタイルシート（`@u18/web-ui` の `UI_STYLESHEET`）。 */
   .get(STYLESHEET_ROUTE, (c) =>

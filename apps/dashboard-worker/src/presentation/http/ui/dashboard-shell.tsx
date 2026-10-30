@@ -1,15 +1,8 @@
 import { Layout } from "@u18/web-ui";
 import type { Child, FC } from "hono/jsx";
-import {
-  APPS_PATH,
-  GRANTS_PATH,
-  LOGIN_PATH,
-  OVERVIEW_PATH,
-  PASSKEYS_PATH,
-  PROFILE_PATH,
-  SESSIONS_PATH,
-  STYLESHEET_PATH,
-} from "./asset-paths";
+import { LOGIN_PATH, OVERVIEW_PATH, STYLESHEET_PATH } from "./asset-paths";
+import { DASHBOARD_NAV_GROUPS } from "./dashboard-nav";
+import type { DashboardNavKey } from "./dashboard-nav";
 
 /**
  * ダッシュボードの外枠（#308）。
@@ -35,39 +28,12 @@ import {
  * （#308 の 3 番目）が入ってから足すこと。
  */
 
-export type DashboardNavKey =
-  "home" | "profile" | "passkeys" | "sessions" | "grants" | "apps" | "clients";
-
-type NavItem = { readonly key: DashboardNavKey; readonly href: string; readonly label: string };
-type NavGroup = { readonly label: string; readonly items: readonly NavItem[] };
-
-const ACCOUNT_GROUP: NavGroup = {
-  label: "アカウント",
-  items: [
-    { key: "profile", href: PROFILE_PATH, label: "プロフィール" },
-    { key: "passkeys", href: PASSKEYS_PATH, label: "パスキー" },
-    { key: "sessions", href: SESSIONS_PATH, label: "ログイン中の端末" },
-    { key: "grants", href: GRANTS_PATH, label: "連携アプリ" },
-  ],
-};
-
 /**
- * 「サービス」グループ（#308）。
- *
- * **「アカウント」と分ける。** あちらは「自分の設定をいじる」場所、
- * こちらは「u18 でログインして使う別のアプリへ行く」場所である。
- * 用事が違うものを同じ並びに置くと、どちらを探しているのか決めてから
- * でないと読めない一覧になる。
- *
- * **中身があるので作れる。** シェルの冒頭に書いたとおり、このグループは
- * NFC（#31）が終わるまで空だった。いまは `/account/apps` という押せる
- * 行き先が 1 つあるので置いている —— **空のグループを先に作らない**のと、
- * 中身ができたら作るのは同じ規則の表裏である。
+ * **並びは `dashboard-nav.ts` にある。** #332 の移行中は外枠が 2 つ
+ * （この手書き CSS 版と Kiwa 版）あり、両方に書くと片方にだけ項目を
+ * 足した状態が作れてしまう。あちらの冒頭を参照。
  */
-const SERVICE_GROUP: NavGroup = {
-  label: "サービス",
-  items: [{ key: "apps", href: APPS_PATH, label: "アプリ" }],
-};
+export type { DashboardNavKey };
 
 export type DashboardShellProps = {
   readonly title: string;
@@ -95,7 +61,7 @@ const Sidebar: FC<{ readonly current: DashboardNavKey }> = ({ current }) => (
     <a class="side-brand" href={OVERVIEW_PATH}>
       u18 Identity
     </a>
-    {[ACCOUNT_GROUP, SERVICE_GROUP].map((group) => (
+    {DASHBOARD_NAV_GROUPS.map((group) => (
       <div key={group.label} class="side-group">
         <p class="side-group-label">{group.label}</p>
         <ul class="side-links">

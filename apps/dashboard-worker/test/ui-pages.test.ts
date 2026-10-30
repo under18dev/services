@@ -10,6 +10,7 @@ import {
   OVERVIEW_PATH,
   PASSKEYS_PATH,
   PROFILE_PATH,
+  KIWA_STYLESHEET_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
@@ -116,20 +117,55 @@ describe("末尾スラッシュの有無で 404 にしない", () => {
 });
 
 describe("参照しているスタイルシートを自分で配信している", () => {
+  /**
+   * 画面がどちらのスタイルシートを読むか（#332）。
+   *
+   * **いま 2 本ある。** `/account/apps` だけが Kiwa UI（Tailwind）で、
+   * 残りは手書きの `u18.css`。P1 / P2 が終わったら 1 本に戻る。
+   *
+   * **1 枚のページが両方を読むことは無い。** Tailwind の preflight が
+   * 手書き CSS の前提（`body` の中央寄せなど）を潰すためで、下の
+   * 「読むのは 1 本だけ」がそれを見ている。混ぜられる形にしておくと、
+   * P1 で 1 枚ずつ移すときに「両方読み込む」が一番楽な逃げ道になる。
+   *
+   * `sentinel` は**中身が入れ替わっていないこと**を見るための目印。
+   * 両方に出る文字列を選ぶと、取り違えても気づけない。
+   */
+  const EXPECTED_STYLESHEET: readonly (readonly [string, string, string])[] = [
+    [OVERVIEW_PATH, STYLESHEET_PATH, ".dash-side"],
+    [PROFILE_PATH, STYLESHEET_PATH, ".dash-side"],
+    [PASSKEYS_PATH, STYLESHEET_PATH, ".dash-side"],
+    [SESSIONS_PATH, STYLESHEET_PATH, ".dash-side"],
+    [GRANTS_PATH, STYLESHEET_PATH, ".dash-side"],
+    [APPS_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
+  ];
+
+  it("一覧が PAGES を漏れなく覆っている", () => {
+    // 画面を足して**ここに書き忘れる**と、下の `it.each` が静かに
+    // その画面を見なくなる。
+    expect(EXPECTED_STYLESHEET.map(([path]) => path)).toEqual(PAGES);
+  });
+
   // **この Worker 単体で成立すること。** `<link href>` を手で書くと、
   // 配信ルート側だけ直して参照が古いまま、という形で 404 になる。
   // ブラウザは素の HTML を出すだけで、型検査もテストも何も言わない。
-  it.each(PAGES)("%s の <link> が指す先が 200 を返す", async (path) => {
-    const html = await (await withCookie(path, FULL_IDENTITY)).text();
-    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(html)?.[1];
+  it.each(EXPECTED_STYLESHEET)(
+    "%s の <link> が指す先が 200 を返す",
+    async (path, expected, sentinel) => {
+      const html = await (await withCookie(path, FULL_IDENTITY)).text();
+      const hrefs = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(
+        (m) => m[1] as string,
+      );
 
-    expect(href, `${path} に stylesheet の link が無い`).toBe(STYLESHEET_PATH);
+      // **1 本だけ。** 2 本読んでいたら上の「混ぜない」が破れている。
+      expect(hrefs, `${path} が読むスタイルシート`).toEqual([expected]);
 
-    const css = await get(href as string, {});
-    expect(css.status).toBe(200);
-    expect(css.headers.get("Content-Type")).toContain("text/css");
-    expect(await css.text()).toContain("--accent");
-  });
+      const css = await get(expected, {});
+      expect(css.status).toBe(200);
+      expect(css.headers.get("Content-Type")).toContain("text/css");
+      expect(await css.text()).toContain(sentinel);
+    },
+  );
 });
 
 describe("Cookie が無ければ RPC を呼ばずに 401 とログイン導線", () => {
@@ -572,11 +608,18 @@ describe("アプリのカタログ（#308）", () => {
       expect(html, `${entry.name} の行き先が出ていない`).toContain(`href="${entry.url}"`);
     }
 
-    // **カテゴリ名はサイドバーにも同じ語がある。** パネルの見出しで絞らないと、
+    // **カテゴリ名はサイドバーにも同じ語がある。** カードの見出しで絞らないと、
     // 一覧が空の画面でも通る。
+    //
+    // 絞り込みに使っているのは Kiwa UI の `data-slot`（#332）。**見た目の
+    // class を目印にしない** —— `panel-title` を見ていたときは、画面を
+    // Kiwa へ移しただけでここが落ちた。落ちたのは正しいが、**直し先が
+    // 「次のスタイルシートの class 名」になる**ので、移行のたびに同じ
+    // 書き換えが要る。`data-slot` は上流が構造を表すために置いている
+    // 属性で、スタイルシートが変わっても付いてくる。
     for (const key of new Set(APP_CATALOG.map((entry) => entry.category))) {
-      expect(html, `${labelOf(key)} の見出しが panel に無い`).toContain(
-        `panel-title">${labelOf(key)}`,
+      expect(html, `${labelOf(key)} の見出しがカードに無い`).toContain(
+        `data-slot="card-title" class="leading-none">${labelOf(key)}`,
       );
     }
 
@@ -753,8 +796,11 @@ describe("アプリのカタログ（#308）", () => {
       const external = await renderApps(buildAppCatalog([EXTERNAL], []));
       const internal = await renderApps(buildAppCatalog([SAME_ORIGIN], []));
 
-      expect(external).toContain('class="item-raw">https://app.example/');
-      expect(internal).not.toContain('class="item-raw"');
+      // **「文字として出ているか」で見る。** `href` にも同じ値が入るので、
+      // 要素の中身であること（`>...<`）まで見ないと区別が付かない。
+      // class 名を目印にしない理由は「実物のカタログを端から端まで描く」を参照。
+      expect(external).toContain(">https://app.example/</p>");
+      expect(internal).not.toContain(">/account/nfc</p>");
     });
   });
 
