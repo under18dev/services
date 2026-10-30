@@ -122,6 +122,39 @@ export class InMemoryUserRepository implements UserRepository {
     this.store.set(id, { ...props, status: "suspended" });
     return true;
   }
+
+  /**
+   * 管理画面の一覧（#375）。
+   *
+   * **本物と同じ並びにする**（`created_at` 降順、同値は `id` 降順）。
+   * ここだけ違う並びにすると、**UseCase のカーソルの検査が
+   * 「このフェイクでだけ通る」**ものになる。
+   */
+  async listForAdmin(criteria: {
+    readonly query?: string;
+    readonly after?: { readonly createdAt: Date; readonly id: string };
+    readonly limit: number;
+  }): Promise<readonly User[]> {
+    const matches = [...this.store.values()]
+      .filter((props) => {
+        if (criteria.query === undefined) return true;
+        const q = criteria.query.trim();
+        return props.email.toLowerCase() === q.toLowerCase() || props.username === q;
+      })
+      .filter((props) => {
+        if (criteria.after === undefined) return true;
+        const at = props.createdAt.getTime();
+        const cursorAt = criteria.after.createdAt.getTime();
+        return at < cursorAt || (at === cursorAt && props.id < criteria.after.id);
+      })
+      .sort((a, b) => {
+        const diff = b.createdAt.getTime() - a.createdAt.getTime();
+        return diff !== 0 ? diff : b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
+      })
+      .slice(0, criteria.limit);
+
+    return matches.map((props) => User.fromPersistence(props));
+  }
 }
 
 export class InMemorySessionRepository implements SessionRepository {

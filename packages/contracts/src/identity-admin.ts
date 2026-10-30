@@ -210,6 +210,150 @@ export type DisableOAuthClientResult = RpcResult<{
   readonly disabled: boolean;
 }>;
 
+// ------------------------------------------------------------ 利用者の管理
+//
+// **他人の `userId` を扱う最初の領域である**（#375 / #382）。これまでの
+// RPC はすべて「セッションの持ち主」しか指せなかった —— `sessionToken` が
+// 誰を指すかを auth-worker が決めており、**呼ぶ側は対象を選べなかった。**
+//
+// ## 増えた面
+//
+// 1. **列挙できるようになる。** 一覧がある以上「u18 に誰が居るか」は
+//    管理者から見える。隠しても意味が無いので隠さない代わりに、
+//    **管理者でない呼び出しは `not_found`** に畳む（`admin-access.ts`）
+// 2. **`userId` が入力になる。** 総当たりの的が増えるが、**的に当たっても
+//    管理者のセッションが無ければ何も返らない。** ID の秘匿を防御に
+//    使わない（`revokeSession` が他人のセッション ID と存在しない ID を
+//    同一視しているのと同じ判断）
+//
+// ## メールアドレスを載せる
+//
+// **これは「他人の個人情報を画面に出す」最初の口である。** 載せるのは、
+// 運用の問い合わせが**アドレスで来る**ため —— 載せないと、管理者は結局
+// `wrangler d1 execute` で SQL を打つことになり、この画面を作った意味が
+// 無くなる（ランブック §11.6 / §11.7 はアドレスで本人を特定している）。
+//
+// **そのぶん置き場所を縛る。** 画面は `Cache-Control: no-store`
+// （dashboard の `root.use("*")` が既定で付ける）、**URL に載せない**
+// （`csrf.ts` が拒否のログに `pathname` を書く）。検索語はクエリではなく
+// **form POST の本文**で渡すこと。
+
+export const listUsersInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+  /**
+   * 絞り込み。**省略すると新しい順の先頭から返す。**
+   *
+   * 照合は「メールアドレスの完全一致」か「username の完全一致」だけで、
+   * **部分一致を持たない。** `LIKE %x%` は索引から外れて全表走査になる
+   * うえ、**管理者が思っていない行まで拾う** —— 問い合わせ対応で
+   * 「このアドレスの人」を引くのに部分一致は要らない。
+   */
+  query: z.string().min(1).max(320).optional(),
+  /** 続きを読む位置。前回の応答の `nextCursor` をそのまま渡す。 */
+  cursor: z.string().min(1).max(64).optional(),
+  /**
+   * 1 回で返す上限。**既定 50、最大 200。**
+   *
+   * 上限を置くのは応答の大きさのためだけではない。**1 回で全員を返せる
+   * 口があると、それが「利用者名簿を 1 リクエストで吸い出す口」になる。**
+   */
+  limit: z.number().int().min(1).max(200).optional(),
+});
+
+export type ListUsersInput = z.infer<typeof listUsersInputSchema>;
+
+/**
+ * 管理画面の一覧に出す 1 人分。
+ *
+ * **`UserProfile` と別の型にしてある。** あちらは「本人が見る自分」で、
+ * ここは「管理者が見る他人」である。同じ型を使い回すと、本人向けに
+ * 足した項目が管理画面にも自動で出る —— **逆もまた起きる**（管理用に
+ * 足した項目が本人の `/api/me` に出る）。
+ *
+ * **パスキーの公開鍵もセッショントークンも持たない。** `PasskeySummary`
+ * と同じで、フィルタではなく型で落とす（RR-13）。
+ */
+export type UserAdminSummary = {
+  /**
+   * 内部 ID。**凍結や失効の引数になるので載せる。**
+   *
+   * `OAuthClientSummary` が `oauth_clients.id` を載せていないのと
+   * 判断が違う。あちらは公開の `client_id` という別の鍵があったが、
+   * **利用者には username しか無く、あれは本人が変えられる。**
+   * 操作の宛先が時間で変わる鍵だと、**一覧で見た人と操作した人が
+   * 違う**ことが起こりうる。
+   */
+  readonly id: string;
+  readonly username: string;
+  readonly displayName: string;
+  /** **他人のアドレス。** 画面に出す条件は上の節を読むこと。 */
+  readonly primaryEmail: string;
+  readonly emailVerified: boolean;
+  /**
+   * `active` / `suspended` / `deleted`。
+   *
+   * **`suspended` は 2 つの理由で付く** —— 運営による凍結と、本人の退会
+   * （#318）。**`status` だけでは区別できない。** 区別は `audit_logs` の
+   * `account.closed` が持っているので、**画面で「凍結されています」と
+   * 言い切らないこと。**
+   */
+  readonly status: "active" | "suspended" | "deleted";
+  /**
+   * `users.is_admin` が立っているか。**「いま管理者として振る舞える」
+   * ではない。**
+   *
+   * ## 名前を `isAdmin` にしていない
+   *
+   * 契約の他の `isAdmin`（`SessionSummary` / `UserProfile`）は
+   * **`User.actsAsAdminWith(authMethod)`** の結果で、「**この
+   * セッションで**管理者として振る舞ってよいか」を意味する（決定 8 /
+   * RR-5 / #337）。一覧に出すのは**他人の行**で、その人がいまどんな
+   * セッションを持っているかは分からない。**同じ名前にすると、意味の
+   * 違う 2 つが同じ型・同じ名前で並ぶ。**
+   *
+   * #337 で踏んだのがまさにその形だった —— `isAdmin` の意味が狭まった
+   * のに、Presentation の 2 か所が `users` の行から直接詰めていて、
+   * **型は `boolean` なので何も言われなかった。** あれを見つけるために
+   * `vitest.config.ts` の走査（`isAdmin:` の右辺を集める）を入れてある。
+   * **この項目はその走査に引っかかって当然なので、名前のほうを変えた。**
+   *
+   * ## 旗が立っていてもログインできるとは限らない
+   *
+   * 決定 8 により、管理者はメール OTP 単独ではログインできない。
+   * **「管理者」と出ている人が、いま u18 に入れるかは別の話である。**
+   */
+  readonly hasAdminFlag: boolean;
+  /** ISO 8601 (UTC) */
+  readonly createdAt: string;
+};
+
+/**
+ * **最終ログイン（`users.last_login_at`、#286）を載せていない。**
+ *
+ * 列は実在するが、**Domain の `User` が持っていない** —— あれは
+ * `touchLastActive` が書くだけの列で、`UserProps` に写されていない。
+ * ここへ足すには Entity を広げる必要があり、**それは「一覧を出す」
+ * 以上の変更になる。**
+ *
+ * 載せる価値はある（保持期間は「最終利用から 1 年」で、ランブック
+ * §11.7 の起点がこの列である）。**足すときは Domain から**。
+ * 契約にだけ足して Presentation で行を直接読む形にしないこと ——
+ * そこだけ Repository を迂回する経路になる。
+ */
+
+export type ListUsersResult = RpcResult<{
+  readonly users: readonly UserAdminSummary[];
+  /**
+   * 続きがあるときだけ入る。**件数の合計は返さない。**
+   *
+   * `count(*)` は行が増えるほど重くなるうえ、**管理者が知りたいのは
+   * 「この条件の人が居るか」であって総数ではない。** 総数が要るように
+   * なったら、そのための口を別に作ること（一覧のついでに数えない）。
+   */
+  readonly nextCursor: string | null;
+}>;
+
 /**
  * dashboard-worker が Service Binding 越しに見る **管理用** Entrypoint の形。
  * auth-worker 側の `IdentityAdminRPC` はこの型を満たす必要がある。
@@ -234,4 +378,13 @@ export interface IdentityAdminRpcContract {
    * 止める経路は `scripts/oauth-client.mjs disable` だけに残してある。
    */
   disableOAuthClient(input: DisableOAuthClientInput): Promise<DisableOAuthClientResult>;
+  /**
+   * 利用者の一覧（#375）。**管理者のみ。**
+   *
+   * **再認証は要求していない。** 読み取りだけで、状態を 1 つも変えない
+   * —— `listOAuthClients` と同じ扱いである。変える操作（凍結・セッション
+   * の失効）をここへ足すときは、**そちらに `hasFreshAuthentication` を
+   * 付けること。**
+   */
+  listUsers(input: ListUsersInput): Promise<ListUsersResult>;
 }

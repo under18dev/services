@@ -61,4 +61,22 @@ export interface UserRepository {
    * `updated_at` だけが進むのを避ける。
    */
   closeAccount(id: string): Promise<boolean>;
+  /**
+   * 管理画面の一覧（#375）。**キーセット方式で、OFFSET を使わない。**
+   *
+   * `limit + 1` 件まで読んで、超えた分で「続きがあるか」を決めるのは
+   * **呼ぶ側（UseCase）の仕事**にしてある —— ここで `nextCursor` まで
+   * 組み立てると、並び順の決め方が Repository と契約の 2 か所に散る。
+   *
+   * **並びは `created_at` の降順、同値は `id` の降順。** `id` を混ぜる
+   * のは、同じミリ秒に作られた行が 2 つあるとカーソルがそこで止まる
+   * ため（テストの seed では実際に起きる）。
+   */
+  listForAdmin(criteria: {
+    /** メールアドレスか username の**完全一致**。部分一致は持たない。 */
+    readonly query?: string;
+    /** 前回の最後の行。**これより古いものを返す。** */
+    readonly after?: { readonly createdAt: Date; readonly id: string };
+    readonly limit: number;
+  }): Promise<readonly User[]>;
 }

@@ -41,7 +41,7 @@
  */
 
 export type AccountNavKey =
-  "profile" | "passkeys" | "sessions" | "grants" | "apps" | "nfc" | "clients";
+  "profile" | "passkeys" | "sessions" | "grants" | "apps" | "nfc" | "clients" | "users";
 
 export type AccountNavItem = {
   readonly key: AccountNavKey;
@@ -139,6 +139,17 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
      */
     label: "管理",
     items: [
+      {
+        /**
+         * **利用者の管理を先に置く**（#375）。運用の問い合わせはまず
+         * 「この人」から始まるので、管理の節で最初に目に入るべきものが
+         * これになる。OAuth クライアントは頻度が低い。
+         */
+        key: "users",
+        href: "/account/admin/users",
+        label: "利用者",
+        adminOnly: true,
+      },
       {
         key: "clients",
         href: "/account/admin/clients",

@@ -13,7 +13,8 @@ export type AdminAccessDeps = {
 };
 
 /** 拒否のログに出す操作名。呼び出し側がリテラルで渡す（外から来た文字列を入れない）。 */
-export type AdminOperation = "listOAuthClients" | "createOAuthClient" | "disableOAuthClient";
+export type AdminOperation =
+  "listOAuthClients" | "createOAuthClient" | "disableOAuthClient" | "listUsers";
 
 /**
  * 管理者のセッションであることを確かめる（#308 / 仕様書 §14.1 決定 8）。

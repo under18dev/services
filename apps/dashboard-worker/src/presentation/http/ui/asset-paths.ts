@@ -139,6 +139,23 @@ export const APPS_PATH = `${ACCOUNT_BASE_PATH}${APPS_ROUTE}` as const;
  * 更新系はこの下にぶら下げる。**別の接頭辞に置かない** —— 管理の経路が
  * 2 か所に散ると、`isAdmin` の確認を片方だけ忘れた状態が作れる。
  */
+/**
+ * 利用者の管理（#375）。**管理者だけ。**
+ *
+ * **一覧の GET と、検索の POST を分けてある。** 検索語はメールアドレス
+ * になりうるので、**クエリに載せない** —— `csrf.ts` が CSRF 失敗時の
+ * ログに `pathname` を書く（`search` は意図的に落としている）が、
+ * パスに入れればそれが残る。#358 が `CLAIM_CARD_PARAM` で辿った道と
+ * 同じ理由で、**こちらは逆向きに「クエリにも置かない」**にした ——
+ * 検索語は Referer にも履歴にも残る。
+ */
+export const ADMIN_USERS_ROUTE = "/admin/users";
+export const ADMIN_USERS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_ROUTE}` as const;
+
+/** 検索と続きの読み込み（form POST）。**検索語を URL に出さないため。** */
+export const ADMIN_USERS_SEARCH_ROUTE = "/admin/users/search";
+export const ADMIN_USERS_SEARCH_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_SEARCH_ROUTE}` as const;
+
 export const ADMIN_CLIENTS_ROUTE = "/admin/clients";
 export const ADMIN_CLIENTS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_ROUTE}` as const;
 
