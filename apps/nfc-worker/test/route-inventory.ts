@@ -44,6 +44,29 @@ export const REDIRECT_ROUTES: readonly Route[] = [{ method: "GET", path: "/c/:ca
 export const HEALTH_ROUTES: readonly Route[] = [{ method: "GET", path: "/health" }];
 
 /**
+ * カードを受け取った人向けの案内（#358）。
+ *
+ * **`go.under18.dev` に HTML を置くのは、これが初めてである。** それまで
+ * あのホストが返していたのは 302 と素のテキスト（404）だけだった。
+ *
+ * **認証しない。** `/c/:cardId` と同じ性質で、Cookie を読まないし発行も
+ * しない —— **読めなければ案内の意味が無い。** 下の検査が実際に
+ * Cookie 無しで 200 が返ることを確かめている。
+ *
+ * **`auth.under18.dev/docs` はこちらに来ない。** あちらの route は
+ * `/account/nfc` とその下だけで、`/docs` は auth-worker が受ける。
+ *
+ * スタイルシートは**カード画面のものを借りていない。** 中身は同じで
+ * ハッシュも同じなので借りれば 200 になるが、**それが #310 で踏んだ形**
+ * である（`ui/asset-paths.ts`）。接頭辞を厳密に持つと、公開面を数える
+ * 側から「案内が読むもの」と「カード画面が読むもの」が別に見える。
+ */
+export const DOCS_ROUTES: readonly Route[] = [
+  { method: "GET", path: "/docs" },
+  { method: "GET", path: "/docs/ui/kiwa.<hash>.css" },
+];
+
+/**
  * カード管理の API。**`auth.under18.dev/account/nfc/*` に載せてある。**
  *
  * **セッション Cookie が要る。** 無ければ 401 の JSON を返す
@@ -153,5 +176,6 @@ export const CARD_ROUTES: readonly Route[] = [
 export const EXPECTED_ROUTES: readonly Route[] = [
   ...REDIRECT_ROUTES,
   ...HEALTH_ROUTES,
+  ...DOCS_ROUTES,
   ...CARD_ROUTES,
 ];

@@ -68,3 +68,24 @@ export function claimUrl(accountOrigin: string, cardId: string): string {
   url.searchParams.set(CLAIM_CARD_PARAM, cardId);
   return url.toString();
 }
+
+/**
+ * カードを受け取った人向けの案内（#358）。
+ *
+ * ## `go.under18.dev/docs` である。`auth.under18.dev` ではない
+ *
+ * `wrangler.jsonc` の production route は `go.under18.dev/*` でホスト全体を
+ * 受けるので、**このパスは短縮 URL のホストから届く。** auth 側の route は
+ * `/account/nfc` とその下だけなので、`auth.under18.dev/docs` は
+ * auth-worker へ行く（こちらには来ない）。
+ *
+ * **カードに書いてあるのが `go.under18.dev` なので、案内も同じホストに置く。**
+ * タップした人がドメインを見て「ここは何だ」と思ったときに、
+ * **同じホストの `/docs` が答えになる。**
+ *
+ * ## 認証しない
+ *
+ * `/c/:cardId` と同じ性質を保つ —— **Cookie を読まないし発行もしない。**
+ * カードを拾っただけの人も、まだ登録していない人も読める。
+ */
+export const DOCS_PATH = "/docs";

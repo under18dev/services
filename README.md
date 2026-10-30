@@ -404,7 +404,7 @@ services/
 │   ├── config/                   共有 tsconfig と ESLint のレイヤ境界ルール
 │   └── testing/                  テスト用 fixture と FixedClock の再エクスポート
 ├── tests/                        e2e / oidc-conformance / security（いずれも未着手の空ディレクトリ）
-├── docs/                         仕様書・アーキテクチャ・脅威モデル・Runbook
+├── docs/                         仕様書・アーキテクチャ・脅威モデル・Runbook（運営が読むもの）
 ├── eslint.config.js              ルート ESLint。末尾でレイヤ境界ルールを展開する
 ├── tsconfig.base.json            strict 系オプションの基点
 └── pnpm-workspace.yaml           workspace 定義、peer 設定、allowBuilds、minimumReleaseAge
@@ -653,3 +653,10 @@ NFC タグ → https://go.under18.dev/c/<random-card-id>
 - [docs/architecture.md](./docs/architecture.md) — 実装済みアーキテクチャ、レイヤ強制、RPC 契約、実装状況
 - [docs/threat-model.md](./docs/threat-model.md) — 脅威モデル
 - [docs/runbook.md](./docs/runbook.md) — 運用手順
+- [docs/nfc-cards-operations.md](./docs/nfc-cards-operations.md) — NFC カードの配布と運用（**配る側**）
+
+**利用者向けの案内だけは、リポジトリの中に無い。** カードを受け取った人が読むものは
+**`https://go.under18.dev/docs`** で配信している —— カードに印字されているのが
+`go.under18.dev` なので、タップした人がドメインを見て辿り着ける場所に置いてある。
+ソースは [`apps/nfc-worker/src/presentation/http/ui/docs-page.tsx`](./apps/nfc-worker/src/presentation/http/ui/docs-page.tsx)。
+**`docs/` 配下に利用者向けの文書は無い**（あそこは運営が読むもの）。

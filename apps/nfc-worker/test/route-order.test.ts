@@ -54,6 +54,11 @@ describe("ルートの登録順", () => {
       "GET /account/nfc/claim",
       "POST /account/nfc/claim",
       "POST /account/nfc/claim",
+      // 案内のページ（#358）。**`go.under18.dev` 側の公開面。**
+      // アセットが先、ページが後（`pageSecurityHeaders` で 2 回出る）。
+      "GET /docs/ui/kiwa.<hash>.css",
+      "GET /docs",
+      "GET /docs",
     ]);
   });
 

@@ -8,6 +8,7 @@ import {
   CARD_CLAIM_ROUTES,
   CARD_PAGE_ROUTES,
   CARD_ROUTES,
+  DOCS_ROUTES,
   EXPECTED_ROUTES,
   HEALTH_ROUTES,
   REDIRECT_ROUTES,
@@ -45,7 +46,7 @@ describe("公開面の一覧", () => {
   });
 
   it("区分が重なっていない", () => {
-    const all = [...REDIRECT_ROUTES, ...HEALTH_ROUTES, ...CARD_ROUTES].map(
+    const all = [...REDIRECT_ROUTES, ...HEALTH_ROUTES, ...DOCS_ROUTES, ...CARD_ROUTES].map(
       (route) => `${route.method} ${route.path}`,
     );
     expect(all.length).toBe(new Set(all).size);
@@ -60,6 +61,7 @@ describe("公開面の一覧", () => {
       ["CARD_PAGE_ROUTES", CARD_PAGE_ROUTES],
       ["CARD_ASSET_ROUTES", CARD_ASSET_ROUTES],
       ["CARD_CLAIM_ROUTES", CARD_CLAIM_ROUTES],
+      ["DOCS_ROUTES", DOCS_ROUTES],
     ] as const) {
       expect(routes.length, `${name} が空`).toBeGreaterThan(0);
     }
@@ -153,6 +155,23 @@ describe("区分どおりの応答が返る", () => {
     for (const route of CARD_CLAIM_ROUTES) {
       expect(others).not.toContain(`${route.method} ${route.path}`);
     }
+  });
+
+  it("DOCS_ROUTES は Cookie 無しで 200（公開ページ）", async () => {
+    // **カードを拾っただけの人が読む。** ここが 302 や 401 になったら
+    // 案内の意味が無い。`/c/:cardId` と同じく Cookie を読まない経路である。
+    const response = await callAnonymously("GET", "/docs");
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/html");
+  });
+
+  it("案内のページは Cookie を発行しない", async () => {
+    // `/c/:cardId` と同じ性質を保つ。あの経路は Cookie を読まないし
+    // 発行もしない（`redirect.routes.ts`）。
+    const response = await callAnonymously("GET", "/docs");
+
+    expect(response.headers.get("Set-Cookie")).toBeNull();
   });
 
   it("CARD_ASSET_ROUTES は Cookie 無しで 200（公開アセット）", async () => {

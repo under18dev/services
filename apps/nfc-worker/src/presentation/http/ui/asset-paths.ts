@@ -1,5 +1,5 @@
 import { hashedFileName } from "@u18/web-ui";
-import { CARDS_UI_PATH } from "../base-path";
+import { CARDS_UI_PATH, DOCS_PATH } from "../base-path";
 import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 
@@ -72,3 +72,24 @@ export const KIWA_STYLESHEET_PATH = `${CARDS_UI_PATH}${KIWA_STYLESHEET_ROUTE}`;
  */
 export const ISLAND_ROUTE = `/ui/${hashedFileName("cards-island.js", CARDS_ISLAND_JS)}`;
 export const ISLAND_PATH = `${CARDS_UI_PATH}${ISLAND_ROUTE}`;
+
+/**
+ * 案内のページが読むスタイルシート（#358）。
+ *
+ * ## 中身は `KIWA_STYLESHEET_PATH` と同じだが、URL を分けてある
+ *
+ * **ハッシュが同じなので、借りれば 200 で通る。** `go.under18.dev/*` は
+ * ホスト全体を受けるので、案内のページから `/account/nfc/ui/kiwa.<hash>.css`
+ * を参照しても**実際に配信される。**
+ *
+ * **それでも分ける。** #310 で踏んだのがまさにこの形で、
+ * **中身が同じならハッシュも同じなので、借用が検査を素通りする。**
+ * 接頭辞を厳密に持てば、「案内のページが読むもの」と
+ * 「カード画面が読むもの」が**別の経路として数えられる。**
+ *
+ * **`/account/nfc/...` を案内のページから参照したくない理由はもう 1 つある**
+ * —— あちらはログインが要る画面の接頭辞である。公開のページが
+ * その下のものを読むと、**公開面の数え方が接頭辞で読めなくなる。**
+ */
+export const DOCS_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
+export const DOCS_STYLESHEET_PATH = `${DOCS_PATH}${DOCS_STYLESHEET_ROUTE}`;

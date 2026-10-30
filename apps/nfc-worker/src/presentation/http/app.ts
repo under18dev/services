@@ -1,14 +1,15 @@
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { createContainer, type ContainerOverrides } from "../../composition/container";
-import { CARDS_BASE_PATH, CARDS_UI_PATH } from "./base-path";
+import { CARDS_BASE_PATH, CARDS_UI_PATH, DOCS_PATH } from "./base-path";
 import { registerCardRoutes } from "./cards.routes";
 import { registerCardsUiRoutes } from "./ui/cards-ui.routes";
+import { registerDocsRoutes } from "./ui/docs.routes";
 import { registerRedirectRoutes } from "./redirect.routes";
 import type { AppBindings } from "./types";
 
 // パスの定義は base-path.ts にある（ui/asset-paths.ts との循環を避けるため）。
-export { CARDS_BASE_PATH, CARDS_UI_PATH };
+export { CARDS_BASE_PATH, CARDS_UI_PATH, DOCS_PATH };
 
 /**
  * nfc-worker の HTTP アプリ。
@@ -63,6 +64,10 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   // 画面は API より先に登録しない。`/account/nfc` と `/account/nfc/cards`
   // は別のパスなので衝突しないが、順序を揃えておくと読む側が迷わない。
   registerCardsUiRoutes(app, CARDS_UI_PATH);
+  // 案内のページ（#358）。**`go.under18.dev` 側の公開面**で、認証しない。
+  // 他の 2 つと接頭辞が重ならないので順序に守りの意味は無いが、
+  // `route-order.test.ts` が並びを固定している。
+  registerDocsRoutes(app, DOCS_PATH);
 
   return app;
 }
