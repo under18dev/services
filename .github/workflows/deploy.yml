@@ -212,7 +212,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     needs: preflight
-    if: needs.preflight.outputs.should_deploy == 'true'
+    # **`ready` である。** `should_deploy` と書いていて、**常に false** だった
+    # （存在しない output との比較は空文字になる）。`migrate` と揃える ——
+    # `skip_migrations` を尊重しないと、「マイグレーションを飛ばす」と
+    # 言われたのに admin の D1 にだけ当たる。
+    if: needs.preflight.outputs.ready == 'true' && !inputs.skip_migrations
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -629,7 +633,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     needs: [preflight, migrate-admin, deploy-auth-worker]
-    if: needs.preflight.outputs.should_deploy == 'true'
+    # **nfc / dashboard と同じ形にする。** `auth` が落ちた回には出さない ——
+    # こちらは OIDC の RP なので、**auth が古いままだとログインが壊れる。**
+    #
+    # **`migrate-admin` は `needs` に入れるだけでよい。** 既定では、
+    # needs のどれかが失敗・スキップされるとこのジョブもスキップされる。
+    # `always()` を付けていないのはそのためで、**D1 が無いときに
+    # デプロイだけ進む形を作らない。**
+    if: needs.preflight.outputs.ready == 'true' && needs.deploy-auth-worker.result == 'success'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
