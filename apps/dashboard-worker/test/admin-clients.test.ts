@@ -175,6 +175,16 @@ describe("GET /account/admin/clients", () => {
     expect(html).toContain('name="csrf_token"');
   });
 
+  it("client_id を入力させない（自動生成、運用者の判断）", async () => {
+    // **以前は管理者が決める値だった。** いまは `CreateOAuthClientUseCase`
+    // が生成するので、入力欄を残すと「入れた値が使われる」と読める。
+    const response = await fetchPage(ADMIN_CLIENTS_PATH, true, {
+      listOAuthClients: async () => rpcOk([]),
+    });
+
+    expect(await response.text()).not.toContain('name="client_id"');
+  });
+
   it("Redirect URI をリンクにしない", async () => {
     const response = await fetchPage(ADMIN_CLIENTS_PATH, true, {
       listOAuthClients: async () => rpcOk([CLIENT]),
@@ -217,7 +227,6 @@ describe("POST /account/admin/clients/create", () => {
     const page = await openAdminPage(created);
     const response = await post(ADMIN_CLIENTS_CREATE_PATH, created, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "demo-app",
       name: "デモ",
       client_type: "confidential",
       redirect_uris: "https://demo.example/callback",
@@ -244,7 +253,6 @@ describe("POST /account/admin/clients/create", () => {
     const page = await openAdminPage(publicClient);
     const response = await post(ADMIN_CLIENTS_CREATE_PATH, publicClient, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "spa",
       name: "SPA",
       client_type: "public",
       redirect_uris: "https://spa.example/cb",
@@ -274,7 +282,6 @@ describe("POST /account/admin/clients/create", () => {
     const page = await openAdminPage(guarded);
 
     const response = await post(ADMIN_CLIENTS_CREATE_PATH, guarded, page.cookie, {
-      client_id: "demo-app",
       name: "デモ",
       client_type: "confidential",
       redirect_uris: "https://demo.example/callback",
@@ -297,7 +304,6 @@ describe("POST /account/admin/clients/create", () => {
     const page = await openAdminPage(conflicting);
     const response = await post(ADMIN_CLIENTS_CREATE_PATH, conflicting, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "demo-app",
       name: "デモ",
       client_type: "confidential",
       redirect_uris: "https://demo.example/callback",
@@ -317,7 +323,6 @@ describe("POST /account/admin/clients/create", () => {
     const page = await openAdminPage(stale);
     const response = await post(ADMIN_CLIENTS_CREATE_PATH, stale, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "demo-app",
       name: "デモ",
       client_type: "confidential",
       redirect_uris: "https://demo.example/callback",
@@ -334,7 +339,6 @@ describe("POST /account/admin/clients/create", () => {
     const page = await openAdminPage(denied);
     const response = await post(ADMIN_CLIENTS_CREATE_PATH, denied, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "demo-app",
       name: "デモ",
       client_type: "confidential",
       redirect_uris: "https://demo.example/callback",
@@ -353,7 +357,6 @@ describe("POST /account/admin/clients/disable", () => {
     const page = await openAdminPage(disabling);
     const response = await post(ADMIN_CLIENTS_DISABLE_PATH, disabling, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "demo-app",
     });
 
     const html = await response.text();
@@ -371,7 +374,6 @@ describe("POST /account/admin/clients/disable", () => {
     const page = await openAdminPage(already);
     const response = await post(ADMIN_CLIENTS_DISABLE_PATH, already, page.cookie, {
       csrf_token: page.csrf,
-      client_id: "demo-app",
     });
 
     // **「失効させました」と言い切らない。** 今回は何も変わっていない。
@@ -389,9 +391,7 @@ describe("POST /account/admin/clients/disable", () => {
     };
     const page = await openAdminPage(guarded);
 
-    const response = await post(ADMIN_CLIENTS_DISABLE_PATH, guarded, page.cookie, {
-      client_id: "demo-app",
-    });
+    const response = await post(ADMIN_CLIENTS_DISABLE_PATH, guarded, page.cookie, {});
 
     expect(calls).toBe(0);
     expect(response.status).toBe(200);

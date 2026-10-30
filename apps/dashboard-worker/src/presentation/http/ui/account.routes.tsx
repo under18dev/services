@@ -404,9 +404,13 @@ export const accountUiRoutes = new Hono<AppBindings>()
    * 次の GET へ運ぶ必要があり、クエリにもパスにも Cookie にも置けない。
    * 200 でそのまま描く。
    *
-   * **再読み込みで再送される。** `client_id` は一意制約を持つので 2 件目は
-   * `conflict` になり、画面には「その client_id は使われています」と出る。
-   * `Idempotency-Key` は要らない（鍵を呼ぶ側が決めているため）。
+   * **再読み込みで再送される。** `client_id` は自動生成（運用者の判断、
+   * 2026-10-30）なので、以前のように「2 件目は `conflict` になるから
+   * `Idempotency-Key` は要らない」とは言えなくなった —— 再送信のたびに
+   * 違う ID の行ができうる。**それでも対策は入れていない。** 登録は
+   * 管理者だけが叩く稀な操作で、重複に気づいたら片方を失効させれば
+   * 済むため、新しい状態保持の仕組みを足すほどの見合いが無いと判断した
+   * （契約側 `createOAuthClientInputSchema` の JSDoc も参照）。
    *
    * ## 失敗しても一覧は出す
    *
@@ -442,7 +446,6 @@ export const accountUiRoutes = new Hono<AppBindings>()
     }
 
     const created = await c.get("identityAdmin").createOAuthClient(token, {
-      clientId: (field(form, "client_id") ?? "").trim(),
       name: (field(form, "name") ?? "").trim(),
       clientType,
       redirectUris,

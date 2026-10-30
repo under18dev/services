@@ -37,6 +37,23 @@ export const newTokenId = (): string => newId("tok");
 export const newCodeId = (): string => newId("cod");
 
 /**
+ * 公開される OIDC `client_id`（#333、運用者の判断で自動生成に変更）。
+ *
+ * **`newClientId()`（`oauth_clients.id`、内部 ID）とは別の値である。**
+ * 同じ接頭辞にすると、`wrangler d1 execute` で行を見た運用者が
+ * どちらの列か取り違える。
+ *
+ * **秘密ではない。** 認可 URL のクエリにそのまま載る値なので、
+ * 推測困難性ではなく**衝突しないこと**だけが要る。既定の 16 バイト
+ * （128 ビット）で十分 —— 誕生日攻撃を考慮しても、現実的な登録数
+ * （多くて数百）では衝突確率は天文学的に低い。それでも
+ * `oauth_clients_client_id_unique` が最後の砦として残っており、
+ * 理論上の衝突は `conflict` に畳まれる（二度と起きないものとして
+ * 無視するのではなく、起きても壊れない形にしてある）。
+ */
+export const newPublicClientId = (): string => newId("app");
+
+/**
  * NFC カードの ID（`https://go.under18.dev/c/<id>` の `<id>`）。
  *
  * ## ここだけ既定の 16 バイトではない

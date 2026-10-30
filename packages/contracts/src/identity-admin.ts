@@ -114,11 +114,25 @@ export type ListOAuthClientsResult = RpcResult<readonly OAuthClientSummary[]>;
 
 // ------------------------------------------------------- createOAuthClient
 
+/**
+ * `client_id` は**受け取らない**（運用者の判断、2026-10-30）。
+ *
+ * 以前はここで呼び出し元が決める値だった。**自動生成に変えた** ——
+ * `CreateOAuthClientUseCase` が `newPublicClientId()` で発行する。
+ *
+ * **これにより「`client_id` に一意制約があるので 2 回押しても 2 本目は
+ * `conflict` になる、だから `Idempotency-Key` は要らない」という以前の
+ * 根拠が崩れている。** 自動生成だと再送信のたびに別の ID が割り当たり、
+ * 一意制約は「同じ ID が 2 行になる」ことしか防がない。
+ *
+ * **それでも `Idempotency-Key` を足していない。** 登録は管理者だけが
+ * 叩く稀な操作で、二重送信で 2 本できても実害は小さく、気づいたら
+ * 片方を失効させれば済む（`disableOAuthClient` は冪等）。新しい状態
+ * 保持の仕組みを 1 つ増やすより、この画面には見合わないと判断した。
+ */
 export const createOAuthClientInputSchema = z.object({
   sessionToken: sessionTokenSchema,
   caller: rpcCallerSchema,
-  /** OIDC の `client_id`。重複は DB の unique index が止める。 */
-  clientId: z.string().min(1).max(255),
   name: z.string().min(1).max(255),
   clientType: z.enum(["confidential", "public"]),
   /**

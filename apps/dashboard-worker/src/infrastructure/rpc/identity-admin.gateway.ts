@@ -41,7 +41,6 @@ export class RpcIdentityAdminGateway implements IdentityAdminGateway {
   createOAuthClient(
     sessionToken: string,
     input: {
-      readonly clientId: string;
       readonly name: string;
       readonly clientType: "confidential" | "public";
       readonly redirectUris: readonly string[];
@@ -53,7 +52,6 @@ export class RpcIdentityAdminGateway implements IdentityAdminGateway {
       this.admin.createOAuthClient(
         this.input({
           sessionToken,
-          clientId: input.clientId,
           name: input.name,
           clientType: input.clientType,
           // **`readonly` を外すためだけに複製している。** 契約は zod から

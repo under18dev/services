@@ -3,6 +3,7 @@ import { createExecutionContext } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUDIT_EVENT_RETENTION } from "../src/application/ports/audit-log.port";
+import { createContainer } from "../src/composition/container";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 import { IdentityAdminRPC } from "../src/presentation/rpc/identity-admin.entrypoint";
 import { IdentityRPC } from "../src/presentation/rpc/identity.entrypoint";
@@ -76,7 +77,6 @@ async function seedAdmin(options: { readonly authTime?: Date } = {}): Promise<Se
 function createClient(
   user: SeededUser,
   overrides: Partial<{
-    clientId: string;
     name: string;
     clientType: "confidential" | "public";
     redirectUris: string[];
@@ -86,7 +86,6 @@ function createClient(
   return rpc.createOAuthClient({
     sessionToken: user.sessionToken,
     caller: "dashboard-worker",
-    clientId: overrides.clientId ?? "u18-admin-created",
     name: overrides.name ?? "管理画面から作ったクライアント",
     clientType: overrides.clientType ?? "confidential",
     redirectUris: overrides.redirectUris ?? ["https://app.example/cb"],
@@ -197,7 +196,7 @@ describe("createOAuthClient", () => {
     const row = await db()
       .select()
       .from(oauthClients)
-      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .where(eq(oauthClients.clientId, result.value.client.clientId))
       .get();
 
     // DB に入っているのはハッシュだけ。平文は 1 文字も残らない。
@@ -233,25 +232,54 @@ describe("createOAuthClient", () => {
     const result = await createClient(admin, { clientType: "public" });
 
     expect(result.ok && result.value.clientSecret).toBeNull();
+    if (!result.ok) throw new Error("登録に失敗した");
     const row = await db()
       .select()
       .from(oauthClients)
-      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .where(eq(oauthClients.clientId, result.value.client.clientId))
       .get();
     expect(row?.clientSecretHash).toBeNull();
   });
 
-  it("同じ client_id は二重登録できない（既存行も書き換わらない）", async () => {
+  it("client_id の衝突は conflict に畳まれ、既存行は書き換わらない", async () => {
+    // **実際の二重登録はもう起こせない。** `client_id` が自動生成に
+    // なった（運用者の判断、2026-10-30）ので、同じ値を 2 回送って
+    // 衝突を再現する手段が無い。見ているのは「Repository が衝突を
+    // `null` で伝えたら UseCase が `conflict` に写す」契約そのもの ——
+    // `OAuthClientRepository.create` を差し替えて衝突を起こす。
     const admin = await seedAdmin();
-    expect((await createClient(admin)).ok).toBe(true);
+    const created = await createClient(admin);
+    if (!created.ok) throw new Error("登録に失敗した");
 
-    const second = await createClient(admin, { name: "なりすまし" });
+    // **`create` だけが意味を持つ偽物。** 見たいのは「Repository が
+    // `null` を返したら UseCase が `conflict` に写す」契約だけで、他の
+    // メソッドは呼ばれない前提のため、呼ばれたら即座に落ちるようにする。
+    const neverCalled = (name: string) => (): never => {
+      throw new Error(`${name} should not have been called`);
+    };
+    const container = createContainer(appEnv(), {
+      oauthClients: {
+        create: async () => null,
+        findByClientId: neverCalled("findByClientId"),
+        listRedirectUris: neverCalled("listRedirectUris"),
+        listAll: neverCalled("listAll"),
+        verifySecret: neverCalled("verifySecret"),
+        disable: neverCalled("disable"),
+      },
+    });
+
+    const second = await container.useCases.createOAuthClient.execute({
+      sessionToken: admin.sessionToken,
+      name: "なりすまし",
+      clientType: "confidential",
+      redirectUris: ["https://app.example/cb"],
+    });
 
     expect(!second.ok && second.error.code).toBe("conflict");
     const rows = await db()
       .select()
       .from(oauthClients)
-      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .where(eq(oauthClients.clientId, created.value.client.clientId))
       .all();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.name).toBe("管理画面から作ったクライアント");
@@ -291,7 +319,6 @@ describe("createOAuthClient", () => {
 
     const result = await rpc.createOAuthClient({
       sessionToken: admin.sessionToken,
-      clientId: "u18-no-uri",
       name: "宛先なし",
       clientType: "public",
       redirectUris: [],
@@ -313,7 +340,6 @@ describe("createOAuthClient", () => {
 
     const result = await rpc.createOAuthClient({
       sessionToken: admin.sessionToken,
-      clientId: "u18-bad-logo",
       name: "ロゴが怪しい",
       clientType: "public",
       redirectUris: ["https://app.example/cb"],
@@ -329,7 +355,6 @@ describe("createOAuthClient", () => {
 
     const result = await rpc.createOAuthClient({
       sessionToken: admin.sessionToken,
-      clientId: "u18-with-logo",
       name: "ロゴあり",
       clientType: "public",
       redirectUris: ["https://app.example/cb"],
@@ -359,11 +384,14 @@ describe("createOAuthClient", () => {
     if (!result.ok) throw new Error("登録に失敗した");
 
     expect(result.value.client).toMatchObject({
-      clientId: "u18-admin-created",
       clientType: "confidential",
       scopes: ["openid", "profile"],
       disabledAt: null,
     });
+    // **自動生成された値である。** 呼び出し元は何も指定していない
+    // （運用者の判断、2026-10-30）。接頭辞だけ見る —— 生の乱数を
+    // 文字列比較しても意味が無い。
+    expect(result.value.client.clientId).toMatch(/^app_/);
     // 内部 ID（`cli_...`）は DTO に出さない。出すと、以後それを受け付ける
     // API を消せなくなる。
     expect(JSON.stringify(result.value.client)).not.toContain("cli_");
@@ -392,7 +420,7 @@ describe("createOAuthClient", () => {
     const row = await db()
       .select()
       .from(oauthClients)
-      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .where(eq(oauthClients.clientId, result.value.client.clientId))
       .get();
     expect(row?.isFirstParty).toBe(false);
   });
@@ -405,7 +433,6 @@ describe("createOAuthClient", () => {
 
     const result = await rpc.createOAuthClient({
       sessionToken: admin.sessionToken,
-      clientId: "u18-wants-first-party",
       name: "一次パーティのつもり",
       clientType: "public",
       redirectUris: ["https://app.example/cb"],
@@ -442,19 +469,20 @@ describe("登録と失効には再認証が要る", () => {
 
   it("古いセッションの管理者は失効させられない", async () => {
     const fresh = await seedAdmin();
-    await createClient(fresh);
+    const created = await createClient(fresh);
+    if (!created.ok) throw new Error("登録に失敗した");
     const stale = await seedAdmin({ authTime: STALE });
 
     const result = await rpc.disableOAuthClient({
       sessionToken: stale.sessionToken,
-      clientId: "u18-admin-created",
+      clientId: created.value.client.clientId,
     });
 
     expect(!result.ok && result.error.code).toBe("reauthentication_required");
     const row = await db()
       .select()
       .from(oauthClients)
-      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .where(eq(oauthClients.clientId, created.value.client.clientId))
       .get();
     expect(row?.disabledAt).toBeNull();
   });
@@ -486,17 +514,23 @@ describe("listOAuthClients", () => {
     // 除くと、失効させた直後に行が消える。運用者は「失効したのか、
     // 消えたのか、そもそも無かったのか」を区別できない。
     const admin = await seedAdmin();
-    await createClient(admin, { clientId: "u18-alive" });
-    await createClient(admin, { clientId: "u18-dead" });
-    await rpc.disableOAuthClient({ sessionToken: admin.sessionToken, clientId: "u18-dead" });
+    const alive = await createClient(admin, { name: "生きている方" });
+    const dead = await createClient(admin, { name: "止める方" });
+    if (!alive.ok || !dead.ok) throw new Error("登録に失敗した");
+    await rpc.disableOAuthClient({
+      sessionToken: admin.sessionToken,
+      clientId: dead.value.client.clientId,
+    });
 
     const result = await rpc.listOAuthClients({ sessionToken: admin.sessionToken });
     if (!result.ok) throw new Error("一覧を取れなかった");
 
     const byId = new Map(result.value.map((client) => [client.clientId, client]));
-    expect([...byId.keys()].sort()).toEqual(["u18-alive", "u18-dead"]);
-    expect(byId.get("u18-alive")?.disabledAt).toBeNull();
-    expect(byId.get("u18-dead")?.disabledAt).toEqual(expect.any(String));
+    expect([...byId.keys()].sort()).toEqual(
+      [alive.value.client.clientId, dead.value.client.clientId].sort(),
+    );
+    expect(byId.get(alive.value.client.clientId)?.disabledAt).toBeNull();
+    expect(byId.get(dead.value.client.clientId)?.disabledAt).toEqual(expect.any(String));
   });
 
   it("Redirect URI を持たないクライアントも落ちない", async () => {
@@ -527,31 +561,23 @@ describe("listOAuthClients", () => {
 describe("disableOAuthClient", () => {
   it("失効は冪等で、2 度目は時刻を上書きしない", async () => {
     const admin = await seedAdmin();
-    await createClient(admin);
+    const created = await createClient(admin);
+    if (!created.ok) throw new Error("登録に失敗した");
+    const clientId = created.value.client.clientId;
 
-    const first = await rpc.disableOAuthClient({
-      sessionToken: admin.sessionToken,
-      clientId: "u18-admin-created",
-    });
+    const first = await rpc.disableOAuthClient({ sessionToken: admin.sessionToken, clientId });
     const disabledAt = (
-      await db()
-        .select()
-        .from(oauthClients)
-        .where(eq(oauthClients.clientId, "u18-admin-created"))
-        .get()
+      await db().select().from(oauthClients).where(eq(oauthClients.clientId, clientId)).get()
     )?.disabledAt;
 
-    const second = await rpc.disableOAuthClient({
-      sessionToken: admin.sessionToken,
-      clientId: "u18-admin-created",
-    });
+    const second = await rpc.disableOAuthClient({ sessionToken: admin.sessionToken, clientId });
 
     expect(first.ok && first.value.disabled).toBe(true);
     expect(second.ok && second.value.disabled).toBe(false);
     const after = await db()
       .select()
       .from(oauthClients)
-      .where(eq(oauthClients.clientId, "u18-admin-created"))
+      .where(eq(oauthClients.clientId, clientId))
       .get();
     expect(after?.disabledAt?.toISOString()).toBe(disabledAt?.toISOString());
   });
@@ -642,16 +668,12 @@ describe("監査ログ", () => {
 
   it("失効が記録され、2 度目は失敗として残る", async () => {
     const admin = await seedAdmin();
-    await createClient(admin);
+    const created = await createClient(admin);
+    if (!created.ok) throw new Error("登録に失敗した");
+    const clientId = created.value.client.clientId;
 
-    await rpc.disableOAuthClient({
-      sessionToken: admin.sessionToken,
-      clientId: "u18-admin-created",
-    });
-    await rpc.disableOAuthClient({
-      sessionToken: admin.sessionToken,
-      clientId: "u18-admin-created",
-    });
+    await rpc.disableOAuthClient({ sessionToken: admin.sessionToken, clientId });
+    await rpc.disableOAuthClient({ sessionToken: admin.sessionToken, clientId });
 
     const rows = await auditRows("oauth.client.disabled");
     expect(rows.map((row) => row.outcome)).toEqual(["success", "failure"]);
@@ -692,15 +714,17 @@ describe("監査ログ", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const user = await seedLoggedInUser();
 
-    await createClient(user);
+    await createClient(user, { name: "攻撃者が入れた名前" });
 
     const lines = warn.mock.calls.map(([first]) => String(first));
     const denied = lines.map((line) => JSON.parse(line)).filter((e) => e.event === "admin.denied");
     expect(denied).toHaveLength(1);
     expect(denied[0]).toMatchObject({ operation: "createOAuthClient", userId: user.userId });
-    // **呼び出し元が決めた文字列は出さない。** ログの中身を攻撃者に
-    // 決めさせない（`client_id` は入力そのもの）。
-    expect(lines.join(" ")).not.toContain("u18-admin-created");
+    // **呼び出し元が決めた文字列は出さない。** `client_id` は #333 で
+    // 自動生成になったので、ここで注入を試せるのは `name` だけになった
+    // （ログの中身を攻撃者に決めさせない）。拒否は `requireAdminSession`
+    // の中で起きるので、そもそも `name` まで読まれていないはずである。
+    expect(lines.join(" ")).not.toContain("攻撃者が入れた名前");
   });
 });
 
