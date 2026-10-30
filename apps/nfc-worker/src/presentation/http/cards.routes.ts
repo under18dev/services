@@ -84,138 +84,177 @@ function bodyFor(failure: NfcFailure): Record<string, string> {
   return { error: failure.kind };
 }
 
-export function registerCardRoutes(app: Hono<AppBindings>, basePath: string): void {
+/**
+ * カード管理 API を **1 本のチェーンで** 組み立てる（#338）。
+ *
+ * ## チェーンを切らないこと
+ *
+ * `hono/client` の `hc<CardsApiType>` は、チェーンの戻り値に積まれた型から
+ * パスを作る。`cards.post(...); cards.get(...);` と**文を分けて**書くと
+ * **`typeof` には何も積まれず、クライアントは空の型になる。**
+ *
+ * **空でも補完が出ないだけで型検査は通る。** dashboard-worker の `app.ts` が
+ * 同じ警告を書いている —— 「宣言はあるが発動しない」の型版で、このリポジトリで
+ * 何度も踏んでいる形である（#88 / #96 / #122 / #164）。
+ *
+ * 効いていることは `test/client-type.test-d.ts` が固定している。存在しない
+ * パスに `@ts-expect-error` を付けてあるので、型が空（= 何でも許す）に戻ると
+ * **エラーが出なくなって `@ts-expect-error` 自身が落ちる。**
+ *
+ * ## 登録の順序は変えていない
+ *
+ * Hono はルートの登録順が一致判定に効くので、並べ替えると**認可の掛かり方が
+ * 静かに変わりうる。** 文をチェーンに繋ぎ替えただけで、順序も、各ハンドラの
+ * 中身も 1 行も動かしていない。`test/route-order.test.ts` が
+ * `createApp().routes` の並びを丸ごと固定している。
+ */
+function createCardsApi() {
   // 親と同じく末尾スラッシュを同一視する（app.ts を参照）。
-  const cards = new Hono<AppBindings>({ strict: false });
+  return (
+    new Hono<AppBindings>({ strict: false })
+      // 親と同じく末尾スラッシュを同一視する（app.ts を参照）。
 
-  /**
-   * 状態を変える操作の門番。
-   *
-   * Origin 検証と Content-Type 検証の**両方**を要求する（origin.ts を参照）。
-   * GET には課さない。課すと通常のブラウザ遷移が壊れるうえ、
-   * 読み取りは状態を変えないので CSRF の利得が無い。
-   */
-  cards.use("*", async (c, next) => {
-    if (c.req.method === "GET" || c.req.method === "HEAD") return next();
+      /**
+       * 状態を変える操作の門番。
+       *
+       * Origin 検証と Content-Type 検証の**両方**を要求する（origin.ts を参照）。
+       * GET には課さない。課すと通常のブラウザ遷移が壊れるうえ、
+       * 読み取りは状態を変えないので CSRF の利得が無い。
+       */
+      .use("*", async (c, next) => {
+        if (c.req.method === "GET" || c.req.method === "HEAD") return next();
 
-    if (!isAllowedOrigin(c)) return c.json({ error: "forbidden" }, 403);
-    if (!isJsonRequest(c)) return c.json({ error: "forbidden" }, 403);
+        if (!isAllowedOrigin(c)) return c.json({ error: "forbidden" }, 403);
+        if (!isJsonRequest(c)) return c.json({ error: "forbidden" }, 403);
 
-    return next();
-  });
+        return next();
+      })
 
-  /**
-   * 運営によるカード発行（#187、仕様書 §10 / §12）。
-   *
-   * **管理者だけ。** 判定は UseCase の中（`requireAdminUserId`）にあり、
-   * ここには無い —— ルートに書くと、経路が増えたときに素通りする形を
-   * 作る（#186 の `rpc-parity.test.ts` で確かめた話と同じ）。
-   *
-   * **応答に平文の紐づけコードが載る。** DB にはハッシュしか入らないので、
-   * この応答を取りこぼしたカードは配れない（再発行するしかない）。
-   * `Cache-Control: no-store` が全経路に付いていることが効く場面でもある。
-   */
-  cards.post("/", async (c) => {
-    const parsed = issueSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: "invalid_request" }, 400);
+      /**
+       * 運営によるカード発行（#187、仕様書 §10 / §12）。
+       *
+       * **管理者だけ。** 判定は UseCase の中（`requireAdminUserId`）にあり、
+       * ここには無い —— ルートに書くと、経路が増えたときに素通りする形を
+       * 作る（#186 の `rpc-parity.test.ts` で確かめた話と同じ）。
+       *
+       * **応答に平文の紐づけコードが載る。** DB にはハッシュしか入らないので、
+       * この応答を取りこぼしたカードは配れない（再発行するしかない）。
+       * `Cache-Control: no-store` が全経路に付いていることが効く場面でもある。
+       */
+      .post("/", async (c) => {
+        const parsed = issueSchema.safeParse(await c.req.json().catch(() => null));
+        if (!parsed.success) return c.json({ error: "invalid_request" }, 400);
 
-    const result = await c
-      .get("container")
-      .useCases.issueCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)), {
-        count: parsed.data.count,
-        batch: parsed.data.batch ?? null,
-      });
-    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+        const result = await c
+          .get("container")
+          .useCases.issueCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)), {
+            count: parsed.data.count,
+            batch: parsed.data.batch ?? null,
+          });
+        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
 
-    return c.json({ cards: result.value }, 201);
-  });
+        return c.json({ cards: result.value }, 201);
+      })
 
-  /** 自分のカード一覧。 */
-  cards.get("/", async (c) => {
-    const result = await c
-      .get("container")
-      .useCases.listMyCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
-    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-    return c.json({ cards: result.value });
-  });
+      /** 自分のカード一覧。 */
+      .get("/", async (c) => {
+        const result = await c
+          .get("container")
+          .useCases.listMyCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
+        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+        return c.json({ cards: result.value });
+      })
 
-  /** カードを自分のアカウントへ紐づける（初回紐づけ・移転の受け取り側）。 */
-  cards.post("/claim", async (c) => {
-    const parsed = claimSchema.safeParse(await readJson(c.req.raw));
-    // 入力の形が不正でも `claim_rejected` に畳む。「形は合っているが
-    // コードが違う」と区別できると、コードの形を教えることになる。
-    if (!parsed.success) return c.json({ error: "claim_rejected" }, 400);
+      /** カードを自分のアカウントへ紐づける（初回紐づけ・移転の受け取り側）。 */
+      .post("/claim", async (c) => {
+        const parsed = claimSchema.safeParse(await readJson(c.req.raw));
+        // 入力の形が不正でも `claim_rejected` に畳む。「形は合っているが
+        // コードが違う」と区別できると、コードの形を教えることになる。
+        if (!parsed.success) return c.json({ error: "claim_rejected" }, 400);
 
-    const result = await c.get("container").useCases.claimCard.execute({
-      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
-      cardId: parsed.data.cardId,
-      // 紙から転記する値なので、大文字と前後の空白だけ吸収する。
-      claimCode: parsed.data.claimCode.trim().toLowerCase(),
-    });
-    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-    return c.json(result.value);
-  });
+        const result = await c.get("container").useCases.claimCard.execute({
+          sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+          cardId: parsed.data.cardId,
+          // 紙から転記する値なので、大文字と前後の空白だけ吸収する。
+          claimCode: parsed.data.claimCode.trim().toLowerCase(),
+        });
+        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+        return c.json(result.value);
+      })
 
-  /**
-   * 遷移先の変更。Phase 4 の完了条件「カードを書き換えずに遷移先を
-   * 変更可能」そのもの。
-   */
-  cards.put("/:cardId/target", async (c) => {
-    const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
-    if (!cardId.success) return c.json({ error: "card_not_found" }, 404);
+      /**
+       * 遷移先の変更。Phase 4 の完了条件「カードを書き換えずに遷移先を
+       * 変更可能」そのもの。
+       */
+      .put("/:cardId/target", async (c) => {
+        const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
+        if (!cardId.success) return c.json({ error: "card_not_found" }, 404);
 
-    const parsed = updateTargetSchema.safeParse(await readJson(c.req.raw));
-    if (!parsed.success) {
-      return c.json({ error: "invalid_target_url", reason: "not_absolute" }, 400);
-    }
+        const parsed = updateTargetSchema.safeParse(await readJson(c.req.raw));
+        if (!parsed.success) {
+          return c.json({ error: "invalid_target_url", reason: "not_absolute" }, 400);
+        }
 
-    const result = await c.get("container").useCases.updateCardTarget.execute({
-      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
-      cardId: cardId.data,
-      targetUrl: parsed.data.targetUrl.trim(),
-    });
-    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-    return c.json(result.value);
-  });
+        const result = await c.get("container").useCases.updateCardTarget.execute({
+          sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+          cardId: cardId.data,
+          targetUrl: parsed.data.targetUrl.trim(),
+        });
+        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+        return c.json(result.value);
+      })
 
-  /** 紛失時の無効化。片道の操作（DisableCardUseCase を参照）。 */
-  cards.post("/:cardId/disable", async (c) => {
-    const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
-    if (!cardId.success) return c.json({ error: "card_not_found" }, 404);
+      /** 紛失時の無効化。片道の操作（DisableCardUseCase を参照）。 */
+      .post("/:cardId/disable", async (c) => {
+        const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
+        if (!cardId.success) return c.json({ error: "card_not_found" }, 404);
 
-    const parsed = disableSchema.safeParse((await readJson(c.req.raw)) ?? {});
-    const reason = parsed.success ? parsed.data.reason : "lost";
+        const parsed = disableSchema.safeParse((await readJson(c.req.raw)) ?? {});
+        const reason = parsed.success ? parsed.data.reason : "lost";
 
-    const result = await c.get("container").useCases.disableCard.execute({
-      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
-      cardId: cardId.data,
-      reason,
-    });
-    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-    return c.json(result.value);
-  });
+        const result = await c.get("container").useCases.disableCard.execute({
+          sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+          cardId: cardId.data,
+          reason,
+        });
+        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+        return c.json(result.value);
+      })
 
-  /**
-   * 所有権を手放す（移転の前半）。
-   *
-   * 応答の `claimCode` は**この 1 回しか返らない**。保存しているのは
-   * ハッシュだけで、再発行は release をもう一度行うしかない。
-   */
-  cards.post("/:cardId/release", async (c) => {
-    const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
-    if (!cardId.success) return c.json({ error: "card_not_found" }, 404);
+      /**
+       * 所有権を手放す（移転の前半）。
+       *
+       * 応答の `claimCode` は**この 1 回しか返らない**。保存しているのは
+       * ハッシュだけで、再発行は release をもう一度行うしかない。
+       */
+      .post("/:cardId/release", async (c) => {
+        const cardId = cardIdSchema.safeParse(c.req.param("cardId"));
+        if (!cardId.success) return c.json({ error: "card_not_found" }, 404);
 
-    const result = await c.get("container").useCases.releaseCard.execute({
-      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
-      cardId: cardId.data,
-    });
-    if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
+        const result = await c.get("container").useCases.releaseCard.execute({
+          sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+          cardId: cardId.data,
+        });
+        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
 
-    // 平文の紐づけコードを含むので、中間キャッシュにも残さない。
-    return c.json(result.value, 200, { "Cache-Control": "no-store" });
-  });
+        // 平文の紐づけコードを含むので、中間キャッシュにも残さない。
+        return c.json(result.value, 200, { "Cache-Control": "no-store" });
+      })
+  );
+}
 
-  app.route(basePath, cards);
+/**
+ * `hono/client` に渡す型。**`createCardsApi` の戻り値そのもの。**
+ *
+ * 島は `hc<CardsApiType>(`${origin}${CARDS_BASE_PATH}`)` の形で使う ——
+ * この型は接頭辞を含まない（`app.route(basePath, ...)` の `basePath` は
+ * 実行時の値で、型には現れない）ので、**接頭辞はクライアント側の base URL
+ * に付ける。**
+ */
+export type CardsApiType = ReturnType<typeof createCardsApi>;
+
+export function registerCardRoutes(app: Hono<AppBindings>, basePath: string): void {
+  app.route(basePath, createCardsApi());
 }
 
 /**
