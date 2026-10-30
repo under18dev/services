@@ -14,7 +14,7 @@
     "dev:nfc": "pnpm --filter @u18/nfc-worker dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm lint:eslint && pnpm lint:format && pnpm check:bindings && pnpm check:routes && pnpm check:shell && pnpm check:codeql && pnpm check:test-ips && pnpm check:webauthn && pnpm check:asset-pages && pnpm check:app-catalog && pnpm check:action-pins && pnpm check:workflow-outputs",
+    "lint": "pnpm lint:eslint && pnpm lint:format && pnpm check:bindings && pnpm check:routes && pnpm check:shell && pnpm check:codeql && pnpm check:test-ips && pnpm check:webauthn && pnpm check:asset-pages && pnpm check:app-catalog && pnpm check:action-pins && pnpm check:workflow-outputs && pnpm check:threat-model-refs",
     "lint:eslint": "eslint .",
     "lint:format": "prettier --check .",
     "lint:fix": "eslint . --fix",
@@ -41,7 +41,8 @@
     "db:migrate:local:nfc": "pnpm --filter @u18/nfc-worker migrate:local",
     "db:migrate:remote:nfc": "pnpm --filter @u18/nfc-worker migrate:remote",
     "check:action-pins": "node scripts/check-action-pins.mjs",
-    "check:workflow-outputs": "node scripts/check-workflow-outputs.mjs"
+    "check:workflow-outputs": "node scripts/check-workflow-outputs.mjs",
+    "check:threat-model-refs": "node scripts/check-threat-model-refs.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261023.1",
