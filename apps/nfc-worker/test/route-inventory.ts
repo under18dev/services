@@ -97,6 +97,10 @@ export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/acco
  */
 export const CARD_ASSET_ROUTES: readonly Route[] = [
   { method: "GET", path: "/account/nfc/ui/kiwa.<hash>.css" },
+  // 遷移先の変更のアイランド（#338）。CSS と同じく公開アセットで、
+  // セッションを要求しない —— 中身は全利用者に同じスクリプトである
+  // （カード ID は HTML 側の `data-card-id` から読む）。
+  { method: "GET", path: "/account/nfc/ui/cards-island.<hash>.js" },
 ];
 
 /** カード管理に属するもの全部。一覧の突き合わせに使う。 */

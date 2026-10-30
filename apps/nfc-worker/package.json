@@ -7,7 +7,7 @@
     "dev": "node scripts/build-client.mjs && wrangler dev",
     "deploy": "wrangler deploy",
     "build": "node scripts/build-client.mjs && wrangler deploy --dry-run --outdir dist",
-    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json",
+    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json",
     "test": "node scripts/build-client.mjs && vitest run",
     "cf-typegen": "wrangler types",
     "migrate:local": "wrangler d1 migrations apply u18-nfc --local",
@@ -24,6 +24,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "@cloudflare/vitest-plugin": "1.4.7",
     "typescript": "5.9.3",
     "vitest": "4.1.12",

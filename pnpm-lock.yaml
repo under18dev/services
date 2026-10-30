@@ -310,6 +310,9 @@ importers:
       '@u18/testing':
         specifier: workspace:*
         version: link:../../packages/testing
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       postcss:
         specifier: 8.5.31
         version: 8.5.31

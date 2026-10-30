@@ -3,11 +3,16 @@
   "compilerOptions": {
     "lib": ["ES2022"],
     // カード一覧の画面は hono/jsx のサーバーレンダリング（§14.1 決定 4）。
-    // ブラウザ側のアイランドは無い —— この画面は JS を要求しない。
+    // **ブラウザ側のアイランドはここでは見ない** —— `src/.../ui/client/` は
+    // `tsconfig.client.json` が DOM の型で別に検査する（#338）。ここに
+    // lib: ["DOM"] を足すと、workerd に無い `document` が Domain 層からも
+    // 見えてしまい、動かないコードが型検査を通る。
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
   },
+  // **アイランドだけ外す。** 上の理由で、DOM の型を持ち込まずに検査する。
+  "exclude": ["src/presentation/http/ui/client/**"],
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",

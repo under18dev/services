@@ -1,6 +1,7 @@
 // @ts-check
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { build } from "esbuild";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 
@@ -11,22 +12,15 @@ import tailwindcss from "@tailwindcss/postcss";
  * いまあるのはスタイルシート（Tailwind v4）だけで、**アイランドはまだ
  * 無い。**
  *
- * ## 無いものをビルドしない
+ * ## 2 つ作る
  *
- * dashboard 側には `buildIsland()`（esbuild）が並んでいるが、
- * こちらには入れていない。`src/presentation/http/ui/client/` が
- * まだ存在せず、**入口の空ファイルを置くと「宣言はあるが繋がって
- * いない」**（#88 / #96 / #122 / #164）をこちらから作ることになる。
+ * スタイルシート（Tailwind v4）とアイランド（esbuild）。`emit()` が
+ * 生成物を `.ts` として書くところは共通で、違うのは組み立て方だけ。
  *
- * **足すときは `buildStylesheet()` の隣に置く。** `emit()` が生成物を
- * `.ts` として書くところは共通なので、増えるのは esbuild を呼ぶ関数と
- * `Promise.all` の 1 要素だけになる。入口と名前は
- *
- *     src/presentation/http/ui/client/cards-island.ts
- *     -> generated/cards-island.bundle.ts  (export CARDS_ISLAND_JS)
- *
- * で合意済み（dashboard の `account-island` / `ACCOUNT_ISLAND_JS` に
- * 揃えてある）。
+ * **アイランドは #338 で入った。** それまでは `buildIsland()` を
+ * 意図的に空けてあった —— 入口のファイルが無いのに空で置くと、
+ * **「宣言はあるが繋がっていない」**（#88 / #96 / #122 / #164）を
+ * こちらから作ることになるため。
  *
  * ## このスクリプトが `dev` / `build` / `typecheck` / `test` の前段にいる
  *
@@ -87,6 +81,42 @@ async function buildStylesheet() {
   return result.css;
 }
 
-const stylesheet = await buildStylesheet();
+/**
+ * カード画面のアイランドをブラウザ向けにバンドルする（#338）。
+ *
+ * **Workers Assets を使わず文字列として Worker に埋め込む。** 理由は
+ * auth-worker / dashboard-worker の同名スクリプトと同じ。
+ *
+ * ## 大きさを出している
+ *
+ * `cn`（`clsx` + `tailwind-merge`）を引き込むと**それだけで 27.8 KB**
+ * になる（#341 の実測）。class 文字列はサーバー側で組み立てて渡す形に
+ * してあるので（`ui/island-classes.ts`）、ここの出力が急に膨らんだら
+ * **島が何かを引き込んだ合図**である。
+ */
+async function buildIsland() {
+  const result = await build({
+    entryPoints: [join(root, "src/presentation/http/ui/client/cards-island.ts")],
+    bundle: true,
+    format: "esm",
+    // Workers ではなくブラウザ向け。
+    platform: "browser",
+    target: ["es2022"],
+    minify: true,
+    // 配信しないので .map への参照は 404 を生むだけ。
+    sourcemap: false,
+    write: false,
+    logLevel: "warning",
+  });
+
+  const [output] = result.outputFiles ?? [];
+  if (output === undefined) throw new Error("esbuild produced no output");
+
+  await emit("cards-island.bundle.ts", "CARDS_ISLAND_JS", output.text);
+  return output.text;
+}
+
+const [stylesheet, island] = await Promise.all([buildStylesheet(), buildIsland()]);
 
 console.log(`built kiwa stylesheet: ${(stylesheet.length / 1024).toFixed(1)} KiB`);
+console.log(`built cards island: ${(island.length / 1024).toFixed(1)} KiB`);
