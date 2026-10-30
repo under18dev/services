@@ -180,24 +180,28 @@ export function readInventoryPaths(text) {
 }
 
 /**
- * `ACCOUNT_NAV_GROUPS` から `href` を拾う（#338）。
+ * ナビゲーション配列（`ACCOUNT_NAV_GROUPS` / `ADMIN_NAV_GROUPS`）から
+ * `href` を拾う（#338 / #427）。
  *
- * **カタログと同じ罠にかかる 2 本目のリストである。** サイドバーの
- * `/account/nfc` に答えるのは nfc-worker で、dashboard-worker の
- * テストは何も言わない。あちらが route を動かした瞬間、ダッシュボードの
- * サイドバーに 404 のリンクが並ぶ。
+ * **カタログと同じ罠にかかるリストである。** サイドバーの `/account/nfc`
+ * に答えるのは nfc-worker で、dashboard-worker のテストは何も言わない。
+ * あちらが route を動かした瞬間、ダッシュボードのサイドバーに 404 の
+ * リンクが並ぶ。admin-worker の `ADMIN_NAV_GROUPS` も**別の Worker では
+ * ないが**、同じ形の「サイドバーの href が実際に登録されているか、
+ * この検査以外に誰も見ていない」という穴だった（#427）。
  *
- * **`readCatalogUrls` と違い定数参照を解かない。** 並びは
- * `@u18/contracts` にあり、Worker ごとの接頭辞から組み立てられない
+ * **`readCatalogUrls` と違い定数参照を解かない。** `ACCOUNT_NAV_GROUPS`
+ * は `@u18/contracts` にあり、Worker ごとの接頭辞から組み立てられない
  * （持ち主が 2 人いる）ので、**値は必ずリテラルで書かれている。**
  * 定数参照が現れたら、それは「組み立ててしまった」ということなので、
  * ここで拾えずに 0 件になる —— 下の「0 件は読めていない」が落とす。
  *
- * @param {string} text `account-nav.ts` の中身
+ * @param {string} text ナビ定義ファイルの中身
+ * @param {string} constName 読み取る配列の定数名（例: `"ACCOUNT_NAV_GROUPS"`）
  * @returns {string[] | null} 読めなければ `null`
  */
-export function readNavHrefs(text) {
-  const block = /export const ACCOUNT_NAV_GROUPS[^=]*=\s*\[([\s\S]*?)\n\];/.exec(text);
+export function readNavHrefs(text, constName) {
+  const block = new RegExp(`export const ${constName}[^=]*=\\s*\\[([\\s\\S]*?)\\n\\];`).exec(text);
   if (block === null) return null;
 
   const hrefs = [...block[1].matchAll(/href:\s*"([^"]*)"/g)].map((m) => m[1]);

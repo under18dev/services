@@ -211,7 +211,7 @@ test("unreachablePaths: 決められない勝者は落とす", () => {
 const ACCOUNT_NAV = path.join(ROOT, "packages", "contracts", "src", "account-nav.ts");
 
 test("readNavHrefs: 実物の ACCOUNT_NAV_GROUPS を読める", () => {
-  const hrefs = readNavHrefs(readFileSync(ACCOUNT_NAV, "utf8"));
+  const hrefs = readNavHrefs(readFileSync(ACCOUNT_NAV, "utf8"), "ACCOUNT_NAV_GROUPS");
 
   assert.notEqual(hrefs, null, "並びを読めていない");
   assert.ok(hrefs.length >= 2, `href が ${hrefs.length} 件しか取れていない`);
@@ -222,7 +222,8 @@ test("readNavHrefs: 実物の ACCOUNT_NAV_GROUPS を読める", () => {
 });
 
 test("readNavHrefs: 入れ子のグループから全部拾う", () => {
-  const hrefs = readNavHrefs(`
+  const hrefs = readNavHrefs(
+    `
 export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
   {
     label: "A",
@@ -233,7 +234,9 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
   },
   { label: "B", items: [{ key: "nfc", href: "/account/nfc", label: "n" }] },
 ];
-`);
+`,
+    "ACCOUNT_NAV_GROUPS",
+  );
 
   assert.deepEqual(hrefs, ["/account/profile", "/account/passkeys", "/account/nfc"]);
 });
@@ -241,7 +244,8 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
 test("readNavHrefs: 項目と href の数が合わなければ null", () => {
   // **「読めなかったので 0 件」を「問題なし」にしない。** 定数参照に
   // 書き換えられると href だけ拾えなくなり、検査は緑のまま本番が 404 を出す。
-  const hrefs = readNavHrefs(`
+  const hrefs = readNavHrefs(
+    `
 export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
   {
     label: "A",
@@ -251,7 +255,9 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
     ],
   },
 ];
-`);
+`,
+    "ACCOUNT_NAV_GROUPS",
+  );
 
   assert.equal(hrefs, null);
 });
@@ -259,12 +265,55 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
 test("readNavHrefs: 項目が 1 つも無ければ null", () => {
   // 空の並びは「サイドバーが消えた」であって、正当な状態ではない。
   assert.equal(
-    readNavHrefs(`export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
-];`),
+    readNavHrefs(
+      `export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
+];`,
+      "ACCOUNT_NAV_GROUPS",
+    ),
     null,
   );
 });
 
 test("readNavHrefs: 宣言が見つからなければ null", () => {
-  assert.equal(readNavHrefs("export const SOMETHING_ELSE = [];"), null);
+  assert.equal(readNavHrefs("export const SOMETHING_ELSE = [];", "ACCOUNT_NAV_GROUPS"), null);
+});
+
+/**
+ * `readNavHrefs` は定数名を引数に取る（#427）。
+ *
+ * admin-worker の `ADMIN_NAV_GROUPS` は `ACCOUNT_NAV_GROUPS` と同じ形
+ * （`label` / `items` / `href`）だが**別の定数**なので、同じ正規表現を
+ * 定数名だけ差し替えて使い回せることを固定する。
+ */
+const ADMIN_NAV = path.join(
+  ROOT,
+  "apps",
+  "admin-worker",
+  "src",
+  "presentation",
+  "http",
+  "ui",
+  "nav.ts",
+);
+
+test("readNavHrefs: 実物の ADMIN_NAV_GROUPS を読める", () => {
+  const hrefs = readNavHrefs(readFileSync(ADMIN_NAV, "utf8"), "ADMIN_NAV_GROUPS");
+
+  assert.notEqual(hrefs, null, "並びを読めていない");
+  assert.ok(hrefs.includes("/nfc"), "NFC カード画面の行き先が無い");
+  for (const href of hrefs) assert.match(href, /^\//);
+});
+
+test("readNavHrefs: 定数名が違えば別の並びとして読む", () => {
+  const text = `
+export const ACCOUNT_NAV_GROUPS: readonly X[] = [
+  { label: "A", items: [{ key: "a", href: "/account/a", label: "a" }] },
+];
+export const ADMIN_NAV_GROUPS: readonly X[] = [
+  { label: "B", items: [{ key: "b", href: "/b", label: "b" }] },
+];
+`;
+
+  assert.deepEqual(readNavHrefs(text, "ACCOUNT_NAV_GROUPS"), ["/account/a"]);
+  assert.deepEqual(readNavHrefs(text, "ADMIN_NAV_GROUPS"), ["/b"]);
 });
