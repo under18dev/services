@@ -3,6 +3,7 @@ import { classesIn, classesMissingFrom } from "@u18/testing";
 import { hashedFileName } from "@u18/web-ui";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CARDS_UI_PATH, createApp } from "../src/presentation/http/app";
+import { ADMIN_UI_PATH } from "../src/presentation/http/base-path";
 import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import {
   ORIGIN,
@@ -45,7 +46,9 @@ import {
  */
 
 const TARO = "token-taro-0123456789abcdefghijklmn";
-const identity = identityWith({ [TARO]: "usr_taro" });
+/** 運営の画面は管理者でないと 200 で引けない（#338 Step 3）。 */
+const ADMIN = "token-admin-0123456789abcdefghijk";
+const identity = identityWith({ [TARO]: "usr_taro", [ADMIN]: "usr_admin" }, ["usr_admin"]);
 
 async function fetchText(path: string, cookie?: string): Promise<string> {
   const headers = new Headers();
@@ -89,6 +92,41 @@ describe("カード画面が使うクラスは、配信する CSS に在る", ()
     const missing = classesMissingFrom(html, css);
     expect(
       missing,
+      `CSS に無いクラス。theme.css にトークンが無いか、@source の走査から` +
+        `漏れたファイルで組み立てている（src/presentation/http/ui/kiwa.css）。`,
+    ).toEqual([]);
+  });
+
+  /**
+   * **運営の画面も引く**（#338 Step 3）。
+   *
+   * **画面を足して、ここに足し忘れる形が一番起きやすい。** dashboard-worker
+   * では実際に起きていて、6 枚とも移したあとも 1 枚しか引いていなかった
+   * （#356）。あちらは `grants-page.tsx` に存在しない class を足しても
+   * 277 本すべて緑だった。
+   *
+   * **空と埋まっている形の両方を見る**のは上と同じ理由で、
+   * `Empty` と `Card` / `Badge` / `Separator` / `<textarea>` では
+   * 出てくる primitive がまるごと違う。
+   */
+  it.each([
+    ["カードが無いとき", false],
+    ["カードがあるとき", true],
+  ])("管理画面（%s）の class が 1 つ残らず CSS にある", async (_label, seeded) => {
+    if (seeded) {
+      await seedActiveCard("usr_taro", "https://example.com/taro");
+      // **未紐づけが 1 枚要る。** `<textarea>` はそれが無いと描かれない。
+      await seedIssuedCard();
+    }
+
+    const html = await fetchText(ADMIN_UI_PATH, cookieFor(ADMIN));
+    const css = await fetchText(KIWA_STYLESHEET_PATH);
+
+    // 0 件だと**何も確かめずに通る。**
+    expect(classesIn(html).length).toBeGreaterThan(20);
+
+    expect(
+      classesMissingFrom(html, css),
       `CSS に無いクラス。theme.css にトークンが無いか、@source の走査から` +
         `漏れたファイルで組み立てている（src/presentation/http/ui/kiwa.css）。`,
     ).toEqual([]);

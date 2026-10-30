@@ -68,6 +68,48 @@ export type CardView = {
 };
 
 /**
+ * 運営向けの一覧で返す表示用データ（#338 Step 3）。
+ *
+ * **`CardView` と別の型にしてある。** あちらは所有者本人が自分のカードを
+ * 見るもので、**所有者の userId を含まない**（自分のものだと分かっている）。
+ * こちらは全員のカードを見るので `ownerUserId` が要る。
+ *
+ * **同じ型に `ownerUserId?` を足さないこと。** 省略可能にすると、
+ * 所有者向けの経路が**うっかり埋めても型が通る**。別の型なら、
+ * 所有者向けの画面へ渡した時点で落ちる。
+ */
+export type AdminCardView = {
+  readonly cardId: string;
+  readonly status: CardStatus;
+  /** 未紐づけなら null。 */
+  readonly ownerUserId: string | null;
+  readonly targetUrl: string | null;
+  /** ロット名。配布の単位。 */
+  readonly batch: string | null;
+  /** ISO 8601 (UTC)。発行された時刻。 */
+  readonly issuedAt: string;
+  /** ISO 8601 (UTC)。 */
+  readonly claimedAt: string | null;
+  readonly disabledAt: string | null;
+};
+
+/**
+ * 運営向けの一覧の結果（#338 Step 3）。
+ *
+ * ## **打ち切ったことを値として返す**
+ *
+ * 件数の上限で切ったとき、**切ったこと自体を呼び出し側へ渡す。**
+ * 「最初の N 件」を黙って返すと、運営は**全部を見たつもりで一部を見る。**
+ * このリポジトリが繰り返し踏んでいる「検査の範囲が静かに狭まる」
+ * （#96 / #122 / #332）の、画面版である。
+ */
+export type AdminCardList = {
+  readonly cards: readonly AdminCardView[];
+  /** 上限で打ち切ったか。true なら画面にそう出すこと。 */
+  readonly truncated: boolean;
+};
+
+/**
  * カードの永続化 Port。
  *
  * ## 状態遷移を「条件付き UPDATE」として表現している理由
@@ -87,6 +129,15 @@ export interface CardRepository {
 
   /** 所有者のカード一覧。無効化済みも含める（所有者には見せてよい）。 */
   listByOwner(ownerUserId: string): Promise<readonly Card[]>;
+
+  /**
+   * 全カードの一覧（運営向け、#338 Step 3）。
+   *
+   * **`limit + 1` 件まで取ること。** 呼び出し側が「上限で切れたか」を
+   * 判定できるようにするためで、ちょうど `limit` 件返すと
+   * 「ちょうど上限だった」と「それ以上ある」が区別できない。
+   */
+  listAll(limit: number): Promise<readonly Card[]>;
 
   /** 運営によるカード発行。HTTP では公開しない（管理者ロールが未実装のため）。 */
   issue(card: NewCard, now: Date): Promise<void>;
