@@ -1,5 +1,12 @@
 /**
- * アイランドが作る要素のクラス（#332）。
+ * この Worker の島だけが作る要素のクラス（#332）。
+ *
+ * **一覧の行まわりは `@u18/web-ui/kiwa/island-classes` にある。**
+ * nfc-worker も同じ見た目で出すので、Worker の外へ出した（#338）。
+ * ここに残っているのは**この画面にしか出ないもの**だけ ——
+ * プロフィールの編集パネルと、そこで使うボタン。
+ *
+ * **使う側が 2 つになったら、あちらへ移すこと。**
  *
  * ## なぜ島の中に直書きしないのか
  *
@@ -28,30 +35,6 @@
  * （`kiwa.css` の `@source "./"` がこのファイルを含む）が、
  * **`@source` を 1 行消せば黙って効かなくなる**ことは変わらない。
  */
-
-/** 行の本体。`data-item-body` が付く側。 */
-export const ITEM_BODY_CLASS = "flex flex-col gap-1";
-
-/** 行の見出し。`data-item-title` が付く側。 */
-export const ITEM_TITLE_CLASS = "flex flex-wrap items-center gap-2 font-medium";
-
-/** 行の補足。日付や種別など。 */
-export const ITEM_META_CLASS = "text-sm/relaxed text-foreground-muted";
-
-/** 利用者が入れた値をそのまま出すところ（User-Agent、URL）。 */
-export const ITEM_RAW_CLASS = "font-mono text-xs break-all text-foreground-soft";
-
-/** 失敗の文言。**`role="alert"` と一緒に使う。** */
-export const ITEM_ERROR_CLASS = "text-sm/relaxed text-destructive";
-
-/** 「ありません」の表示。 */
-export const EMPTY_CLASS = "text-sm/relaxed text-foreground-muted";
-
-/** 一覧。区切り線は行が自分で持つ。 */
-export const LIST_CLASS = "flex flex-col";
-
-/** 行の中のボタンを並べるところ。 */
-export const ITEM_ACTIONS_CLASS = "mt-2 flex flex-wrap gap-2";
 
 /**
  * ボタンのクラス。**`getButtonClasses()` の戻り値をリテラルで写したもの。**

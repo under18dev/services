@@ -12,7 +12,7 @@ import {
   ITEM_META_CLASS,
   ITEM_TITLE_CLASS,
   LIST_CLASS,
-} from "./island-classes";
+} from "@u18/web-ui/kiwa/island-classes";
 
 /**
  * 連携を許可したアプリ（`/account/grants`、#18）。

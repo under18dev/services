@@ -10,7 +10,12 @@ import {
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
 import { GRANTS_PATH, PASSKEYS_PATH, PROFILE_PATH, SESSIONS_PATH } from "./asset-paths";
-import { ITEM_BODY_CLASS, ITEM_META_CLASS, ITEM_TITLE_CLASS, LIST_CLASS } from "./island-classes";
+import {
+  ITEM_BODY_CLASS,
+  ITEM_META_CLASS,
+  ITEM_TITLE_CLASS,
+  LIST_CLASS,
+} from "@u18/web-ui/kiwa/island-classes";
 import { ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 
 /**

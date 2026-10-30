@@ -17,7 +17,8 @@ import {
 import type { FC } from "hono/jsx";
 import type { CardView } from "../../../application/ports";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
-import { STATUS_TEXT_CLASS, TARGET_INPUT_CLASS } from "./island-classes";
+import { ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
+import { TARGET_INPUT_CLASS } from "./island-classes";
 import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "./island-hooks";
 
 /**
@@ -167,9 +168,9 @@ const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
           島が要素を作らずに済むようにするため（作らせると class が
           サーバーの HTML に出ない）。
         */}
-        <p class={STATUS_TEXT_CLASS} {...{ [TARGET_STATUS]: "" }}></p>
+        <p class={ITEM_META_CLASS} {...{ [TARGET_STATUS]: "" }}></p>
         <noscript>
-          <p class={STATUS_TEXT_CLASS}>
+          <p class={ITEM_META_CLASS}>
             遷移先の変更には JavaScript が必要です。一覧の表示には要りません。
           </p>
         </noscript>

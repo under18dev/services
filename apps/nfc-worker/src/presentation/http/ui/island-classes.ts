@@ -1,6 +1,13 @@
 /**
  * **アイランドが組み立てる class を、サーバーも使う**（#338）。
  *
+ * ## 一覧の行まわりはここに無い
+ *
+ * 補足の文・失敗の文言・「ありません」の表示は
+ * `@u18/web-ui/kiwa/island-classes` にある。**dashboard-worker が同じ
+ * 見た目で出している**ので、Worker の外へ出した（#332）。
+ * ここに残っているのは**この画面にしか出ないもの**だけである。
+ *
  * ## なぜ定数にするのか
  *
  * Tailwind v4 は**ソースを走査して**使われている class だけを CSS に
@@ -61,9 +68,3 @@
 export const TARGET_INPUT_CLASS =
   "w-full rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-sm " +
   "outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20";
-
-/** 操作の結果を出す行。**成功と失敗で色を変えない**（design.md の "No colorful UI."）。 */
-export const STATUS_TEXT_CLASS = "text-sm/relaxed text-foreground-muted";
-
-/** 失敗だけは区別が要る。読み上げにも出すので `role="alert"` と対で使う。 */
-export const STATUS_ERROR_CLASS = "text-sm/relaxed text-destructive";
