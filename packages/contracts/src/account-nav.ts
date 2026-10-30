@@ -41,7 +41,21 @@
  */
 
 export type AccountNavKey =
-  "profile" | "passkeys" | "sessions" | "grants" | "apps" | "nfc" | "clients" | "users";
+  | "profile"
+  | "passkeys"
+  | "sessions"
+  | "grants"
+  | "apps"
+  | "nfc"
+  | "clients"
+  | "users"
+  /**
+   * 運営向けのカード管理（#338 Step 3）。
+   *
+   * **`"nfc"` と別のキーにする** —— 同じにすると、利用者向けの
+   * カード画面を開いたときに管理の項目まで選択状態になる。
+   */
+  | "nfc-admin";
 
 export type AccountNavItem = {
   readonly key: AccountNavKey;
@@ -154,6 +168,24 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
         key: "clients",
         href: "/account/admin/clients",
         label: "OAuth クライアント",
+        adminOnly: true,
+      },
+      /**
+       * **この 1 行だけ持ち主が違う**（#338 Step 3）。`/account/nfc/*` に
+       * 答えるのは nfc-worker で、上の「サービス」の `"nfc"` と同じ事情。
+       *
+       * **ラベルを「NFC カード」と重ねない。** あちらは**自分の**カード、
+       * こちらは**全員の**カードで、用事が違う。同じ語を 2 回出すと、
+       * どちらを押せばよいか画面から読めない。
+       *
+       * **`adminOnly` はサイドバーの話でしかない。** この URL は誰でも
+       * 叩けるので、**画面側が `isAdmin` を見て 404 を返している**
+       * （`cards-ui.routes.tsx`）。片方だけだと嘘になる。
+       */
+      {
+        key: "nfc-admin",
+        href: "/account/nfc/admin",
+        label: "カードの管理",
         adminOnly: true,
       },
     ],
