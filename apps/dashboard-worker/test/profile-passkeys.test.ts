@@ -1,5 +1,5 @@
 import { DEV_SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
-import type { PasskeySummary, UserProfile } from "@u18/contracts";
+import type { UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_BASE_PATH, createApp } from "../src/presentation/http/app";
 import { ORIGIN, envWith, executionContext } from "./helpers";
@@ -130,45 +130,15 @@ describe("PATCH /api/me", () => {
   });
 });
 
-describe("GET /api/me/passkeys", () => {
-  const SUMMARY: PasskeySummary = {
-    id: "pk_1",
-    label: "iPhone",
-    deviceType: "multiDevice",
-    createdAt: "2026-10-25T00:00:00.000Z",
-    lastUsedAt: null,
-  };
-
-  it("一覧を返す", async () => {
-    const env = envWith({ listPasskeys: async () => rpcOk([SUMMARY]) });
-
-    const response = await request("/api/me/passkeys", env, { headers: { Cookie: COOKIE } });
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ passkeys: [SUMMARY] });
-  });
-
-  it("受けた DTO をそのまま返す（加工しない）", async () => {
-    // **契約に項目を足すと、そのまま利用者のブラウザへ届く。**
-    // ここでフィルタしていないことを明示しておく（`/api/me/grants` と同じ）。
-    const env = envWith({ listPasskeys: async () => rpcOk([SUMMARY]) });
-
-    const body = (await (
-      await request("/api/me/passkeys", env, {
-        headers: { Cookie: COOKIE },
-      })
-    ).json()) as { passkeys: unknown[] };
-
-    expect(Object.keys(body.passkeys[0] as object).sort()).toEqual(
-      ["createdAt", "deviceType", "id", "label", "lastUsedAt"].sort(),
-    );
-  });
-
-  it("Cookie が無ければ 401", async () => {
-    const response = await request("/api/me/passkeys", envWith({}));
-    expect(response.status).toBe(401);
-  });
-});
+/*
+ * **「GET /api/me/passkeys」のテストはここにあった**（#321 で消した）。
+ *
+ * **呼ぶ側が 1 つも無かったので経路ごと消した。** 削除
+ * （`DELETE /api/me/passkeys/:id`）はアイランドが呼ぶので残っており、下が見ている。
+ *
+ * 一覧の表示は `passkeys-page.tsx` がサーバー側で RPC から描く
+ * （`ui-island.test.ts`）。
+ */
 
 describe("DELETE /api/me/passkeys/:id", () => {
   const del = (env: Env, headers: Record<string, string> = { Cookie: COOKIE, Origin: ORIGIN }) =>

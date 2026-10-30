@@ -30,14 +30,15 @@ const client = hc<DashboardAppType>("http://localhost");
 
 // --- 実在するルートは引ける ---
 void client.account.api.me.$get;
-void client.account.api.me.sessions.$get;
 void client.account.api.me.sessions[":id"].$delete;
-void client.account.api.me.grants.$get;
 void client.account.api.me.grants[":clientId"].$delete;
-void client.account.api.me.passkeys.$get;
 void client.account.api.me.passkeys[":id"].$delete;
 void client.account.health.$get;
 void client.account.api.me.$patch;
+
+// **一覧の `$get` はここに並んでいた**（#321 で消した）。
+// `GET .../sessions` / `.../passkeys` / `.../grants` は**呼ぶ側が 1 つも
+// 無かった**ので経路ごと消してある。画面はサーバー側で RPC から描く。
 
 // **本文の形は `hc` では縛られない**（実測）。`PATCH /api/me` は
 // `zValidator` などの validator を通していないので、Hono のスキーマに

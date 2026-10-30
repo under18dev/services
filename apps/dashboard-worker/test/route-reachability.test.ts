@@ -70,13 +70,8 @@ const NOT_CALLED_FROM_ISLAND: Readonly<Record<string, string>> = {
   "GET /account/health": "監視が叩く経路。利用者の入口ではない",
   "GET /account/api/me":
     "デプロイ後のスモークが Cookie 無しで 401 を確かめる経路（deploy.yml）。画面はサーバー側で RPC から描く",
-  // **以下 3 つはリポジトリ内に呼ぶ側が 1 つも無い。** 画面はサーバー側で
-  // RPC から描くので、この BFF を経由しない。**#321 で扱う** ——
-  // セッション Cookie さえあればブラウザから個人情報が読める口が、
-  // 誰にも使われないまま空いている。
-  "GET /account/api/me/sessions": "呼ぶ側が無い（#321）。画面はサーバー側で RPC から描く",
-  "GET /account/api/me/passkeys": "呼ぶ側が無い（#321）。画面はサーバー側で RPC から描く",
-  "GET /account/api/me/grants": "呼ぶ側が無い（#321）。画面はサーバー側で RPC から描く",
+  // **一覧の取得はここに並んでいた。** 呼ぶ側が 1 つも無かったので
+  // #321 で消した。理由は `route-inventory.ts` に残してある。
 };
 
 describe("API の経路に、利用者の入口があること", () => {
