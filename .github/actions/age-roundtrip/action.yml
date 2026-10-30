@@ -1,0 +1,99 @@
+name: Install age and prove the round trip
+description: >
+  age を SHA256 固定で入れ、**使い捨ての鍵で暗号化→復号を 1 往復して**
+  経路が動くことを確かめる。本番の鍵は使わない。
+
+# ## なぜ往復まで確かめるのか
+#
+# `scripts/lib/age.mjs` のテストは、**こちらが想像した age の出力**に対する
+# 検査である。**本物の age が同じものを出すかは、本物を動かさないと言えない。**
+#
+# バックアップは取れたことより**戻せること**に意味があるのに、暗号化の経路が
+# 一度も動いていない状態で本番のダンプを封じると、**開けないものが毎日
+# 積み上がる。** 先に 1 往復させる。
+#
+# ## なぜ使い捨ての鍵なのか
+#
+# 運用者の秘密鍵は CI に無い（それが設計である。runbook 12.11）。
+# **経路が動くことと、運用者の鍵で開けることは別の問い**で、ここで言えるのは
+# 前者だけ。後者は runbook 12.11 の期限が追う。
+#
+# ## なぜ composite action なのか
+#
+# `backup.yml` と `d1-token-probe.yml` の両方が使う。**2 箇所に写すと、
+# 片方だけ直す事故が起きる**（`smoke-probe.sh` を 1 本に寄せたのと同じ理由）。
+
+inputs:
+  version:
+    description: age のリリースタグ
+    required: false
+    default: v1.3.2
+  sha256:
+    description: linux-amd64 の tarball の SHA256
+    required: false
+    # タグは動かせるので中身で固定する（Actions を SHA で固定しているのと同じ理由、#49）。
+    default: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+
+outputs:
+  bin:
+    description: age の実行ファイルの場所（AGE_BIN へ渡す）
+    value: ${{ steps.install.outputs.bin }}
+
+runs:
+  using: composite
+  steps:
+    - name: age を入れる（SHA256 で固定）
+      id: install
+      shell: bash
+      env:
+        AGE_VERSION: ${{ inputs.version }}
+        AGE_SHA256: ${{ inputs.sha256 }}
+      run: |
+        cd "$RUNNER_TEMP"
+        curl -sSL --fail -o age.tar.gz \
+          "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-amd64.tar.gz"
+        echo "${AGE_SHA256}  age.tar.gz" | sha256sum --check --strict
+        tar -xzf age.tar.gz
+        "$RUNNER_TEMP/age/age" --version
+        echo "bin=$RUNNER_TEMP/age/age" >> "$GITHUB_OUTPUT"
+
+    # **ここが本番の鍵を使わずに経路を証明する場所。**
+    - name: 使い捨ての鍵で 1 往復する
+      shell: bash
+      run: |
+        work="$RUNNER_TEMP/age-selftest"
+        mkdir -p "$work"
+        chmod 700 "$work"
+
+        # 鍵は標準出力に出さない。**公開鍵だけ**を取り出す。
+        "$RUNNER_TEMP/age/age-keygen" -o "$work/key.txt" 2> "$work/keygen.txt"
+        recipient="$(grep -o 'age1[0-9a-z]*' "$work/keygen.txt" | head -1)"
+        if [ -z "$recipient" ]; then
+          echo "::error::age-keygen から公開鍵を取り出せなかった"
+          exit 1
+        fi
+
+        # 既知の平文。**本物のダンプは使わない**（中身が個人情報なので、
+        # 自己検査のために触らせる理由が無い）。
+        printf 'age round trip %s\n' "$GITHUB_RUN_ID" > "$work/plain.txt"
+
+        "$RUNNER_TEMP/age/age" --recipient "$recipient" \
+          --output "$work/cipher.age" "$work/plain.txt"
+
+        # 暗号文が age の形をしていること。**平文のまま出ていたらここで落ちる。**
+        head -c 21 "$work/cipher.age" | grep -q '^age-encryption.org/v1' || {
+          echo "::error::age の出力が age のヘッダで始まっていない"
+          exit 1
+        }
+
+        "$RUNNER_TEMP/age/age" --decrypt -i "$work/key.txt" \
+          --output "$work/out.txt" "$work/cipher.age"
+
+        # **元に戻ること。** ここが通らなければバックアップを取りに行かない。
+        if ! cmp -s "$work/plain.txt" "$work/out.txt"; then
+          echo "::error::age の往復で中身が変わった"
+          exit 1
+        fi
+
+        echo "age round trip OK (${AGE_VERSION:-pinned})"
+        rm -rf "$work"

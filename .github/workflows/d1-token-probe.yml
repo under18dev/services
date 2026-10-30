@@ -65,6 +65,11 @@ jobs:
         working-directory: apps/auth-worker
         run: pnpm exec wrangler --version
 
+      # **暗号化の経路も道具のうち。** ここが動かないなら、D1 を読めても
+      # バックアップは組めない。本番の鍵は使わず、使い捨ての鍵で 1 往復する。
+      - name: age を入れて往復を確かめる
+        uses: ./.github/actions/age-roundtrip
+
       # 失敗しても後続を止めない。「どこまでできるか」を知るのが目的。
       # 判定は最後にまとめて行う（outcome を見る。下記 Report 参照）。
       - name: d1 list

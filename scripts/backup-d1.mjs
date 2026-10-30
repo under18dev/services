@@ -54,7 +54,7 @@ import { fileURLToPath } from "node:url";
 import { deriveSigningKey, signRequest, SIGNING_KEY_VECTORS } from "./lib/aws-sigv4.mjs";
 import { ageBinary, assertAgeBytes, assertRecipient } from "./lib/age.mjs";
 import { reorderDump } from "./lib/d1-dump.mjs";
-import { rehearseRestore } from "./lib/restore-rehearsal.mjs";
+import { countInsertsByTable, rehearseRestore } from "./lib/restore-rehearsal.mjs";
 import { assertHttpsEndpoint } from "./lib/s3-endpoint.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -74,11 +74,13 @@ const DATABASES = {
   nfc: {
     name: "u18-nfc",
     dir: join(ROOT, "apps/nfc-worker"),
-    // **こちらは要求しない。** カードは本番でも正当に 0 件でありうるので、
-    // 行を要求すると偽陽性になる。`nfc_cards.owner_user_id` が指す先は
-    // **別の D1 の users** で、SQLite の外部キーとしては張られていない
-    // （#325 / runbook 12.4 (5)）。したがって #165 の形も起こらない。
-    // **空でも通る、という弱さは承知のうえで受け入れている。**
+    // **こちらは「行があること」を要求しない。** カードは本番でも正当に
+    // 0 件でありうるので、行を要求すると偽陽性になる。
+    //
+    // **それでも「空だから通った」にはならない。** ダンプの `INSERT` 件数と
+    // 流し込み後の行数を突き合わせているので（`countInsertsByTable()`）、
+    // 0 件なら 0 件同士で一致し、**文が流れなければ件数のずれとして出る。**
+    // 閾値を置かずに済むのはそのため。
     requireRows: [],
   },
 };
@@ -191,8 +193,14 @@ function backupKey(databaseName, at, ext = ".sql") {
 async function rehearseFile({ database, file, requireRows }) {
   // 保管するのは Cloudflare が吐いた生のダンプだが、**復元時は並べ替える**
   // （`d1-dump.mjs`）。リハーサルも復元と同じ形に揃える。
-  const ready = reorderDump(readFileSync(file, "utf8"));
-  const result = await rehearseRestore(ready, { requireRows });
+  const raw = readFileSync(file, "utf8");
+
+  // **数えるのは並べ替える前。** 流し込み後の行数と突き合わせることで、
+  // 「文が流れなかった」と「並べ替えで文が落ちた」の両方が件数のずれとして出る。
+  const expectedRows = countInsertsByTable(raw);
+
+  const ready = reorderDump(raw);
+  const result = await rehearseRestore(ready, { requireRows, expectedRows });
 
   const counted = Object.entries(result.tables)
     .map(([name, rows]) => `${name}=${rows}`)

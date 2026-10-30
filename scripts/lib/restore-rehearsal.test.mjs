@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rehearseRestore, REQUIRED_TABLES } from "./restore-rehearsal.mjs";
+import { reorderDump } from "./d1-dump.mjs";
+import { countInsertsByTable, rehearseRestore, REQUIRED_TABLES } from "./restore-rehearsal.mjs";
 
 /** 親が先。`reorderDump()` を通した後の形。 */
 const ORDERED = `
@@ -103,4 +104,77 @@ test("既定で要求するのは users と user_emails", () => {
   // #165 が「親より先に子の INSERT が来る」で壊れていた以上、
   // **この 2 つに行があることがリハーサルの前提条件**である。
   assert.deepEqual([...REQUIRED_TABLES], ["users", "user_emails"]);
+});
+
+// --- ダンプの件数と流し込み後の行数の突き合わせ（#325） -----------------------
+
+test("INSERT の件数をテーブルごとに数える", () => {
+  assert.deepEqual(countInsertsByTable(ORDERED), { users: 1, user_emails: 1 });
+});
+
+test("sqlite_ で始まる内部表は数えない", () => {
+  const sql = `${ORDERED}\nINSERT INTO sqlite_sequence VALUES ('users', 1);`;
+  assert.deepEqual(countInsertsByTable(sql), { users: 1, user_emails: 1 });
+});
+
+test("件数が一致すれば通る", async () => {
+  const expectedRows = countInsertsByTable(ORDERED);
+  const result = await rehearseRestore(reorderDump(ORDERED), { expectedRows });
+  assert.deepEqual(result.problems, []);
+});
+
+test("★空のダンプでも、0 件同士で一致すれば件数の検査は通る", async () => {
+  // **閾値を置かずに済む**のがこの方式の肝。カードが正当に 0 件でも偽陽性にしない。
+  const result = await rehearseRestore(reorderDump(EMPTY), {
+    expectedRows: countInsertsByTable(EMPTY),
+    requireRows: [],
+  });
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(result.tables, { user_emails: 0, users: 0 });
+});
+
+test("★文が流れなかったら件数のずれとして出る", async () => {
+  // ダンプには 2 件あるのに、流し込む側から 1 件落とす。
+  // **これが #165 の形そのもの** —— 流し込みは成功するのに中身が足りない。
+  const dump = `
+CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT);
+CREATE TABLE user_emails (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id));
+INSERT INTO users VALUES ('u1', 'a@example.test');
+INSERT INTO users VALUES ('u2', 'b@example.test');
+`;
+  const expectedRows = countInsertsByTable(dump);
+  assert.deepEqual(expectedRows, { users: 2 });
+
+  const dropped = dump.replace("INSERT INTO users VALUES ('u2', 'b@example.test');\n", "");
+  const result = await rehearseRestore(reorderDump(dropped), { expectedRows, requireRows: [] });
+
+  assert.equal(result.ok, false);
+  assert.match(
+    result.problems.join("\n"),
+    /users の件数が合わない: ダンプに 2 件 \/ 流し込み後 1 件/,
+  );
+  // **流し込み自体は成功している。** だから件数を見ないと気づけない。
+  assert.equal(result.statementError, null);
+});
+
+test("ダンプにあるテーブルが作られていなければ落ちる", async () => {
+  const result = await rehearseRestore("CREATE TABLE users (id TEXT PRIMARY KEY);", {
+    expectedRows: { cards: 3 },
+    requireRows: [],
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /cards へ 3 件入るはずが、テーブルが存在しない/);
+});
+
+test("件数の中身はエラーに出すが、行の値は出さない", async () => {
+  const dump = `
+CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT);
+INSERT INTO users VALUES ('u1', 'taro@example.test');
+`;
+  const result = await rehearseRestore("CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT);", {
+    expectedRows: countInsertsByTable(dump),
+    requireRows: [],
+  });
+  assert.equal(result.ok, false);
+  assert.doesNotMatch(result.problems.join("\n"), /example\.test/);
 });

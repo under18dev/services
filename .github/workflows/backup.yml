@@ -1,6 +1,8 @@
-# D1 のバックアップを毎日取り、R2 へ退避する（#325 / runbook 12.11）。
+# D1 のバックアップを取り、R2 へ退避する（#325 / runbook 12.11）。
 #
-# ## なぜ毎日なのか
+# **いまは手動実行だけ。** 日次に繋ぐのは別の PR（下の `on:` に理由）。
+#
+# ## なぜ（繋いだら）毎日なのか
 #
 # RPO（許容できるデータ損失時間）を 24 時間と置いた。Identity DB の書き込みは
 # 多くない（登録・ログイン・セッション失効）。**30 日以内なら Time Travel で
@@ -36,10 +38,20 @@
 name: Backup
 
 on:
-  schedule:
-    # 毎日 1 回。分を 0 にしないのは、毎時 0 分に集中する実行を避けるため。
-    - cron: "41 17 * * *"
-  # 手で走らせられるようにしておく。インシデント対応の初動で打つ（runbook 5）。
+  # **いまは手動だけ。`schedule:` は別の PR で足す。**
+  #
+  # 繋ぐ前に 1 回ずつ通しておきたいものが 2 つある ——
+  # `D1 token probe`（トークンが本番 D1 を読めるか）と、この手動実行である。
+  #
+  # **形式ではない。** いま `schedule:` を入れると、最初の実行は誰も見ていない
+  # 時間に走り、**本番の全利用者のメールアドレスを平文で扱う経路**がそこで
+  # 初めて動くことになる。
+  #
+  # 足すときの時刻は `0 21 * * *`（UTC）= **06:00 JST** を想定している。
+  # 失敗したときに**運用者が起きた時点で結果が出ている**ようにするため。
+  # 分を 0 にしているのはこの時刻に限った話で、**毎時 0 分は GitHub 側が
+  # 混むので普段は避ける** —— ここは「朝に結果が出ている」を優先した。
+  # `security.yml` の `17 3 * * 1` とは曜日も時刻もぶつからない。
   workflow_dispatch:
 
 # **前の実行を打ち切らない。** バックアップは「走り切ったこと」に意味が
@@ -50,12 +62,6 @@ concurrency:
 
 permissions:
   contents: read
-
-env:
-  # 公式リリースを SHA256 で固定する。Actions を SHA で固定しているのと
-  # 同じ理由（#49）—— タグは動かせる。
-  AGE_VERSION: v1.3.2
-  AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
 
 jobs:
   backup:
@@ -74,16 +80,12 @@ jobs:
         working-directory: apps/auth-worker
         run: pnpm exec wrangler --version
 
-      # age は PATH へ入れず、場所を AGE_BIN で渡す。
-      # **どの age を使ったかを設定から読めるようにするため。**
-      - name: age を入れる（SHA256 で固定）
-        run: |
-          cd "$RUNNER_TEMP"
-          curl -sSL --fail -o age.tar.gz \
-            "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-amd64.tar.gz"
-          echo "${AGE_SHA256}  age.tar.gz" | sha256sum --check --strict
-          tar -xzf age.tar.gz
-          "$RUNNER_TEMP/age/age" --version
+      # age を入れ、**使い捨ての鍵で 1 往復させてから**先へ進む。
+      # 往復が落ちたらバックアップを取りに行かない —— 開けないものを
+      # 積み上げないため。本番の鍵はここでは使わない。
+      - name: age を入れて往復を確かめる
+        id: age
+        uses: ./.github/actions/age-roundtrip
 
       - name: バックアップを取り、復元を確かめ、暗号化して上げる
         env:
@@ -92,7 +94,7 @@ jobs:
           # **公開鍵。秘密ではない。** それでも Secrets に置くのは、
           # 受信者を変えたときに履歴へ残さないため。
           AGE_RECIPIENT: ${{ secrets.BACKUP_AGE_RECIPIENT }}
-          AGE_BIN: ${{ runner.temp }}/age/age
+          AGE_BIN: ${{ steps.age.outputs.bin }}
           # ダンプはランナーの一時領域へ。$GITHUB_WORKSPACE へ置くと
           # 後続ステップやキャッシュに拾われうる。
           BACKUP_OUT: ${{ runner.temp }}/backup

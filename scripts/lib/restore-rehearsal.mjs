@@ -46,6 +46,41 @@
  * 呼び出し側には原因が分からない。
  */
 
+import { splitStatements } from "./d1-dump.mjs";
+
+/**
+ * ダンプに入っている `INSERT` の件数を、テーブルごとに数える。
+ *
+ * **これを流し込んだ後の行数と突き合わせると、閾値が要らなくなる。**
+ * 本番が 0 件なら 0 件同士で一致し、1 万件なら 1 万件同士で一致する。
+ * **そして「文が流れなかった」が必ず件数のずれとして出る** —— #165 の
+ * 不具合はまさにそれだった。
+ *
+ * `reorderDump()` と**同じ分け方**を使う（`splitStatements()`）。別々に
+ * 分けると、並べ替えたものと数えたものがずれても誰も気づかない。
+ *
+ * ## 前提: wrangler は 1 行につき 1 文を吐く
+ *
+ * `INSERT INTO "users" VALUES(...);` が行ごとに並ぶ形を前提にしている。
+ * **複数行をまとめた `VALUES (...),(...)` を吐くようになったら、この数え方は
+ * 実際の行数より少なく数える。** その場合は件数が合わなくなるので
+ * **検査が落ちる側に倒れる**（黙って通らない）。落ちたら数え方を直すこと。
+ */
+export function countInsertsByTable(sql) {
+  /** @type {Record<string, number>} */
+  const counts = {};
+  const target = /^INSERT INTO [`"]?([A-Za-z_0-9]+)/;
+  for (const statement of splitStatements(sql)) {
+    const match = target.exec(statement.trim());
+    if (match === null) continue;
+    const name = match[1];
+    // SQLite の内部表は流し込み後の集計からも外れる。
+    if (name.startsWith("sqlite_")) continue;
+    counts[name] = (counts[name] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** リハーサル後に行が入っていなければ落とすテーブル。 */
 export const REQUIRED_TABLES = ["users", "user_emails"];
 
@@ -66,11 +101,14 @@ async function openMemoryDatabase() {
  * ダンプを空のデータベースへ流し込み、結果を報告する。
  *
  * @param {string} sql 流し込む SQL（`reorderDump()` を通した後のもの）
- * @param {{ requireRows?: readonly string[] }} [options]
+ * @param {{ requireRows?: readonly string[], expectedRows?: Record<string, number> }} [options]
+ *   `expectedRows` は**並べ替える前のダンプ**から数えた件数
+ *   （`countInsertsByTable()`）。並べ替えで文が落ちていないことも同時に見る。
  * @returns {Promise<{ ok: boolean, problems: string[], tables: Record<string, number>, statementError: string | null }>}
  */
 export async function rehearseRestore(sql, options = {}) {
   const requireRows = options.requireRows ?? REQUIRED_TABLES;
+  const expectedRows = options.expectedRows ?? null;
   const problems = [];
   /** @type {Record<string, number>} */
   const tables = {};
@@ -135,6 +173,29 @@ export async function rehearseRestore(sql, options = {}) {
 
     if (names.length === 0) {
       problems.push("テーブルが 1 つも作られていない（ダンプが空の可能性）");
+    }
+
+    // ★ダンプの `INSERT` 件数と、流し込んだ後の行数を突き合わせる。
+    //
+    // **閾値が要らない。** 本番が 0 件なら 0 件同士で一致する。そして
+    // **「文が流れなかった」が必ずここに出る。** 行を要求する方式だと
+    // 「1 行でもあれば通る」になるが、こちらは**全部入ったか**を見る。
+    //
+    // 数えるのは**並べ替える前**のダンプなので、`reorderDump()` が文を
+    // 落としていないことも同時に確かめていることになる。
+    if (expectedRows !== null) {
+      for (const [name, expected] of Object.entries(expectedRows)) {
+        const actual = tables[name];
+        if (actual === undefined) {
+          problems.push(`${name} へ ${expected} 件入るはずが、テーブルが存在しない`);
+          continue;
+        }
+        if (actual !== expected) {
+          problems.push(
+            `${name} の件数が合わない: ダンプに ${expected} 件 / 流し込み後 ${actual} 件`,
+          );
+        }
+      }
     }
 
     // ★空の DB で緑になる穴を塞ぐ。
