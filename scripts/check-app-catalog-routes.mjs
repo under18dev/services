@@ -13,6 +13,7 @@ import { eachWorkerEnv, findWorkerConfigs } from "./lib/wrangler-configs.mjs";
 import {
   readCatalogUrls,
   readInventoryPaths,
+  readNavHrefs,
   readStringConstants,
   unreachablePaths,
 } from "./lib/app-catalog-routes.mjs";
@@ -21,6 +22,7 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const UI = path.join(ROOT, "apps", "dashboard-worker", "src", "presentation", "http", "ui");
 const CATALOG = path.join(UI, "app-catalog.ts");
 const ASSET_PATHS = path.join(UI, "asset-paths.ts");
+const ACCOUNT_NAV = path.join(ROOT, "packages", "contracts", "src", "account-nav.ts");
 
 function fail(message) {
   console.error(`::error::${message}`);
@@ -29,9 +31,11 @@ function fail(message) {
 
 let catalogText;
 let assetPathsText;
+let navText;
 try {
   catalogText = readFileSync(CATALOG, "utf8");
   assetPathsText = readFileSync(ASSET_PATHS, "utf8");
+  navText = readFileSync(ACCOUNT_NAV, "utf8");
 } catch (error) {
   fail(
     `could not read the app catalog (${error instanceof Error ? error.message : String(error)}). ` +
@@ -114,17 +118,57 @@ function inventoryOf(worker) {
   return inventoryCache.get(worker);
 }
 
-const problems = unreachablePaths(paths, routes, inventoryOf);
-if (problems.length > 0) {
-  for (const { path: p, reason } of problems) {
-    console.error(
-      `::error::app catalog lists "${p}", but ${reason}. ` +
-        `A catalog entry that 404s is exactly the dead link #306 was about. ` +
-        `Either fix the url in app-catalog.ts, or fix the Worker that should serve it.`,
-    );
-  }
-  process.exit(1);
+/**
+ * サイドバーの並び（#338）。
+ *
+ * **カタログと同じ検査に通す。** 2 つ目の仕組みを作らないこと ——
+ * どちらが正しいか誰も言えなくなる。見ているものが同じ（「この
+ * `/account/...` は、本番でどの Worker に当たり、その Worker が
+ * 登録しているか」）なので、通す経路も 1 つでよい。
+ */
+const navHrefs = readNavHrefs(navText);
+if (navHrefs === null) {
+  // **「読めなかったので 0 件」を「問題なし」にしない**（カタログと同じ）。
+  fail(
+    `ACCOUNT_NAV_GROUPS could not be parsed out of ${path.relative(ROOT, ACCOUNT_NAV)}. ` +
+      `The check reads the TypeScript as text, so a change to how items are written ` +
+      `silently empties it. Update lib/app-catalog-routes.mjs along with the nav.`,
+  );
 }
+
+// **並びは全部が同一オリジンである。** カタログと違い外部リンクを
+// 置く場所ではないので、`/` 始まりでないものが現れたら読み違えている。
+const foreign = navHrefs.filter((href) => !href.startsWith("/"));
+if (foreign.length > 0) {
+  fail(
+    `ACCOUNT_NAV_GROUPS contains non-absolute href(s): ${foreign.join(", ")}. ` +
+      `The sidebar only links to pages on auth.under18.dev; an external link there ` +
+      `would leave the account area without saying so.`,
+  );
+}
+
+let failed = false;
+
+for (const { path: p, reason } of unreachablePaths(paths, routes, inventoryOf)) {
+  failed = true;
+  console.error(
+    `::error::app catalog lists "${p}", but ${reason}. ` +
+      `A catalog entry that 404s is exactly the dead link #306 was about. ` +
+      `Either fix the url in app-catalog.ts, or fix the Worker that should serve it.`,
+  );
+}
+
+for (const { path: p, reason } of unreachablePaths(navHrefs, routes, inventoryOf)) {
+  failed = true;
+  console.error(
+    `::error::the account sidebar (packages/contracts/src/account-nav.ts) lists "${p}", ` +
+      `but ${reason}. The sidebar is rendered by dashboard-worker AND nfc-worker, ` +
+      `so a dead entry shows a 404 link on every page of the account area. ` +
+      `Either fix the href, or fix the Worker that should serve it.`,
+  );
+}
+
+if (failed) process.exit(1);
 
 // **0 件は「問題なし」と書き分ける。** カタログが空になるのは設計上
 // ありうるので落とさないが、「何も調べていない」ことは出力に出す。
@@ -133,3 +177,4 @@ console.log(
     ? `app catalog: no same-origin entries to check (${routes.length} production routes read)`
     : `app catalog: ${paths.length} same-origin entr${paths.length === 1 ? "y reaches" : "ies reach"} the Worker that registers it`,
 );
+console.log(`account sidebar: ${navHrefs.length} entries reach the Worker that registers them`);

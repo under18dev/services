@@ -84,8 +84,8 @@ export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/acco
  * このパスに認証を一切掛けておらず、**2 つのホストのどちらからも
  * Cookie 無しで 200 が返る**（実測）:
  *
- *     https://auth.under18.dev/account/nfc/ui/u18.<hash>.css  200
- *     https://go.under18.dev/account/nfc/ui/u18.<hash>.css    200
+ *     https://auth.under18.dev/account/nfc/ui/kiwa.<hash>.css  200
+ *     https://go.under18.dev/account/nfc/ui/kiwa.<hash>.css    200
  *
  * **意図どおりである** —— 中身は全利用者に同じ CSS で、個人情報を
  * 1 文字も含まない（`cards-ui.routes.tsx` のコメント）。`immutable` で
@@ -96,7 +96,7 @@ export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/acco
  * なっていた。**
  */
 export const CARD_ASSET_ROUTES: readonly Route[] = [
-  { method: "GET", path: "/account/nfc/ui/u18.<hash>.css" },
+  { method: "GET", path: "/account/nfc/ui/kiwa.<hash>.css" },
 ];
 
 /** カード管理に属するもの全部。一覧の突き合わせに使う。 */

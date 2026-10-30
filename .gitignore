@@ -21,3 +21,4 @@ coverage/
 # dev / build / typecheck / test が毎回作り直すのでコミットしない。
 apps/auth-worker/src/presentation/http/ui/generated/
 apps/dashboard-worker/src/presentation/http/ui/generated/
+apps/nfc-worker/src/presentation/http/ui/generated/

@@ -6,6 +6,7 @@ import {
   patternCovers,
   readCatalogUrls,
   readInventoryPaths,
+  readNavHrefs,
   readStringConstants,
   resolveOwner,
   unreachablePaths,
@@ -199,4 +200,71 @@ test("unreachablePaths: 決められない勝者は落とす", () => {
 
   assert.equal(problems.length, 1);
   assert.match(problems[0].reason, /not decidable/);
+});
+
+/**
+ * `readNavHrefs`（#338）。
+ *
+ * **実物を最初に読む。** `readCatalogUrls` と同じ理由で、合成した入力
+ * だけだと「書き方が変わって 0 件」が一番見えない。
+ */
+const ACCOUNT_NAV = path.join(ROOT, "packages", "contracts", "src", "account-nav.ts");
+
+test("readNavHrefs: 実物の ACCOUNT_NAV_GROUPS を読める", () => {
+  const hrefs = readNavHrefs(readFileSync(ACCOUNT_NAV, "utf8"));
+
+  assert.notEqual(hrefs, null, "並びを読めていない");
+  assert.ok(hrefs.length >= 2, `href が ${hrefs.length} 件しか取れていない`);
+  // **持ち主が 2 人いることが、このリストが存在する理由である。**
+  // nfc が消えたらこの検査の意味も変わるので、ここで固定しておく。
+  assert.ok(hrefs.includes("/account/nfc"), "nfc-worker の行き先が無い");
+  for (const href of hrefs) assert.match(href, /^\/account/);
+});
+
+test("readNavHrefs: 入れ子のグループから全部拾う", () => {
+  const hrefs = readNavHrefs(`
+export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
+  {
+    label: "A",
+    items: [
+      { key: "profile", href: "/account/profile", label: "p" },
+      { key: "passkeys", href: "/account/passkeys", label: "k" },
+    ],
+  },
+  { label: "B", items: [{ key: "nfc", href: "/account/nfc", label: "n" }] },
+];
+`);
+
+  assert.deepEqual(hrefs, ["/account/profile", "/account/passkeys", "/account/nfc"]);
+});
+
+test("readNavHrefs: 項目と href の数が合わなければ null", () => {
+  // **「読めなかったので 0 件」を「問題なし」にしない。** 定数参照に
+  // 書き換えられると href だけ拾えなくなり、検査は緑のまま本番が 404 を出す。
+  const hrefs = readNavHrefs(`
+export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
+  {
+    label: "A",
+    items: [
+      { key: "profile", href: PROFILE_PATH, label: "p" },
+      { key: "nfc", href: "/account/nfc", label: "n" },
+    ],
+  },
+];
+`);
+
+  assert.equal(hrefs, null);
+});
+
+test("readNavHrefs: 項目が 1 つも無ければ null", () => {
+  // 空の並びは「サイドバーが消えた」であって、正当な状態ではない。
+  assert.equal(
+    readNavHrefs(`export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
+];`),
+    null,
+  );
+});
+
+test("readNavHrefs: 宣言が見つからなければ null", () => {
+  assert.equal(readNavHrefs("export const SOMETHING_ELSE = [];"), null);
 });

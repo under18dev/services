@@ -1,29 +1,58 @@
-import { Layout } from "@u18/web-ui";
-import { STYLESHEET_PATH } from "./asset-paths";
+import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import {
+  Badge,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  KiwaShell,
+  Separator,
+} from "@u18/web-ui/kiwa";
 import type { FC } from "hono/jsx";
 import type { CardView } from "../../../application/ports";
+import { KIWA_STYLESHEET_PATH } from "./asset-paths";
 
 /**
- * 自分のカード一覧（Phase 4 / #31）。
+ * 自分のカード一覧（Phase 4 / #31、#338 で Kiwa UI へ）。
+ *
+ * ## ダッシュボードの 1 枚になった（#338）
+ *
+ * **以前はサイドバーを持たない 1 枚のカードだった。** 同じオリジンに
+ * 載っているのに**ダッシュボードから辿れず**、`/account` の他の画面と
+ * 見た目も違っていた。`KiwaShell` を使い、サイドバーの「サービス」に
+ * 自分を出すことで、利用者から見て 1 つの画面になる。
+ *
+ * **並びは `@u18/contracts` の `ACCOUNT_NAV_GROUPS`** で、
+ * dashboard-worker が渡すものと同じ配列である。片方にだけ項目を足した
+ * 状態が作れない（あちらの冒頭）。
  *
  * ## サーバーレンダリングだけで成立させる
  *
- * この画面は **JS を 1 行も要求しない**。`<script>` を出さないので
- * `Layout` の `scripts` も渡していない。
+ * この画面は **JS を 1 行も要求しない**。`KiwaShell` は `<script>` を
+ * 出さず、ここで使っている primitives もクライアント JS を持たない。
  *
- * 表示だけに絞っているのは、書き込み経路を 2 本持たないためである。
- * `cards.routes.ts` は既に JSON + Origin 検証で守られていて、そこへ
- * form POST を並べると **2 つを同期させ続ける必要が出る**。それは本
- * リポジトリが繰り返し踏んでいるバグの形そのものなので、変更操作は
- * アイランドから既存の JSON API を叩く形に寄せる（後続）。
+ * ## 操作はまだ無い
  *
- * ## 既存のクラスだけで組む
+ * API には 5 つの操作（紐づけ・遷移先の変更・無効化・移転・発行）が
+ * あるが、**この画面からは 1 つも叩けない。** それが #338 の本体で、
+ * アイランドから既存の JSON API を叩く形で別途入る。
  *
- * 新しい CSS クラスを足していない。`.identity` は同意画面で「誰として
- * 操作しているか」を出す枠付きのボックスで、**1 件を枠で囲んで見せる**
- * という形が同じなのでそのまま使う。スタイルシートは別 Worker
- * （auth-worker）が配信しており、**こちらの都合で増やすと 2 箇所を
- * 同期させることになる。**
+ * **「できない」を黙って出さない** —— 下の案内がそれを言っている。
+ * 書き込み経路を 2 本（form POST と JSON）持たないのは、
+ * `cards.routes.ts` が既に JSON + Origin 検証で守られていて、並べると
+ * **2 つを同期させ続ける必要が出る**ためである。
+ *
+ * ## インラインの `style` を書かない
+ *
+ * 本番の CSP は `style-src 'self'` で `'unsafe-inline'` を含まない。
+ * `style="..."` はブラウザに破棄されるので、**ローカルでは効いて本番で
+ * だけ崩れる**（dashboard が #320 で踏んだ）。`test/cards.ui.test.ts` が
+ * 見ている。
  *
  * ## 遷移先 URL をリンクにしない
  *
@@ -39,27 +68,58 @@ const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
   disabled: "無効化済み",
 };
 
+/**
+ * 状態のバッジの見た目。
+ *
+ * **`disabled` だけ `destructive` にする。** 無効化は片道の操作で、
+ * 一覧の中で見分けが付く必要がある。`issued`（まだ誰のものでもない）と
+ * `active` は中立 —— **色で良し悪しを言わない**（design.md の
+ * "No colorful UI."）。
+ */
+const STATUS_VARIANT: Readonly<Record<CardView["status"], "secondary" | "destructive">> = {
+  issued: "secondary",
+  active: "secondary",
+  disabled: "destructive",
+};
+
 /** ISO 8601 を「2026-10-25」まで落とす。時刻まで見せる理由が無い。 */
 function toDate(iso: string): string {
   return iso.split("T")[0] ?? iso;
 }
 
-const CardBox: FC<{ readonly card: CardView }> = ({ card }) => (
-  <li class="identity">
-    <strong>{card.cardId}</strong>
-    <span>
-      {STATUS_LABEL[card.status]}
-      {card.claimedAt === null ? null : ` ・ ${toDate(card.claimedAt)} に紐づけ`}
-      {card.transferCount > 0 ? ` ・ 移転 ${card.transferCount} 回` : null}
-    </span>
-    <span>遷移先: {card.targetUrl === null ? "未設定" : card.targetUrl}</span>
-    {card.disabledAt === null ? null : (
-      <span>
-        {toDate(card.disabledAt)} に無効化
-        {card.disabledReason === null ? null : `（${card.disabledReason}）`}
-      </span>
+const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
+  <div class="flex flex-col gap-1">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="font-mono text-sm font-medium">{card.cardId}</span>
+      <Badge variant={STATUS_VARIANT[card.status]}>{STATUS_LABEL[card.status]}</Badge>
+    </div>
+
+    <p class="text-sm/relaxed text-foreground-muted">
+      遷移先:{" "}
+      {card.targetUrl === null ? (
+        "未設定"
+      ) : (
+        // **リンクにしない**（冒頭を参照）。折り返すのは、長い URL が
+        // カードの幅を超えて横スクロールを作らないようにするため。
+        <span class="font-mono break-all">{card.targetUrl}</span>
+      )}
+    </p>
+
+    {/*
+      **日付の行は、言うことがあるときだけ出す。** 空の行を並べると、
+      カードごとに高さが揃うぶん「何も無い」が読みにくくなる。
+    */}
+    {(card.claimedAt !== null || card.transferCount > 0 || card.disabledAt !== null) && (
+      <p class="text-xs text-foreground-soft">
+        {card.claimedAt === null ? null : `${toDate(card.claimedAt)} に紐づけ`}
+        {card.transferCount > 0 ? ` ・ 移転 ${card.transferCount} 回` : null}
+        {card.disabledAt === null
+          ? null
+          : ` ・ ${toDate(card.disabledAt)} に無効化` +
+            (card.disabledReason === null ? "" : `（${card.disabledReason}）`)}
+      </p>
     )}
-  </li>
+  </div>
 );
 
 export type CardsPageProps = {
@@ -67,26 +127,58 @@ export type CardsPageProps = {
 };
 
 export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
-  <Layout title="NFC カード" stylesheet={STYLESHEET_PATH}>
-    <h2>NFC カード</h2>
-
+  <KiwaShell
+    title="NFC カード"
+    nav={ACCOUNT_NAV_GROUPS}
+    brandHref={ACCOUNT_HOME_PATH}
+    // **Worker ごとに違う。** この Worker が自分で配信している CSS
+    // （借りない理由は `asset-paths.ts` の #211 の節）。
+    stylesheet={KIWA_STYLESHEET_PATH}
+    current="nfc"
+    heading="NFC カード"
+    lead="カードをかざしたときの行き先を、カードを書き換えずに変更できます。"
+  >
     {cards.length === 0 ? (
-      <p class="lead">
-        紐づけられたカードはありません。カードに同梱された紐づけコードで登録できます。
-      </p>
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>紐づけられたカードはありません。</EmptyTitle>
+          <EmptyDescription>カードに同梱された紐づけコードで登録できます。</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     ) : (
-      // `.scopes` は同意画面で項目を並べるための指定（余白とマーカー抑制）。
-      // 「枠付きの項目を縦に並べる」という形が同じなので使い回す。
-      <ul class="scopes">
-        {cards.map((card) => (
-          <CardBox key={card.cardId} card={card} />
-        ))}
-      </ul>
+      <Card>
+        <CardHeader>
+          <CardTitle>あなたのカード</CardTitle>
+          <CardDescription>
+            {cards.length} 枚。カード ID は、カードの裏面に印字されているものと同じです。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul class="flex flex-col">
+            {cards.map((card, index) => (
+              <li key={card.cardId}>
+                {/*
+                  **区切りは 1 件目の前に置かない。** 先頭に出すと
+                  `CardHeader` との間に線が 2 本並ぶ。件数で分岐させずに
+                  済むよう、間に入る側だけが描く。
+                */}
+                {index > 0 && <Separator class="my-3" />}
+                <CardRow card={card} />
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
     )}
 
-    <p class="notice">
-      遷移先の変更と無効化は、現在このページからは行えません。
-      <code>/account/nfc/cards</code> の API から操作してください。
-    </p>
-  </Layout>
+    <Card>
+      <CardHeader>
+        <CardTitle>この画面からできないこと</CardTitle>
+        <CardDescription>
+          遷移先の変更・無効化・移転・新しいカードの紐づけは、まだこの画面からは行えません。
+          <code class="font-mono">/account/nfc/cards</code> の API から操作してください。
+        </CardDescription>
+      </CardHeader>
+    </Card>
+  </KiwaShell>
 );

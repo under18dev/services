@@ -2,6 +2,7 @@ import { DEV_SESSION_COOKIE_NAME, rpcOk } from "@u18/contracts";
 import type { GrantListItem, UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
+import { classesIn, classesMissingFrom } from "@u18/testing";
 import { hashedFileName } from "@u18/web-ui";
 import { APPS_PATH, KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, envWith, executionContext } from "./helpers";
@@ -27,11 +28,9 @@ import { ORIGIN, envWith, executionContext } from "./helpers";
  *
  * ## 「在る」の見方
  *
- * Tailwind の出力では class 名がセレクタに**そのまま**入り、
- * `:` `/` `[` `.` のような記号は `\` で逃がされる（`md:w-64` ->
- * `.md\:w-64`）。同じ逃がし方をして `.` を頭に付けた文字列を探している。
- * **CSS を構文解析していない**ので、将来 Tailwind が出力の形を変えたら
- * ここは誤検知しうる。そのときは「落ちた」側から気づける。
+ * 突き合わせは `@u18/testing` の `classesMissingFrom`。**2 つの Worker で
+ * 同じものを使う** —— 最初は各 Worker に書いていて、実体参照の戻し方が
+ * 不完全なまま**片方だけ緑だった**（あちらの冒頭）。
  */
 
 const PROFILE: UserProfile = {
@@ -63,18 +62,6 @@ async function fetchText(path: string, withSession: boolean): Promise<string> {
   return await response.text();
 }
 
-/** `md:w-64` -> `.md\:w-64`。英数字と `_` `-` 以外を逃がす。 */
-function classSelector(name: string): string {
-  return `.${name.replace(/[^A-Za-z0-9_-]/g, (ch) => `\\${ch}`)}`;
-}
-
-function classesIn(html: string): readonly string[] {
-  const raw = [...html.matchAll(/class="([^"]*)"/g)].flatMap((m) => (m[1] ?? "").split(/\s+/));
-  // hono/jsx が属性値を HTML エスケープする。`[&_svg]:size-4` は
-  // `[&amp;_svg]:size-4` として出るので、CSS と比べる前に戻す。
-  return [...new Set(raw.filter(Boolean).map((name) => name.replaceAll("&amp;", "&")))];
-}
-
 describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () => {
   it("/account/apps の class が 1 つ残らず CSS にある", async () => {
     const [html, css] = await Promise.all([
@@ -86,7 +73,7 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
     // 0 件だと**何も確かめずに通る。**
     expect(classes.length).toBeGreaterThan(20);
 
-    const missing = classes.filter((name) => !css.includes(classSelector(name)));
+    const missing = classesMissingFrom(html, css);
     expect(
       missing,
       `CSS に無いクラス。theme.css にトークンが無いか、@source の走査から` +

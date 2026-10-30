@@ -40,7 +40,7 @@ describe("ルートの登録順", () => {
       "PUT /account/nfc/cards/:cardId/target",
       "POST /account/nfc/cards/:cardId/disable",
       "POST /account/nfc/cards/:cardId/release",
-      "GET /account/nfc/ui/u18.<hash>.css",
+      "GET /account/nfc/ui/kiwa.<hash>.css",
       // 画面は 2 回出る（`pageSecurityHeaders` とハンドラ）。
       "GET /account/nfc",
       "GET /account/nfc",

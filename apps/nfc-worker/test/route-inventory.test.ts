@@ -12,7 +12,7 @@ import {
   REDIRECT_ROUTES,
 } from "./route-inventory";
 import { ORIGIN, executionContext, identityWith } from "./helpers";
-import { STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 
 /**
  * 登録されているルートが `route-inventory.ts` の一覧と一致すること（#275）。
@@ -130,15 +130,15 @@ describe("区分どおりの応答が返る", () => {
   it("CARD_ASSET_ROUTES は Cookie 無しで 200（公開アセット）", async () => {
     // **ハッシュ付きの実パスで叩く。** 一覧側は `<hash>` で伏せてあるので、
     // そのままでは当たらない。
-    const response = await callAnonymously("GET", STYLESHEET_PATH);
+    const response = await callAnonymously("GET", KIWA_STYLESHEET_PATH);
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("text/css");
   });
 
   it("CARD_ASSET_ROUTES の一覧が実パスと対応している", () => {
-    // 上の検査は `STYLESHEET_PATH` を直接使うので、**一覧側が間違っていても
+    // 上の検査は `KIWA_STYLESHEET_PATH` を直接使うので、**一覧側が間違っていても
     // 200 になる。** 伏せ字に直した形が一覧と一致することを別途見る。
-    const normalized = normalizeAssetHash(STYLESHEET_PATH);
+    const normalized = normalizeAssetHash(KIWA_STYLESHEET_PATH);
     expect(CARD_ASSET_ROUTES.map((route) => route.path)).toContain(normalized);
   });
 });

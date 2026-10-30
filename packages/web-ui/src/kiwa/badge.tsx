@@ -1,11 +1,26 @@
 /**
  * Kiwa UI の `registry/ui/badge.tsx` を取り込んだもの（#332、MIT）。
  *
- * **上流のまま置いている。** 変えたのは import の書き方だけで、
- * `@/lib/utils` -> `./utils` のように**このリポジトリの相対パス**へ
- * 直している。クラスの中身には手を入れていない。
+ * **上流のまま置いている。** 変えたのは import の書き方と、
+ * 下の `border-subtle` の 1 語だけ。
  *
- * 由来と更新の仕方は `./README.md` を参照。
+ * ## `secondary` の枠線は上流では出ない（#338）
+ *
+ * 上流は `border border-subtle` と書いているが、**`border-subtle` は
+ * Tailwind のユーティリティとして存在しない。** トークンは
+ * `--color-border-subtle` で、そこから作られる class は
+ * `border-border-subtle` である（`--color-subtle` は上流の
+ * `globals.css` にも無い）。
+ *
+ * つまり上流のままだと **class は HTML に出るのに CSS が無い** ——
+ * #320 とまったく同じ形で、`variant="secondary"` のバッジだけ枠線が
+ * 消える。落ちも警告も出ない。
+ *
+ * `test/kiwa-stylesheet.test.ts`（nfc）が実際にこれで落ちた。
+ * **取り込んだ 6 つを端から端まで調べて、効いていない class はこの
+ * 1 つだけだった**（207 個の class 文字列を検査した）。
+ *
+ * 由来と更新の仕方、手を入れた箇所の一覧は `./README.md` を参照。
  */
 
 import type { FC, JSX } from "hono/jsx";
@@ -16,7 +31,7 @@ const badgeVariants = {
     default:
       "border border-primary/20 bg-primary-soft text-primary [a&]:hover:bg-primary-soft/80",
     secondary:
-      "border border-subtle bg-secondary text-secondary-foreground [a&]:hover:bg-secondary-hover",
+      "border border-border-subtle bg-secondary text-secondary-foreground [a&]:hover:bg-secondary-hover",
     destructive:
       "border border-destructive/20 bg-destructive-soft text-destructive [a&]:hover:bg-destructive-soft/80",
     success:

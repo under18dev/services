@@ -11,6 +11,7 @@ import {
   PASSKEYS_PATH,
   PROFILE_PATH,
   KIWA_STYLESHEET_PATH,
+  NFC_CARDS_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../src/presentation/http/ui/asset-paths";
@@ -75,9 +76,25 @@ describe("画面が HTML を返す", () => {
     expect(response.headers.get("Content-Type")).toContain("text/html");
   });
 
-  it("サイドバーの行き先がすべて実在する", async () => {
+  /**
+   * **サイドバーには、この Worker が持たない行き先が 1 つある**（#338）。
+   *
+   * `/account/nfc` に答えるのは nfc-worker で（`wrangler.jsonc` の
+   * production route が dashboard の `/account/*` より長いので勝つ）、
+   * ここへ投げても 404 が返る。**それが正しい** —— 利用者から見れば
+   * 同じオリジンの 1 つの画面だが、答える Worker は別である。
+   *
+   * **この 1 行は、ここでは確かめられない。** 本番 route で勝つ Worker を
+   * 決め、その Worker の `route-inventory.ts` に登録があるかまで見るのは
+   * `scripts/check-app-catalog-routes.mjs` の仕事である（#327 / #338）。
+   * **ここで `toBe(404)` を見るだけにすると、nfc が route を動かしても
+   * 緑のまま**になるので、何を誰が見ているかを書いておく。
+   */
+  const FOREIGN_NAV_HREFS: readonly string[] = [NFC_CARDS_PATH];
+
+  it("サイドバーの行き先が、自分の画面と他 Worker の分に分かれる", async () => {
     // サイドバーに書いたパスと、実際に登録したルートがずれると 404 を踏む。
-    // 画面から `href` を抜き出して、全部引けることを確かめる。
+    // 画面から `href` を抜き出して、自分のものは全部引けることを確かめる。
     //
     // **ブランドのリンク（ホームへ戻る）も混ざる。** 除かずにそのまま
     // 引ければよい —— あれも押せる必要がある。
@@ -86,11 +103,16 @@ describe("画面が HTML を返す", () => {
       .flatMap((nav) => [...(nav[1] ?? "").matchAll(/href="([^"]+)"/g)])
       .map((m) => m[1] as string);
 
-    expect(new Set(navHrefs)).toEqual(new Set(PAGES));
+    // **一覧そのものを突き合わせる。** 「引ければよい」だけにすると、
+    // 項目が 1 つ減っても緑になる。
+    expect(new Set(navHrefs)).toEqual(new Set([...PAGES, ...FOREIGN_NAV_HREFS]));
 
     for (const href of navHrefs) {
       const response = await withCookie(href, FULL_IDENTITY);
-      expect(response.status, `ナビの ${href} が引けない`).toBe(200);
+      // 他 Worker のものは、この Worker に登録が無いので 404 でよい。
+      // **200 を返したら、こちらが持つべきでないものを持っている。**
+      const expected = FOREIGN_NAV_HREFS.includes(href) ? 404 : 200;
+      expect(response.status, `ナビの ${href}`).toBe(expected);
     }
   });
 });
@@ -139,6 +161,50 @@ describe("参照しているスタイルシートを自分で配信している"
     [GRANTS_PATH, STYLESHEET_PATH, ".dash-side"],
     [APPS_PATH, KIWA_STYLESHEET_PATH, "tailwindcss"],
   ];
+
+  /**
+   * **401 / 503 の経路も「ちょうど 1 本」である**（#338）。
+   *
+   * ## ここが空いていた
+   *
+   * 下の `it.each` は**必ず Cookie を付けて**取りに行く。ところが
+   * `SignInRequiredPage` と `UnavailablePage`（`message-page.tsx`）は
+   * **6 つの URL すべてから返る**共通の画面で、Cookie が無いときに
+   * 出るのはそちらである。**つまり「1 枚のページは片方の CSS しか
+   * 読まない」が、未認証の経路では一度も確かめられていなかった。**
+   *
+   * いま `/account/apps` は、ログインしていれば Kiwa、**していなければ
+   * 手書き CSS** で出る。壊れてはいない（どちらも 1 本である）が、
+   * **2 本読む形になっても誰も気づかない**状態だった。
+   *
+   * ## ここは「移った」ではなく「1 本である」を見る
+   *
+   * `message-page.tsx` が Kiwa へ移るのは #332 の P1 で、そのとき
+   * 期待値は `KIWA_STYLESHEET_PATH` に変わる。**どちらであっても
+   * 1 本であることは変わらない**ので、本数だけを固定しておく。
+   * 中身の取り違えは上の `EXPECTED_STYLESHEET` が見ている。
+   */
+  it.each(PAGES)("%s は未認証でもスタイルシートを 1 本しか読まない", async (path) => {
+    const html = await (
+      await get(path, {
+        getUserProfile: () => neverCalled("getUserProfile"),
+        listPasskeys: () => neverCalled("listPasskeys"),
+        listSessions: () => neverCalled("listSessions"),
+        listGrants: () => neverCalled("listGrants"),
+      })
+    ).text();
+
+    const hrefs = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(
+      (m) => m[1] as string,
+    );
+
+    expect(hrefs.length, `${path} の未認証応答が読むスタイルシート: ${hrefs.join(" ")}`).toBe(1);
+
+    // **引けることまで見る。** 本数だけだと、存在しない URL を 1 本
+    // 読んでいる状態が通る。
+    const css = await get(hrefs[0] as string, {});
+    expect(css.status, `${hrefs[0]} が引けない`).toBe(200);
+  });
 
   it("一覧が PAGES を漏れなく覆っている", () => {
     // 画面を足して**ここに書き忘れる**と、下の `it.each` が静かに

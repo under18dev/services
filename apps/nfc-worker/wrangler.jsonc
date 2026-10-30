@@ -16,6 +16,34 @@
   // 実際に pnpm test で確かめること。
   "compatibility_date": "2026-10-24",
   "compatibility_flags": ["nodejs_compat"],
+
+  // 画面のスタイルシート（Tailwind v4）を生成する（#338）。**生成物は
+  // コミットしない**（auth / dashboard と同じ理由。ソースと食い違った
+  // ものが本番へ出るのを防ぐ）。
+  //
+  // **`package.json` の dev / build / typecheck / test だけでは足りない。**
+  // CI の deploy ジョブは `pnpm exec wrangler deploy` を直接呼ぶので
+  // npm スクリプトを迂回し、本番デプロイが
+  //   Could not resolve "./generated/kiwa-stylesheet"
+  // で落ちる。**dashboard-worker が実際にこれを踏んだ**（auth-worker が
+  // #132 で踏んだのと同じ形）。生成を Worker のビルド定義に置けば、
+  // dev / deploy / dry-run のどの経路から入っても必ず走る。
+  //
+  // `watch_dir` を広げないこと。既定の監視範囲は src 全体で、出力
+  // （src/presentation/http/ui/generated/）もその中にあるため、
+  // 生成 -> 変更検知 -> 再生成 が無限に続いて `wrangler dev` が
+  // 起動しなくなる（#138）。
+  //
+  // **その代償として、`wrangler dev` を開いたまま class を足しても CSS は
+  // 作り直されない。** 画面の .tsx も `packages/web-ui/src/kiwa/` も
+  // watch_dir の外にある。手元で効かないときは dev を入れ直すこと。
+  // deploy と dry-run は watch しないので、本番に古い CSS が出る形は
+  // ここからは生まれない。
+  "build": {
+    "command": "node scripts/build-client.mjs",
+    "watch_dir": "scripts",
+  },
+
   "observability": { "enabled": true },
 
   // NFC 専用の D1。**Identity D1 (`u18-identity`) の binding は持たない。**

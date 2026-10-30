@@ -15,5 +15,6 @@ export * from "./badge";
 export * from "./card";
 export * from "./empty";
 export * from "./separator";
+export * from "./shell";
 export * from "./sidebar-item";
 export * from "./utils";
