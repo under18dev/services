@@ -68,6 +68,18 @@ export function ensureCsrfToken(c: Context<AppBindings>): string {
  * いま呼ぶ場所は無い。**置いてあるのは、auth-worker と同じ API にして
  * おくため** —— 片方にしか無い関数があると、移すときに「こちらには
  * 要らなかったのか、忘れたのか」が読めなくなる。
+ *
+ * **呼ぶ前に `@u18/web-ui` の `buildCsrfCookie` の JSDoc を読むこと。**
+ * 置き場所を間違えると壊れる形が 2 つある —— 同じ応答で画面を描くと
+ * **描く値と Cookie がずれて、次の POST が必ず 403 になる**（利用者から
+ * 見ると #226 と同じ「何度やっても受け付けられない」）。GET のハンドラに
+ * 置くと**第三者のページから `<img src>` ひとつで被害者の Cookie を
+ * 回せる**（開いている form がすべて無効になる）。
+ *
+ * **auth-worker にその規律があるわけではない** —— あちらは呼び出し 3 箇所が
+ * たまたますべて `isValidCsrf` を通過した POST の後にある。この Worker では
+ * `vitest.config.ts` の走査が「GET のハンドラで呼んでいないこと」を見る
+ * （`test/form-csrf.test.ts`）。**文書に書く形は守られない**（#253）。
  */
 export function rotateCsrfToken(c: Context<AppBindings>): void {
   const token = generateCsrfToken();

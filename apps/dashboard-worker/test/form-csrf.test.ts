@@ -26,39 +26,41 @@ import { describe, expect, it } from "vitest";
 
 type FormCsrfSite = { readonly file: string; readonly kind: string; readonly guarded: boolean };
 
-const sites = [
-  ...(env as unknown as { TEST_FORM_CSRF_SITES: FormCsrfSite[] }).TEST_FORM_CSRF_SITES,
-];
-const fixtures = [
-  ...(env as unknown as { TEST_FORM_CSRF_FIXTURE_SITES: FormCsrfSite[] })
-    .TEST_FORM_CSRF_FIXTURE_SITES,
-];
+const testEnv = env as unknown as {
+  TEST_FORM_CSRF_SITES: FormCsrfSite[];
+  TEST_FORM_CSRF_FILES_SCANNED: number;
+  TEST_FORM_CSRF_FIXTURE_SITES: FormCsrfSite[];
+};
 
-const describeSite = (site: FormCsrfSite): string => `${site.file} (${site.kind})`;
+const sites = [...testEnv.TEST_FORM_CSRF_SITES];
+const filesScanned = testEnv.TEST_FORM_CSRF_FILES_SCANNED;
+const fixtures = [...testEnv.TEST_FORM_CSRF_FIXTURE_SITES];
+
+const describeSite = (site: FormCsrfSite): string =>
+  `${site.file} (${site.kind}) ${site.guarded ? "guarded" : "unguarded"}`;
 
 describe("走査そのものが効いている", () => {
-  it("見本の form と本文読みを拾う", () => {
+  it("見本を 1 件ずつ、守られているかまで見分ける", () => {
     expect(fixtures.map(describeSite).sort()).toEqual([
-      "test/fixtures/csrf-scan/guarded-form.tsx (render)",
-      "test/fixtures/csrf-scan/unguarded-form.tsx (render)",
-      "test/fixtures/csrf-scan/unguarded-reader.ts (read)",
-    ]);
-  });
-
-  it("守られている見本と守られていない見本を見分ける", () => {
-    const unguarded = fixtures
-      .filter((site) => !site.guarded)
-      .map(describeSite)
-      .sort();
-
-    expect(unguarded).toEqual([
-      "test/fixtures/csrf-scan/unguarded-form.tsx (render)",
-      "test/fixtures/csrf-scan/unguarded-reader.ts (read)",
+      "test/fixtures/csrf-scan/guarded-form.tsx (render) guarded",
+      "test/fixtures/csrf-scan/import-only-reader.ts (read) unguarded",
+      "test/fixtures/csrf-scan/rotate-in-get.ts (rotate) guarded",
+      "test/fixtures/csrf-scan/rotate-in-get.ts (rotate) unguarded",
+      "test/fixtures/csrf-scan/unguarded-form.tsx (render) unguarded",
+      "test/fixtures/csrf-scan/unguarded-reader.ts (read) unguarded",
     ]);
   });
 });
 
 describe("src の form POST", () => {
+  it("走査が実際にファイルを読んでいる", () => {
+    // **見本が緑でも、`src` 側の走査先を書き間違えれば 0 件が返る。**
+    // 見本と `src` は別の呼び出しなので、正規表現を直しても守る側には
+    // 届かない —— この検査が手当てしたはずの「0 件で緑」が、守る側にだけ
+    // 残っていた。`src` に `.ts` / `.tsx` が 1 つも無いことは起こりえない。
+    expect(filesScanned, "src を 1 ファイルも読んでいない（走査先が違う）").toBeGreaterThan(0);
+  });
+
   it("判定を通っていないものが無い", () => {
     const unguarded = sites
       .filter((site) => !site.guarded)
@@ -70,7 +72,7 @@ describe("src の form POST", () => {
     // 何を見たかは失敗したときに読めればよいので、メッセージに入れる。
     expect(
       unguarded,
-      `CSRF の判定を通っていない form / 本文読み（見た件数: ${sites.length}）`,
+      `CSRF の判定を通っていない form / 本文読み / rotate（該当 ${sites.length} 件 / 読んだファイル ${filesScanned} 件）`,
     ).toEqual([]);
   });
 });

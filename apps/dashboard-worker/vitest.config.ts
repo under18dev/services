@@ -40,6 +40,14 @@ import { defineConfig } from "vitest/config";
  * - **form を描いているのに `name={CSRF_FIELD_NAME}` を描いていない**
  * - **本文を読んでいる（`parseBody` / `formData`）のに `isValidCsrf()` を
  *   同じファイルで呼んでいない**
+ * - **`rotateCsrfToken()` を GET のハンドラで呼んでいる**（共有側の
+ *   「誤用の形」を参照。第三者のページから `<img src>` ひとつで
+ *   被害者の CSRF Cookie を回せる）
+ *
+ * **走ったファイル数も返す。** `src` 側の走査先を書き間違えると、見本側は
+ * 緑のまま `src` が 0 件を返し続ける —— **この検査が手当てしたはずの
+ * 「0 件で緑」が、守る側にだけ残る形**だった。`src` に `.ts` / `.tsx` が
+ * 1 つも無いことは起こりえないので、件数を見れば落ちる。
  *
  * ファイル単位の粗い判定である。同じファイルに 2 つ form があって片方だけ
  * 守られている形は拾えない。**拾えるのは「いちばんありそうな形」までで、
@@ -51,22 +59,28 @@ import { defineConfig } from "vitest/config";
  * 走査は Node 側でしかできない（テスト本体は workerd の中で動く）。
  * 照合は `test/form-csrf.test.ts`。
  */
-function collectFormCsrfSites(dir: string, root: string): FormCsrfSite[] {
+function collectFormCsrfSites(dir: string, root: string): FormCsrfScan {
   const sites: FormCsrfSite[] = [];
+  let filesScanned = 0;
+
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      sites.push(...collectFormCsrfSites(path, root));
+      const nested = collectFormCsrfSites(path, root);
+      sites.push(...nested.sites);
+      filesScanned += nested.filesScanned;
       continue;
     }
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
+    filesScanned += 1;
 
-    const source = readFileSync(path, "utf8");
-    const code = source
+    const lines = readFileSync(path, "utf8")
       .split("\n")
+      // 散文を除く。JSDoc に例として書いた `<form method="post">` が
+      // 違反として出てしまう（`collectAuditEventNames` と同じ理由）。
       .filter((line) => !/^\s*\*/.test(line))
-      .map((line) => line.split("//")[0] ?? "")
-      .join("\n");
+      .map((line) => line.split("//")[0] ?? "");
+    const code = lines.join("\n");
 
     const file = relative(root, path);
     if (/<form[\s>]/.test(code)) {
@@ -79,14 +93,36 @@ function collectFormCsrfSites(dir: string, root: string): FormCsrfSite[] {
       // 同じ理由で、`isValidCsrf` を import しただけでは通さない。
       sites.push({ file, kind: "read", guarded: /isValidCsrf\(/.test(code) });
     }
+
+    // **`rotateCsrfToken` は、どのハンドラの中で呼ぶかで安全性が変わる。**
+    // ファイル単位では見分けられないので、直前に現れた経路の動詞を覚えて
+    // おく。`meRoutes.get("/me", async (c) => {` という書き方に合わせた
+    // 粗い追跡で、**入れ子のコールバックまでは追わない。**
+    let enclosing = "";
+    for (const line of lines) {
+      // **経路の登録だけを拾う。** `c.get("identity")` のような
+      // Context の取り出しと区別が要るので、第 1 引数が `/` で始まる
+      // 文字列であることまで見る。
+      const route = /\.(get|post|put|patch|delete|all)\(\s*["'`]\//.exec(line);
+      if (route !== null) enclosing = route[1]!;
+      // 定義そのものは呼び出しではない。
+      if (/function rotateCsrfToken\(/.test(line)) continue;
+      if (/rotateCsrfToken\(/.test(line)) {
+        sites.push({ file, kind: "rotate", guarded: WRITE_METHODS.has(enclosing) });
+      }
+    }
   }
-  return sites;
+  return { sites, filesScanned };
 }
 
-type FormCsrfSite = { file: string; kind: "render" | "read"; guarded: boolean };
+/** `rotateCsrfToken` を呼んでよい経路。GET で呼べると CSRF Cookie を回せる。 */
+const WRITE_METHODS = new Set(["post", "put", "patch", "delete"]);
+
+type FormCsrfSite = { file: string; kind: "render" | "read" | "rotate"; guarded: boolean };
+type FormCsrfScan = { sites: FormCsrfSite[]; filesScanned: number };
 
 const workerRoot = import.meta.dirname;
-const formCsrfSites = collectFormCsrfSites(join(workerRoot, "src"), workerRoot);
+const formCsrfScan = collectFormCsrfSites(join(workerRoot, "src"), workerRoot);
 /**
  * **走査そのものが効いていることを確かめるための見本。**
  *
@@ -94,7 +130,7 @@ const formCsrfSites = collectFormCsrfSites(join(workerRoot, "src"), workerRoot);
  * 「違反が無い」と「何も見ていない」が同じ観測値になる形なので、
  * わざと違反した見本を別に置いて、そちらが拾えることを見る。
  */
-const formCsrfFixtureSites = collectFormCsrfSites(
+const formCsrfFixtureScan = collectFormCsrfSites(
   join(workerRoot, "test/fixtures/csrf-scan"),
   workerRoot,
 );
@@ -106,8 +142,9 @@ export default defineConfig({
       miniflare: {
         bindings: {
           TEST_WRANGLER_JSONC: readFileSync(join(workerRoot, "wrangler.jsonc"), "utf8"),
-          TEST_FORM_CSRF_SITES: formCsrfSites,
-          TEST_FORM_CSRF_FIXTURE_SITES: formCsrfFixtureSites,
+          TEST_FORM_CSRF_SITES: formCsrfScan.sites,
+          TEST_FORM_CSRF_FILES_SCANNED: formCsrfScan.filesScanned,
+          TEST_FORM_CSRF_FIXTURE_SITES: formCsrfFixtureScan.sites,
         },
         workers: [
           {

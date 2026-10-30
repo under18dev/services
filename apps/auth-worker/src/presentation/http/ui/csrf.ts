@@ -50,6 +50,10 @@ export function ensureCsrfToken(c: Context<AppBindings>): string {
  * ログイン・ログアウトのように**権限が変わる**瞬間に呼ぶ。ログイン前に
  * 攻撃者が仕込んだ値をログイン後も使い回させないため（セッション固定対策と
  * 同じ考え方）。
+ *
+ * **置き場所を間違えると壊れる形が 2 つある**（同じ応答で描くと値がずれる /
+ * GET に置くと第三者が Cookie を回せる）。`@u18/web-ui` の
+ * `buildCsrfCookie` の JSDoc に書いてある。**呼ぶ前に読むこと。**
  */
 export function rotateCsrfToken(c: Context<AppBindings>): void {
   const token = generateCsrfToken();

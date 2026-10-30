@@ -77,6 +77,34 @@ export function generateCsrfToken(): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
+/**
+ * Cookie を組み立てる。
+ *
+ * ## これを使った「作り直し」（`rotateCsrfToken`）の誤用の形
+ *
+ * トークンの作り直しは、ログイン・ログアウトのように**権限が変わる**瞬間に
+ * 呼ぶ。ログイン前に攻撃者が仕込んだ値をログイン後も使い回させないため
+ * （セッション固定対策と同じ考え方）。**置く場所を間違えると壊れる形が
+ * 2 つあり、どちらも実測してある。**
+ *
+ * **1. 作り直してから同じ応答で画面を描くと、描く値と Cookie がずれる。**
+ * トークンを用意する側は**要求に付いてきた** Cookie を読むので、同じ応答で
+ * 新しい値を `Set-Cookie` しても、画面には**古い値**が埋まる。次の POST は
+ * 必ず `token_mismatch` で 403 になる。**利用者から見ると「何度やっても
+ * 操作を受け付けられない」** —— #226 とまったく同じ見え方で、しかも
+ * あのときと同じく画面には理由が出ない。
+ *
+ * **2. 作り直し自体は何も検証しない。** GET のハンドラに置くと、
+ * `Origin: https://evil.example` が付いていても Cookie を差し替える。
+ * **第三者のページから `<img src>` ひとつで被害者の CSRF トークンを
+ * 回せる** —— 開いている form がすべて無効になる（DoS）。
+ *
+ * auth-worker でこれが起きていないのは、呼び出し 3 箇所がいずれも
+ * **`isValidCsrf` を通過した POST の後**だからである。**そこに規律が
+ * あるのではなく、たまたま全部そうなっている** —— dashboard-worker では
+ * `vitest.config.ts` の走査が「GET のハンドラで呼んでいないこと」を
+ * 見ている（`test/form-csrf.test.ts`）。
+ */
 export function buildCsrfCookie(environment: string, token: string): string {
   const secure = environment === "development" ? "" : "; Secure";
   // HttpOnly にできるのは、トークンをサーバー側で HTML に埋めるため。
