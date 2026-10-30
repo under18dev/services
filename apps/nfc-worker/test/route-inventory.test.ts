@@ -1,3 +1,4 @@
+import { isCardId } from "@u18/domain";
 import { normalizeAssetHash } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
@@ -82,9 +83,11 @@ describe("区分どおりの応答が返る", () => {
   /**
    * Cookie 無しで叩く。
    *
-   * **`:cardId` は `CARD_ID_PATTERN`（`/^[a-z0-9_]{1,64}$/`）に合う形で
-   * 埋める。** ハイフンを含む値だと入口の形式検査で 404 になり、
-   * **認証まで届かないものを「認証で止まった」と読み違える。**
+   * **`:cardId` は `@u18/domain` の `isCardId()` に合う形で埋める
+   * （`FAKE_CARD_ID`、#365）。** 合わない値だと入口の形式検査で 404 に
+   * なり、**認証まで届かないものを「認証で止まった」と読み違える。**
+   * 以前はもっと緩い検査だったころの値（`"doesnotexist"`）を使っていたが、
+   * 検査を実際の ID の形まで厳しくしたので、ここも合わせる必要があった。
    */
   /**
    * **本文は形式検査を通る値にする。**
@@ -95,16 +98,19 @@ describe("区分どおりの応答が返る", () => {
    * 塞いでいる」ことを確かめたことにならない。** 形式を通したうえで
    * 401 が返ることを見る。
    */
+  /** 形式検査は通るが、実在しない（零パディングで衝突しようがない）。 */
+  const FAKE_CARD_ID = `nfc_${"0".repeat(20)}`;
+
   const BODIES: Record<string, unknown> = {
     "POST /account/nfc/cards": { count: 1 },
-    "POST /account/nfc/cards/claim": { cardId: "doesnotexist" },
+    "POST /account/nfc/cards/claim": { cardId: FAKE_CARD_ID },
     "PUT /account/nfc/cards/:cardId/target": { targetUrl: "https://example.com/" },
   };
 
   async function callAnonymously(method: string, path: string): Promise<Response> {
     const body = BODIES[`${method} ${path}`] ?? {};
     return await createApp({ identity: identityWith({}) }).fetch(
-      new Request(`${ORIGIN}${path.replaceAll(/:[A-Za-z]+/g, "doesnotexist")}`, {
+      new Request(`${ORIGIN}${path.replaceAll(/:[A-Za-z]+/g, FAKE_CARD_ID)}`, {
         method,
         headers: { Origin: ORIGIN, "Content-Type": "application/json" },
         ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
@@ -113,6 +119,14 @@ describe("区分どおりの応答が返る", () => {
       executionContext(),
     );
   }
+
+  // **`FAKE_CARD_ID` 自体が drift していないことを見る。** #365 の前は
+  // `"doesnotexist"` が緩い検査を通っていたが、検査を実際の ID の形まで
+  // 厳しくしたときに気づかれず、この一覧の 401 が黙って 404 / 400 へ
+  // 変わりかけた——定数が検査の形から外れたら、ここが先に落ちるようにする。
+  it("FAKE_CARD_ID は isCardId() に合う形である", () => {
+    expect(isCardId(FAKE_CARD_ID)).toBe(true);
+  });
 
   it.each(CARD_API_ROUTES.map((route) => [`${route.method} ${route.path}`, route] as const))(
     "%s は Cookie 無しで 401",
