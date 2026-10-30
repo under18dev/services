@@ -47,10 +47,15 @@ function deviceTypeLabel(deviceType: string): string {
   return deviceType;
 }
 
-export type PasskeysPageProps = { readonly passkeys: readonly PasskeySummary[] };
+export type PasskeysPageProps = {
+  readonly passkeys: readonly PasskeySummary[];
+  /** 管理の節を出すか（#333）。`AccountShell` が必須にしている。 */
+  readonly isAdmin: boolean;
+};
 
-export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys }) => (
+export const PasskeysPage: FC<PasskeysPageProps> = ({ passkeys, isAdmin }) => (
   <AccountShell
+    isAdmin={isAdmin}
     title="パスキー"
     heading="パスキー"
     lead="この一覧にある認証器でログインできます。身に覚えのないものがあれば削除してください。"

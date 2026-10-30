@@ -38,11 +38,14 @@ import {
  */
 
 export type GrantsPageProps = {
+  /** 管理の節を出すか（#333）。`AccountShell` が必須にしている。 */
+  readonly isAdmin: boolean;
   readonly grants: readonly GrantListItem[];
 };
 
-export const GrantsPage: FC<GrantsPageProps> = ({ grants }) => (
+export const GrantsPage: FC<GrantsPageProps> = ({ grants, isAdmin }) => (
   <AccountShell
+    isAdmin={isAdmin}
     title="連携アプリ"
     heading="連携アプリ"
     lead="あなたの情報へのアクセスを許可したアプリです。使っていないものは連携を解除してください。"

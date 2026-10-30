@@ -20,6 +20,39 @@ export async function requireUserId(
   identity: IdentityGateway,
   sessionToken: string | undefined,
 ): Promise<NfcOutcome<string>> {
+  const actor = await requireActor(identity, sessionToken);
+  return actor.ok ? outcomeOk(actor.value.userId) : actor;
+}
+
+/** 操作者。`isAdmin` は**サイドバーの出し分けに要る**（#333）。 */
+export type Actor = {
+  readonly userId: string;
+  /**
+   * **このセッションで管理者として振る舞ってよいか。**
+   *
+   * `getSession` が既に返しているので、**往復は増えない。**
+   * `requireUserId` が捨てていただけである。
+   *
+   * **これは「何を出すか」の値で、「何を叩けるか」ではない。**
+   * 管理操作の可否は `requireAdminUserId` が別に確かめる ——
+   * 画面がサイドバーを描くのに使う値と、操作を通す値を同じ 1 本に
+   * すると、**片方を緩めたときにもう片方も緩む。**
+   */
+  readonly isAdmin: boolean;
+};
+
+/**
+ * 操作者を得る（#333）。
+ *
+ * **`requireUserId` との違いは `isAdmin` を捨てないことだけ**で、
+ * `getSession` の呼び方は同じである。**2 本あるのは移行の都合ではなく、
+ * 呼ぶ側が要る値だけを受け取れるようにするため** —— `isAdmin` を
+ * 使わない経路に渡すと、使ってよいと読まれる。
+ */
+export async function requireActor(
+  identity: IdentityGateway,
+  sessionToken: string | undefined,
+): Promise<NfcOutcome<Actor>> {
   if (sessionToken === undefined || sessionToken === "") {
     return outcomeErr({ kind: "unauthenticated" });
   }
@@ -31,7 +64,7 @@ export async function requireUserId(
   // 理由を問い合わせる口を作らない（理由はトークンの実在を示す）。
   if (result.value === null) return outcomeErr({ kind: "unauthenticated" });
 
-  return outcomeOk(result.value.userId);
+  return outcomeOk({ userId: result.value.userId, isAdmin: result.value.isAdmin });
 }
 
 /**

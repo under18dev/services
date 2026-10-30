@@ -36,8 +36,14 @@ import { loginUrlWithReturnTo } from "@u18/contracts";
  * 自分でこの画面まで辿り直すことになる。戻り先の検証は auth-worker の
  * `sanitizeReturnTo` が行うので（関門は 1 つ）、ここは渡すだけ。
  */
+/**
+ * **`isAdmin` は渡さない（`false` を書く）。** この画面が出ている時点で
+ * セッションが無いか死んでいるので、**管理者かどうかを決める材料が無い。**
+ * 「分からないときは出さない」側に倒す —— 逆に倒すと、ログアウト後の
+ * 画面に管理の節が残る。
+ */
 export const SignInRequiredPage: FC<{ readonly returnTo: string | null }> = ({ returnTo }) => (
-  <AccountShell title="ログインが必要です" heading="ログインが必要です">
+  <AccountShell title="ログインが必要です" heading="ログインが必要です" isAdmin={false}>
     <Card>
       <CardHeader>
         <CardTitle>アカウント情報を表示するにはログインしてください。</CardTitle>
@@ -55,7 +61,7 @@ export const SignInRequiredPage: FC<{ readonly returnTo: string | null }> = ({ r
 );
 
 export const UnavailablePage: FC = () => (
-  <AccountShell title="一時的に表示できません" heading="一時的に表示できません">
+  <AccountShell title="一時的に表示できません" heading="一時的に表示できません" isAdmin={false}>
     <Card>
       <CardHeader>
         <CardTitle>アカウント情報を取得できませんでした。</CardTitle>

@@ -51,6 +51,8 @@ import { ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
  */
 
 export type HomePageProps = {
+  /** 管理の節を出すか（#333）。`AccountShell` が必須にしている。 */
+  readonly isAdmin: boolean;
   readonly displayName: string;
   readonly passkeyCount: number;
   readonly sessionCount: number;
@@ -67,6 +69,7 @@ const LINKS: readonly Link[] = [
 ];
 
 export const HomePage: FC<HomePageProps> = ({
+  isAdmin,
   displayName,
   passkeyCount,
   sessionCount,
@@ -80,6 +83,7 @@ export const HomePage: FC<HomePageProps> = ({
 
   return (
     <AccountShell
+      isAdmin={isAdmin}
       title="ホーム"
       heading={`こんにちは、${displayName} さん`}
       lead="u18 Identity のアカウントと、連携しているアプリを管理できます。"

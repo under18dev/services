@@ -46,11 +46,14 @@ function titleFor(userAgent: string | null): string {
 }
 
 export type SessionsPageProps = {
+  /** 管理の節を出すか（#333）。`AccountShell` が必須にしている。 */
+  readonly isAdmin: boolean;
   readonly sessions: readonly SessionListItem[];
 };
 
-export const SessionsPage: FC<SessionsPageProps> = ({ sessions }) => (
+export const SessionsPage: FC<SessionsPageProps> = ({ sessions, isAdmin }) => (
   <AccountShell
+    isAdmin={isAdmin}
     title="ログイン中の端末"
     heading="ログイン中の端末"
     current="sessions"
