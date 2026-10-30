@@ -1,3 +1,4 @@
+export * from "./admin-disable-card.use-case";
 export * from "./authenticate";
 export * from "./card-view";
 export * from "./claim-card.use-case";

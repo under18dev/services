@@ -124,6 +124,13 @@ export const CARD_ADMIN_ROUTES: readonly Route[] = [
    * 引かない。** 管理者判定（404 へ翻訳する分岐）まで届かない。
    */
   { method: "POST", path: "/account/nfc/admin" },
+  /**
+   * 運営が、他人のカードを無効化する（#382「他人のカードへの操作」1 本目）。
+   *
+   * Cookie 無しも一般利用者も **403**（CSRF の検証がセッションより先、
+   * 上の発行と同じ順序）。
+   */
+  { method: "POST", path: "/account/nfc/admin/:cardId/disable" },
 ];
 
 /**

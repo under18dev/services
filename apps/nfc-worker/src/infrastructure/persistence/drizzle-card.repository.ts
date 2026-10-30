@@ -127,6 +127,22 @@ export class DrizzleCardRepository implements CardRepository {
     return rows.length > 0;
   }
 
+  /**
+   * 運営による無効化（#382）。**所有者を WHERE 句に持たない。**
+   *
+   * `disable` と同じ条件付き UPDATE で、違いは所有者を問わないことだけ。
+   * `active` であることだけを条件にするので、`disabled` からの再実行は
+   * 同じく 0 行になり、UseCase 側が冪等に扱う。
+   */
+  async disableAsAdmin(cardId: string, reason: string, now: Date): Promise<boolean> {
+    const rows = await this.db
+      .update(nfcCards)
+      .set({ status: "disabled", disabledAt: now, disabledReason: reason, updatedAt: now })
+      .where(and(eq(nfcCards.id, cardId), eq(nfcCards.status, "active")))
+      .returning({ id: nfcCards.id });
+    return rows.length > 0;
+  }
+
   async claim(cardId: string, newOwnerUserId: string, now: Date): Promise<boolean> {
     const rows = await this.db
       .update(nfcCards)

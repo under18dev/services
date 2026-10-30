@@ -133,6 +133,23 @@ const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
  * `active` は中立 —— **色で良し悪しを言わない**（design.md の
  * "No colorful UI."）。
  */
+/**
+ * 無効化の理由の表示用ラベル（#382）。
+ *
+ * **生の理由コードをそのまま出していた**（`lost` / `unused` が英語の
+ * ままだった）。**運営が止めたことを所有者に伝える**（`AdminDisableCardUseCase`
+ * の "admin_action"）には、この値を人間に読める日本語へ訳す必要がある。
+ *
+ * **運営が黙って止めると問い合わせが来る。** ここで一覧に出す文言が、
+ * 「自分で止めた」のか「運営に止められた」のかを所有者が読める
+ * 唯一の場所である。
+ */
+const DISABLED_REASON_LABEL: Readonly<Record<string, string>> = {
+  lost: "紛失のため",
+  unused: "使っていないため",
+  admin_action: "運営により無効化されました",
+};
+
 const STATUS_VARIANT: Readonly<Record<CardView["status"], "secondary" | "destructive">> = {
   issued: "secondary",
   active: "secondary",
@@ -258,7 +275,9 @@ const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
         {card.disabledAt === null
           ? null
           : ` ・ ${toDate(card.disabledAt)} に無効化` +
-            (card.disabledReason === null ? "" : `（${card.disabledReason}）`)}
+            (card.disabledReason === null
+              ? ""
+              : `（${DISABLED_REASON_LABEL[card.disabledReason] ?? card.disabledReason}）`)}
       </p>
     )}
   </div>

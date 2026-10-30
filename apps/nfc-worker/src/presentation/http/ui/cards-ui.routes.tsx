@@ -259,6 +259,62 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
   });
 
   /**
+   * 運営が、他人のカードを無効化する（#382「他人のカードへの操作」）。
+   *
+   * **緊急の要望として先に入れた。** 遷移先の書き換え・所有者の付け替え
+   * より先に無効化を入れるのは、**止めれば遷移先が何であっても到達しない**
+   * ため（`AdminDisableCardUseCase` に詳しい）。
+   *
+   * ## JavaScript を要求しない
+   *
+   * 発行フォームと同じ理由で、**一覧の行ごとに小さな form を 1 本ずつ
+   * 置く。** 島を新しく作らない —— この画面はまだ島を持たず、JS 無しで
+   * 完結する形を保つほうが、1 つの画面に 2 つの流儀を混ぜるより読みやすい。
+   *
+   * ## 管理者判定は UseCase の中
+   *
+   * `AdminDisableCardUseCase` の `requireAdminUserId` が持つ。GET と同じく
+   * `forbidden` を 404 へ翻訳する。
+   *
+   * ## 成功したら 303 で一覧へ戻す（PRG）
+   *
+   * 一覧の「無効化済み」バッジで結果が見えるので、issue のような
+   * クエリ経由の完了文言は運ばない。
+   */
+  app.post(`${ADMIN_UI_PATH}/:cardId/disable`, pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return c.text("forbidden", 403);
+    }
+
+    const cardId = c.req.param("cardId");
+    if (!CARD_ID_PATTERN.test(cardId)) {
+      return renderAdminWithError(c, "そのカードは見つかりませんでした。");
+    }
+
+    const result = await c.get("container").useCases.adminDisableCard.execute({
+      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
+      cardId,
+    });
+
+    if (!result.ok) {
+      if (result.failure.kind === "unauthenticated") {
+        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(ADMIN_UI_PATH)), 302);
+      }
+      if (result.failure.kind === "forbidden") return c.notFound();
+      if (result.failure.kind === "identity_unavailable") {
+        return c.text("しばらくしてからもう一度お試しください。", 503);
+      }
+      return renderAdminWithError(c, "そのカードは見つかりませんでした。");
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect(ADMIN_UI_PATH, 303);
+  });
+
+  /**
    * カードをタップした人の着地点（#358）。
    *
    * `go.under18.dev/c/:cardId` が未紐づけのカードについてここへ 302 する
