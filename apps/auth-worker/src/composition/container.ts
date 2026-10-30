@@ -45,6 +45,7 @@ import { DisableOAuthClientUseCase } from "../application/use-cases/disable-oaut
 import { ListGrantsUseCase } from "../application/use-cases/list-grants.use-case";
 import { ListOAuthClientsUseCase } from "../application/use-cases/list-oauth-clients.use-case";
 import { ListUsersUseCase } from "../application/use-cases/list-users.use-case";
+import { ManageUserUseCase } from "../application/use-cases/manage-user.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -163,6 +164,7 @@ export type Container = {
     readonly revokeGrant: RevokeGrantUseCase;
     readonly listOAuthClients: ListOAuthClientsUseCase;
     readonly listUsers: ListUsersUseCase;
+    readonly manageUser: ManageUserUseCase;
     readonly createOAuthClient: CreateOAuthClientUseCase;
     readonly disableOAuthClient: DisableOAuthClientUseCase;
   };
@@ -467,6 +469,7 @@ export function createContainer(
       // （判定は UseCase の中。`application/use-cases/admin-access.ts`）。
       listOAuthClients: new ListOAuthClientsUseCase({ getSession, clients: oauthClients }),
       listUsers: new ListUsersUseCase({ getSession, users }),
+      manageUser: new ManageUserUseCase({ getSession, users, sessions, clock, audit }),
       createOAuthClient: new CreateOAuthClientUseCase({
         getSession,
         audit,

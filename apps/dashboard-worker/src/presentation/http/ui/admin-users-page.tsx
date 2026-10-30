@@ -4,6 +4,7 @@ import {
   EMPTY_CLASS,
   FIELD_CLASS,
   INPUT_CLASS,
+  ITEM_ACTIONS_CLASS,
   ITEM_BODY_CLASS,
   ITEM_META_CLASS,
   ITEM_RAW_CLASS,
@@ -13,7 +14,7 @@ import {
 } from "@u18/web-ui/kiwa/island-classes";
 import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
-import { ADMIN_USERS_SEARCH_PATH } from "./asset-paths";
+import { ADMIN_USERS_ACTION_PATH, ADMIN_USERS_SEARCH_PATH } from "./asset-paths";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { formatDateTime } from "./format";
 
@@ -47,6 +48,13 @@ import { formatDateTime } from "./format";
 
 export type AdminUsersPageProps = {
   readonly isAdmin: boolean;
+  /**
+   * いま開いている管理者の `userId`。**自分の行に停止を出さないため。**
+   *
+   * 守っているのはここではない（auth-worker が `conflict` を返す）。
+   * **押せるのに断られる形にしない**ための表示上の配慮である。
+   */
+  readonly actorUserId: string;
   readonly csrfToken: string;
   readonly users: readonly UserAdminSummary[];
   /** 続きがあるときだけ。**「次へ」の form に積む。** */
@@ -54,6 +62,8 @@ export type AdminUsersPageProps = {
   /** いま絞り込んでいる語。**再描画で入力欄に残す。** */
   readonly query?: string;
   readonly error?: string;
+  /** 直前の操作が通ったときの 1 文。 */
+  readonly notice?: string;
 };
 
 /**
@@ -69,7 +79,92 @@ const StatusBadge: FC<{ readonly status: UserAdminSummary["status"] }> = ({ stat
   return <Badge variant="warning">停止中</Badge>;
 };
 
-const UserRow: FC<{ readonly user: UserAdminSummary }> = ({ user }) => (
+/**
+ * 1 行ぶんの操作。
+ *
+ * ## 停止には理由を選ばせる
+ *
+ * **`status` は `suspended` の 1 値しか持たない。** ランブック §11.1 の表が
+ * 区別している「侵害の疑いによる緊急停止」と「規約違反による BAN」は、
+ * **`audit_logs` にしか残らない。** 選ばせないと、後から「戻してよいのか」
+ * を判断する材料が消える。
+ *
+ * ## 自分の行には停止を出さない
+ *
+ * 止めた瞬間に自分のセッションが死に、解除する人が居なくなる。
+ * auth-worker も `conflict` で弾くが、**押せるのに断られる形にしない。**
+ *
+ * ## `deleted` には何も出さない
+ *
+ * 戻せない（個人情報が落ちている）し、止めるものも残っていない。
+ */
+const UserActions: FC<{
+  readonly user: UserAdminSummary;
+  readonly csrfToken: string;
+  readonly isSelf: boolean;
+}> = ({ user, csrfToken, isSelf }) => {
+  if (user.status === "deleted") {
+    return <p class={ITEM_META_CLASS}>個人情報を削除済みのため、操作できません。</p>;
+  }
+
+  return (
+    <form method="post" action={ADMIN_USERS_ACTION_PATH} class={ITEM_ACTIONS_CLASS}>
+      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+      <input type="hidden" name="user_id" value={user.id} />
+      {user.status === "active" ? (
+        isSelf ? (
+          <p class={ITEM_META_CLASS}>自分のアカウントは停止できません。</p>
+        ) : (
+          <>
+            <label class={ITEM_META_CLASS}>
+              <input type="radio" name="reason" value="compromise" required />{" "}
+              侵害の疑い（戻す前提）
+            </label>
+            <label class={ITEM_META_CLASS}>
+              <input type="radio" name="reason" value="abuse" required /> 規約違反
+            </label>
+            <button
+              type="submit"
+              name="action"
+              value="suspend"
+              class="text-sm text-destructive underline underline-offset-4"
+            >
+              停止する
+            </button>
+          </>
+        )
+      ) : (
+        <button
+          type="submit"
+          name="action"
+          value="reinstate"
+          class="text-sm text-foreground underline underline-offset-4"
+        >
+          停止を解除する
+        </button>
+      )}
+      {/*
+        **停止とは別に置く。** 止めずに切りたいことがある（端末を失くした
+        人の救済など）。自分に対しても押せる ——「全端末からログアウト」に
+        あたるので、止めるのと違って困らない。
+      */}
+      <button
+        type="submit"
+        name="action"
+        value="revoke_sessions"
+        class="text-sm text-foreground underline underline-offset-4"
+      >
+        ログイン中の端末を全部切る
+      </button>
+    </form>
+  );
+};
+
+const UserRow: FC<{
+  readonly user: UserAdminSummary;
+  readonly csrfToken: string;
+  readonly isSelf: boolean;
+}> = ({ user, csrfToken, isSelf }) => (
   <li class={ITEM_BODY_CLASS}>
     <div class={ITEM_TITLE_CLASS}>
       <span>{user.displayName}</span>
@@ -91,16 +186,19 @@ const UserRow: FC<{ readonly user: UserAdminSummary }> = ({ user }) => (
       （この画面が SQL を置き換えきるまでの間、両方が使われる）。
     */}
     <p class={ITEM_RAW_CLASS}>{user.id}</p>
+    <UserActions user={user} csrfToken={csrfToken} isSelf={isSelf} />
   </li>
 );
 
 export const AdminUsersPage: FC<AdminUsersPageProps> = ({
   isAdmin,
+  actorUserId,
   csrfToken,
   users,
   nextCursor,
   query,
   error,
+  notice,
 }) => (
   <AccountShell
     isAdmin={isAdmin}
@@ -113,6 +211,13 @@ export const AdminUsersPage: FC<AdminUsersPageProps> = ({
       <Card>
         <CardContent>
           <p class={ITEM_META_CLASS}>{error}</p>
+        </CardContent>
+      </Card>
+    )}
+    {notice === undefined ? null : (
+      <Card>
+        <CardContent>
+          <p class={ITEM_META_CLASS}>{notice}</p>
         </CardContent>
       </Card>
     )}
@@ -164,7 +269,7 @@ export const AdminUsersPage: FC<AdminUsersPageProps> = ({
         ) : (
           <ul class={LIST_CLASS}>
             {users.map((user) => (
-              <UserRow user={user} />
+              <UserRow user={user} csrfToken={csrfToken} isSelf={user.id === actorUserId} />
             ))}
           </ul>
         )}

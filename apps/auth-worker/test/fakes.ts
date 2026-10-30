@@ -123,6 +123,16 @@ export class InMemoryUserRepository implements UserRepository {
     return true;
   }
 
+  async setStatus(
+    id: string,
+    change: { readonly from: "active" | "suspended"; readonly to: "active" | "suspended" },
+  ): Promise<boolean> {
+    const props = this.store.get(id);
+    if (props === undefined || props.status !== change.from) return false;
+    this.store.set(id, { ...props, status: change.to });
+    return true;
+  }
+
   /**
    * 管理画面の一覧（#375）。
    *

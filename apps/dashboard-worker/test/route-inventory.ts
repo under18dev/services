@@ -107,6 +107,9 @@ export const PAGE_ROUTES = [
   // **絞り込みと続きの読み込み**（#375）。検索語がメールアドレスに
   // なりうるので、GET のクエリではなく POST の本文で渡す。
   { method: "POST", path: "/account/admin/users/search" },
+  // 停止・解除・セッションの失効（#375）。**1 本の口に畳んである** ——
+  // 経路ごとに `isAdmin` の確認を書き分けないため。
+  { method: "POST", path: "/account/admin/users/action" },
   { method: "GET", path: "/account/admin/clients" },
   // **POST がこの Worker に入るのはここが最初である**（#340 で CSRF の
   // 仕組みだけ先に入れてあった）。hidden と Origin の両方を要求する。

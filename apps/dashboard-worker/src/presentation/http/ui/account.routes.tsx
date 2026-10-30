@@ -5,12 +5,13 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
-import type { IdentityOutcome } from "../../../application/ports";
+import type { IdentityAdminGateway, IdentityOutcome } from "../../../application/ports";
 import type { IdentityFailure } from "../../../domain/errors";
 import type { AppBindings } from "../types";
 import { HomePage } from "./home-page";
 import {
   ADMIN_CLIENTS_CREATE_ROUTE,
+  ADMIN_USERS_ACTION_ROUTE,
   ADMIN_USERS_ROUTE,
   ADMIN_USERS_SEARCH_ROUTE,
   ADMIN_CLIENTS_DISABLE_ROUTE,
@@ -258,6 +259,62 @@ export const accountUiRoutes = new Hono<AppBindings>()
       ...(query === "" ? {} : { query }),
       ...(cursor === "" ? {} : { cursor }),
     });
+  })
+
+  /**
+   * 利用者への操作（#375 / #382）。**停止・解除・セッションの失効。**
+   *
+   * ## 1 本の口にまとめてある
+   *
+   * 画面の form が `action` を押し分ける。**経路ごとに `isAdmin` の確認を
+   * 書き分けない** —— 管理の経路が散ると、片方だけ忘れた状態が作れる。
+   *
+   * ## 守っているのはここではない
+   *
+   * 管理者判定も再認証も自分自身かどうかも、**auth-worker の UseCase が
+   * 見ている。** ここは「どの操作を頼むか」を決めて、返ってきたものを
+   * 人が読む文に訳すだけである。
+   *
+   * ## 一覧へ戻さない（PRG を挟まない）
+   *
+   * 戻すと「いま何をしたか」を次の GET へ運ぶ必要が出る。再読み込みで
+   * 再送されるが、**停止も解除も状態を見てから書く**（`setStatus` の
+   * `from`）ので、2 度目は `conflict` になって状態は動かない。
+   */
+  .post(ADMIN_USERS_ACTION_ROUTE, pageSecurityHeaders, async (c) => {
+    const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
+    if (token === undefined) return signInRequired(c);
+
+    const form = await c.req.parseBody();
+    if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
+      return renderAdminUsers(c, token, { error: CSRF_REJECTED_MESSAGE });
+    }
+
+    const userId = (field(form, "user_id") ?? "").trim();
+    const action = field(form, "action");
+    const admin = c.get("identityAdmin");
+
+    const outcome =
+      action === "suspend"
+        ? await suspendFromForm(admin, token, userId, field(form, "reason"))
+        : action === "reinstate"
+          ? await admin.reinstateUser(token, userId)
+          : action === "revoke_sessions"
+            ? await admin.revokeUserSessions(token, userId)
+            : null;
+
+    if (outcome === null) {
+      return renderAdminUsers(c, token, { error: "操作を選んでください。" });
+    }
+    if (!outcome.ok) {
+      if (outcome.failure.kind === "unauthenticated") return renderFailure(c, outcome);
+      if (outcome.failure.kind === "not_found") return c.html(<AdminNotFoundPage />, 404);
+      return renderAdminUsers(c, token, { error: manageFailureMessage(action, outcome.failure) });
+    }
+
+    // 権限の境界をまたぐ操作が通ったので、トークンを入れ替える。
+    rotateCsrfToken(c);
+    return renderAdminUsers(c, token, { notice: manageNotice(action, outcome.value) });
   })
 
   /**
@@ -552,6 +609,56 @@ async function renderAdminPage(
 }
 
 /**
+ * 停止の form から理由を取り出して呼ぶ。
+ *
+ * **理由が無ければ RPC を呼ばない。** 契約の `z.enum` が弾くが、
+ * **その失敗は `invalid_input` になって「障害」として画面に出る** ——
+ * 選び忘れは利用者の操作なので、やり直せる文で返す。
+ */
+async function suspendFromForm(
+  admin: IdentityAdminGateway,
+  token: string,
+  userId: string,
+  reason: string | undefined,
+): Promise<IdentityOutcome<{ revokedSessions: number }> | null> {
+  if (reason !== "compromise" && reason !== "abuse") return null;
+  return admin.suspendUser(token, userId, reason);
+}
+
+/** 通ったときの 1 文。**何が起きたかだけを言う。** */
+function manageNotice(action: string | undefined, value: unknown): string {
+  if (action === "suspend") {
+    const revoked = (value as { revokedSessions?: number }).revokedSessions ?? 0;
+    // **「切ったから止まる」と書かない。** 停止した時点で次の要求から
+    // 通らなくなる（`GetSessionUseCase` が `isActive` を見る）。
+    return `停止しました。ログイン中だった ${revoked} 件の端末も切りました。`;
+  }
+  if (action === "reinstate") return "停止を解除しました。またログインできます。";
+  const revoked = (value as { revokedSessions?: number }).revokedSessions ?? 0;
+  // **「ログインできなくなります」とは書かない。** 止めていないので、
+  // 本人はログインし直せる。
+  return `${revoked} 件の端末を切りました。本人はログインし直せます。`;
+}
+
+/** 通らなかった理由。**内部の事情は書かない。** */
+function manageFailureMessage(action: string | undefined, failure: IdentityFailure): string {
+  if (failure.kind === "reauthentication_required") {
+    return "この操作にはログインし直しが必要です。もう一度ログインしてから操作してください。";
+  }
+  if (failure.kind === "conflict") {
+    if (action === "suspend") {
+      // **区別しない。** 既に停止済み・退会済み・`deleted`・自分自身 ——
+      // auth-worker がどれも `conflict` に畳んでいる（存在を当てさせない）。
+      return "停止できませんでした。すでに停止しているか、自分のアカウントです。";
+    }
+    if (action === "reinstate") {
+      return "解除できませんでした。停止中ではないか、個人情報を削除済みのアカウントです。";
+    }
+  }
+  return "いま操作できません。しばらく待ってからもう一度お試しください。";
+}
+
+/**
  * 利用者の一覧を描く（#375）。**GET と POST が共有する。**
  *
  * **検索語を画面へ戻す。** 戻さないと、POST のあと入力欄が空になり、
@@ -560,10 +667,13 @@ async function renderAdminPage(
 async function renderAdminUsers(
   c: Context<AppBindings>,
   token: string,
-  options: { query?: string; cursor?: string; error?: string },
+  options: { query?: string; cursor?: string; error?: string; notice?: string },
 ): Promise<Response> {
-  const [flags, page] = await Promise.all([
+  const [flags, profile, page] = await Promise.all([
     navFlags(c, token),
+    // **自分の `userId` が要る。** 自分の行に停止を出さないため
+    // （守っているのは auth-worker。ここは押せるのに断られる形を避ける）。
+    c.get("identity").getProfile(token),
     c.get("identityAdmin").listUsers(token, {
       ...(options.query === undefined ? {} : { query: options.query }),
       ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
@@ -574,11 +684,13 @@ async function renderAdminUsers(
   return c.html(
     <AdminUsersPage
       isAdmin={flags.isAdmin}
+      actorUserId={profile.ok && profile.value !== null ? profile.value.id : ""}
       csrfToken={ensureCsrfToken(c)}
       users={page.value.users}
       nextCursor={page.value.nextCursor}
       {...(options.query === undefined ? {} : { query: options.query })}
       {...(options.error === undefined ? {} : { error: options.error })}
+      {...(options.notice === undefined ? {} : { notice: options.notice })}
     />,
   );
 }

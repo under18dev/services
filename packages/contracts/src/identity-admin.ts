@@ -342,6 +342,63 @@ export type UserAdminSummary = {
  * そこだけ Repository を迂回する経路になる。
  */
 
+/**
+ * 停止の理由（#375 / ランブック §11.1 の表）。
+ *
+ * **`status` は `suspended` の 1 値しか持たない。** 「侵害の疑いによる
+ * 緊急停止」「規約違反による BAN」「本人の退会」の 3 つが同じ値に畳まれる
+ * ので、**どれだったかは `audit_logs` にしか残らない。** 管理者が立てる
+ * のはこの 2 つで、3 つ目は `account.closed`（#318）が記録する。
+ *
+ * **自由記述にしていない。** 後から読んで効くのは「戻す前提か」だけで、
+ * 文章にすると集計も検索もできなくなる。
+ */
+export const suspendReasonSchema = z.enum(["compromise", "abuse"]);
+export type SuspendReason = z.infer<typeof suspendReasonSchema>;
+
+export const suspendUserInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+  userId: z.string().min(1).max(64),
+  reason: suspendReasonSchema,
+});
+export type SuspendUserInput = z.infer<typeof suspendUserInputSchema>;
+
+export type SuspendUserResult = RpcResult<{
+  /**
+   * 切ったセッションの本数。
+   *
+   * **「切ったから止まる」ではない。** 停止した時点で次の要求から通らなく
+   * なる（auth-worker の `GetSessionUseCase` が `isActive` を見る）。
+   * 切るのは、止まっているのに生きた行が残る状態を作らないため。
+   */
+  readonly revokedSessions: number;
+}>;
+
+export const reinstateUserInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+  userId: z.string().min(1).max(64),
+});
+export type ReinstateUserInput = z.infer<typeof reinstateUserInputSchema>;
+
+/**
+ * 解除の応答。**中身が無い。**
+ *
+ * 「何が起きたか」は `status` が `active` に戻ったことに尽きる。件数を
+ * 返すと呼ぶ側がそれを使った文言を書きたくなるが、**戻るのは 1 行**である。
+ */
+export type ReinstateUserResult = RpcResult<Record<string, never>>;
+
+export const revokeUserSessionsInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+  userId: z.string().min(1).max(64),
+});
+export type RevokeUserSessionsInput = z.infer<typeof revokeUserSessionsInputSchema>;
+
+export type RevokeUserSessionsResult = RpcResult<{ readonly revokedSessions: number }>;
+
 export type ListUsersResult = RpcResult<{
   readonly users: readonly UserAdminSummary[];
   /**
@@ -387,4 +444,30 @@ export interface IdentityAdminRpcContract {
    * 付けること。**
    */
   listUsers(input: ListUsersInput): Promise<ListUsersResult>;
+  /**
+   * 利用者を停止する（#375）。**管理者のみ。再認証が要る。**
+   *
+   * **自分は止められない**（`conflict`）—— 止めた瞬間に自分のセッションが
+   * 死に、解除する人が居なくなる。
+   *
+   * **理由（`reason`）は `audit_logs` にしか残らない。** `status` は
+   * 1 値なので、記録を消すと「なぜ止まっているか」が分からなくなる。
+   */
+  suspendUser(input: SuspendUserInput): Promise<SuspendUserResult>;
+  /**
+   * 停止を解除する（#375）。**管理者のみ。再認証が要る。**
+   *
+   * **`deleted` の利用者は戻せない**（`conflict`）。あれは個人情報が
+   * 落ちている状態で、**落とした情報は戻らないのに `active` に見える
+   * アカウント**ができる。
+   */
+  reinstateUser(input: ReinstateUserInput): Promise<ReinstateUserResult>;
+  /**
+   * 利用者のセッションを全部切る（#375）。**管理者のみ。再認証が要る。**
+   *
+   * **停止とは別の操作である。** 止めずに切りたいことがある —— 端末を
+   * 失くした人の救済や、侵害の疑いが晴れていない段階での予防。
+   * **自分に対しては許している**（全端末からログアウト）。
+   */
+  revokeUserSessions(input: RevokeUserSessionsInput): Promise<RevokeUserSessionsResult>;
 }

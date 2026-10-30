@@ -72,6 +72,24 @@ export interface UserRepository {
    * のは、同じミリ秒に作られた行が 2 つあるとカーソルがそこで止まる
    * ため（テストの seed では実際に起きる）。
    */
+  /**
+   * 管理者による停止・解除（#375 / ランブック §11.1）。
+   *
+   * **`deleted` の行には当たらない。** あれは「個人情報が落ちている」
+   * ことを指す状態で（§11.6 の表）、**戻せるものではない** ——
+   * 落とした情報は戻らないのに `active` に見えるアカウントができる。
+   *
+   * **`from` を指定させる。** 「いま `active` なものだけ止める」
+   * 「いま `suspended` なものだけ戻す」を SQL の条件に入れることで、
+   * **読んでから書くまでの間に状態が変わっていたら 0 行**になる。
+   * 読み直して分岐すると、その隙間で二重に書ける。
+   *
+   * 当たらなければ false。呼ぶ側はそれを `conflict` に訳す。
+   */
+  setStatus(
+    id: string,
+    change: { readonly from: "active" | "suspended"; readonly to: "active" | "suspended" },
+  ): Promise<boolean>;
   listForAdmin(criteria: {
     /** メールアドレスか username の**完全一致**。部分一致は持たない。 */
     readonly query?: string;

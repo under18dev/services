@@ -1,4 +1,4 @@
-import type { IdentityAdminRpcContract, RpcCaller, RpcResult } from "@u18/contracts";
+import type { IdentityAdminRpcContract, RpcCaller, RpcResult, SuspendReason } from "@u18/contracts";
 import type { IdentityAdminGateway, IdentityOutcome } from "../../application/ports";
 import { toFailure } from "./identity.gateway";
 
@@ -70,6 +70,18 @@ export class RpcIdentityAdminGateway implements IdentityAdminGateway {
 
   disableOAuthClient(sessionToken: string, clientId: string) {
     return this.call(() => this.admin.disableOAuthClient(this.input({ sessionToken, clientId })));
+  }
+
+  suspendUser(sessionToken: string, userId: string, reason: SuspendReason) {
+    return this.call(() => this.admin.suspendUser(this.input({ sessionToken, userId, reason })));
+  }
+
+  reinstateUser(sessionToken: string, userId: string) {
+    return this.call(() => this.admin.reinstateUser(this.input({ sessionToken, userId })));
+  }
+
+  revokeUserSessions(sessionToken: string, userId: string) {
+    return this.call(() => this.admin.revokeUserSessions(this.input({ sessionToken, userId })));
   }
 
   listUsers(sessionToken: string, criteria: { readonly query?: string; readonly cursor?: string }) {

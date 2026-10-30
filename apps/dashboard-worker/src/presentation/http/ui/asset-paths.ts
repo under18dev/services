@@ -156,6 +156,17 @@ export const ADMIN_USERS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_ROUTE}` as co
 export const ADMIN_USERS_SEARCH_ROUTE = "/admin/users/search";
 export const ADMIN_USERS_SEARCH_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_SEARCH_ROUTE}` as const;
 
+/**
+ * 利用者への操作（#375）。**停止・解除・セッションの失効。**
+ *
+ * **1 本の口にまとめてある。** 画面の form が `action` を押し分ける形
+ * （`<button name="action" value="suspend">`）で、**経路ごとに
+ * `isAdmin` の確認を書き分けない** —— 管理の経路が散ると、片方だけ
+ * 忘れた状態が作れる（`ADMIN_CLIENTS_ROUTE` の JSDoc と同じ判断）。
+ */
+export const ADMIN_USERS_ACTION_ROUTE = "/admin/users/action";
+export const ADMIN_USERS_ACTION_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_ACTION_ROUTE}` as const;
+
 export const ADMIN_CLIENTS_ROUTE = "/admin/clients";
 export const ADMIN_CLIENTS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_ROUTE}` as const;
 

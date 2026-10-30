@@ -116,6 +116,27 @@ export const AUDIT_EVENTS = [
   /** 管理権限を剥がした。締め出しの手口でもある。 */
   "ops.admin.revoked",
   /**
+   * 管理者が利用者を停止した（#375 / ランブック §11.1 の表）。
+   *
+   * **理由はここにしか無い。** `status` は `suspended` の 1 値で、
+   * 「侵害の疑いによる緊急停止」「規約違反による BAN」「本人の退会」の
+   * 3 つを区別しない（区別するのは `metadata.reason` とこのイベント名）。
+   * §11.6 の purge の対象になるのは `deleted` だけなので、**どの理由で
+   * 止めたかが後から読めないと、戻してよいのかも判断できない。**
+   */
+  "ops.user.suspended",
+  /** 管理者が停止を解除した（#375）。 */
+  "ops.user.reinstated",
+  /**
+   * 管理者が利用者のセッションを全部切った（#375）。
+   *
+   * **停止とは別の操作である。** 停止すれば次の要求から通らなくなる
+   * （`GetSessionUseCase` が `isActive` を見る）が、**止めずに切りたい**
+   * ことがある —— 端末を失くした人の救済や、侵害の疑いが晴れていない
+   * 段階での予防。
+   */
+  "ops.user.sessions_revoked",
+  /**
    * 管理者の旗が立ったアカウントが、**Passkey 以外で張られたセッション**で
    * 現れた（決定 8 / 脅威モデル RR-5）。権限は与えず、その事実だけを出す。
    *
@@ -288,6 +309,20 @@ export const AUDIT_EVENT_RETENTION: Readonly<Record<AuditEventName, AuditRetenti
   "ops.admin.granted": "security",
   /** 剥奪。締め出しの手口でもあるので、付与と同じだけ残す。 */
   "ops.admin.revoked": "security",
+  /**
+   * **支配権が変わる操作なので長期側。** しかも `ops.user.suspended` は
+   * **理由の唯一の保存先**である（`status` は 1 値しか持たない）。
+   * 180 日で消えると、「なぜ止まっているのか」が誰にも分からない
+   * アカウントが残る。
+   */
+  "ops.user.suspended": "security",
+  /** 付与と剥奪を同じだけ残すのと同じ理由（`ops.admin.revoked`）。 */
+  "ops.user.reinstated": "security",
+  /**
+   * **管理者しか起こせないので件数が頭打ちになる。** 外から誘発できる
+   * `admin.denied` と違い、`audit_logs` を伸ばす経路にならない。
+   */
+  "ops.user.sessions_revoked": "security",
   /** 認証器を足した。乗っ取りの最も典型的な足跡。 */
   "passkey.register": "security",
   /** 認証器を外した。締め出しの手口でもある。 */
