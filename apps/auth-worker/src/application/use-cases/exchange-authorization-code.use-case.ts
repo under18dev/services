@@ -10,6 +10,8 @@ import type { PkceVerifier, RandomTokenGenerator, TokenHasher } from "../ports/c
 import type { IdTokenIssuer } from "../ports/id-token.port";
 import type { OAuthGrantRepository } from "../ports/oauth-grant.repository";
 import type { OAuthTokenRepository } from "../ports/oauth-token.repository";
+import type { SessionRepository } from "../ports/session.repository";
+import { acrFor, amrFor } from "../../domain/services/amr";
 import type { UserRepository } from "../ports/user.repository";
 import { settleSideEffects } from "./side-effects";
 import { err, ok, type UseCaseResult } from "./types";
@@ -43,6 +45,11 @@ export type ExchangeAuthorizationCodeDeps = {
   readonly pkce: PkceVerifier;
   readonly clock: Clock;
   readonly audit: AuditLogger;
+  /**
+   * `amr`（#390）の解決にだけ使う。**書き込みは一切しない。**
+   * `code.sessionId` から `authMethod` を引くための読み取り専用の依存。
+   */
+  readonly sessions: SessionRepository;
 };
 
 /**
@@ -130,6 +137,18 @@ export class ExchangeAuthorizationCodeUseCase {
     }
 
     // ---- 5. ID Token ----
+    //
+    // **`amr` はここで決まる値で、`additionalClaims` を通さない**
+    // （scope に左右されない base claim。`auth_time` と同じ）。
+    //
+    // 解決できなければ `null`（claim を出さない）に倒す —— 捏造しない。
+    // `code.sessionId` が無い、あるいは認可から交換までの間（最大 60 秒）に
+    // そのセッションが失効した場合がこれに当たる。
+    const session =
+      code.sessionId === null ? null : await this.deps.sessions.findById(code.sessionId);
+    const amr = session === null ? null : amrFor(session.authMethod);
+    const acr = session === null ? null : acrFor(session.authMethod);
+
     const idTokenExpiresAt = expiresAt(now, TokenLifetime.idTokenMs);
     let idToken: string;
     try {
@@ -141,6 +160,8 @@ export class ExchangeAuthorizationCodeUseCase {
         expiresAt: idTokenExpiresAt,
         authTime: code.authTime,
         nonce: code.nonce,
+        amr,
+        acr,
         // scope に応じて claim を絞る。`openid` だけなら `sub` のみ。
         additionalClaims: filterClaimsByScope(user.toClaims(), code.scopes),
       });

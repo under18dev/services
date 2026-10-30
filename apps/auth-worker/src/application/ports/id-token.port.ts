@@ -36,6 +36,25 @@ export type IdTokenClaims = {
   /** 認可要求に `nonce` があればそのまま載せる。無ければ claim 自体を出さない。 */
   readonly nonce: string | null;
   /**
+   * 認証方式（RFC 8176 の `amr`、#390）。**`auth_time` と同じ扱い** ——
+   * scope に関わらず常に載る base claim で、`additionalClaims` を通さない。
+   * セッションへ解決できなかった場合（`sessionId` が無い、既に失効した等）
+   * は `null` にし、claim 自体を出さない。**存在しないことは「弱い」とは
+   * 違う**ので、空配列で埋めない。
+   *
+   * `userinfo` には載せない。`auth_time` と同じく「特定の認証イベントに
+   * ついての事実」で、`/oauth/userinfo` が答える「いまの利用者の属性」とは
+   * 性質が違う（`user.toClaims()` が `auth_time` を持たないのと同じ理由）。
+   */
+  readonly amr: readonly string[] | null;
+  /**
+   * `acr`（RFC 8176 / OIDC Core、#390）。**u18 が定義する水準を満たしたか
+   * だけを答える。** 満たさなければ `null`（claim を出さない）—— 「u18 に
+   * acr という概念が無い」と「要求された水準に届かなかった」を区別しない。
+   * `domain/services/amr.ts` の `acrFor` を参照。
+   */
+  readonly acr: string | null;
+  /**
    * scope に応じた追加 claim（`profile` / `email`）。
    * `filterClaimsByScope()` を通した結果を渡すこと。
    */

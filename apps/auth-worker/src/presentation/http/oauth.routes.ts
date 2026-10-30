@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { ACR_PASSKEY } from "../../domain/services/amr";
 import { SUPPORTED_SCOPES } from "../../domain/services/scope";
 import { oauthAuthorizeRoutes } from "./oauth.authorize.routes";
 import { oauthRevokeRoutes } from "./oauth.revoke.routes";
@@ -74,6 +75,8 @@ oauthRoutes.get("/.well-known/openid-configuration", (c) => {
     u18_revocation_endpoint_token_types_supported: ["access_token"],
     // PKCE は S256 必須。plain は公開しない。
     code_challenge_methods_supported: ["S256"],
+    // u18 が応じられる acr はこれだけ（#390）。`ACR_PASSKEY` と同じ値。
+    acr_values_supported: [ACR_PASSKEY],
     // Request Object は受け付けない（#15）。黙って無視するのではなく
     // `request_not_supported` で拒否するので、広告と挙動が一致している。
     request_parameter_supported: false,
@@ -85,6 +88,8 @@ oauthRoutes.get("/.well-known/openid-configuration", (c) => {
       "exp",
       "iat",
       "auth_time",
+      "amr",
+      "acr",
       "nonce",
       "name",
       "preferred_username",
