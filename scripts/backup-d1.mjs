@@ -242,8 +242,10 @@ function encryptFile(path, recipient) {
   }
   if (result.status !== 0) throw new Error(`age が失敗した (exit ${result.status})`);
 
-  assertAgeBytes(readFileSync(out), out);
-  console.log(`[age] ${path} → ${out} (${statSync(out).size} バイト)`);
+  // こちらも 1 回だけ読む（上と同じ理由）。
+  const produced = readFileSync(out);
+  assertAgeBytes(produced, out);
+  console.log(`[age] ${path} → ${out} (${produced.byteLength} バイト)`);
   return out;
 }
 
@@ -260,13 +262,24 @@ function verifyUploaded({ key, localPath, expectEncrypted }) {
   const path = join(dir, "readback.bin");
   wrangler(["r2", "object", "get", `${BUCKET}/${key}`, "--file", path, "--remote"]);
 
+  // **取り直したファイルは 1 回しか読まない**（CodeQL `js/file-system-race`）。
+  //
+  // 以前はここで `statSync()` してから `readFileSync()` していた。
+  // **長さを測ったファイルと、中身を見たファイルが同じである保証が無い。**
+  // このスクリプトが扱うのは全利用者の平文メールアドレスを含むダンプで、
+  // 「検査した対象と操作した対象が違う」は**暗号化したつもりのものが別物**
+  // という形に化ける。長さも中身も同じバッファから取る。
+  //
+  // `localPath` は逆に 1 回しか触らない（長さだけが要る）ので stat のまま。
   const expected = statSync(localPath).size;
-  const actual = statSync(path).size;
-  if (actual !== expected) {
-    throw new Error(`読み戻しのバイト長が違う: 期待 ${expected} / 実際 ${actual}`);
+  const readBack = readFileSync(path);
+  if (readBack.byteLength !== expected) {
+    throw new Error(`読み戻しのバイト長が違う: 期待 ${expected} / 実際 ${readBack.byteLength}`);
   }
-  if (expectEncrypted) assertAgeBytes(readFileSync(path), `r2://${BUCKET}/${key}`);
-  console.log(`[verify] r2://${BUCKET}/${key} (${actual} バイト) を読み戻して確認した`);
+  if (expectEncrypted) assertAgeBytes(readBack, `r2://${BUCKET}/${key}`);
+  console.log(
+    `[verify] r2://${BUCKET}/${key} (${readBack.byteLength} バイト) を読み戻して確認した`,
+  );
   rmSync(dir, { recursive: true, force: true });
 }
 
