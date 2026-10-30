@@ -628,7 +628,7 @@ describe("アプリのカタログ（#308）", () => {
    * `AppsPage` に直接 props を渡して、カタログが変わったときの形を見る。
    */
   async function renderApps(view: AppCatalogView): Promise<string> {
-    const probe = new Hono().get("/", (c) => c.html(AppsPage({ view }) as never));
+    const probe = new Hono().get("/", (c) => c.html(AppsPage({ view, isAdmin: false }) as never));
     return await (await probe.request("/")).text();
   }
 

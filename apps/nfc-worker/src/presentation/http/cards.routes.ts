@@ -163,7 +163,12 @@ function createCardsApi() {
           .get("container")
           .useCases.listMyCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
         if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-        return c.json({ cards: result.value });
+        // **`isAdmin` は API へ出さない。** `ListMyCardsUseCase` は画面の
+        // サイドバー用にそれも返すが、**この経路の消費者は一覧だけを
+        // 求めている** —— 混ぜると、JSON を読む側が「管理者かどうかは
+        // ここから取れる」と読む。`cards.api.test.ts` の「CardView の
+        // 項目だけを返す」が見ている。
+        return c.json({ cards: result.value.cards });
       })
 
       /**

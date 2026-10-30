@@ -1,4 +1,4 @@
-import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, accountNavFor } from "@u18/contracts";
 import {
   Card,
   CardContent,
@@ -42,15 +42,20 @@ import { KIWA_STYLESHEET_PATH } from "./asset-paths";
 const CLAIM_BUTTON_CLASS = getButtonClasses("default", "default");
 
 export type ClaimPageProps = {
+  /**
+   * 管理の節を出すか（#333）。**必須にしてある** —— 既定値を置くと、
+   * 次に足した画面だけ渡し忘れた状態が作れて、しかも落ちない。
+   */
+  readonly isAdmin: boolean;
   /** 紐づけられるカード。畳んだ側は null。 */
   readonly cardId: string | null;
   readonly csrfToken: string;
 };
 
-export const ClaimPage: FC<ClaimPageProps> = ({ cardId, csrfToken }) => (
+export const ClaimPage: FC<ClaimPageProps> = ({ cardId, csrfToken, isAdmin }) => (
   <KiwaShell
     title="カードの登録"
-    nav={ACCOUNT_NAV_GROUPS}
+    nav={accountNavFor(isAdmin)}
     brandHref={ACCOUNT_HOME_PATH}
     stylesheet={KIWA_STYLESHEET_PATH}
     current="nfc"

@@ -1,4 +1,4 @@
-import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, accountNavFor } from "@u18/contracts";
 import {
   Badge,
   Card,
@@ -197,13 +197,18 @@ const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
 );
 
 export type CardsPageProps = {
+  /**
+   * 管理の節を出すか（#333）。**必須にしてある** —— 既定値を置くと、
+   * 次に足した画面だけ渡し忘れた状態が作れて、しかも落ちない。
+   */
+  readonly isAdmin: boolean;
   readonly cards: readonly CardView[];
 };
 
-export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
+export const CardsPage: FC<CardsPageProps> = ({ cards, isAdmin }) => (
   <KiwaShell
     title="NFC カード"
-    nav={ACCOUNT_NAV_GROUPS}
+    nav={accountNavFor(isAdmin)}
     brandHref={ACCOUNT_HOME_PATH}
     // **Worker ごとに違う。** この Worker が自分で配信している CSS
     // （借りない理由は `asset-paths.ts` の #211 の節）。

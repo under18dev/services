@@ -96,7 +96,7 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     // キャッシュしない。カードの状態は所有者固有で、共有キャッシュに
     // 載ると他人に見える（#125 と同じ理由）。
     c.header("Cache-Control", "no-store");
-    return c.html(<CardsPage cards={result.value} />);
+    return c.html(<CardsPage cards={result.value.cards} isAdmin={result.value.isAdmin} />);
   });
 
   /**
@@ -146,7 +146,11 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
 
     c.header("Cache-Control", "no-store");
     return c.html(
-      <ClaimPage cardId={result.value.claimable ? cardId : null} csrfToken={csrfToken} />,
+      <ClaimPage
+        cardId={result.value.claimable ? cardId : null}
+        csrfToken={csrfToken}
+        isAdmin={result.value.isAdmin}
+      />,
     );
   });
 
@@ -174,7 +178,10 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     const form = await c.req.formData().catch(() => null);
     const concealed = () => {
       c.header("Cache-Control", "no-store");
-      return c.html(<ClaimPage cardId={null} csrfToken="" />, 400);
+      // **`isAdmin` は `false`。** ここは CSRF 拒否でも通るので、
+      // **セッションを確かめる前に出ることがある** —— 管理者かどうかを
+      // 決める材料が無い。「分からないときは出さない」側に倒す。
+      return c.html(<ClaimPage cardId={null} csrfToken="" isAdmin={false} />, 400);
     };
 
     if (form === null) return concealed();

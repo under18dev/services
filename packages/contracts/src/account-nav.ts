@@ -47,6 +47,15 @@ export type AccountNavItem = {
   /** 絶対パス。**Worker をまたぐので接頭辞から組み立てない。** */
   readonly href: string;
   readonly label: string;
+  /**
+   * 管理者にだけ出す項目か（#333）。
+   *
+   * **ここに書くのは「誰に出すか」だけで、「誰が叩けるか」ではない。**
+   * サイドバーから消えても URL は叩けるので、**画面側が自分で
+   * `isAdmin` を見て `not_found` を返すこと。** 片方だけだと、
+   * #306 と向きが逆の同じ嘘になる（出るのに叩けない / 出ないのに叩ける）。
+   */
+  readonly adminOnly?: boolean;
 };
 
 export type AccountNavGroup = {
@@ -64,6 +73,17 @@ export type AccountNavGroup = {
  * 「API はあるのに入口が無い」まま残っていた #306 と、向きは逆だが
  * 同じ種類の嘘になる。「開発」（OAuth クライアントの管理、#331）は
  * まだ画面が無いので置いていない。
+ *
+ * ## 管理者向けの項目も、ここに足す（#333）
+ *
+ * **別の配列を作らない。** `adminOnly: true` を付けて同じ並びに置き、
+ * 出し分けは `accountNavFor()` が行う。分けると
+ * `check-app-catalog-routes.mjs` の走査から外れ、**行き先が実在する
+ * ことを誰も見なくなる。**
+ *
+ * **いま 1 つも無いのは、画面がまだ無いから**である。上の規則は
+ * 管理者向けにも同じく当てはまる —— **画面が入る PR で、その PR が
+ * ここへ足すこと。**
  */
 export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
   {
@@ -99,6 +119,41 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
     ],
   },
 ];
+
+/**
+ * このセッションに出す並び（#333）。
+ *
+ * **`adminOnly` の項目を落とし、それで空になったグループも落とす。**
+ * 見出しだけが残ると、**管理者にだけ中身がある節が、非管理者には
+ * 空の見出しとして見える** —— 存在を隠す意味が無くなる。
+ *
+ * ## なぜ呼ぶ側に書かせないのか
+ *
+ * dashboard-worker と nfc-worker が**それぞれ** `isAdmin ? ... : ...` と
+ * 書くと、**片方だけ条件を間違えた状態**が作れる。どちらの画面も落ちず、
+ * 気づくのは「NFC の画面では管理の節が出ないのですが」と言われたとき
+ * である。**このファイルの冒頭が並びを contracts に置いた理由が、
+ * そのまま出し分けにも当てはまる。**
+ *
+ * **`isAdmin` の値そのものは呼ぶ側が持つ。** あれはセッションごとに
+ * 変わる値で、Worker 間の取り決めではない。両方の Worker が
+ * `getSession`（`SessionSummary.isAdmin`）から取れる。
+ *
+ * ## `check-app-catalog-routes.mjs` はフィルタ前を見る
+ *
+ * あの検査は `ACCOUNT_NAV_GROUPS` の**ソースを正規表現で読む**
+ * （`scripts/lib/app-catalog-routes.mjs` の `readNavHrefs`）ので、
+ * `adminOnly` を付けても走査から外れない。**行き先が実在することは
+ * `isAdmin` と無関係に要る。**
+ */
+export function accountNavFor(isAdmin: boolean): readonly AccountNavGroup[] {
+  if (isAdmin) return ACCOUNT_NAV_GROUPS;
+
+  return ACCOUNT_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => item.adminOnly !== true),
+  })).filter((group) => group.items.length > 0);
+}
 
 /** ダッシュボードのホーム。サイドバーのブランドが指す先。 */
 export const ACCOUNT_HOME_PATH = "/account";
