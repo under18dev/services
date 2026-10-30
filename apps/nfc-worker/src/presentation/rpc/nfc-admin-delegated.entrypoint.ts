@@ -1,6 +1,7 @@
 import {
   disableCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
+  releaseCardDelegatedInputSchema,
   rpcErr,
   rpcOk,
   updateCardTargetDelegatedInputSchema,
@@ -11,6 +12,8 @@ import {
   type IssueCardsDelegatedResult,
   type ListAllCardsDelegatedResult,
   type NfcAdminDelegatedRpcContract,
+  type ReleaseCardDelegatedInput,
+  type ReleaseCardDelegatedResult,
   type RpcErrorCode,
   type UpdateCardTargetDelegatedInput,
   type UpdateCardTargetDelegatedResult,
@@ -125,6 +128,25 @@ export class NfcAdminDelegatedRPC
         result.failure.kind === "invalid_target_url" ? result.failure.reason : result.failure.kind;
       return rpcErr(toRpcCode(result.failure.kind), detail);
     }
+
+    return rpcOk(null);
+  }
+
+  /**
+   * 他人のカードの所有権を剥奪する（#422）。「付け替え」ではなく
+   * 「手放させる」——`issued` に戻るだけで、直接別の利用者へは束縛しない。
+   * 理由は `DelegatedReleaseCardUseCase` の冒頭を参照。
+   */
+  async releaseCard(input: ReleaseCardDelegatedInput): Promise<ReleaseCardDelegatedResult> {
+    const parsed = releaseCardDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or cardId is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedReleaseCard.execute({
+      actorUserId: parsed.data.actorUserId,
+      cardId: parsed.data.cardId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
 
     return rpcOk(null);
   }

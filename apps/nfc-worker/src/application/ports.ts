@@ -205,6 +205,19 @@ export interface CardRepository {
    * 手渡しするまでの間が無防備なことは、`ReleaseCardUseCase` に書いてある。
    */
   release(cardId: string, ownerUserId: string, now: Date): Promise<boolean>;
+
+  /**
+   * 運営による所有権の剥奪（#422「所有者が付け替えられない」）。
+   *
+   * **`release` との違いは `ownerUserId` を WHERE 句に持たないことだけ。**
+   * `disableAsAdmin` / `updateTargetAsAdmin` と同じ判断——所有者を問わず、
+   * `active` であることだけを条件にする。
+   *
+   * **「付け替え」ではなく「手放させる」。** 直接別の利用者へ付け替える
+   * 口は無い。カードは `issued` へ戻り、次にタップした人のものになる
+   * （`DelegatedReleaseCardUseCase` の冒頭を参照）。
+   */
+  releaseAsAdmin(cardId: string, now: Date): Promise<boolean>;
 }
 
 /** カードに起きたことの記録（`nfc_card_events`）。 */
