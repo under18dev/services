@@ -195,6 +195,59 @@ jobs:
         working-directory: apps/nfc-worker
         run: pnpm exec wrangler d1 migrations apply u18-nfc --remote --env production
 
+  # 承認リストの D1（#390）。**`migrate` とは別のジョブにする。**
+  #
+  # ## なぜ分けるのか
+  #
+  # `migrate` が落ちると `deploy-auth-worker` ごと止まる（`needs: migrate`）。
+  # **admin の D1 がまだ作られていないせいで、auth / nfc / dashboard の
+  # デプロイまで止まるのは釣り合わない。** この DB は Identity とも NFC とも
+  # 外部キーで繋がっていないので、**順序の制約も無い。**
+  #
+  # **代わりに、落ちるのはこのジョブと admin のデプロイだけになる。**
+  # 「黙って飛ばす」にはしない —— **出るはずのものが出ていないことは、
+  # 赤で見えていなければならない。**
+  migrate-admin:
+    name: Apply D1 migrations (Admin)
+    runs-on: ubuntu-latest
+    environment: production
+    needs: preflight
+    if: needs.preflight.outputs.should_deploy == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+
+      # **`database_id` が未設定のまま進めない。**
+      #
+      # 新しい Worker の `wrangler.jsonc` は、`wrangler d1 create` を打つまで
+      # `database_id` がプレースホルダ（オール 0）である。そのまま
+      # `migrations apply` を打つと Cloudflare 側の「そんな DB は無い」で
+      # 落ちるが、**どの設定を直せばよいかはエラーから読めない。**
+      # 先に名指しで落とす。
+      #
+      # **#393 の時点では、これは必ず落ちる。** `wrangler d1 create u18-admin`
+      # は運用者の作業で、**その出力で `wrangler.jsonc` を差し替えるまで
+      # admin は出せない。** 他の 3 つは出る。
+      - name: Verify the Admin D1 id is not a placeholder
+        working-directory: apps/admin-worker
+        run: |
+          if grep -q '"database_id": "00000000-0000-0000-0000-000000000000"' wrangler.jsonc; then
+            echo "::error::apps/admin-worker/wrangler.jsonc still has a placeholder database_id."
+            echo "::error::Run 'pnpm exec wrangler d1 create u18-admin' and replace the id in both the"
+            echo "::error::top-level d1_databases and env.production.d1_databases before deploying."
+            exit 1
+          fi
+
+      # **他の Worker の working-directory から打たないこと。**
+      # migrations_dir が別のパッケージを指したまま、そちらの SQL を
+      # この DB に流し込む（NFC の同じ注意と同じ理由）。
+      - name: wrangler d1 migrations apply (Admin)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/admin-worker
+        run: pnpm exec wrangler d1 migrations apply u18-admin --remote --env production
+
   # auth-worker が先。dashboard-worker は IdentityRPC entrypoint に依存するため、
   # 新しい RPC メソッドを使う dashboard を先に出すと参照先が無い（仕様書 4.4）。
   deploy-auth-worker:
@@ -559,3 +612,95 @@ jobs:
             exit 0
           fi
           scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}" dashboard-worker
+
+  # admin-worker は **u18 Identity の OAuth クライアント**である（#390）。
+  #
+  # ## なぜ auth の後なのか
+  #
+  # **Service Binding は 1 本も持たない** —— OIDC の RP なので、auth とは
+  # HTTPS で話す。それでも `needs: deploy-auth-worker` にするのは、
+  # **ログインが auth の discovery と token endpoint に依っている**ため。
+  # auth が先に出ていないと、**出た直後の admin は誰もログインできない**
+  # （画面は出るので、押すまで分からない）。
+  #
+  # dashboard / nfc と同じ段に並ぶ。互いに依存しないので並行でよい。
+  deploy-admin-worker:
+    name: Deploy admin-worker
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [preflight, migrate-admin, deploy-auth-worker]
+    if: needs.preflight.outputs.should_deploy == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+
+      # **secret が無いまま出さない。** admin-worker は 2 つ持つ:
+      #
+      #  - `OIDC_CLIENT_SECRET` —— トークン交換に要る。**無いと、画面は
+      #    出てログインの最後だけが落ちる**（認可要求までは通るので、
+      #    押すまで分からない）
+      #  - `SESSION_SECRET` —— 自分のセッション Cookie の署名。**無いと
+      #    ログインは通るが、次のリクエストで剥がれる**
+      #
+      # `continue-on-error: true` は auth-worker と同じ理由 —— 初回の
+      # デプロイでは Worker 自体がまだ無く、`secret list` が引けない。
+      # **止めるのではなく警告にする**（止めると最初の 1 回が永久に出せない）。
+      - name: Check required Worker secrets
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/admin-worker
+        run: |
+          if ! secrets_json="$(pnpm exec wrangler secret list --env production 2>/dev/null)"; then
+            echo "::warning::Could not list Worker secrets (the Worker may not exist yet on a first deploy). Skipping the check."
+            exit 0
+          fi
+
+          missing=""
+          for name in OIDC_CLIENT_SECRET SESSION_SECRET; do
+            echo "$secrets_json" | grep -q "\"$name\"" || missing="$missing $name"
+          done
+
+          if [ -n "$missing" ]; then
+            echo "::error::Missing Worker secrets:$missing"
+            echo "::error::Set them with: pnpm exec wrangler secret put <NAME> --env production"
+            exit 1
+          fi
+
+      - name: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: apps/admin-worker
+        run: pnpm exec wrangler deploy --env production
+
+      # **ログインできることまでは見ない。** あれには OAuth クライアントの
+      # 登録（CLI、#390 の「鶏と卵」）と承認リストの 1 行目が要るので、
+      # **デプロイの成否とは別の条件**である。
+      #
+      # ここで見るのは「**route が届いていること**」だけ。届いていなければ
+      # Cloudflare が DNS のダミーへ繋ぎに行って **522** になる
+      # （nfc-worker が `go.under18.dev` で踏んだ形、#137）。
+      #
+      # **未ログインの応答は 200 でなくてよい** —— ログイン導線への
+      # リダイレクトが正しい。**522 と 530 でないことを見る。**
+      - name: Smoke test the deployed Worker
+        env:
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
+        run: |
+          if [ -z "$ADMIN_URL" ]; then
+            echo "::warning::ADMIN_URL repository variable is not set, skipping the smoke test."
+            exit 0
+          fi
+
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${ADMIN_URL%/}/")"
+          echo "GET / -> $status"
+
+          case "$status" in
+            522|523|530|000)
+              echo "::error::admin.under18.dev did not reach the Worker (status $status)."
+              echo "::error::Check the zone record and the Workers route for admin.under18.dev."
+              exit 1
+              ;;
+          esac
