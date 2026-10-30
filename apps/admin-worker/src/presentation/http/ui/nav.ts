@@ -19,6 +19,8 @@ export const ADMIN_NAV_GROUPS: readonly ShellNavGroup[] = [
     items: [
       { key: "nfc", href: "/nfc", label: "NFC カード" },
       { key: "clients", href: "/clients", label: "OAuth クライアント" },
+      { key: "users", href: "/users", label: "利用者" },
+      { key: "auditLogs", href: "/audit", label: "監査ログ" },
     ],
   },
 ];
