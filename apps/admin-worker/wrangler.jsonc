@@ -1,0 +1,74 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "u18-admin",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // **u18 Identity への Service Binding は持たない。**
+  //
+  // 運用者の判断（2026-10-30 夜）で、u18 Identity 側には「誰が管理画面を
+  // 使ってよいか」の情報を一切足さない——admin-worker はただの OIDC
+  // クライアントの 1 つで、IdentityRPC / IdentityAdminRPC を呼ぶ理由が
+  // 無い。「誰が使ってよいか」の記憶は、下の `ADMIN_DB`（admin-worker
+  // 専用の D1）だけが持つ。
+  "d1_databases": [
+    {
+      "binding": "ADMIN_DB",
+      "database_name": "u18-admin",
+      // `wrangler d1 create u18-admin` の出力で置き換える
+      // （`docs/admin-worker-setup.md`）。
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/admin-db/drizzle",
+    },
+  ],
+
+  "vars": {
+    // u18 Identity の Issuer。Discovery をここから引く。
+    "AUTH_ISSUER": "http://localhost:8787",
+    // この Worker 自身のオリジン。`redirect_uri` の組み立てに使う。
+    //
+    // **要求の Host から作らない。** `Host` は攻撃者が差し替えられるので、
+    // そこから `redirect_uri` を組むと、登録済みの URI と違うものを
+    // 認可要求に載せる余地ができる（完全一致で弾かれるが、弾かれ方が
+    // 設定ミスと区別できなくなる）。
+    "ADMIN_ORIGIN": "http://localhost:8790",
+    // OAuth クライアント ID。**秘密ではない。** 秘密は `OIDC_CLIENT_SECRET`。
+    "OIDC_CLIENT_ID": "u18-admin",
+    "ENVIRONMENT": "development",
+  },
+
+  // Secrets（`wrangler secret put`）:
+  //   OIDC_CLIENT_SECRET  CLI の `create` が 1 度だけ出す値
+  //   SESSION_SECRET      この Worker のセッション Cookie の署名鍵
+  //
+  // **`create` を打つ前に受け皿を用意すること。** CLI が平文を出すのは
+  // 1 度だけで、取り損ねると作り直しになる（`docs/admin-worker-setup.md`）。
+
+  "env": {
+    "production": {
+      "d1_databases": [
+        {
+          "binding": "ADMIN_DB",
+          "database_name": "u18-admin",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "../../packages/admin-db/drizzle",
+        },
+      ],
+      "vars": {
+        "AUTH_ISSUER": "https://auth.under18.dev",
+        "ADMIN_ORIGIN": "https://admin.under18.dev",
+        "OIDC_CLIENT_ID": "u18-admin",
+        "ENVIRONMENT": "production",
+      },
+      "routes": [
+        // **ホスト全体を受ける。** `/callback` だけに絞ると、route に
+        // 当たらないパスが DNS の指すオリジンへ行って 522 になる
+        // （nfc-worker の wrangler.jsonc が同じ形で踏んでいる）。
+        { "pattern": "admin.under18.dev/*", "zone_name": "under18.dev" },
+      ],
+      "observability": { "enabled": true },
+    },
+  },
+}

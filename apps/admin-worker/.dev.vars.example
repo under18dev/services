@@ -1,0 +1,11 @@
+# ローカル開発用のシークレット。実値を入れた .dev.vars はコミットしない。
+# 本番は `wrangler secret put <NAME>` で設定する。
+
+# u18 Identity に `--type confidential` で登録したクライアントの secret。
+# `scripts/oauth-client.mjs create ... --dry-run` で発行前に SQL を確認し、
+# 本物を打ったときに出力される値をここへ貼る（1 度しか出ない）。
+OIDC_CLIENT_SECRET=change-me
+
+# この Worker のセッショントークンの署名鍵。32 バイト以上のランダム値。
+#   node -e 'console.log(crypto.randomUUID()+crypto.randomUUID())'
+SESSION_SECRET=change-me-in-every-environment

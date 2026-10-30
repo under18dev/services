@@ -654,6 +654,7 @@ NFC タグ → https://go.under18.dev/c/<random-card-id>
 - [docs/threat-model.md](./docs/threat-model.md) — 脅威モデル
 - [docs/runbook.md](./docs/runbook.md) — 運用手順
 - [docs/nfc-cards-operations.md](./docs/nfc-cards-operations.md) — NFC カードの配布と運用（**配る側**）
+- [docs/admin-worker-setup.md](./docs/admin-worker-setup.md) — admin-worker の初回セットアップ（OAuth クライアント登録・承認リストの初期化）
 
 **利用者向けの案内だけは、リポジトリの中に無い。** カードを受け取った人が読むものは
 **`https://go.under18.dev/docs`** で配信している —— カードに印字されているのが
