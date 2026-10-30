@@ -39,3 +39,21 @@ export const TARGET_SAVE = "data-card-target-save";
 
 /** 結果を出す行。**サーバーが空で描き、島が埋める。** */
 export const TARGET_STATUS = "data-card-target-status";
+
+/**
+ * 片道の操作のまとまり（#382）。`data-card-id` を併せ持つ。
+ *
+ * **`TARGET_FORM` と分けてある。** あちらは何度でもやり直せる操作で、
+ * こちらは**戻せない／戻しても宙に浮く**操作である。同じ入れ物に混ぜると、
+ * 島の側で「どちらの結果を出す行か」が曖昧になる。
+ */
+export const ACTIONS_ROW = "data-card-actions";
+
+/** 止める（無効化）。**片道。** */
+export const DISABLE_BUTTON = "data-card-disable";
+
+/** 人にゆずる（手放す）。**次にタップした人のものになる。** */
+export const RELEASE_BUTTON = "data-card-release";
+
+/** 片道の操作の結果を出す行。**サーバーが空で描き、島が埋める。** */
+export const ACTION_STATUS = "data-card-action-status";
