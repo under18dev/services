@@ -1,5 +1,5 @@
 import { CARDS_BASE_PATH } from "../../base-path";
-import { STATUS_ERROR_CLASS, STATUS_TEXT_CLASS } from "../island-classes";
+import { ITEM_ERROR_CLASS, ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
 import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "../island-hooks";
 import { createCardsClient } from "./api-client";
 import { UPDATE_TARGET_COPY } from "./messages";
@@ -50,7 +50,7 @@ function attach(form: HTMLElement): void {
 
   const show = (message: string, failed: boolean): void => {
     status.textContent = message;
-    status.className = failed ? STATUS_ERROR_CLASS : STATUS_TEXT_CLASS;
+    status.className = failed ? ITEM_ERROR_CLASS : ITEM_META_CLASS;
     // **読み上げにも出す。** 見えている人にしか結果が伝わらない状態にしない。
     if (failed) status.setAttribute("role", "alert");
     else status.removeAttribute("role");

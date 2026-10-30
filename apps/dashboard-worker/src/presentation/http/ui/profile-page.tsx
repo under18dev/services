@@ -4,7 +4,7 @@ import type { FC } from "hono/jsx";
 import { AccountShell } from "./account-shell";
 import { ISLAND_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
-import { ITEM_META_CLASS } from "./island-classes";
+import { ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
 
 /**
  * プロフィール（`/account/profile`、#308）。

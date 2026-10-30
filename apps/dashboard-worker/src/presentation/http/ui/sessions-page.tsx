@@ -11,7 +11,7 @@ import {
   ITEM_RAW_CLASS,
   ITEM_TITLE_CLASS,
   LIST_CLASS,
-} from "./island-classes";
+} from "@u18/web-ui/kiwa/island-classes";
 import { EMPTY_ATTR, EMPTY_TEXT_ATTR, ITEM_BODY_ATTR, ITEM_TITLE_ATTR } from "./island-hooks";
 import { summarizeUserAgent } from "./user-agent";
 

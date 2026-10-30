@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./client/webauthn-json": "./src/client/webauthn-json.ts",
     "./kiwa": "./src/kiwa/index.ts",
-    "./kiwa/theme.css": "./src/kiwa/theme.css"
+    "./kiwa/theme.css": "./src/kiwa/theme.css",
+    "./kiwa/island-classes": "./src/kiwa/island-classes.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
