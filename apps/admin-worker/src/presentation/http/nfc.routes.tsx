@@ -148,6 +148,34 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     return c.redirect("/nfc", 303);
   });
 
+  /**
+   * 無効化されたカードを `active` へ戻す（#427）。**`active` へ戻すだけで、
+   * `issued`（手放す、上の `/release`）とはまとめない** —— 「戻したい」と
+   * 「渡したい」は運営側の判断が違う場面なので、2 つのボタンを並べる
+   * （`nfc-page.tsx` の `CardActions` を参照）。
+   */
+  app.post("/nfc/:cardId/reinstate", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return c.text("forbidden", 403);
+    }
+
+    const session = c.get("session");
+    const cardId = c.req.param("cardId");
+
+    const container = c.get("container");
+    const result = await container.nfcCards.reinstateCard({ actorUserId: session.sub, cardId });
+
+    if (!result.ok) {
+      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect("/nfc", 303);
+  });
+
   app.post("/nfc/:cardId/target", pageSecurityHeaders, async (c) => {
     const form = await c.req.formData().catch(() => null);
 
