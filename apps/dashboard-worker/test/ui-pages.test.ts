@@ -117,6 +117,35 @@ describe("画面が HTML を返す", () => {
       expect(response.status, `ナビの ${href}`).toBe(expected);
     }
   });
+
+  /**
+   * モバイルの折りたたみ（#399 の作り直し）。
+   *
+   * **`<details>`/`<summary>` には戻らない。** 閉じている間に中身を
+   * `::details-content` という擬似要素で包み `content-visibility: hidden`
+   * を当てるブラウザがあり、子要素の `display: flex` では勝てず、PC でも
+   * サイドバーごと消えた（#399 の本番回帰）。チェックボックス方式は
+   * その擬似要素を経由しない。
+   *
+   * **DOM にクラスが付いていることまでしか、ここでは確かめられない。**
+   * 「見えるかどうか」は生成された CSS 側（`.peer-checked\:flex` /
+   * `.md\:flex` が何にも阻まれず効くこと）で確かめる——
+   * `packages/web-ui/test/shell.test.ts` を参照。
+   */
+  it("モバイルの折りたたみに <details> を使わない", async () => {
+    const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
+
+    expect(html).not.toContain("<details");
+    expect(html).not.toContain("<summary");
+
+    const checkbox = html.match(/<input[^>]*type="checkbox"[^>]*>/)?.[0];
+    expect(checkbox).toBeDefined();
+    expect(checkbox).toContain('class="peer sr-only"');
+    const toggleId = checkbox?.match(/id="([^"]+)"/)?.[1];
+    expect(toggleId).toBeDefined();
+
+    expect(html).toContain(`for="${toggleId}"`);
+  });
 });
 
 describe("末尾スラッシュの有無で 404 にしない", () => {

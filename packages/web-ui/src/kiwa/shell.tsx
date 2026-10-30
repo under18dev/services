@@ -1,4 +1,3 @@
-import type { AccountNavCurrent, AccountNavGroup } from "@u18/contracts";
 import type { Child, FC } from "hono/jsx";
 import { Layout } from "../layout";
 import { SidebarItem } from "./sidebar-item";
@@ -15,15 +14,23 @@ import { SidebarItem } from "./sidebar-item";
  * 持っているのは「サイドバーと本文を横に並べる」という形だけで、
  * **何が並ぶか・どこへ行くかは呼び出し側が決める。**
  *
- * 理由は持ち主が 2 人いることにある。`/account/*` の大半は
+ * 理由は持ち主が複数いることにある。`/account/*` の大半は
  * dashboard-worker が、`/account/nfc` は **nfc-worker** が答える。
- * **アセットのパスは Worker ごとに違う**（それぞれが自分で CSS を
- * 配信している。`asset-paths.ts` を参照）ので、ここで決め打つと
- * 片方が他方のアセットを借りる形になる —— #211 で nfc が踏んで、
- * **画面は描かれるがスタイルだけ当たらない**状態になったのがそれである。
+ * さらに `admin.under18.dev` は **admin-worker** が、account とは
+ * 別のナビを出す（#390）。**アセットのパスは Worker ごとに違う**
+ * （それぞれが自分で CSS を配信している。`asset-paths.ts` を参照）ので、
+ * ここで決め打つと片方が他方のアセットを借りる形になる —— #211 で
+ * nfc が踏んで、**画面は描かれるがスタイルだけ当たらない**状態に
+ * なったのがそれである。
  *
- * 並びの実体は `@u18/contracts` の `ACCOUNT_NAV_GROUPS`。**見た目の
- * 部品がデプロイの構成を抱えないように**、あちらに置いてある。
+ * `nav`/`current` の型は `ShellNavGroup`/`ShellNavCurrent`（このファイルが
+ * 持つ）であって、`@u18/contracts` の `AccountNavGroup`/`AccountNavCurrent`
+ * ではない。**account のナビは `AccountNavKey` という閉じた共用体で、
+ * admin のナビはそれとは別物**だからである——`AccountNavGroup` は
+ * 構造的に `ShellNavGroup` を満たすので、account 側の呼び出しは
+ * 変更なしで動く。並びの実体そのもの（`ACCOUNT_NAV_GROUPS` など）は
+ * 依然として contracts に置く。**見た目の部品がデプロイの構成を
+ * 抱えないように**、という元の理由はそのまま。
  *
  * ## 読む CSS は Tailwind の 1 本だけ
  *
@@ -40,11 +47,28 @@ import { SidebarItem } from "./sidebar-item";
  * `style="..."` はブラウザに破棄されるので、**ローカルでは効いて本番で
  * だけ崩れる**（#320）。
  *
- * ## サイドバーは JS を 1 行も要求しない
+ * ## モバイルの開閉は `<input type="checkbox">` + `peer-checked:`（#399 の作り直し）
  *
- * `<a>` の並びで、開閉も折りたたみも無い。**中身のほうは画面次第**で、
- * アイランドを読むなら `scripts` を渡す（`<script type="module" defer>`
- * が出る。インラインは CSP が禁じている）。
+ * かつて `<details>`/`<summary>` で作ったことがあるが、**本番の PC で
+ * サイドバーが消えた。** 最近のブラウザは `<details>` が閉じている間、
+ * 中身を `::details-content` という擬似要素で包み
+ * `content-visibility: hidden` を当てる。**子要素に `display: flex` を
+ * 指定しても、親の `content-visibility: hidden` には勝てない。**
+ * `group-open:` は `[open]` のときしか効かないので、`<summary>` を
+ * `md:hidden` にしたことで PC では開く手段ごと消えていた。
+ *
+ * DOM 構造のテスト（`group-open:flex` が外れると落ちる、まで）は
+ * 通っていた。**それでも PC で消えた** —— 「クラスが付いていること」と
+ * 「見えること」は別で、**隠しているのが何なのか**（このときは `<nav>`
+ * 自身ではなく `<details>` の中身を包む擬似要素）を見ないと分からない。
+ *
+ * 今回のチェックボックス方式は `::details-content` のような擬似要素を
+ * 経由しない —— `peer-checked:` も `md:` も、素の `<div>`/`<nav>` の
+ * `display` にしか掛からない。チェックボックス自身は `sr-only`
+ * （スクリーンリーダーには残るが見た目には出ない）で、折りたたみの
+ * 状態は `<label for>` を押すか、チェックボックスへキーボードで
+ * フォーカスして Space を押せば切り替わる —— ここでも JS を 1 行も
+ * 要求しない。
  *
  * ## `<noscript>` を出すかは画面が決める
  *
@@ -58,15 +82,31 @@ import { SidebarItem } from "./sidebar-item";
  * 外枠が知ることになる。
  */
 
+/** `ShellNavGroup` の 1 項目。`@u18/contracts` の `AccountNavItem` はこれを満たす。 */
+export type ShellNavItem = {
+  readonly key: string;
+  readonly href: string;
+  readonly label: string;
+};
+
+/** `ShellNavItem` のまとまり。`@u18/contracts` の `AccountNavGroup` はこれを満たす。 */
+export type ShellNavGroup = {
+  readonly label: string;
+  readonly items: readonly ShellNavItem[];
+};
+
+/** ナビの現在地を表す文字列。`@u18/contracts` の `AccountNavCurrent` はこの部分型。 */
+export type ShellNavCurrent = string;
+
 export type KiwaShellProps = {
   readonly title: string;
-  readonly nav: readonly AccountNavGroup[];
+  readonly nav: readonly ShellNavGroup[];
   /**
    * ナビの現在地。`undefined` ならサイドバーを出さない（未ログイン時や
    * 障害時の画面）。**行き先が無い状態でナビだけ出すと、押すたびに
    * 同じエラーへ戻る。**
    */
-  readonly current?: AccountNavCurrent;
+  readonly current?: ShellNavCurrent;
   /** ブランドの行き先。ダッシュボードのホーム。 */
   readonly brandHref: string;
   /**
@@ -81,6 +121,13 @@ export type KiwaShellProps = {
   /** 読み込む外部スクリプト。インラインは CSP が禁じている。 */
   readonly scripts?: readonly string[];
   /**
+   * 本文の最大幅（Tailwind の `max-w-*` クラス）。既定は `max-w-3xl`。
+   *
+   * **admin 画面は表が主役で、768px では足りない。** 画面ごとに
+   * 必要な幅が違うので、既定値を持つが固定はしない。
+   */
+  readonly maxWidth?: string;
+  /**
    * 取り消しの操作がある画面かどうか。`true` なら `<noscript>` で
    * 「JS が無いとできないこと」を伝える。
    *
@@ -94,25 +141,27 @@ export type KiwaShellProps = {
 };
 
 type SidebarProps = {
-  readonly nav: readonly AccountNavGroup[];
-  readonly current: AccountNavCurrent;
+  readonly nav: readonly ShellNavGroup[];
+  readonly current: ShellNavCurrent;
   readonly brandHref: string;
 };
 
+/** モバイルの折りたたみ用チェックボックスの id。`<label for>` と対にする。 */
+const NAV_TOGGLE_ID = "kiwa-nav-toggle";
+
 const Sidebar: FC<SidebarProps> = ({ nav, current, brandHref }) => (
-  <nav
-    class="shrink-0 border-b border-border px-3 py-5 md:w-64 md:border-r md:border-b-0 md:py-8"
-    aria-label="ダッシュボード"
-  >
+  <nav class="flex flex-col px-3 py-5 md:py-8" aria-label="ダッシュボード">
     {/*
       **ホームに居るときはここが現在地である。** ホームは並びの項目では
       なくブランドのリンクなので、`aria-current` を付ける先もここになる。
       付けないと、ホームの画面だけサイドバー全体がどこも現在地でない
       状態になる。
+      **モバイルでは隠す** —— 折りたたみを開いたときに出てくる地点が、
+      常時見えているモバイルの上部バー（下記）と二重に出ないように。
     */}
     <a
       href={brandHref}
-      class="mb-6 block px-3 text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground"
+      class="mb-6 hidden px-3 text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground md:block"
       {...(current === "home" ? { "aria-current": "page" } : {})}
     >
       u18 Identity
@@ -147,15 +196,49 @@ export const KiwaShell: FC<KiwaShellProps> = ({
   heading,
   lead,
   scripts = [],
+  maxWidth = "max-w-3xl",
   hasRevokeActions = false,
   loginHref,
   children,
 }) => (
   <Layout title={title} stylesheet={stylesheet} scripts={scripts}>
     <div class="flex min-h-dvh flex-col md:flex-row">
-      {current !== undefined && <Sidebar nav={nav} current={current} brandHref={brandHref} />}
+      {current !== undefined && [
+        // **PC では無条件で表示する。** `sr-only` は見た目には出ない
+        // だけで DOM からは消えない——フォーカス・Tab 移動・スクリーン
+        // リーダーの両方が辿れる。
+        <input key="nav-toggle" type="checkbox" id={NAV_TOGGLE_ID} class="peer sr-only" />,
+        // **モバイルだけの上部バー。** 折りたたみが閉じていてもここだけは
+        // 常に見えるので、ブランドへの行き先と開閉ボタンの両方をここに置く。
+        <div
+          key="mobile-bar"
+          class="flex items-center justify-between border-b border-border px-5 py-4 md:hidden"
+        >
+          <a
+            href={brandHref}
+            class="text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground"
+          >
+            u18 Identity
+          </a>
+          <label
+            for={NAV_TOGGLE_ID}
+            class="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground-soft transition-colors hover:text-foreground"
+          >
+            メニュー
+          </label>
+        </div>,
+        // **チェックボックスの直後の兄弟だけが `peer-checked:` を使える。**
+        // `<nav>` 自身ではなくこの外側の `<div>` に掛けておけば、`Sidebar`
+        // はモバイル専用の事情を一切知らずに済む。
+        <div
+          key="nav-wrapper"
+          class="hidden flex-col border-b border-border peer-checked:flex md:flex md:w-64 md:border-r md:border-b-0"
+        >
+          <Sidebar nav={nav} current={current} brandHref={brandHref} />
+        </div>,
+      ]}
       <main class="min-w-0 flex-1 px-5 py-8 md:px-10 md:py-12">
-        <div class="mx-auto flex w-full max-w-3xl flex-col gap-8">
+        <div class={`mx-auto flex w-full ${maxWidth} flex-col gap-8`}>
           <div class="flex flex-col gap-2">
             <h1 class="text-2xl">{heading}</h1>
             {lead !== undefined && <p class="text-sm/relaxed text-foreground-muted">{lead}</p>}
