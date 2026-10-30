@@ -8,7 +8,7 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { isAllowedOrigin } from "../origin";
 import type { AppBindings } from "../types";
-import type { AuditEventName } from "../../../application/ports/audit-log.port";
+import type { NotPersistedAuditEventName } from "../../../application/ports/audit-log.port";
 
 /**
  * form POST 用の CSRF 対策（仕様書 9 CSRF）。
@@ -72,7 +72,7 @@ export function isValidCsrf(c: Context<AppBindings>, submitted: string | undefin
     submitted,
     // 出力先は違うが名前空間は監査イベントと同じなので、登録簿で縛る
     // （rate_limit.exceeded と同じ理由。audit-log.port.ts）。
-    event: "csrf.rejected" satisfies AuditEventName,
+    event: "csrf.rejected" satisfies NotPersistedAuditEventName,
     path: new URL(c.req.url).pathname,
     origin: c.req.header("Origin") ?? null,
     secFetchSite: c.req.header("Sec-Fetch-Site") ?? null,

@@ -4,6 +4,7 @@ import {
   AUDIT_EVENTS,
   AUDIT_EVENT_RETENTION,
   auditEventDeadlines,
+  type AuditEventName,
 } from "../src/application/ports/audit-log.port";
 import { AuditRetention } from "../src/domain/services/retention-policy";
 
@@ -58,7 +59,7 @@ describe("AUDIT_EVENT_RETENTION", () => {
     expect(classified).toEqual(registered);
   });
 
-  it("ops. のイベントはすべて security", () => {
+  it("ops. のイベントはすべて audit_logs に書かれ、security である", () => {
     // **運用者が wrangler 越しに書くものは、どれも支配権に関わる**
     // （いまは管理権限の付与・剥奪）。180 日で消えると、
     // 「誰がいつ管理者にしたか」が半年で分からなくなる。
@@ -70,8 +71,11 @@ describe("AUDIT_EVENT_RETENTION", () => {
     const ops = Object.entries(AUDIT_EVENT_RETENTION).filter(([event]) => event.startsWith("ops."));
 
     expect(ops.length, "ops. のイベントが 1 つも無い").toBeGreaterThan(0);
-    for (const [event, tier] of ops) {
-      expect(tier, `${event} は security であること`).toBe("security");
+    for (const [event, classification] of ops) {
+      expect(classification, `${event} は sink: "d1" であること`).toEqual({
+        sink: "d1",
+        retention: "security",
+      });
     }
   });
 
@@ -80,21 +84,27 @@ describe("AUDIT_EVENT_RETENTION", () => {
     expect(AuditRetention.security).toBeGreaterThan(AuditRetention.standard);
   });
 
-  it("境界は security 区分のイベントにだけ出る", () => {
+  it("境界は d1 かつ security 区分のイベントにだけ出る", () => {
     const deadlines = auditEventDeadlines(new Date("2026-10-24T00:00:00.000Z"));
     const expected = Object.entries(AUDIT_EVENT_RETENTION)
-      .filter(([, tier]) => tier !== "standard")
+      .filter(
+        ([, classification]) =>
+          classification.sink === "d1" && classification.retention === "security",
+      )
       .map(([event]) => event)
       .sort();
 
     expect([...deadlines.keys()].sort()).toEqual(expected);
-    // standard を入れると既定と同じ条件を 2 回書くことになる。
+    // standard / log を入れると既定と同じ条件を 2 回書くか、無意味な境界を
+    // 計算することになる。
     expect(deadlines.size).toBeLessThan(registered.length);
   });
 
   it("security 区分が空にならない", () => {
-    // 全部 standard に倒れたら、区分化そのものが効いていない。
-    const secured = Object.values(AUDIT_EVENT_RETENTION).filter((t) => t === "security");
+    // 全部 standard / log に倒れたら、区分化そのものが効いていない。
+    const secured = Object.values(AUDIT_EVENT_RETENTION).filter(
+      (c) => c.sink === "d1" && c.retention === "security",
+    );
     expect(secured.length).toBeGreaterThan(0);
   });
 
@@ -113,7 +123,53 @@ describe("AUDIT_EVENT_RETENTION", () => {
     ] as const;
 
     for (const event of perRequest) {
-      expect(AUDIT_EVENT_RETENTION[event], `${event} を長期側に置いている`).toBe("standard");
+      expect(AUDIT_EVENT_RETENTION[event], `${event} を長期側に置いている`).toEqual({
+        sink: "d1",
+        retention: "standard",
+      });
+    }
+  });
+});
+
+/**
+ * 「そもそも `audit_logs` に書かない」の分類（#381）。
+ *
+ * 以前はこの 4 つにも `AuditRetentionTier` の値（`"standard"`）を
+ * 置いていた。型の上では「180 日残る」と読めるが、実際には
+ * `audit_logs` に 1 行も現れない —— 置いた値が何も意味しなかった。
+ */
+describe('sink: "log"（audit_logs に書かないイベント、#381）', () => {
+  it("既知の 4 つだけが log 区分である", () => {
+    // 増えたり減ったりしたら、このテストで気づけるようにする。
+    // 新しく「書かない」イベントを足すときは、ここに追記すること。
+    const notPersisted = Object.entries(AUDIT_EVENT_RETENTION)
+      .filter(([, classification]) => classification.sink === "log")
+      .map(([event]) => event)
+      .sort();
+
+    expect(notPersisted).toEqual(
+      ["admin.denied", "admin.session_not_passkey", "csrf.rejected", "rate_limit.exceeded"].sort(),
+    );
+  });
+
+  it("log 区分は retention を持たない", () => {
+    for (const classification of Object.values(AUDIT_EVENT_RETENTION)) {
+      if (classification.sink !== "log") continue;
+      expect(classification).toEqual({ sink: "log" });
+    }
+  });
+
+  it("log 区分のイベントは境界を持たない（計算しても使われないため）", () => {
+    const deadlines = auditEventDeadlines(new Date("2026-10-24T00:00:00.000Z"));
+    const notPersisted: AuditEventName[] = [
+      "admin.denied",
+      "admin.session_not_passkey",
+      "csrf.rejected",
+      "rate_limit.exceeded",
+    ];
+
+    for (const event of notPersisted) {
+      expect(deadlines.has(event), `${event} に境界が計算されている`).toBe(false);
     }
   });
 });

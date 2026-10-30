@@ -68,8 +68,9 @@ export const rpcErr = (code: RpcErrorCode, message: string): RpcResult<never> =>
  *
  * こう書いておけば、**ここへコードを 1 つ足した時点で UI がビルドで落ちる。**
  * 実行時に「知らないコードが来た」ではなく、変更した人の手元で
- * 「文言を書いていない」で止まる —— `Record<AuditEventName, AuditRetentionTier>`
- * が保持区分の指定を強制しているのと同じ形である。
+ * 「文言を書いていない」で止まる —— auth-worker の `AUDIT_EVENT_RETENTION`
+ * （`Record<AuditEventName, AuditClassification>`）が区分の指定を
+ * 強制しているのと同じ形である。
  *
  * ## `message` を通さない代わりの仕組みである
  *
