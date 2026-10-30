@@ -322,6 +322,34 @@ describe("POST /account/admin/users/action", () => {
     expect(await response.text()).toContain("操作を選んでください");
   });
 
+  it("知らない理由では RPC を呼ばない", async () => {
+    // **「未指定か」ではなく「許された 2 値か」を見る。** 未指定だけを
+    // 弾く実装にしても、上の「理由を選ばないと呼ばない」は緑のままに
+    // なる —— ネガティブ確認で実際にすり抜けた。
+    //
+    // 通してしまうと契約の `z.enum` が `invalid_input` を返し、画面には
+    // 「障害」として出る。入力の誤りは、やり直せる文で返したい。
+    let calls = 0;
+    const admin = {
+      ...listOnly,
+      suspendUser: () => {
+        calls += 1;
+        return neverCalled("suspendUser");
+      },
+    };
+    const page = await openPage(admin);
+
+    const response = await act(admin, page.cookie, {
+      csrf_token: page.csrf,
+      user_id: USER.id,
+      action: "suspend",
+      reason: "something-else",
+    });
+
+    expect(calls).toBe(0);
+    expect(await response.text()).toContain("操作を選んでください");
+  });
+
   it("CSRF トークンが無ければ RPC を呼ばない", async () => {
     let calls = 0;
     const admin = {

@@ -57,6 +57,28 @@ describe("suspendUser", () => {
     expect(await statusOf(target.userId)).toBe("active");
   });
 
+  it("一般利用者が古いセッションで来ても not_found（壁が先）", async () => {
+    // **順序の検査である。** 先に再認証を見ると、
+    // `reauthentication_required` が返る相手と `not_found` が返る相手の
+    // 違いから、**管理機能の存在が一般利用者に漏れる。**
+    //
+    // 「一般利用者には not_found」と「古いセッションの管理者には再認証」
+    // の 2 本だけでは、順序を入れ替えても両方緑のままになる
+    // （前者は新しいセッション、後者は管理者なので、入れ替えの影響を
+    // どちらも受けない）—— ネガティブ確認で実際にすり抜けた。
+    const actor = await seedLoggedInUser({ authTime: new Date(Date.now() - 60 * 60 * 1000) });
+    const target = await seedLoggedInUser();
+
+    const result = await rpc.suspendUser({
+      sessionToken: actor.sessionToken,
+      caller: CALLER,
+      userId: target.userId,
+      reason: "abuse",
+    });
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
   it("古いセッションの管理者には再認証を要求する", async () => {
     const admin = await seedLoggedInUser({
       isAdmin: true,
