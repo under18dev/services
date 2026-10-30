@@ -146,7 +146,9 @@ describe("JS 無しで登録できる", () => {
     );
 
     expect(verified.status).toBe(303);
-    // 戻り先が無ければアカウント画面へ着地させる（/login ではない）。
+    // 戻り先が無ければアカウント画面へ着地させる（ui/landing.ts）。
+    // **ログインと同じ場所。** 同じ文字列を login.ui.test.ts が書いていて、
+    // 2 つが一致していることが「経路によって着地点が違わない」ことである。
     expect(verified.headers.get("Location")).toBe("/account");
 
     const issued = cookiePairs(verified).find((pair) =>

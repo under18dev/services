@@ -404,7 +404,7 @@ describe("メール OTP ログイン（JavaScript 無し）", () => {
     expect(html).toContain(`value="${REGISTERED}"`);
   });
 
-  it("コードを正しく入れるとセッション Cookie が発行され、ログイン済み画面へ進む", async () => {
+  it("コードを正しく入れるとセッション Cookie が発行され、アカウント画面へ進む", async () => {
     const session = await openLoginPage();
     await seedOtpChallenge(REGISTERED, "123456");
 
@@ -416,7 +416,15 @@ describe("メール OTP ログイン（JavaScript 無し）", () => {
 
     // 再読み込みで使用済みコードを送り直さないよう 303 にする。
     expect(verified.status).toBe(303);
-    expect(verified.headers.get("Location")).toBe("/login");
+    // **ログイン画面へは戻さない**（ui/landing.ts）。戻すと「ログイン済みです」
+    // とだけ書かれた行き止まりに着地する。
+    //
+    // **行き先をここに書き写している。** `DEFAULT_LANDING_PATH` を import して
+    // 突き合わせると、定数を書き換えたときにこの検査も一緒に動いてしまい、
+    // **何を変えても緑のまま**になる。サインアップ側（signup.ui.test.ts）も
+    // 同じ文字列を直接書いていて、2 つが同じ場所を指していることはその
+    // 2 つの文字列が一致していることで決まる。
+    expect(verified.headers.get("Location")).toBe("/account");
 
     const issued = cookiePairs(verified);
     const sessionCookie = issued.find((pair) =>
@@ -455,6 +463,25 @@ describe("メール OTP ログイン（JavaScript 無し）", () => {
     expect(location).not.toContain("?");
     expect(location).not.toContain("123456");
     expect(location).not.toContain(REGISTERED);
+  });
+
+  it("戻り先が渡っていればそちらが既定より優先される", async () => {
+    // **既定の着地点を足したとき、戻り先を上書きしていないこと。**
+    // `returnTo ?? DEFAULT_LANDING_PATH` の左右を取り違えると、認可フローの
+    // 途中でログインした人が `/oauth/authorize` へ戻らずアカウント画面へ
+    // 着地する —— クライアントから見ると「ログインしたのに何も起きない」。
+    const returnTo = "/oauth/authorize?client_id=demo&response_type=code";
+    const session = await openLoginPage();
+    await seedOtpChallenge(REGISTERED, "123456");
+
+    const verified = await submit(
+      "/login/verify",
+      { csrf_token: session.csrf, email: REGISTERED, code: "123456", return_to: returnTo },
+      { cookie: session.cookie },
+    );
+
+    expect(verified.status).toBe(303);
+    expect(verified.headers.get("Location")).toBe(returnTo);
   });
 });
 

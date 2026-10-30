@@ -8,6 +8,7 @@ import {
   LABEL_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
 import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH } from "./asset-paths";
+import { DEFAULT_LANDING_PATH } from "./landing";
 import { ErrorMessage, LINK_TEXT_CLASS } from "./page-parts";
 import { loginUrlWithReturnTo, RETURN_TO_FIELD, signupUrlWithReturnTo } from "./return-to";
 
@@ -184,8 +185,15 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
       グローバル変数に入れる手もあるが、`script-src 'self'` の CSP に
       引っかかり `'unsafe-inline'` が要る。CSP を緩めるくらいなら属性で渡す
       （ui/page-headers.ts）。
+
+      **戻り先が無いときも属性を書く。** 以前は `undefined` にして属性ごと
+      落とし、着地点の判断をアイランドへ預けていたが、そうするとパスキーの
+      着地点だけがサーバーの描く HTML から見えなくなる —— バンドルの中に
+      しか無い値は、画面を取ってきても確かめられない。アイランド側の
+      フォールバックは属性が壊れていた場合のために残してあり、
+      同じ `DEFAULT_LANDING_PATH` を見ている。
     */}
-        <div id="passkey-island" data-return-to={returnTo ?? undefined}>
+        <div id="passkey-island" data-return-to={returnTo ?? DEFAULT_LANDING_PATH}>
           <p class={ITEM_META_CLASS}>
             パスキーをお使いの場合は、この端末で JavaScript を有効にするとご利用いただけます。
             上のメールアドレスでのログインは JavaScript 無しでも行えます。
