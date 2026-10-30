@@ -193,7 +193,6 @@ export class IdentityAdminRPC extends WorkerEntrypoint<Env> implements IdentityA
     const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
     const result = await container.useCases.createOAuthClient.execute({
       sessionToken: parsed.data.sessionToken,
-      clientId: parsed.data.clientId,
       name: parsed.data.name,
       clientType: parsed.data.clientType,
       redirectUris: parsed.data.redirectUris,

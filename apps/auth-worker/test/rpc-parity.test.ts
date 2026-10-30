@@ -234,7 +234,6 @@ describe("無効なセッションは両方の入口で拒否される", () => {
       () =>
         adminRpc.createOAuthClient({
           sessionToken: "x".repeat(40),
-          clientId: "u18-x",
           name: "x",
           clientType: "public",
           redirectUris: ["https://app.example/cb"],
@@ -285,7 +284,6 @@ describe("OAuth クライアント管理は管理者のセッションでしか�
     const result = await adminRpc.createOAuthClient({
       sessionToken: admin.sessionToken,
       caller: "dashboard-worker",
-      clientId: "u18-stale",
       name: "古いセッションからの登録",
       clientType: "public",
       redirectUris: ["https://app.example/cb"],

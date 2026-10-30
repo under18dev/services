@@ -34,8 +34,9 @@ import { formatDateTime } from "./format";
  *
  * 登録は POST の応答をそのまま描く（PRG を挟まない）。リダイレクトすると
  * 秘密を次の GET へ運ぶ必要があり、クエリにもパスにも Cookie にも
- * 置きたくない。**再読み込みで再送されるが、`client_id` は一意制約を
- * 持つので 2 件目は `conflict` になる**（`Idempotency-Key` は要らない）。
+ * 置きたくない。**再読み込みで再送される。** `client_id` は自動生成
+ * なので「2 件目は `conflict` になる」とはもう言えないが、対策は
+ * 入れていない（理由は `account.routes.tsx` の同じ節を参照）。
  *
  * ## 一次パーティは押す前に分かる
  *
@@ -72,10 +73,12 @@ export type AdminClientsPageProps = {
  *
  * ## 操作の成否と、控えの成否を分けて言う
  *
- * 見出しは**先に「登録しました」と言い切る。** 秘密を取り損ねた人が
- * 「失敗したのでもう一度」と押すと、`client_id` が重複して `conflict` に
- * なり、**何が起きたのか分からなくなる。** 作成は済んでいる、という
- * 事実を最初に伝える。
+ * 見出しは**先に「登録しました」と言い切る。** `client_id` は自動生成
+ * （運用者の判断、2026-10-30）なので、秘密を取り損ねた人が「失敗した
+ * のでもう一度」と押すと、**`conflict` にはならず、別の `client_id` で
+ * もう 1 本登録される。** 気づかないと、同じ用途のクライアントが 2 つ
+ * 残ったまま運用されることになる。作成は済んでいる、という事実を
+ * 最初に伝えるのは、この「気づかれない重複」を減らすためでもある。
  *
  * ## 復旧の手順もここに書く
  *
@@ -209,10 +212,6 @@ export const AdminClientsPage: FC<AdminClientsPageProps> = ({
       <CardContent>
         <form method="post" action={ADMIN_CLIENTS_CREATE_PATH} class={ITEM_BODY_CLASS}>
           <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-          <label class={FIELD_CLASS}>
-            <span class={LABEL_CLASS}>client_id</span>
-            <input class={INPUT_CLASS} type="text" name="client_id" required maxlength={255} />
-          </label>
           <label class={FIELD_CLASS}>
             <span class={LABEL_CLASS}>表示名</span>
             <input class={INPUT_CLASS} type="text" name="name" required maxlength={255} />

@@ -99,7 +99,6 @@ export interface IdentityAdminGateway {
   createOAuthClient(
     sessionToken: string,
     input: {
-      readonly clientId: string;
       readonly name: string;
       readonly clientType: "confidential" | "public";
       readonly redirectUris: readonly string[];

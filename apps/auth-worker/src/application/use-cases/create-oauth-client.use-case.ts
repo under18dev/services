@@ -1,4 +1,4 @@
-import { newClientId } from "@u18/domain";
+import { newClientId, newPublicClientId } from "@u18/domain";
 import type { OAuthClient, OAuthClientType } from "../../domain/entities/oauth-client";
 import { validateLogoUrl } from "../../domain/services/logo-url";
 import { hasFreshAuthentication } from "../../domain/services/reauthentication";
@@ -14,7 +14,6 @@ import { err, ok, type UseCaseResult } from "./types";
 
 export type CreateOAuthClientCommand = {
   readonly sessionToken: string;
-  readonly clientId: string;
   readonly name: string;
   readonly clientType: OAuthClientType;
   readonly redirectUris: readonly string[];
@@ -109,11 +108,23 @@ const MAX_REDIRECT_URIS = 16;
  * 同じことを防いでいるが、こちらは**本番にしか繋がらない**ので、
  * 選択肢そのものを置かない。
  *
- * ## `client_id` の重複は DB に止めさせる
+ * ## `client_id` を自動生成する（運用者の判断、2026-10-30）
  *
- * 「存在するか確認してから挿す」に分けない。同時に 2 本走ると両方が
- * 「無い」と判断しうる。`OAuthClientRepository.create` は unique index に
- * 衝突したとき `null` を返すので、それを `conflict` に写すだけでよい。
+ * **以前は呼び出し元が決める値だった。** `newPublicClientId()`
+ * （`@u18/domain`）で発行する —— 秘密ではないので衝突しないことだけが
+ * 要る（根拠は `identifier.ts` の JSDoc）。
+ *
+ * **`Idempotency-Key` を置いていない理由が変わった。** 以前は
+ * 「`client_id` に一意制約があるので、2 回押しても 2 本目は `conflict`
+ * になる」だった。**自動生成では毎回別の値になるので、この理由はもう
+ * 成り立たない。** 二重送信で 2 本できる余地は残っているが、管理者だけが
+ * 叩く稀な操作で、気づいたら片方を失効させれば済むため、対策を入れない
+ * ことにした（契約側 `createOAuthClientInputSchema` の JSDoc も参照）。
+ *
+ * **DB の unique index は、なお最後の砦として残す。** 「存在するか確認
+ * してから挿す」に分けないのも変わらない —— 同時に 2 本走ると両方が
+ * 「無い」と判断しうるため、`OAuthClientRepository.create` が unique
+ * index の衝突を `null` で返し、それを `conflict` に写す。
  */
 export class CreateOAuthClientUseCase {
   constructor(private readonly deps: CreateOAuthClientDeps) {}
@@ -126,18 +137,24 @@ export class CreateOAuthClientUseCase {
 
     const { session, userId } = admin.value;
 
+    // **ここで生成する。** 失敗しても捨てるだけで害は無い（DB へは
+    // まだ 1 行も書いていない）。ここで決めておくと、以降のどの失敗
+    // 記録にも同じ値を渡せる —— 「結局どの client_id を登録しようと
+    // していたか」が監査から追える。
+    const clientId = newPublicClientId();
+
     // 管理者であることを確かめた**後**に見る。逆順だと、古いセッションの
     // 一般利用者に `reauthentication_required` が返り、`not_found` に
     // 畳んだ意味（管理機能の存在を漏らさない）が消える。
     if (!hasFreshAuthentication(session, this.deps.clock.now())) {
-      await this.record(userId, "failure", command.clientId, { reason: "stale_authentication" });
+      await this.record(userId, "failure", clientId, { reason: "stale_authentication" });
       return err("reauthentication_required", "recent authentication is required");
     }
 
     if (command.redirectUris.length === 0 || command.redirectUris.length > MAX_REDIRECT_URIS) {
       // Redirect URI を持たないクライアントは認可フローに入れない。
       // 「後で足す」を許すと、未検証の URI が直接 SQL で入る経路ができる。
-      await this.record(userId, "failure", command.clientId, { reason: "redirect_uri_count" });
+      await this.record(userId, "failure", clientId, { reason: "redirect_uri_count" });
       return err("invalid_input", "redirect_uris must contain 1..16 entries");
     }
 
@@ -148,7 +165,7 @@ export class CreateOAuthClientUseCase {
         // 拒否の理由は返す。**登録しようとしているのは管理者本人**で、
         // 何を直せばよいか分からないと正規形に書き直せない（CLI も
         // 同じ理由で `reason` をそのまま出している）。
-        await this.record(userId, "failure", command.clientId, {
+        await this.record(userId, "failure", clientId, {
           reason: "invalid_redirect_uri",
           metadata: { rejection: result.reason },
         });
@@ -163,7 +180,7 @@ export class CreateOAuthClientUseCase {
     if (logoUrl !== null) {
       const logo = validateLogoUrl(logoUrl);
       if (!logo.ok) {
-        await this.record(userId, "failure", command.clientId, {
+        await this.record(userId, "failure", clientId, {
           reason: "invalid_logo_url",
           metadata: { rejection: logo.reason },
         });
@@ -176,7 +193,7 @@ export class CreateOAuthClientUseCase {
     if (unsupported.length > 0) {
       // 未知の scope を黙って無視すると、クライアントが得たつもりの権限と
       // 実際に出る claim がずれる（`domain/services/scope.ts`）。
-      await this.record(userId, "failure", command.clientId, {
+      await this.record(userId, "failure", clientId, {
         reason: "unsupported_scope",
         metadata: { unsupported },
       });
@@ -192,7 +209,7 @@ export class CreateOAuthClientUseCase {
 
     const created = await this.deps.clients.create({
       id: newClientId(),
-      clientId: command.clientId,
+      clientId,
       name: command.name,
       clientType: command.clientType,
       clientSecretHash,
@@ -207,11 +224,11 @@ export class CreateOAuthClientUseCase {
     });
 
     if (created === null) {
-      await this.record(userId, "failure", command.clientId, { reason: "duplicate_client_id" });
+      await this.record(userId, "failure", clientId, { reason: "duplicate_client_id" });
       return err("conflict", "client_id is already registered");
     }
 
-    await this.record(userId, "success", command.clientId, {
+    await this.record(userId, "success", clientId, {
       // **宛先を残す。** この操作で増えたのは「認可コードを受け取ってよい
       // 場所」なので、後から調べるときに要るのは client_id ではなく URI の
       // 側である。秘密とそのハッシュは入れない（`AuditEvent.metadata`）。
