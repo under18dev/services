@@ -37,6 +37,8 @@ export type IpScope =
   | "rate-limit"
   | "rate-limit-form"
   | "oauth-helpers"
+  /** 描かれた form だけでログインを完走する検査（#332）。 */
+  | "login-form-drive"
   /**
    * **配らない。直書き用に空けてある範囲。**
    *
@@ -69,6 +71,7 @@ export const RANGES: Readonly<Record<IpScope, Range>> = {
   "rate-limit": { prefix: "203.0.113", from: 1, to: 99 },
   "rate-limit-form": { prefix: "203.0.113", from: 100, to: 199 },
   "oauth-helpers": { prefix: "198.51.100", from: 100, to: 199 },
+  "login-form-drive": { prefix: "192.0.2", from: 200, to: 254 },
   // **配らない。** 直書きしているファイルのための範囲。
   "fixed-values": { prefix: "198.51.100", from: 1, to: 99 },
 };
