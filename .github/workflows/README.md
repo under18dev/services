@@ -774,24 +774,6 @@ expect(text).not.toContain("claimCodeHash");
 **この誤解は実際に起きた** —— 「`check:shell` があるなら、その形も見て
 いるかもしれない」と書いて、確かめずに次へ渡された（39）。
 
-### 赤い理由と、赤く見えているジョブ名が違うことがある（2026-10-30、#371）
-
-**上は「検査の名前が射程を隠す」話。こちらは「検査が走っているジョブの
-名前が、検査の名前と違う」話で、別の壊れ方である。**
-
-`check:issue-refs` は `pnpm lint` の一部ではなく、`check-deadlines.mjs` と
-同じ独立したジョブに同居させてある（`check-issue-refs.mjs` の冒頭、理由も
-そこに書いてある）。**そのジョブの名前は `Deadlines` である。**
-
-実際に起きた：`docs/nfc-cards-operations.md` が「#333 で入る」と指していた
-issue が閉じたとき、PR 一覧には `Deadlines` が赤く並んだ。**`check:deadlines`
-自体は `No deadline has arrived yet.` で通っていた**——赤くしていたのは
-同じジョブに同居する `check:issue-refs` で、期限とは無関係だった。
-
-**チェック一覧の行名を見ても分からない。** `gh pr checks` や PR 画面の
-`Deadlines` という 1 行は、**そのジョブの中で走っている複数の検査のうち
-どれが落ちたかを言わない。** 原因を特定するには run のログを開くしかない。
-
 ## 本文と head は鮮度が違う
 
 **`mergeStateStatus` を見ても、これは防げない。** `CLEAN` でも起こる。
