@@ -468,3 +468,51 @@ export interface AuditEvent {
 export interface AuditLogger {
   record(event: AuditEvent): Promise<void>;
 }
+
+/**
+ * 監査ログの 1 行（読み取り用、#375）。
+ *
+ * **`AuditEvent`（書き込み用）とは別の型にしてある。** 書き込み側は
+ * `userId?` のように省略可能な入力で、読み取り側は D1 に実際に入っている
+ * 形（`null` であって `undefined` ではない）。同じ型を使い回すと、
+ * 「書くときに省略できる」と「読んだら必ず存在する」が混ざる。
+ */
+export interface PersistedAuditLogEntry {
+  readonly id: string;
+  readonly event: string;
+  readonly userId: string | null;
+  readonly actor: string | null;
+  readonly outcome: "success" | "failure";
+  readonly reason: string | null;
+  readonly metadata: Record<string, unknown> | null;
+  readonly ipHash: string | null;
+  readonly userAgent: string | null;
+  readonly createdAt: Date;
+}
+
+/**
+ * 監査ログの閲覧 Port（#375 / #382）。
+ *
+ * **`AuditLogger` と分けてある。** あちらは書き込みだけを許す形で、
+ * ほぼすべての UseCase がそれを依存に持つ。読み取りを同じ interface に
+ * 足すと、書くだけでよかった UseCase が読む力まで持つことになる ——
+ * `ListUsersUseCase` が `AuditLogger` を依存に持たない（書きようがない
+ * 形にしてある）のと同じ理由を、逆向きに守る。
+ */
+export interface AuditLogReader {
+  /**
+   * 管理画面の一覧（#375）。**キーセット方式。** `UserRepository.listForAdmin`
+   * と同じ判断 —— 読んでいる最中に行が増えても並びが崩れない。
+   *
+   * `event` と `userId` は**両方指定すれば AND**。`outcome` も同様。
+   * いずれも完全一致で、`audit_logs_event_idx` / `audit_logs_user_idx` /
+   * `audit_logs_created_idx` のどれかに乗る。
+   */
+  listForAdmin(criteria: {
+    readonly event?: string;
+    readonly userId?: string;
+    readonly outcome?: "success" | "failure";
+    readonly after?: { readonly createdAt: Date; readonly id: string };
+    readonly limit: number;
+  }): Promise<readonly PersistedAuditLogEntry[]>;
+}

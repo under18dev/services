@@ -1,4 +1,5 @@
 import type { User } from "../../domain/entities/user";
+import { decodeCursor, nextCursorOf } from "../../domain/services/keyset-cursor";
 import type { UserRepository } from "../ports/user.repository";
 import { requireAdminSession, type AdminAccessDeps } from "./admin-access";
 import { err, ok, type UseCaseResult } from "./types";
@@ -23,38 +24,6 @@ export type ListUsersDeps = AdminAccessDeps & {
 const DEFAULT_LIMIT = 50;
 /** 1 回の上限。**「名簿を 1 リクエストで吸い出す口」にしないため。** */
 const MAX_LIMIT = 200;
-
-/**
- * カーソルの組み立てと読み取り。
- *
- * ## 中身を隠していない
- *
- * `<createdAt のミリ秒>:<id>` をそのまま渡す。base64 にしても**復号できる
- * ので秘匿にはならず**、「隠してあるから壊れない」と誤解させるだけである。
- *
- * **隠す必要も無い。** 入っているのは「最後に見た行の作成時刻と ID」で、
- * どちらも**その管理者が既に見た値**である。改竄されても、効くのは
- * 「どこから読むか」だけで、**管理者でなければそもそも 1 行も返らない。**
- *
- * **壊れたカーソルは黙って先頭から返さない。** `invalid_input` にする ——
- * 先頭へ戻すと、画面を送り続けても同じ 50 人が出続ける（終わらない一覧）。
- */
-const CURSOR_SEPARATOR = ":";
-
-function encodeCursor(user: User): string {
-  return `${user.createdAt.getTime()}${CURSOR_SEPARATOR}${user.id}`;
-}
-
-function decodeCursor(raw: string): { createdAt: Date; id: string } | null {
-  const index = raw.indexOf(CURSOR_SEPARATOR);
-  if (index <= 0) return null;
-
-  const at = Number(raw.slice(0, index));
-  const id = raw.slice(index + 1);
-  if (!Number.isSafeInteger(at) || at < 0 || id === "") return null;
-
-  return { createdAt: new Date(at), id };
-}
 
 /**
  * 利用者の一覧（#375 / #382）。**管理者のみ。**
@@ -106,14 +75,12 @@ export class ListUsersUseCase {
       limit: limit + 1,
     });
 
-    const page = rows.slice(0, limit);
-    const last = page.at(-1);
-
     return ok({
-      users: page,
+      users: rows.slice(0, limit),
       // **「ちょうど limit 件あった」を「続きがある」と言わない。**
-      // 余分に読んだ 1 件が実在したときだけカーソルを返す。
-      nextCursor: rows.length > limit && last !== undefined ? encodeCursor(last) : null,
+      // 余分に読んだ 1 件が実在したときだけカーソルを返す
+      // （共通処理は keyset-cursor.ts、#375 のネガティブ確認で学んだ形）。
+      nextCursor: nextCursorOf(rows, limit),
     });
   }
 }
