@@ -50,6 +50,16 @@ export type DelegatedReleaseCardInput = {
  * 操作で、本人には「無効化された」とも「自分で手放した」とも見えない
  * 説明の付かない消え方をする。運用者が実行前に本人へ連絡する前提であることを
  * `docs/nfc-cards-operations.md` に明記する——ここでは機械的に守れない。
+ *
+ * ## 無効化済みのカードも `card_not_found` を返す（運営には畳む理由が無い）
+ *
+ * `NfcFailure.card_not_found` の畳み込みは、**カード ID を総当たりする
+ * 相手から「実在するか」を隠すため**の設計（`disclosure.ts` / 本ファイルの
+ * 冒頭）。admin-worker はその相手ではない——`listAllCards` で状態ごと
+ * 見えているカードに対して同じ値を返されると、「実在しない」と誤解する
+ * 損のほうが大きい。**ここは `DelegatedUpdateCardTargetUseCase` と
+ * 同じ既存の畳み方を踏襲しているだけ**で、admin 向けに専用の失敗種別を
+ * 割らない判断は本 PR（#422）の対象外——直すなら両方まとめて直すこと。
  */
 export class DelegatedReleaseCardUseCase {
   constructor(
