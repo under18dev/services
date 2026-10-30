@@ -1,5 +1,6 @@
 import type { Session } from "../../domain/entities/session";
 import type { AuditEventName } from "../ports/audit-log.port";
+import type { UserRepository } from "../ports/user.repository";
 import type { GetSessionUseCase } from "./get-session.use-case";
 import { err, ok, type UseCaseResult } from "./types";
 
@@ -96,4 +97,36 @@ export async function requireAdminSession(
   }
 
   return ok({ session: auth.value.session, userId: auth.value.userId });
+}
+
+/**
+ * admin-worker から渡された `actorUserId` が実在することだけを確かめる
+ * （#390 決定 16 ③、delegated RPC 用）。
+ *
+ * ## これは認可ではない
+ *
+ * **`requireAdminSession` の代わりではない。** delegated 系の入口に認可は
+ * 無い —— 認可の境界は Service Binding そのもので、admin-worker が
+ * 呼ぶ前に自分の承認リストで管理者性を確かめている
+ * （`IdentityAdminDelegatedRpcContract` の冒頭）。ここで見るのは
+ * 「`actorUserId` が存在しない ID ではないか」という、監査ログの質を
+ * 保つためだけの確認である。
+ *
+ * **検証ではなく実在確認。** `actorUserId` が本当にその人によって
+ * 操作されたことまでは確かめようがない（admin-worker 自身の承認リストの
+ * 正しさに依存する）。確かめるのは「存在する `userId` である」ことだけで、
+ * 存在しない ID を監査ログへそのまま書き込む事故を防ぐ。
+ *
+ * 一致しなければ `invalid_input` を返す。**`not_found` にしない** ——
+ * `not_found` は `requireAdminSession` が「管理機能の存在を隠す」ために
+ * 使っている値で、ここで同じ値を返すと 2 つの違う意味が混ざる。
+ */
+export async function requireExistingActor(
+  deps: { readonly users: UserRepository },
+  actorUserId: string,
+): Promise<UseCaseResult<{ readonly userId: string }>> {
+  const actor = await deps.users.findById(actorUserId);
+  if (actor === null) return err("invalid_input", "actorUserId does not exist");
+
+  return ok({ userId: actor.id });
 }

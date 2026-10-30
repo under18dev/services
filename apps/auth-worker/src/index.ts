@@ -12,11 +12,21 @@ export { IdentityRPC } from "./presentation/rpc/identity.entrypoint";
 export { IdentityAdminRPC } from "./presentation/rpc/identity-admin.entrypoint";
 
 /**
+ * admin-worker から呼べる内部 RPC（#390 決定 16 ③）。
+ *
+ * `IdentityAdminRPC` と**並走する**。dashboard-worker はこちらを呼ばない
+ * ——  `sessionToken` を要求しないので、束縛を間違えると素通しの入口になる。
+ * `IdentityAdminDelegatedRPC` のクラスコメントを参照。
+ */
+export { IdentityAdminDelegatedRPC } from "./presentation/rpc/identity-admin-delegated.entrypoint";
+
+/**
  * auth-worker のエントリポイント。
  *
  * 公開 HTTP（OIDC + アカウント API）と、Service Binding 経由の内部 RPC
- * （`IdentityRPC` / `IdentityAdminRPC` の named export）、そして
- * Cron Trigger（`scheduled`）の 3 種類の入口を持つ（仕様書 2.1）。
+ * （`IdentityRPC` / `IdentityAdminRPC` / `IdentityAdminDelegatedRPC` の
+ * named export）、そして Cron Trigger（`scheduled`）の 4 種類の入口を持つ
+ * （仕様書 2.1）。
  */
 const app = createApp();
 

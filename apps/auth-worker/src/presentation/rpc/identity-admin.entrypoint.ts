@@ -68,7 +68,7 @@ import { toRpcCode } from "./identity.entrypoint";
  * `isAdmin:` 走査（#337）が**正しくここを捕まえた**ので、名前を
  * `hasAdminFlag` に変えて意味の違いを型に出してある。
  */
-function toUserAdminSummary(user: User): UserAdminSummary {
+export function toUserAdminSummary(user: User): UserAdminSummary {
   const props = user.snapshot();
   return {
     id: props.id,
@@ -82,7 +82,7 @@ function toUserAdminSummary(user: User): UserAdminSummary {
   };
 }
 
-function toClientSummary(client: OAuthClient): OAuthClientSummary {
+export function toClientSummary(client: OAuthClient): OAuthClientSummary {
   return {
     clientId: client.clientId,
     name: client.name,
@@ -345,7 +345,7 @@ export class IdentityAdminRPC extends WorkerEntrypoint<Env> implements IdentityA
 }
 
 /** `PersistedAuditLogEntry`（Domain 寄りの読み取り行）を契約の DTO へ写す（#375）。 */
-function toAuditLogEntryAdmin(entry: {
+export function toAuditLogEntryAdmin(entry: {
   readonly id: string;
   readonly event: string;
   readonly userId: string | null;
