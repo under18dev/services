@@ -17,8 +17,10 @@ import { deriveCodeChallenge, generateCodeVerifier, generateOpaqueValue } from "
 import { sanitizeReturnTo } from "../../oidc/return-to";
 import { createSessionToken, verifySessionToken } from "../../oidc/session";
 import { exchangeAuthorizationCode } from "../../oidc/token-exchange";
-import { registerNfcRoutes } from "./nfc.routes";
+import { registerAuditRoutes } from "./audit.routes";
 import { registerClientsRoutes } from "./clients.routes";
+import { registerNfcRoutes } from "./nfc.routes";
+import { registerUsersRoutes } from "./users.routes";
 import type { AppBindings } from "./types";
 
 /**
@@ -351,13 +353,18 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     return c.html(
       `<!doctype html><html><body><p>サインインしました: ${renderSub(session.sub)}</p>` +
         `<p><a href="/nfc">NFC カード</a></p>` +
-        `<p><a href="/clients">OAuth クライアント</a></p></body></html>`,
+        `<p><a href="/clients">OAuth クライアント</a></p>` +
+        `<p><a href="/users">利用者</a></p>` +
+        `<p><a href="/audit">監査ログ</a></p></body></html>`,
     );
   });
 
   // NFC カードの管理（#382 / #390 決定 16 ③）。上のガードが既にセッション・
   // 承認済みであることを確かめている。
   registerNfcRoutes(app);
+  // 利用者の管理・監査ログの閲覧（#375 / #382 / #390 決定 16 ③）。同上。
+  registerUsersRoutes(app);
+  registerAuditRoutes(app);
 
   // OAuth クライアントの管理（#308 / #333 / #390 決定 16 ③ 段取り 3）。
   // 上のガードが既にセッション・承認済みであることを確かめている。
