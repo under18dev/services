@@ -243,8 +243,10 @@ https://go.under18.dev/c/nfc_hdt62b396zy809mmqk3v
 
 ## 4. 止める・付け替える
 
-**どちらも所有者本人の操作として作られている。** 運営が代行する経路は
-まだ無く、#333 で入る。
+**止める・遷移先の変更・一覧・発行は、運営が代行できる**
+（`NfcAdminDelegatedRPC` —— `disableCard` / `updateCardTarget` /
+`listAllCards` / `issueCards`）。**付け替え（release）だけ、まだ所有者
+本人の操作としてしか作られていない。** 運営が代行する経路は #422 で入る。
 
 ### 止める（無効化）
 
