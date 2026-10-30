@@ -114,7 +114,17 @@ export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/acco
  * 管理画面の所在を教える（#331 / #333 の判断）。`cards-ui.routes.tsx` が
  * `forbidden` を 404 に翻訳している。
  */
-export const CARD_ADMIN_ROUTES: readonly Route[] = [{ method: "GET", path: "/account/nfc/admin" }];
+export const CARD_ADMIN_ROUTES: readonly Route[] = [
+  { method: "GET", path: "/account/nfc/admin" },
+  /**
+   * カードの発行（#382）。**この Worker で 2 本目の form POST。**
+   *
+   * Cookie 無しも一般利用者も **403**（CSRF の検証がセッションより先）。
+   * 紐づけの POST と同じ順序で、**トークンを確かめる前に D1 や Identity を
+   * 引かない。** 管理者判定（404 へ翻訳する分岐）まで届かない。
+   */
+  { method: "POST", path: "/account/nfc/admin" },
+];
 
 /**
  * カードをタップした人が着地する紐づけ画面（#358）。

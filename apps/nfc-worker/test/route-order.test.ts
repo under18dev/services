@@ -55,6 +55,9 @@ describe("ルートの登録順", () => {
       // 意味があるのは `ALL /account/nfc/cards/*` の門番の位置だけ。
       "GET /account/nfc/admin",
       "GET /account/nfc/admin",
+      // 発行の form POST（#382）。2 行あるのは上と同じ事情。
+      "POST /account/nfc/admin",
+      "POST /account/nfc/admin",
       // 紐づけ画面（#358）。**画面より後ろに居る。** `/account/nfc` と
       // `/account/nfc/claim` は別パスなので順序に守りの意味は無いが、
       // 変わったら気づく。POST はこの Worker で唯一の form 送信。
