@@ -18,6 +18,7 @@ import { sanitizeReturnTo } from "../../oidc/return-to";
 import { createSessionToken, verifySessionToken } from "../../oidc/session";
 import { exchangeAuthorizationCode } from "../../oidc/token-exchange";
 import { registerNfcRoutes } from "./nfc.routes";
+import { registerClientsRoutes } from "./clients.routes";
 import type { AppBindings } from "./types";
 
 /**
@@ -349,13 +350,18 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     c.header("Cache-Control", "no-store");
     return c.html(
       `<!doctype html><html><body><p>サインインしました: ${renderSub(session.sub)}</p>` +
-        `<p><a href="/nfc">NFC カード</a></p></body></html>`,
+        `<p><a href="/nfc">NFC カード</a></p>` +
+        `<p><a href="/clients">OAuth クライアント</a></p></body></html>`,
     );
   });
 
   // NFC カードの管理（#382 / #390 決定 16 ③）。上のガードが既にセッション・
   // 承認済みであることを確かめている。
   registerNfcRoutes(app);
+
+  // OAuth クライアントの管理（#308 / #333 / #390 決定 16 ③ 段取り 3）。
+  // 上のガードが既にセッション・承認済みであることを確かめている。
+  registerClientsRoutes(app);
 
   return app;
 }

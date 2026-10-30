@@ -16,6 +16,9 @@ import type { ShellNavGroup } from "@u18/web-ui/kiwa";
 export const ADMIN_NAV_GROUPS: readonly ShellNavGroup[] = [
   {
     label: "管理",
-    items: [{ key: "nfc", href: "/nfc", label: "NFC カード" }],
+    items: [
+      { key: "nfc", href: "/nfc", label: "NFC カード" },
+      { key: "clients", href: "/clients", label: "OAuth クライアント" },
+    ],
   },
 ];

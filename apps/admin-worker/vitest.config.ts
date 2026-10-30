@@ -13,8 +13,8 @@ import { defineConfig } from "vitest/config";
  * 依然として持たない**（運用者の判断、2026-10-30 夜）。テストでは本物の
  * nfc-worker / auth-worker を立てず、`ContainerOverrides.nfcCards` /
  * `ContainerOverrides.identityAdmin` に fake を差す
- * （`test/nfc.routes.test.ts`）——それでも
- * `wrangler.jsonc` が宣言した Entrypoint 名が無いと workerd が起動に
+ * （`test/nfc.routes.test.ts` / `test/clients.routes.test.ts`）——
+ * それでも `wrangler.jsonc` が宣言した Entrypoint 名が無いと workerd が起動に
  * 失敗する（#47 と同じ形）ので、スタブだけは要る。
  *
  * **D1 は持つ。** 承認リスト（`ADMIN_DB`）のマイグレーションを

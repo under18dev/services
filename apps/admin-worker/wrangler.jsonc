@@ -30,12 +30,12 @@
   // `ADMIN_DB`（admin-worker 専用の D1）だけが持つ。
   //
   // **`IdentityAdminDelegatedRPC` は束縛する**（#390 決定 16 ③）。
-  // `sessionToken` を要求しない delegated 契約で、利用者の停止・解除・
-  // OAuth クライアントの登録・失効を呼ぶ。信頼境界はこの Service Binding
-  // そのもの——auth-worker 側は `actorUserId` の実在だけを確かめ、
-  // 「管理者かどうか」は検証しない（`IdentityAdminDelegatedRpcContract`
-  // の冒頭）。admin-worker 側（上のセッションガード + 承認リスト + `acr`
-  // 確認）が認可の全体を持つ。
+  // `sessionToken` を要求しない delegated 契約で、OAuth クライアントの
+  // 一覧・登録・失効を呼ぶ（段取り 4 で利用者の管理もここへ乗る）。
+  // 信頼境界はこの Service Binding そのもの——auth-worker 側は
+  // `actorUserId` の実在だけを確かめ、「管理者かどうか」は検証しない
+  // （`IdentityAdminDelegatedRpcContract` の冒頭）。admin-worker 側
+  // （上のセッションガード + 承認リスト + `acr` 確認）が認可の全体を持つ。
   //
   // **nfc-worker への Service Binding も持つ**（#382 / #390 決定 16 ③）。
   // あちらの `NfcAdminDelegatedRPC` を束縛し、他人のカードの無効化・
