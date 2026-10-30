@@ -25,6 +25,13 @@ const TARO = "token-taro-0123456789abcdefghijklmn";
 const HANAKO = "token-hanako-0123456789abcdefghijk";
 const identity = identityWith({ [TARO]: "usr_taro", [HANAKO]: "usr_hanako" });
 
+/** 管理者のセッション。**サイドバーの出し分けを本物の画面で見る**のに要る（#333）。 */
+const ADMIN = "token-admin-0123456789abcdefghijk";
+const adminIdentity = identityWith({ [TARO]: "usr_taro", [ADMIN]: "usr_admin" }, ["usr_admin"]);
+
+/** サイドバーに出る管理の項目（`account-nav.ts` の `adminOnly`）。 */
+const ADMIN_NAV_LABEL = "カードの管理";
+
 async function open(cookie?: string, gateway = identity): Promise<Response> {
   const headers = new Headers();
   if (cookie !== undefined) headers.set("Cookie", cookie);
@@ -260,5 +267,37 @@ describe("片道の操作（#382）", () => {
     const html = await (await open(cookieFor(TARO))).text();
 
     expect(html).toContain("カードを止めたり人にゆずったりするには JavaScript が必要です");
+  });
+});
+
+/**
+ * **サイドバーの管理の節**（#333 / #338 Step 3）。
+ *
+ * `account-nav.test.ts` にあった「本物の並びに `adminOnly` が 0 件」の
+ * 見張りの置き換えである。あちらは**フィルタの振る舞い**を作り物の並びで
+ * 固定していて、**本物の画面を 1 度も引いていなかった。**
+ *
+ * **nfc-worker でも引く理由**は `account-nav.ts` の冒頭にある ——
+ * 並びを読むのは 2 つの Worker で、**片方だけ条件を間違えた状態**が
+ * 作れる。どちらの画面も落ちず、気づくのは「NFC の画面では管理の節が
+ * 出ないのですが」と言われたときである。
+ */
+describe("サイドバーの管理の節", () => {
+  it("管理者には出る", async () => {
+    const html = await (await open(cookieFor(ADMIN), adminIdentity)).text();
+
+    expect(html).toContain(ADMIN_NAV_LABEL);
+    expect(html).toContain("/account/nfc/admin");
+    // 節の見出しも出ていること。項目だけ出て見出しが無いと迷子になる。
+    expect(html).toContain("管理");
+  });
+
+  it("一般利用者には出ない。リンクも本文に残らない", async () => {
+    const html = await (await open(cookieFor(TARO), adminIdentity)).text();
+
+    expect(html, "管理の項目が非管理者に出ている").not.toContain(ADMIN_NAV_LABEL);
+    // **href も残らないこと。** ラベルだけ消して URL が残ると、
+    // 読めば分かる状態になる（`adminOnly` は隠すための仕掛けである）。
+    expect(html, "管理画面の URL が非管理者に出ている").not.toContain("/account/nfc/admin");
   });
 });
