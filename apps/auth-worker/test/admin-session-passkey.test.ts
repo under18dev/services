@@ -8,7 +8,7 @@ import { appEnv, seedLoggedInUser } from "./helpers.oauth";
 
 /**
  * **管理者として振る舞えるのは Passkey で張ったセッションだけ**
- * （仕様書 §14.1 決定 8 / 脅威モデル RR-21）。
+ * （仕様書 §14.1 決定 8 / 脅威モデル RR-5）。
  *
  * ## 塞いでいる穴
  *
@@ -152,6 +152,12 @@ describe("権限を伏せたことを黙って済ませない", () => {
       sessionId: user.sessionId,
       authMethod: OTHER_AUTH_METHOD,
     });
+    // **`toMatchObject` は項目が増えても落ちない。** 後からメールアドレスや
+    // username を足した人を止めるのは、無いことを見るこちらの行である
+    // （`audit-logger.test.ts` と同じ形）。内部 ID は漏れても本人を指さない
+    // が、メールアドレスは本人そのものである。
+    expect(reported[0]).not.toContain(user.email);
+    expect(reported[0]).not.toContain(user.username);
   });
 
   it("一般利用者では出さない", async () => {

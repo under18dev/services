@@ -150,7 +150,7 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
       createdAt: props.createdAt.toISOString(),
       // **`props.isAdmin` ではない。** あれは `users` の行の旗で、
       // 「このセッションで管理者として振る舞ってよいか」ではない（決定 8 /
-      // RR-21）。判定は `GetSessionUseCase` に 1 か所だけ置いてあるので、
+      // RR-5）。判定は `GetSessionUseCase` に 1 か所だけ置いてあるので、
       // ここは運ぶだけにする。
       isAdmin: session.value.isAdmin,
     });

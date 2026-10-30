@@ -19,7 +19,7 @@ export type UpdateProfileOutput = {
   /** 実際に値が変わった項目。値そのものは返さず、呼び出し元は user を見る。 */
   readonly changedFields: readonly string[];
   /**
-   * **このセッションで管理者として振る舞ってよいか**（決定 8 / RR-21）。
+   * **このセッションで管理者として振る舞ってよいか**（決定 8 / RR-5）。
    *
    * `user.isAdmin` をそのまま返す応答にすると、Passkey 以外で張られた
    * セッションに対しても旗が立って見える。ここで `GetSessionUseCase` が

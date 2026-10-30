@@ -234,14 +234,14 @@ describe("無効なセッションは両方の入口で拒否される", () => {
  * 常に `true` を返すよう壊しても nfc 側のテストは落ちない —— あちらは
  * fake の gateway を使うため。**その境目をこちらで塞ぐ。**
  *
- * **ここで `authMethod` を書くようになった経緯**（RR-21）。以前この
+ * **ここで `authMethod` を書くようになった経緯**（RR-5）。以前この
  * describe は `seedLoggedInUser()`（= `email_otp` のセッション）に
  * `is_admin` を立てて `true` を期待していた。つまり**「OTP セッションの
  * 管理者に権限が出る」ことをテストが固定していた**。決定 8 がそれを
  * 禁じているので、期待のほうを直した。条件は
  * `admin-session-passkey.test.ts` にまとめてある。
  */
-describe("getSession の isAdmin は実際の users.is_admin を返す", () => {
+describe("getSession の isAdmin は、このセッションで管理者として振る舞えるかを返す", () => {
   it("一般利用者は false", async () => {
     const user = await seedLoggedInUser();
 

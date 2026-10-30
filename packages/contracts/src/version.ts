@@ -76,7 +76,7 @@
  * **後方互換な追加**なので MINOR。デプロイ順は auth-worker が先。
  */
 /**
- * ## 1.4.0 のまま変えない（RR-21: `isAdmin` を Passkey セッションに限る）
+ * ## 1.4.0 のまま変えない（RR-5: `isAdmin` を Passkey セッションに限る）
  *
  * `SessionSummary.isAdmin` と `UserProfile.isAdmin` が、**Passkey で
  * 張られたセッションでしか true にならなく**なった（仕様書 §14.1 決定 8）。
@@ -97,7 +97,7 @@
  * 探して見つけられない。
  *
  * 意味が変わったことは `identity.ts` の各 `isAdmin` と脅威モデル RR-5 /
- * RR-21 に書いた。**番号を動かさないぶん、そちらは必ず書く。**
+ * RR-5 に書いた。**番号を動かさないぶん、そちらは必ず書く。**
  */
 export const CONTRACT_VERSION = "1.4.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;

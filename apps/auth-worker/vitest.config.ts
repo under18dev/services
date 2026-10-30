@@ -62,7 +62,7 @@ function collectAuditEventNames(dir: string): string[] {
 }
 
 /**
- * Presentation 層が `isAdmin:` に詰めている右辺を集める（決定 8 / RR-21）。
+ * Presentation 層が `isAdmin:` に詰めている右辺を集める（決定 8 / RR-5）。
  *
  * **外へ出す `isAdmin` は、`users` の行ではなく UseCase の結果から来ること。**
  * 旗が立っているかと、このセッションで管理者として振る舞ってよいかは別で、

@@ -97,7 +97,7 @@ export class User {
 
   /**
    * **いま手元にあるこのセッションで、管理者として振る舞ってよいか**
-   * （決定 8 / 脅威モデル RR-21）。
+   * （決定 8 / 脅威モデル RR-5）。
    *
    * `isAdmin` と `permitsAuthMethod` を 1 つにまとめただけだが、**この 2 つを
    * 別々に見るのをやめることがこの関数の目的**である。
@@ -114,6 +114,12 @@ export class User {
    * ことではなく、**この 1 回の操作がどの認証方式に支えられているか**を
    * 見る。`sessions.auth_method` は発行時に決まって以後変わらないので、
    * 追加の問い合わせも要らない。
+   *
+   * **`permitsAuthMethod` に乗せているのは意図的である。** 決定 8 を緩めて
+   * 管理者の OTP ログインを許す日が来たら、権限の判定も同時に緩むべきで、
+   * **片方だけ緩んだ状態（ログインは通るが権限が出ない / その逆）を
+   * 作れないようにしてある。** 逆に言うと、**`permitsAuthMethod` を
+   * 緩めるときは、ここも緩むことを承知で緩めること。**
    */
   actsAsAdminWith(method: AuthMethod): boolean {
     return this.props.isAdmin && this.permitsAuthMethod(method);
