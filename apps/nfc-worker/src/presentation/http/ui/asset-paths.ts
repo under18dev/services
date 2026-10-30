@@ -1,5 +1,6 @@
 import { hashedFileName } from "@u18/web-ui";
 import { CARDS_UI_PATH } from "../base-path";
+import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 
 /**
@@ -59,3 +60,15 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
  */
 export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
 export const KIWA_STYLESHEET_PATH = `${CARDS_UI_PATH}${KIWA_STYLESHEET_ROUTE}`;
+
+/**
+ * カード画面のアイランド（#338）。
+ *
+ * **dashboard-worker のものは借りられない。** あちらの
+ * `account-island.js` はセッション・パスキー・連携アプリの取り消しで、
+ * 中身が別物である。借りる関係を作らない理由は上の #211 と同じ。
+ *
+ * URL に内容ハッシュが入るので `immutable` で配信してよい。
+ */
+export const ISLAND_ROUTE = `/ui/${hashedFileName("cards-island.js", CARDS_ISLAND_JS)}`;
+export const ISLAND_PATH = `${CARDS_UI_PATH}${ISLAND_ROUTE}`;

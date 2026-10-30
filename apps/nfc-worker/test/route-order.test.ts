@@ -41,6 +41,9 @@ describe("ルートの登録順", () => {
       "POST /account/nfc/cards/:cardId/disable",
       "POST /account/nfc/cards/:cardId/release",
       "GET /account/nfc/ui/kiwa.<hash>.css",
+      // 遷移先の変更のアイランド（#338）。**画面より前に居る。**
+      // 公開アセットなので順序に守りの意味は無いが、変わったら気づく。
+      "GET /account/nfc/ui/cards-island.<hash>.js",
       // 画面は 2 回出る（`pageSecurityHeaders` とハンドラ）。
       "GET /account/nfc",
       "GET /account/nfc",

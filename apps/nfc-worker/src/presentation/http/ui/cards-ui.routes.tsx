@@ -1,6 +1,7 @@
 import { loginUrlWithReturnTo, returnToForCurrentRequest, sessionCookieName } from "@u18/contracts";
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -43,6 +44,20 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
   app.get(KIWA_STYLESHEET_PATH, (c) =>
     c.body(KIWA_STYLESHEET, 200, {
       "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
+    }),
+  );
+
+  /**
+   * カード画面のアイランド（#338）。
+   *
+   * **CSS と同じ扱い。** URL に内容ハッシュが入るので `immutable` で
+   * 配信してよい。中身は全利用者に同じスクリプトで、個人情報を 1 文字も
+   * 含まない（カード ID は HTML 側の `data-card-id` から読む）。
+   */
+  app.get(ISLAND_PATH, (c) =>
+    c.body(CARDS_ISLAND_JS, 200, {
+      "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
     }),
   );

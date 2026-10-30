@@ -34,6 +34,9 @@
   // 生成 -> 変更検知 -> 再生成 が無限に続いて `wrangler dev` が
   // 起動しなくなる（#138）。
   //
+  // **アイランドのソースだけは入れてある**（#338）。あそこは
+  // `generated/` の外なので、監視しても再生成のループにならない。
+  //
   // **その代償として、`wrangler dev` を開いたまま class を足しても CSS は
   // 作り直されない。** 画面の .tsx も `packages/web-ui/src/kiwa/` も
   // watch_dir の外にある。手元で効かないときは dev を入れ直すこと。
@@ -41,7 +44,7 @@
   // ここからは生まれない。
   "build": {
     "command": "node scripts/build-client.mjs",
-    "watch_dir": "scripts",
+    "watch_dir": ["scripts", "src/presentation/http/ui/client"],
   },
 
   "observability": { "enabled": true },

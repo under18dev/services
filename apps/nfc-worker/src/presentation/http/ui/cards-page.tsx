@@ -10,12 +10,15 @@ import {
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
+  getButtonClasses,
   KiwaShell,
   Separator,
 } from "@u18/web-ui/kiwa";
 import type { FC } from "hono/jsx";
 import type { CardView } from "../../../application/ports";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { STATUS_TEXT_CLASS, TARGET_INPUT_CLASS } from "./island-classes";
+import { CARD_ID, TARGET_FORM, TARGET_INPUT, TARGET_SAVE, TARGET_STATUS } from "./island-hooks";
 
 /**
  * 自分のカード一覧（Phase 4 / #31、#338 で Kiwa UI へ）。
@@ -31,18 +34,31 @@ import { KIWA_STYLESHEET_PATH } from "./asset-paths";
  * dashboard-worker が渡すものと同じ配列である。片方にだけ項目を足した
  * 状態が作れない（あちらの冒頭）。
  *
- * ## サーバーレンダリングだけで成立させる
+ * ## 一覧は JS 無しで成立する。操作だけが JS を要る
  *
- * この画面は **JS を 1 行も要求しない**。`KiwaShell` は `<script>` を
- * 出さず、ここで使っている primitives もクライアント JS を持たない。
+ * カードの一覧・状態・遷移先の表示は**サーバーレンダリングだけ**で出る。
+ * アイランドが足すのは遷移先の変更だけで、**JS が無ければその 1 箇所が
+ * 効かない**（`<noscript>` がそう言う）。一覧が読めなくなることはない。
+ *
+ * **操作の入口はサーバーが描く。** 島が作るのではない —— class を
+ * サーバー側の HTML にも出しておくと、`kiwa-stylesheet.test.ts` の視界に
+ * 入り、**「島だけが使う class」という状態そのものが無くなる**
+ * （`ui/island-classes.ts`）。
  *
  * ## 操作はまだ無い
  *
  * API には 5 つの操作（紐づけ・遷移先の変更・無効化・移転・発行）が
- * あるが、**この画面からは 1 つも叩けない。** それが #338 の本体で、
- * アイランドから既存の JSON API を叩く形で別途入る。
+ * ある。**いま画面から叩けるのは遷移先の変更 1 本だけ**で、残り 4 本は
+ * Step 2 / Step 3 で入る（#338）。
  *
- * **「できない」を黙って出さない** —— 下の案内がそれを言っている。
+ * **最初に通す 1 本を `target` にしたのは、間違えても戻せるからである。**
+ * `disable` は片道、`release` は紐づけコードが 1 回しか返らない。
+ *
+ * **「できない」を黙って出さない** —— 下の案内が、残り 4 本について
+ * それを言っている。**できるようになった分はそこから外すこと。**
+ * 全部残すと「できるのにできないと書いてある」、全部消すと
+ * 「できないのに何も書いていない」になる。
+ *
  * 書き込み経路を 2 本（form POST と JSON）持たないのは、
  * `cards.routes.ts` が既に JSON + Origin 検証で守られていて、並べると
  * **2 つを同期させ続ける必要が出る**ためである。
@@ -61,6 +77,15 @@ import { KIWA_STYLESHEET_PATH } from "./asset-paths";
  * 飛べる経路になり、**この画面が踏み台になる**（カードを奪った側が
  * 遷移先を変え、所有者に踏ませる）。文字列として見せるに留める。
  */
+
+/**
+ * 保存ボタンの class。**ここで畳む**（#338）。
+ *
+ * `getButtonClasses()` は `cn()` を呼ぶので、**島から import すると
+ * `cn` ごとバンドルへ入る**（実測で島が 18.4 -> 36.2 KiB）。
+ * サーバー側のこのファイルで文字列にしてしまえば、島には何も増えない。
+ */
+const SAVE_BUTTON_CLASS = getButtonClasses("default", "sm");
 
 const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
   issued: "未紐づけ",
@@ -109,6 +134,48 @@ const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
       **日付の行は、言うことがあるときだけ出す。** 空の行を並べると、
       カードごとに高さが揃うぶん「何も無い」が読みにくくなる。
     */}
+    {/*
+      **遷移先の変更**（#338）。`active` のカードにだけ出す ——
+      `issued` はまだ誰のものでもなく、`disabled` は片道で戻せない。
+      出しても必ず失敗する入口を描かない。
+
+      **目印は `data-*`。** 見た目の class で引くと、Tailwind の移行の
+      たびに島が黙って効かなくなる（#341）。class 定数は
+      `ui/island-classes.ts` で、島と同じものをここでも描いている。
+    */}
+    {card.status === "active" && (
+      <div
+        class="mt-2 flex flex-col gap-2"
+        {...{ [TARGET_FORM]: "" }}
+        {...{ [CARD_ID]: card.cardId }}
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            class={TARGET_INPUT_CLASS}
+            value={card.targetUrl ?? ""}
+            placeholder="https://example.com/"
+            aria-label={`${card.cardId} の遷移先`}
+            {...{ [TARGET_INPUT]: "" }}
+          />
+          <button type="button" class={SAVE_BUTTON_CLASS} {...{ [TARGET_SAVE]: "" }}>
+            保存
+          </button>
+        </div>
+        {/*
+          結果を出す行。**最初は空で、島が埋める。** 空の `<p>` を置くのは、
+          島が要素を作らずに済むようにするため（作らせると class が
+          サーバーの HTML に出ない）。
+        */}
+        <p class={STATUS_TEXT_CLASS} {...{ [TARGET_STATUS]: "" }}></p>
+        <noscript>
+          <p class={STATUS_TEXT_CLASS}>
+            遷移先の変更には JavaScript が必要です。一覧の表示には要りません。
+          </p>
+        </noscript>
+      </div>
+    )}
+
     {(card.claimedAt !== null || card.transferCount > 0 || card.disabledAt !== null) && (
       <p class="text-xs text-foreground-soft">
         {card.claimedAt === null ? null : `${toDate(card.claimedAt)} に紐づけ`}
@@ -137,6 +204,9 @@ export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
     current="nfc"
     heading="NFC カード"
     lead="カードをかざしたときの行き先を、カードを書き換えずに変更できます。"
+    // **島はこの画面のためだけのもの。** `KiwaShell` は中身を知らず、
+    // 渡されたものを `Layout` へ素通しする（#338）。
+    scripts={[ISLAND_PATH]}
   >
     {cards.length === 0 ? (
       <Empty>
@@ -175,8 +245,9 @@ export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
       <CardHeader>
         <CardTitle>この画面からできないこと</CardTitle>
         <CardDescription>
-          遷移先の変更・無効化・移転・新しいカードの紐づけは、まだこの画面からは行えません。
+          無効化・移転・新しいカードの紐づけ・カードの発行は、まだこの画面からは行えません。
           <code class="font-mono">/account/nfc/cards</code> の API から操作してください。
+          <strong>遷移先の変更はこの画面からできます</strong>（上の一覧）。
         </CardDescription>
       </CardHeader>
     </Card>

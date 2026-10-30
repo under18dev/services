@@ -117,11 +117,19 @@ describe("カード一覧の画面", () => {
     expect(csp).toContain("default-src 'none'");
   });
 
-  it("JS を 1 つも要求しない", async () => {
+  it("一覧そのものは JS を要求しない（#338 で島が付いた後も）", async () => {
+    // **「`<script>` が 1 つも無い」ではなくなった**（#338 で遷移先の
+    // 変更が入った）。それでも**一覧・状態・遷移先の表示はサーバーが
+    // 描いている**ことは変わらない。島が落ちても読めること自体を見る。
     await seedActiveCard("usr_taro", "https://example.com/taro");
 
     const html = await (await open(cookieFor(TARO))).text();
-    expect(html).not.toContain("<script");
+
+    // 島は 1 本だけ。増えたらここで気づく。
+    expect(html.match(/<script/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("https://example.com/taro");
+    // **JS が無いと何ができないかを言っている。**
+    expect(html).toContain("<noscript>");
   });
 
   it("インラインの style も使わない", async () => {
