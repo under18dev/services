@@ -282,6 +282,11 @@ describe("listUsers のカーソル", () => {
       });
       expect(page.ok).toBe(true);
       if (!page.ok) return;
+      // **空のページを返さない。** `nextCursor` を「ちょうど limit 件
+      // あったか」で決めると、**件数が limit の倍数のときに空のページが
+      // 1 回増える** —— 利用者には「続きを読む」を押したのに何も出ない
+      // 画面として見える。余分に 1 件読んで実在を確かめているのはそのため。
+      expect(page.value.users.length).toBeGreaterThan(0);
       for (const u of page.value.users) {
         // **同じ人が 2 度出ない。** 出るならカーソルが進んでいない。
         expect(seen.has(u.id)).toBe(false);
