@@ -399,6 +399,55 @@ export type RevokeUserSessionsInput = z.infer<typeof revokeUserSessionsInputSche
 
 export type RevokeUserSessionsResult = RpcResult<{ readonly revokedSessions: number }>;
 
+/**
+ * 監査ログの 1 行（#375）。
+ *
+ * **`ipHash` を載せている。** `SessionListItem` の JSDoc が「必要になったら
+ * 専用の管理用 RPC を分ける」と書いていた、その RPC がこれである。
+ * dashboard がこの DTO をそのまま返すのは本人向けの画面だけ、という
+ * 前提がここでは成り立たない —— **呼べるのは管理者だけ**なので、
+ * 同じ Worker を調べた複数アカウントを `ipHash` で結び付ける調査ができる。
+ */
+export type AuditLogEntryAdmin = {
+  readonly id: string;
+  readonly event: string;
+  readonly userId: string | null;
+  readonly actor: string | null;
+  readonly outcome: "success" | "failure";
+  readonly reason: string | null;
+  /**
+   * **秘密を含まないことは書き込み側が保証している**（`AuditEvent` の
+   * JSDoc と `test/audit-secrets.test.ts`）。ここで二重に選別しない ——
+   * 「何が安全に含まれるか」の正本を 2 か所に作らない。
+   */
+  readonly metadata: Record<string, unknown> | null;
+  readonly ipHash: string | null;
+  readonly userAgent: string | null;
+  /** ISO 8601 (UTC) */
+  readonly createdAt: string;
+};
+
+export const listAuditLogsInputSchema = z.object({
+  sessionToken: sessionTokenSchema,
+  caller: rpcCallerSchema,
+  /**
+   * イベント名の完全一致。**列挙はしない** —— 登録簿（`AUDIT_EVENTS`）は
+   * auth-worker の内部にあり、contracts へ持ち出すと二重管理になる。
+   * 一致しない文字列を渡しても 0 件が返るだけで、エラーにはしない。
+   */
+  event: z.string().min(1).max(64).optional(),
+  userId: z.string().min(1).max(64).optional(),
+  outcome: z.enum(["success", "failure"]).optional(),
+  cursor: z.string().min(1).max(64).optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+export type ListAuditLogsInput = z.infer<typeof listAuditLogsInputSchema>;
+
+export type ListAuditLogsResult = RpcResult<{
+  readonly entries: readonly AuditLogEntryAdmin[];
+  readonly nextCursor: string | null;
+}>;
+
 export type ListUsersResult = RpcResult<{
   readonly users: readonly UserAdminSummary[];
   /**
@@ -470,4 +519,11 @@ export interface IdentityAdminRpcContract {
    * **自分に対しては許している**（全端末からログアウト）。
    */
   revokeUserSessions(input: RevokeUserSessionsInput): Promise<RevokeUserSessionsResult>;
+  /**
+   * 監査ログの閲覧（#375）。**管理者のみ。**
+   *
+   * これまで `wrangler d1 execute` でしか読めなかった。再認証は要求して
+   * いない —— 読み取りだけで状態を変えない（`listUsers` と同じ扱い）。
+   */
+  listAuditLogs(input: ListAuditLogsInput): Promise<ListAuditLogsResult>;
 }

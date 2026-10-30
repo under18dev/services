@@ -2,6 +2,7 @@ import {
   createOAuthClientInputSchema,
   disableOAuthClientInputSchema,
   listOAuthClientsInputSchema,
+  listAuditLogsInputSchema,
   listUsersInputSchema,
   reinstateUserInputSchema,
   revokeUserSessionsInputSchema,
@@ -15,6 +16,9 @@ import {
   type IdentityAdminRpcContract,
   type ListOAuthClientsInput,
   type ListOAuthClientsResult,
+  type AuditLogEntryAdmin,
+  type ListAuditLogsInput,
+  type ListAuditLogsResult,
   type ListUsersInput,
   type ListUsersResult,
   type ReinstateUserInput,
@@ -312,4 +316,58 @@ export class IdentityAdminRPC extends WorkerEntrypoint<Env> implements IdentityA
 
     return rpcOk({ revokedSessions: result.value.revokedSessions });
   }
+
+  /**
+   * 監査ログの閲覧（#375）。**管理者のみ。**
+   *
+   * `metadata` はそのまま返す。秘密を含まないことは書き込み側
+   * （`AuditEvent` の JSDoc / `test/audit-secrets.test.ts`）が保証している。
+   */
+  async listAuditLogs(input: ListAuditLogsInput): Promise<ListAuditLogsResult> {
+    const parsed = listAuditLogsInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.contextFor(parsed.data.caller));
+    const result = await container.useCases.listAuditLogs.execute({
+      sessionToken: parsed.data.sessionToken,
+      ...(parsed.data.event === undefined ? {} : { event: parsed.data.event }),
+      ...(parsed.data.userId === undefined ? {} : { userId: parsed.data.userId }),
+      ...(parsed.data.outcome === undefined ? {} : { outcome: parsed.data.outcome }),
+      ...(parsed.data.cursor === undefined ? {} : { cursor: parsed.data.cursor }),
+      ...(parsed.data.limit === undefined ? {} : { limit: parsed.data.limit }),
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({
+      entries: result.value.entries.map(toAuditLogEntryAdmin),
+      nextCursor: result.value.nextCursor,
+    });
+  }
+}
+
+/** `PersistedAuditLogEntry`（Domain 寄りの読み取り行）を契約の DTO へ写す（#375）。 */
+function toAuditLogEntryAdmin(entry: {
+  readonly id: string;
+  readonly event: string;
+  readonly userId: string | null;
+  readonly actor: string | null;
+  readonly outcome: "success" | "failure";
+  readonly reason: string | null;
+  readonly metadata: Record<string, unknown> | null;
+  readonly ipHash: string | null;
+  readonly userAgent: string | null;
+  readonly createdAt: Date;
+}): AuditLogEntryAdmin {
+  return {
+    id: entry.id,
+    event: entry.event,
+    userId: entry.userId,
+    actor: entry.actor,
+    outcome: entry.outcome,
+    reason: entry.reason,
+    metadata: entry.metadata,
+    ipHash: entry.ipHash,
+    userAgent: entry.userAgent,
+    createdAt: entry.createdAt.toISOString(),
+  };
 }

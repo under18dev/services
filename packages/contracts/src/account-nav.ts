@@ -55,7 +55,8 @@ export type AccountNavKey =
    * **`"nfc"` と別のキーにする** —— 同じにすると、利用者向けの
    * カード画面を開いたときに管理の項目まで選択状態になる。
    */
-  | "nfc-admin";
+  | "nfc-admin"
+  | "auditLogs";
 
 export type AccountNavItem = {
   readonly key: AccountNavKey;
@@ -186,6 +187,12 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
         key: "nfc-admin",
         href: "/account/nfc/admin",
         label: "カードの管理",
+        adminOnly: true,
+      },
+      {
+        key: "auditLogs",
+        href: "/account/admin/audit",
+        label: "監査ログ",
         adminOnly: true,
       },
     ],

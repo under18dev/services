@@ -167,6 +167,19 @@ export const ADMIN_USERS_SEARCH_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_SEARCH
 export const ADMIN_USERS_ACTION_ROUTE = "/admin/users/action";
 export const ADMIN_USERS_ACTION_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_ACTION_ROUTE}` as const;
 
+/**
+ * 監査ログの閲覧（#375 / #382）。**管理者だけ。**
+ *
+ * `ADMIN_USERS_ROUTE` と同じ形 —— 検索語（イベント名・利用者 ID）を
+ * URL に載せない。GET は新しい順の先頭だけ、絞り込みと続きの読み込みは
+ * POST の本文で渡す。
+ */
+export const ADMIN_AUDIT_ROUTE = "/admin/audit";
+export const ADMIN_AUDIT_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_AUDIT_ROUTE}` as const;
+
+export const ADMIN_AUDIT_SEARCH_ROUTE = "/admin/audit/search";
+export const ADMIN_AUDIT_SEARCH_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_AUDIT_SEARCH_ROUTE}` as const;
+
 export const ADMIN_CLIENTS_ROUTE = "/admin/clients";
 export const ADMIN_CLIENTS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_ROUTE}` as const;
 

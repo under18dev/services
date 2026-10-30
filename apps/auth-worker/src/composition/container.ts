@@ -46,6 +46,7 @@ import { ListGrantsUseCase } from "../application/use-cases/list-grants.use-case
 import { ListOAuthClientsUseCase } from "../application/use-cases/list-oauth-clients.use-case";
 import { ListUsersUseCase } from "../application/use-cases/list-users.use-case";
 import { ManageUserUseCase } from "../application/use-cases/manage-user.use-case";
+import { ListAuditLogsUseCase } from "../application/use-cases/list-audit-logs.use-case";
 import { ListPasskeysUseCase } from "../application/use-cases/list-passkeys.use-case";
 import { ListSessionsUseCase } from "../application/use-cases/list-sessions.use-case";
 import { PasskeyLoginOptionsUseCase } from "../application/use-cases/passkey-login-options.use-case";
@@ -84,7 +85,10 @@ import {
   InlineSideEffectScheduler,
   WaitUntilSideEffectScheduler,
 } from "../infrastructure/scheduling/side-effect-schedulers";
-import { DrizzleAuditLogger } from "../infrastructure/persistence/drizzle-audit-logger";
+import {
+  DrizzleAuditLogger,
+  DrizzleAuditLogReader,
+} from "../infrastructure/persistence/drizzle-audit-logger";
 import { DrizzleAuthorizationCodeRepository } from "../infrastructure/persistence/drizzle-authorization-code.repository";
 import { DrizzleEmailChallengeRepository } from "../infrastructure/persistence/drizzle-email-challenge.repository";
 import { DrizzleExpiredRecordPurger } from "../infrastructure/persistence/drizzle-expired-record-purger";
@@ -165,6 +169,7 @@ export type Container = {
     readonly listOAuthClients: ListOAuthClientsUseCase;
     readonly listUsers: ListUsersUseCase;
     readonly manageUser: ManageUserUseCase;
+    readonly listAuditLogs: ListAuditLogsUseCase;
     readonly createOAuthClient: CreateOAuthClientUseCase;
     readonly disableOAuthClient: DisableOAuthClientUseCase;
   };
@@ -471,6 +476,10 @@ export function createContainer(
       listOAuthClients: new ListOAuthClientsUseCase({ getSession, clients: oauthClients }),
       listUsers: new ListUsersUseCase({ getSession, users }),
       manageUser: new ManageUserUseCase({ getSession, users, sessions, clock, audit }),
+      listAuditLogs: new ListAuditLogsUseCase({
+        getSession,
+        auditLogs: new DrizzleAuditLogReader(db),
+      }),
       createOAuthClient: new CreateOAuthClientUseCase({
         getSession,
         audit,

@@ -20,7 +20,8 @@ export type AdminOperation =
   | "listUsers"
   | "suspendUser"
   | "reinstateUser"
-  | "revokeUserSessions";
+  | "revokeUserSessions"
+  | "listAuditLogs";
 
 /**
  * 管理者のセッションであることを確かめる（#308 / 仕様書 §14.1 決定 8）。

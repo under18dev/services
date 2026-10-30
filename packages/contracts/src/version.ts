@@ -186,5 +186,18 @@
  * `audit_logs` にしか残らない** —— 呼ぶ側はそれを前提に、画面で
  * 「凍結されています」と言い切らないこと（本人の退会でも同じ値になる）。
  */
-export const CONTRACT_VERSION = "1.8.0" as const;
+/**
+ * ## 1.8.0 → 1.9.0（#375: 監査ログの閲覧）
+ *
+ * `listAuditLogs` を `IdentityAdminRpcContract` に足した。`wrangler d1
+ * execute` でしか読めなかった監査ログを、管理者のセッションでだけ画面
+ * から読めるようにする。
+ *
+ * **後方互換な追加**なので MINOR。デプロイ順は auth-worker が先。
+ *
+ * **`ipHash` を載せる最初の DTO である。** `SessionListItem` は本人向けの
+ * 画面が読むので意図的に外していたが、ここは管理者しか呼べないので
+ * 条件が違う（理由は `AuditLogEntryAdmin` の JSDoc）。
+ */
+export const CONTRACT_VERSION = "1.9.0" as const;
 export type ContractVersion = typeof CONTRACT_VERSION;
