@@ -8,6 +8,7 @@ import {
   LABEL_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
 import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH } from "./asset-paths";
+import { ErrorMessage, LINK_TEXT_CLASS } from "./page-parts";
 import { loginUrlWithReturnTo, RETURN_TO_FIELD, signupUrlWithReturnTo } from "./return-to";
 
 /**
@@ -104,17 +105,6 @@ const CsrfField: FC<{ token: string }> = ({ token }) => (
 const ReturnToField: FC<{ returnTo: string | null }> = ({ returnTo }) =>
   returnTo === null ? null : <input type="hidden" name={RETURN_TO_FIELD} value={returnTo} />;
 
-const ErrorMessage: FC<{ message: string | null }> = ({ message }) =>
-  message === null ? null : (
-    // role="alert" で読み上げへ届ける。文言そのものは中立に保つこと。
-    <p
-      class="rounded-lg border border-destructive/40 bg-background-subtle px-3 py-2.5 text-sm text-destructive"
-      role="alert"
-    >
-      {message}
-    </p>
-  );
-
 const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" }> }> = ({
   view,
   csrfToken,
@@ -168,7 +158,7 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
       アカウント画面から追加する（§14.1 決定 2）。
     */}
     {mode === "signup" ? (
-      <p class="text-sm text-foreground-muted [&_a:hover]:text-foreground [&_a]:underline [&_a]:underline-offset-4">
+      <p class={LINK_TEXT_CLASS}>
         <a href={loginUrlWithReturnTo(returnTo)}>すでにアカウントをお持ちの方</a>
       </p>
     ) : (
@@ -201,7 +191,7 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
             上のメールアドレスでのログインは JavaScript 無しでも行えます。
           </p>
         </div>
-        <p class="text-sm text-foreground-muted [&_a:hover]:text-foreground [&_a]:underline [&_a]:underline-offset-4">
+        <p class={LINK_TEXT_CLASS}>
           <a href={signupUrlWithReturnTo(returnTo)}>アカウントをお持ちでない方</a>
         </p>
       </>
@@ -262,7 +252,7 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
       </button>
     </form>
 
-    <div class="text-sm text-foreground-muted [&_a:hover]:text-foreground [&_a]:underline [&_a]:underline-offset-4 flex flex-wrap items-center gap-1">
+    <div class={`${LINK_TEXT_CLASS} flex flex-wrap items-center gap-1`}>
       <form method="post" action="/login/start" class="inline">
         <CsrfField token={csrfToken} />
         <ReturnToField returnTo={returnTo} />
