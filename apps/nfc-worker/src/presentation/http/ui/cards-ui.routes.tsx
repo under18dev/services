@@ -122,7 +122,14 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
 
     const result = await c.get("container").useCases.viewClaim.execute({
       sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
-      // 形が違えば D1 を引かずに済ませるが、**応答は畳んだ側と同じ**になる。
+      // **形が不正でも D1 は引く。** `""` がそのまま `findById()` へ渡り、
+      // 存在しないカードとして畳まれる。
+      //
+      // **早期 return を足さないこと。** 形が不正なときだけ D1 を飛ばすと、
+      // 「形が不正」と「形は合っているが存在しない」で処理時間が変わる ——
+      // `cards.routes.ts` の `CARD_ID_PATTERN` が明示的に避けている形である。
+      // ここで正規化しているのは、**変な値をそのまま UseCase へ運ばない**
+      // ためだけで、応答を速くするためではない。
       cardId: CARD_ID_PATTERN.test(cardId) ? cardId : "",
     });
 
