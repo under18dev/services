@@ -143,8 +143,9 @@ describe("アイランドが触る場所が HTML に在る", () => {
 
   it("見た目のクラスでサーバーの HTML を引いていない", () => {
     // **移行のたびに変わる前提のものを継ぎ目に使わない**（#332）。
-    // `className = "..."` の代入は残っている（アイランドが作る側で、
-    // 手書き CSS があるうちは効く）ので、`querySelector` の側だけを見る。
+    // `className = "..."` の代入は残っている（アイランドが**作る**側で、
+    // `island-classes.ts` の Tailwind のクラスを当てている）ので、
+    // **引く側**の `querySelector` だけを見る。
     const selectors = [...ACCOUNT_ISLAND_JS.matchAll(/querySelector(?:All)?\(([^)]*)\)/g)].map(
       (m) => m[1] as string,
     );
