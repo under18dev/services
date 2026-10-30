@@ -6,34 +6,75 @@
  * **`pnpm lint` には入れない。** 他人が issue を閉じただけで落ちる検査なので、
  * 手元の lint に混ぜると「自分の変更が lint に落ちた」に見える。
  * `check-deadlines.mjs` と同じ独立したジョブに置く（#234 と同じ判断）。
+ *
+ * ## 射程は `docs/*.md` だけだった（#371 / #425）
+ *
+ * **このリポジトリはコメントが分厚い。** `apps/**` / `packages/**` の
+ * TypeScript コメントと `.github/**` の文書が、丸ごと射程の外にあった。
+ *
+ * 実際に 1 件あった——`rate-limit-policy.ts` が「#236 で扱う」と書いたまま
+ * 残っていたが、**#236 は 2026-10-28 に閉じており、該当する層は
+ * `start-email-otp.use-case.ts` に入っていた。** `docs/` だけを見ていた
+ * ので、この検査は何も言わなかった（#425 で直した）。
+ *
+ * `findForwardIssueRefs` 自体は変えていない。射程を広げて 544 ファイルに
+ * 当てても、ヒットはこの 1 件だけだった——誤検出がほぼ出ないことの
+ * 裏付けでもある。
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, globSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import path from "node:path";
+import { relative } from "node:path";
 import { findForwardIssueRefs } from "./lib/issue-refs.mjs";
 
-const repoRoot = path.resolve(import.meta.dirname, "..");
-const docsDir = path.join(repoRoot, "docs");
+/**
+ * 参照を拾う対象。**`node_modules` と `.claude/worktrees/`（他セッションの
+ * 作業ツリー）は手で除く**——pnpm の `node_modules` は symlink 経由で
+ * `**` が踏み込まないことを実測済みだが、`.claude/worktrees/` は通常の
+ * ディレクトリなので同じ保証が無い。
+ */
+const GLOBS = [
+  "*.md",
+  "docs/**/*.md",
+  ".github/**/*.md",
+  "apps/**/*.{ts,tsx,mjs,md,jsonc}",
+  "packages/**/*.{ts,tsx,mjs,md,jsonc}",
+];
 
-const files = readdirSync(docsDir)
-  .filter((name) => name.endsWith(".md"))
-  .map((name) => path.join("docs", name));
+const EXCLUDED_PATH_SEGMENTS = ["node_modules", ".claude"];
 
-const refs = files.flatMap((file) =>
-  findForwardIssueRefs(file, readFileSync(path.join(repoRoot, file), "utf8")),
+function isExcluded(file) {
+  const segments = file.split("/");
+  return EXCLUDED_PATH_SEGMENTS.some((segment) => segments.includes(segment));
+}
+
+const seenFiles = new Set();
+for (const glob of GLOBS) {
+  for (const file of globSync(glob)) {
+    if (isExcluded(file)) continue;
+    seenFiles.add(relative(process.cwd(), file));
+  }
+}
+
+// **0 件ガード。** 置き場所が変わって拾えなくなった状態と、対象ファイルが
+// 無い状態は、出力からは区別が付かない（#243 と同じ理由。この検査自身が
+// `docs/*.md` のみに狭まっていたことに長く気づけなかった反省も踏まえる）。
+if (seenFiles.size === 0) {
+  console.error(
+    `::error::check-issue-refs: ${GLOBS.join(" / ")} のどれにも一致しませんでした。` +
+      " 置き場所が変わったなら、このスクリプトの glob も直してください（検査が黙って無効になっています）。",
+  );
+  process.exit(1);
+}
+
+const refs = [...seenFiles].flatMap((file) =>
+  findForwardIssueRefs(file, readFileSync(file, "utf8")),
 );
 
 if (refs.length === 0) {
   // 0 件そのものは正常でありうる（全部 open で、かつ参照が無い場合）。
-  // ただし「拾い方が壊れて 0 件」と区別できないので、文書が 1 つも
-  // 無いときだけ故障として落とす。
-  if (files.length === 0) {
-    console.error(
-      "::error::No docs/*.md found, so no issue reference was checked. This is a bug in the check, not a clean repository.",
-    );
-    process.exit(1);
-  }
-  console.log("check-issue-refs: これからのこととして指している issue はありません。");
+  console.log(
+    `check-issue-refs: ${seenFiles.size} ファイルを見て、これからのこととして指している issue はありません。`,
+  );
   process.exit(0);
 }
 
@@ -67,7 +108,7 @@ for (const ref of closed) {
 }
 
 console.log(
-  `check-issue-refs: ${refs.length} 件の参照（${stateOf.size} 個の issue）を見ました。` +
+  `check-issue-refs: ${seenFiles.size} ファイルを見て、${refs.length} 件の参照（${stateOf.size} 個の issue）を見ました。` +
     `閉じているもの: ${closed.length} 件。`,
 );
 
