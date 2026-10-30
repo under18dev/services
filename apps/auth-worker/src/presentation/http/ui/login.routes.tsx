@@ -8,7 +8,7 @@ import {
   readSessionCookie,
 } from "../session-cookie";
 import type { AppBindings } from "../types";
-import { LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
+import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH, STYLESHEET_PATH } from "./asset-paths";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import {
   LoginPage,
@@ -18,6 +18,7 @@ import {
   type LoginView,
 } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
+import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import { enforceIpRateLimit } from "../rate-limit";
 import {
   loginUrlWithReturnTo,
@@ -516,8 +517,21 @@ uiRoutes.post("/login/logout", pageSecurityHeaders, async (c) => {
  */
 const ASSET_CACHE_CONTROL = IMMUTABLE_ASSET_CACHE_CONTROL;
 
+/**
+ * 手書きの共有スタイルシート。**いま読んでいるのは同意画面だけ**
+ * （#332 の P2 でログイン画面が Kiwa へ移った）。P2 の残りが終わったら
+ * この経路ごと消える。
+ */
 uiRoutes.get(STYLESHEET_PATH, (c) =>
   c.body(UI_STYLESHEET, 200, {
+    "Content-Type": "text/css; charset=utf-8",
+    "Cache-Control": ASSET_CACHE_CONTROL,
+  }),
+);
+
+/** Kiwa UI のスタイルシート（#332）。ログイン画面が読む。 */
+uiRoutes.get(KIWA_STYLESHEET_PATH, (c) =>
+  c.body(KIWA_STYLESHEET, 200, {
     "Content-Type": "text/css; charset=utf-8",
     "Cache-Control": ASSET_CACHE_CONTROL,
   }),

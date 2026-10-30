@@ -6,12 +6,11 @@ import {
   CardTitle,
   getButtonClasses,
 } from "@u18/web-ui/kiwa";
+import { BUTTON_CLASS, DANGER_BUTTON_CLASS } from "@u18/web-ui/kiwa/island-classes";
 import { classesIn } from "@u18/testing";
 import type { Child } from "hono/jsx";
 import { describe, expect, it } from "vitest";
 import {
-  BUTTON_CLASS,
-  DANGER_BUTTON_CLASS,
   PANEL_BODY_CLASS,
   PANEL_CLASS,
   PANEL_DESC_CLASS,

@@ -85,3 +85,67 @@ export const LIST_CLASS = "flex flex-col";
 
 /** 行の中のボタンを並べるところ。 */
 export const ITEM_ACTIONS_CLASS = "mt-2 flex flex-wrap gap-2";
+
+/**
+ * 入力欄 1 つ分（ラベル + 入力）。
+ *
+ * **サーバーが描く画面（auth-worker のログイン）と、島が組み立てる
+ * 画面（dashboard のプロフィール編集）の両方が使う。** 片方だけ変えると
+ * 「編集のときだけ入力欄の見た目が違う」という形で出る。
+ */
+export const FIELD_CLASS = "flex flex-col gap-1.5";
+
+/** 入力欄のラベル。 */
+export const LABEL_CLASS = "text-sm font-medium text-foreground-muted";
+
+/**
+ * 入力欄そのもの。
+ *
+ * **Kiwa に input の primitive がまだ無い**ので、`theme.css` のトークン
+ * から直に組んである。`registry/ui/input.tsx` を取り込んだ日に、この
+ * 手書きが取り残される —— そのときは**サーバー側で
+ * `getInputClasses()` 相当を呼んで渡す形**へ寄せること。
+ * リテラルを残して突き合わせの検査を書く形は採らない（#332 で
+ * 目で写した 7 本のうち 4 本が外れた）。
+ */
+export const INPUT_CLASS =
+  "h-9 w-full rounded-lg border border-border bg-background-subtle px-3 text-sm " +
+  "outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] " +
+  "focus-visible:ring-ring/20";
+
+/**
+ * ボタン。**`getButtonClasses()` の戻り値をリテラルで写したもの。**
+ *
+ * 島は `getButtonClasses()` を**呼べない** —— `cn`（clsx +
+ * tailwind-merge）ごとバンドルへ入るため（このファイルの冒頭）。
+ * そこでリテラルを置き、**同じ値であることを
+ * `apps/dashboard-worker/test/island-classes.test.tsx` が
+ * `getButtonClasses()` と突き合わせている。** Kiwa 側が変われば落ちる。
+ *
+ * **写すのは目では無理だった。** 最初に書いた 7 本のうち 4 本が外れて
+ * いる（`tailwind-merge` が衝突する class を落とすため）。
+ * **サーバー側で呼んで渡せる場面では、そちらを使うこと** ——
+ * 突き合わせの検査ごと要らなくなる。
+ */
+const BUTTON_BASE =
+  "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium " +
+  "transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] " +
+  "focus-visible:ring-ring/20 aria-invalid:ring-destructive/20 " +
+  "dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive " +
+  "disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none " +
+  '[&_svg:not([class*="size-"])]:size-4 shrink-0 [&_svg]:shrink-0';
+
+const BUTTON_OUTLINE = "border border-border bg-card hover:bg-secondary hover:text-foreground";
+const BUTTON_SIZE_SM = "h-8 rounded-lg gap-1.5 px-3 has-[>svg]:px-2.5";
+
+/** ふつうのボタン（パスキーの登録・ログイン、プロフィールの保存）。 */
+export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`;
+
+/**
+ * 取り消しのボタン。
+ *
+ * **面を赤く塗らない。** 一覧の各行に 1 つずつ並ぶので、塗ると
+ * design.md の "No colorful UI." に当たる赤い面が画面を占める。
+ * 文字だけ `--danger` にする。
+ */
+export const DANGER_BUTTON_CLASS = `${BUTTON_CLASS} text-destructive hover:text-destructive`;

@@ -6,6 +6,13 @@ import {
   toRequestOptions,
   toResponseJson,
 } from "@u18/web-ui/client/webauthn-json";
+/*
+ * **`getButtonClasses()` を呼ばない。** `cn`（clsx + tailwind-merge）ごと
+ * バンドルへ入り、島が 2 倍近くになる（#338 で実測）。リテラルは
+ * `@u18/web-ui/kiwa/island-classes` 側にあり、あのファイルは何も
+ * import しない（`packages/web-ui/test/island-classes.test.ts` が見ている）。
+ */
+import { BUTTON_CLASS, ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
 
 /**
  * ログイン画面の Passkey アイランド（仕様書 14-1 の決定 4）。
@@ -111,10 +118,17 @@ function PasskeyLogin({ returnTo }: { returnTo: string }) {
   };
 
   return (
-    <div class="passkey">
+    /*
+      **包みにクラスを付けていない**（#332）。手書き CSS のころ
+      `class="passkey"` と書いていたが、**`styles.ts` に定義が無く、
+      何も指していなかった。** 上の余白は罫線（`または`）が、ボタンの
+      幅はボタン自身が出している（本番で描いて確かめた）。
+      ここで Tailwind に「再現」すると、**元に無かった余白を足すことになる。**
+    */
+    <div>
       <button
         type="button"
-        class="button button-secondary"
+        class={BUTTON_CLASS}
         disabled={phase.kind === "running"}
         onClick={() => void start()}
       >
@@ -122,7 +136,7 @@ function PasskeyLogin({ returnTo }: { returnTo: string }) {
       </button>
       {phase.kind === "failed" ? (
         // 「登録されていません」とは言わない。失敗の理由を問わず同じ文言にする。
-        <p class="notice" role="status">
+        <p class={ITEM_META_CLASS} role="status">
           パスキーでのログインを完了できませんでした。メールアドレスでのログインをお試しください。
         </p>
       ) : null}
