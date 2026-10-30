@@ -258,9 +258,18 @@ describe("POST /account/admin/clients/create", () => {
   });
 
   it("CSRF トークンが無ければ RPC を呼ばない", async () => {
+    // **`neverCalled` が投げるだけでは足りない。** 投げた例外は
+    // `RpcIdentityAdminGateway.call` が `identity_unavailable` へ畳み、
+    // 画面は「いま登録できません」を出す。**判定を丸ごと外しても
+    // 200 が返り、文言も「もう一度」で一致していた** ——
+    // ネガティブ確認で緑のまま通ったので、呼ばれた回数を数える。
+    let calls = 0;
     const guarded = {
       listOAuthClients: async () => rpcOk([]),
-      createOAuthClient: () => neverCalled("createOAuthClient"),
+      createOAuthClient: () => {
+        calls += 1;
+        return neverCalled("createOAuthClient");
+      },
     };
     const page = await openAdminPage(guarded);
 
@@ -271,8 +280,13 @@ describe("POST /account/admin/clients/create", () => {
       redirect_uris: "https://demo.example/callback",
     });
 
+    expect(calls).toBe(0);
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("もう一度");
+    // **障害時の文言と区別する。** 重ねると、判定を外しても緑になる。
+    expect(await response.text()).toContain("画面を開き直して");
+    expect(await (await fetchPage(ADMIN_CLIENTS_PATH, true, guarded)).text()).not.toContain(
+      "画面を開き直して",
+    );
   });
 
   it("client_id が重複したら、やり直せる形で言う", async () => {
@@ -365,9 +379,13 @@ describe("POST /account/admin/clients/disable", () => {
   });
 
   it("CSRF トークンが無ければ RPC を呼ばない", async () => {
+    let calls = 0;
     const guarded = {
       listOAuthClients: async () => rpcOk([CLIENT]),
-      disableOAuthClient: () => neverCalled("disableOAuthClient"),
+      disableOAuthClient: () => {
+        calls += 1;
+        return neverCalled("disableOAuthClient");
+      },
     };
     const page = await openAdminPage(guarded);
 
@@ -375,7 +393,8 @@ describe("POST /account/admin/clients/disable", () => {
       client_id: "demo-app",
     });
 
+    expect(calls).toBe(0);
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("もう一度");
+    expect(await response.text()).toContain("画面を開き直して");
   });
 });

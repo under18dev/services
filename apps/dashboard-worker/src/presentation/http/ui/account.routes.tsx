@@ -273,7 +273,11 @@ export const accountUiRoutes = new Hono<AppBindings>()
 
     const form = await c.req.parseBody();
     if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
-      return renderAdminPage(c, token, { error: "もう一度お試しください。" });
+      // **障害時の文言と別にする。** どちらも「もう一度お試しください」に
+      // していたので、**CSRF で弾いたのか RPC が落ちたのかを応答から
+      // 区別できなかった** —— 判定を丸ごと外しても検査が緑のままになる
+      // （#333 のネガティブ確認で出た）。
+      return renderAdminPage(c, token, { error: CSRF_REJECTED_MESSAGE });
     }
 
     const redirectUris = (field(form, "redirect_uris") ?? "")
@@ -328,7 +332,7 @@ export const accountUiRoutes = new Hono<AppBindings>()
 
     const form = await c.req.parseBody();
     if (!isValidCsrf(c, field(form, CSRF_FIELD_NAME))) {
-      return renderAdminPage(c, token, { error: "もう一度お試しください。" });
+      return renderAdminPage(c, token, { error: CSRF_REJECTED_MESSAGE });
     }
 
     const result = await c
@@ -451,6 +455,16 @@ function renderFailure(
   }
   return c.html(<UnavailablePage />, 503);
 }
+
+/**
+ * CSRF で弾いたときの文言。**障害時の文言と重ねない。**
+ *
+ * **理由は何が壊れたかを応答から読めるようにするため**だけではない ——
+ * 重ねると、**判定そのものを外しても検査が落ちなくなる。** RPC は
+ * 呼ばれて失敗し、どちらの道も同じ文字列へ着く。
+ */
+const CSRF_REJECTED_MESSAGE =
+  "操作を受け付けられませんでした。画面を開き直してからお試しください。";
 
 /** form の値を 1 つ取り出す。ファイルが来たら無いものとして扱う。 */
 function field(form: Record<string, unknown>, name: string): string | undefined {
