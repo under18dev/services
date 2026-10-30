@@ -9,7 +9,13 @@
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "approval:status": "node scripts/admin-approval.mjs status",
+    "approval:list": "node scripts/admin-approval.mjs list",
+    "approval:grant": "node scripts/admin-approval.mjs grant",
+    "approval:revoke": "node scripts/admin-approval.mjs revoke",
+    "migrate:local": "wrangler d1 migrations apply u18-admin --local",
+    "migrate:remote": "wrangler d1 migrations apply u18-admin --remote"
   },
   "dependencies": {
     "@u18/admin-db": "workspace:*",

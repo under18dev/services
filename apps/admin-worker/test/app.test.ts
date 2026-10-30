@@ -285,7 +285,12 @@ describe("承認リスト", () => {
     expect(response.headers.get("Location")).toBe("/pending");
   });
 
-  it("/pending は承認待ちである旨を表示する（実装の語は出さない）", async () => {
+  it("/pending は自分の sub と、承認する人へ渡す grant コマンドを表示する", async () => {
+    // **最初の 1 人は、ここでしか自分の sub を知れない。** 承認リストが
+    // 空の状態では `/` へ辿り着けず、CLI（admin-approval.mjs）に渡す
+    // 値を他で見る手段が無い（運用者表を直接引くか、別の管理者になって
+    // 入るかしか無く、どちらも筋が悪い）。以前はここを「実装の語は
+    // 出さない」として sub を隠していたが、隠すべきは逆の側だった。
     const approvals = fakeApprovals([]);
     const sessionCookie = await loginAs("usr_waiting", approvals);
 
@@ -299,7 +304,10 @@ describe("承認リスト", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("承認");
-    expect(html).not.toContain("usr_waiting");
+    expect(html).toContain("usr_waiting");
+    expect(html).toContain("admin-approval.mjs grant");
+    expect(html).toContain("--sub usr_waiting");
+    expect(html).toContain("--super");
   });
 
   it("承認済みが /pending を開くと / へ戻される（ループにしない）", async () => {
