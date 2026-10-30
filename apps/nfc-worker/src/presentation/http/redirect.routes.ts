@@ -1,22 +1,25 @@
+import { isCardId } from "@u18/domain";
 import type { Context, Hono } from "hono";
 import { isoDateUtc } from "../../domain/services/retention-policy";
 import { claimUrl } from "./base-path";
 import type { AppBindings } from "./types";
 
 /**
- * カード ID として受け付ける形。
+ * カード ID の形の判定は `@u18/domain` の `isCardId()` 1 箇所（#365）。
  *
- * `@u18/domain` の `newId()` が作る Crockford base32 + 接頭辞の形に合わせる。
- * ここで弾くのは防御というより無駄打ちの抑制 —— 形の違う入力で D1 を
+ * **以前はここに別のリテラル（`/^[a-z0-9_]{1,64}$/`）を持っていた。**
+ * `newCardId()` の実際の形（`nfc_` + 20 文字でちょうど 24 文字、文字集合も
+ * 狭い）とは合っておらず、しかも `cards.routes.ts` / `cards-ui.routes.tsx`
+ * に同じリテラルが散っていた——直す必要が起きても 3 箇所のうち 1, 2 箇所
+ * しか直らない形だった。`isCardId()` は `newCardId()` と同じ定数から
+ * 組み立てているので、作る側と見る側が離れられない。
+ *
+ * **ここで弾くのは防御というより無駄打ちの抑制** —— 形の違う入力で D1 を
  * 引きに行かない。**弾いた場合も応答は実在しないカードと同じ**にすること。
- *
- * **実際の ID の形とは合っていない**（`newCardId()` は `nfc_` + 20 文字で
- * ちょうど 24 文字、文字集合も狭い）。目的が防御でないので漏れは無いが、
- * 同じリテラルが 3 箇所にある。#365。
- * 「形が不正」と「存在しない」を区別すると、総当たりする相手に
- * カード ID の形を教えることになる。
+ * 「形が不正」と「存在しない」を区別すると、総当たりする相手にカード ID
+ * の形を教えることになる——とはいえ `isCardId()` の JSDoc にある通り、
+ * その形自体は秘密ではない。
  */
-const CARD_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
 
 /**
  * 何も言わないときの応答。
@@ -71,7 +74,7 @@ export function registerRedirectRoutes(app: Hono<AppBindings>): void {
         "Referrer-Policy": "no-referrer",
       });
 
-    if (!CARD_ID_PATTERN.test(cardId)) return notFound();
+    if (!isCardId(cardId)) return notFound();
 
     const disclosure = await c.get("container").useCases.resolveCard.execute(cardId);
 

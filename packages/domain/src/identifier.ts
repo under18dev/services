@@ -75,4 +75,36 @@ export const newPublicClientId = (): string => newId("app");
  * 前提で、1 万枚・毎秒 1 万回でも 3.8 億年）。**危険だったから伸ばすのでは
  * なく、決めてあった値へ戻している。**
  */
-export const newCardId = (): string => newId("nfc", 20);
+const CARD_ID_PREFIX = "nfc";
+const CARD_ID_BYTE_LENGTH = 20;
+
+export const newCardId = (): string => newId(CARD_ID_PREFIX, CARD_ID_BYTE_LENGTH);
+
+/**
+ * `newCardId()` が作る形かどうかを見る（#365）。
+ *
+ * **以前は `apps/nfc-worker/src/presentation/http/` の 3 箇所が、それぞれ
+ * `/^[a-z0-9_]{1,64}$/` という別のリテラルを持っていた。** 実際の ID の形
+ * （`nfc_` + `ALPHABET` 20 文字 = ちょうど 24 文字）とは合っておらず、
+ * 3 箇所が同じようにずれていた——直す必要が起きたとき、1 箇所直して
+ * 残り 2 箇所を直し忘れる形になっていた。
+ *
+ * ここでは `newCardId()` と**同じ定数**（`CARD_ID_PREFIX` / `CARD_ID_BYTE_LENGTH`
+ * / `ALPHABET`）からパターンを組み立てる。作る側と見る側が離れられない。
+ *
+ * ## これは防御ではない
+ *
+ * 呼び出し側（`redirect.routes.ts` 等）が既に書いている通り、ここで弾く
+ * 目的は「形の違う入力で D1 を引きに行かない」という無駄打ちの抑制で
+ * あり、セキュリティ上の境界ではない。**カード ID の形（接頭辞・長さ・
+ * 文字集合）はこのファイルを読めば誰でも分かる、秘密ではない値**
+ * ——厳しくしても、第三者に新しく教える情報は無い。
+ *
+ * 弾いた場合の応答を「実在しないカード」と変えないことは、呼び出し側
+ * （`domain/services/disclosure.ts` を参照する経路）の責務のままである。
+ */
+const CARD_ID_PATTERN = new RegExp(`^${CARD_ID_PREFIX}_[${ALPHABET}]{${CARD_ID_BYTE_LENGTH}}$`);
+
+export function isCardId(value: string): boolean {
+  return CARD_ID_PATTERN.test(value);
+}
