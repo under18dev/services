@@ -22,6 +22,16 @@ import type { Jwks } from "./discovery";
 
 export type VerifiedIdToken = {
   readonly sub: string;
+  /**
+   * `acr`（OIDC Core §2、u18 Identity の #390 拡張）。
+   *
+   * **u18 が定義する水準（`"passkey"`）を満たしたときだけ値が入る。**
+   * 満たさなければ claim 自体が無いので `null`——「u18 に acr という
+   * 概念が無い」と「満たさなかった」を auth-worker 側が区別していない
+   * （auth-worker の `domain/services/amr.ts` の `acrFor` を参照）。
+   * ここでも同じ扱いにし、2 つを区別しない。
+   */
+  readonly acr: string | null;
   readonly payload: JWTPayload;
 };
 
@@ -52,5 +62,7 @@ export async function verifyIdToken(params: {
     throw new Error("id_token の nonce が一致しない");
   }
 
-  return { sub: payload.sub, payload };
+  const acr = typeof payload.acr === "string" ? payload.acr : null;
+
+  return { sub: payload.sub, acr, payload };
 }

@@ -37,11 +37,18 @@ export function executionContext(): ExecutionContext {
  *
  * **ここで承認済みにするとは限らない。** `approvals` 次第で `/pending`
  * に落ちる状態も作れる——呼び出し側がどちらを見たいかを選ぶ。
+ *
+ * **既定で `acr: "passkey"` を乗せる**（#390 決定 8）。`/callback` が
+ * `REQUIRED_ACR` を見るようになったので、乗せないと**すべての画面テストが
+ * ログインの時点で弾かれる**——ここは「Passkey で入った管理者」を
+ * 代表させる既定値で、acr 自体の拒否を見たいテスト（`app.test.ts`）だけ
+ * `acr` を明示的に外す。
  */
 export async function loginAs(
   sub: string,
   approvals: ApprovalRepository,
   overrides: Parameters<typeof createApp>[0] = {},
+  acr: string | undefined = "passkey",
 ): Promise<string> {
   const idp = await createFakeIdp(env.AUTH_ISSUER);
   const loginApp = createApp({ ...overrides, fetcher: idp.fetcherReturning("unused"), approvals });
@@ -55,7 +62,12 @@ export async function loginAs(
   const nonce = authorizeUrl.searchParams.get("nonce")!;
   const loginStateCookie = cookieHeaderFrom(loginResponse);
 
-  const idToken = await idp.signIdToken({ sub, aud: env.OIDC_CLIENT_ID, nonce });
+  const idToken = await idp.signIdToken({
+    sub,
+    aud: env.OIDC_CLIENT_ID,
+    nonce,
+    ...(acr === undefined ? {} : { acr }),
+  });
   const callbackApp = createApp({
     ...overrides,
     fetcher: idp.fetcherReturning(idToken),

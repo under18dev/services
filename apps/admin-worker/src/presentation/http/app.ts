@@ -44,13 +44,21 @@ import type { AppBindings } from "./types";
  * 画面からの承認はまだ無い——承認する側の画面（「誰が待っているか」の
  * 一覧）が無いので、2 人目以降もしばらくは CLI で入れることになる。
  *
- * ## `amr`（認証方法）クレームはまだ見ていない
+ * ## `acr` を要求する（決定 8、#390）
  *
- * d5 が ID Token に `amr` を足す作業と並行している。`amr` が無いと、
- * admin-worker は「Passkey で入ったか、メール OTP で入ったか」を
- * 知る手段が無い——**承認リストへの昇格（誰かを承認してよい権限）に
- * Passkey を要求する**なら、`amr` が入ってから確かめる。いまは
- * 確かめていないことを、ここに明示しておく。
+ * **管理者は Passkey のセッションでしか振る舞えない**という決定 8 は、
+ * dashboard-worker / nfc-worker では auth-worker 自身の `getSession` が
+ * 強制しているが、admin-worker は別ホストの Relying Party で auth-worker
+ * の生のセッションを読めない。`IdentityAdminDelegatedRPC`
+ * （`IDENTITY_ADMIN_DELEGATED`）は `sessionToken` を要求しない設計
+ * （`requireAdminSession` 相当が auth-worker 側に無い）なので、
+ * **決定 8 をここで引き受けないと、admin-worker 経由だけ再認証なしで
+ * 利用者の停止・OAuth クライアントの登録ができる穴になる。**
+ *
+ * `/login` で `acr_values=passkey` を要求し、`/callback` で返ってきた
+ * ID Token の `acr` を見る——`REQUIRED_ACR` を参照。**`acr_values` は
+ * u18 Identity 側では強制にならない**（`prompt=none` と組んだときだけ）
+ * ので、確認は必ずここ（RP 側）で行う。
  *
  * ## `return_to` は admin-worker の中だけで閉じる
  *
@@ -70,6 +78,16 @@ const RETURN_TO_QUERY = "return_to";
  * u18 Identity から見ればただの OIDC クライアントの 1 つである。
  */
 const SCOPE = "openid";
+
+/**
+ * u18 が定義する `acr` の水準（決定 8、#390）。
+ *
+ * auth-worker の `domain/services/amr.ts` の `ACR_PASSKEY` と同じ文字列。
+ * **import できない**（別 Worker）ので複製してある——`_shared.ts` の
+ * 複製と同じ判断で、1 語の定数が 2 箇所にあること自体のリスクより、
+ * 依存を増やすことのリスクのほうが大きい。
+ */
+const REQUIRED_ACR = "passkey";
 
 /** セッションを要求しない経路。OIDC のラウンドトリップそのものと死活監視。 */
 const PUBLIC_PATHS = new Set(["/health", "/login", "/callback", "/logout"]);
@@ -158,6 +176,10 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       state,
       nonce,
       codeChallenge,
+      // **要求するだけでは決定 8 を守れない**（u18 Identity は
+      // `prompt=none` と組まない限り強制しない）。`/callback` 側の
+      // `REQUIRED_ACR` 確認と対で機能する。
+      acrValues: REQUIRED_ACR,
     });
 
     const loginState = encodeLoginState({ state, nonce, codeVerifier, returnTo });
@@ -230,6 +252,23 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       });
     } catch (error) {
       return fail(`id_token_invalid:${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (verified.acr !== REQUIRED_ACR) {
+      // **`fail()` を使わない。** あちらは「理由を画面に出さない」
+      // 方針（攻撃者に何を直せばよいか教えない）だが、これは攻撃ではなく
+      // 本人がメール OTP でログインしただけである——「やり直せば直る」
+      // ことを具体的に伝えるほうが親切で、何も漏らさない。
+      console.warn(JSON.stringify({ event: "admin.callback_rejected", reason: "acr_not_met" }));
+      c.header("Set-Cookie", clearLoginStateCookie(env.ENVIRONMENT), { append: true });
+      c.header("Cache-Control", "no-store");
+      return c.html(
+        "<!doctype html><html><body>" +
+          "<p>この管理画面はパスキーでログインした場合のみ使えます。</p>" +
+          `<p><a href="/login">パスキーでログインし直す</a></p>` +
+          "</body></html>",
+        403,
+      );
     }
 
     if (env.SESSION_SECRET === undefined || env.SESSION_SECRET === "") {

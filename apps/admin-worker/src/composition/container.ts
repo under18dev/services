@@ -1,5 +1,9 @@
 import { createAdminDatabase } from "@u18/admin-db";
-import type { NfcAdminDelegatedRpcContract } from "@u18/contracts";
+import type {
+  IdentityAdminDelegatedRpcContract,
+  NfcAdminDelegatedRpcContract,
+} from "@u18/contracts";
+import { asIdentityAdminDelegatedRpc } from "../infrastructure/rpc/identity-admin-delegated.gateway";
 import { asNfcAdminDelegatedRpc } from "../infrastructure/rpc/nfc-admin-delegated.gateway";
 import type { ApprovalRepository } from "../application/ports/approval.repository";
 import { DrizzleApprovalRepository } from "../infrastructure/persistence/drizzle-approval.repository";
@@ -24,6 +28,8 @@ export type ContainerOverrides = {
   readonly approvals?: ApprovalRepository;
   /** nfc-worker への delegated RPC。テストでは fake を差して Service Binding 無しで確かめる。 */
   readonly nfcCards?: NfcAdminDelegatedRpcContract;
+  /** auth-worker への delegated RPC（#390 決定 16 ③）。同上。 */
+  readonly identityAdmin?: IdentityAdminDelegatedRpcContract;
 };
 
 /**
@@ -62,8 +68,10 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
   const approvals =
     overrides.approvals ?? new DrizzleApprovalRepository(createAdminDatabase(env.ADMIN_DB));
   const nfcCards = overrides.nfcCards ?? asNfcAdminDelegatedRpc(env.NFC_ADMIN_DELEGATED);
+  const identityAdmin =
+    overrides.identityAdmin ?? asIdentityAdminDelegatedRpc(env.IDENTITY_ADMIN_DELEGATED);
 
-  return { env, fetcher, clock, discovery, approvals, nfcCards };
+  return { env, fetcher, clock, discovery, approvals, nfcCards, identityAdmin };
 }
 
 export type Container = ReturnType<typeof createContainer>;

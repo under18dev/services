@@ -7,12 +7,15 @@ import { defineConfig } from "vitest/config";
  *
  * **Service Binding のスタブが要る**（#382 / #390 決定 16 ③）。
  * `wrangler.jsonc` に `NFC_ADMIN_DELEGATED`（nfc-worker の
- * `NfcAdminDelegatedRPC`）を持つ——**u18 Identity への binding は
- * 依然として持たない**（運用者の判断、2026-10-30 夜）が、nfc-worker
- * とは繋がる。テストでは本物の nfc-worker を立てず、
- * `ContainerOverrides.nfcCards` に fake を差す（`test/nfc.routes.test.ts`）
- * ——それでも `wrangler.jsonc` が宣言した Entrypoint 名が無いと workerd が
- * 起動に失敗する（#47 と同じ形）ので、スタブだけは要る。
+ * `NfcAdminDelegatedRPC`）と `IDENTITY_ADMIN_DELEGATED`（auth-worker の
+ * `IdentityAdminDelegatedRPC`）の 2 本を持つ——**`IdentityRPC` /
+ * `IdentityAdminRPC`（sessionToken 必須の dashboard-worker 向け契約）は
+ * 依然として持たない**（運用者の判断、2026-10-30 夜）。テストでは本物の
+ * nfc-worker / auth-worker を立てず、`ContainerOverrides.nfcCards` /
+ * `ContainerOverrides.identityAdmin` に fake を差す
+ * （`test/nfc.routes.test.ts`）——それでも
+ * `wrangler.jsonc` が宣言した Entrypoint 名が無いと workerd が起動に
+ * 失敗する（#47 と同じ形）ので、スタブだけは要る。
  *
  * **D1 は持つ。** 承認リスト（`ADMIN_DB`）のマイグレーションを
  * `packages/admin-db/drizzle` から読み、`test/setup.ts` で適用する
@@ -60,6 +63,18 @@ export default defineConfig({
               "'stub worker - you meant to inject a fake NfcAdminDelegatedRpcContract into createApp()'," +
               " { status: 599 }) };" +
               "export class NfcAdminDelegatedRPC {}",
+          },
+          {
+            // 名前は既定 env の binding（`u18-auth`）に合わせてある。
+            // `env.production` は `u18-auth-production` を指すので、
+            // 上の `u18-nfc` と同じ注意が当てはまる。
+            name: "u18-auth",
+            modules: true,
+            script:
+              "export default { fetch: () => new Response(" +
+              "'stub worker - you meant to inject a fake IdentityAdminDelegatedRpcContract into createApp()'," +
+              " { status: 599 }) };" +
+              "export class IdentityAdminDelegatedRPC {}",
           },
         ],
       },
