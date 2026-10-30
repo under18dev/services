@@ -27,13 +27,18 @@ import { ORIGIN, executionContext, identityWith } from "./helpers";
 // 書き直すと、検査しているのは「テストの中の組み立て方」になる。
 const client = createCardsClient(ORIGIN, CARDS_BASE_PATH);
 
+// 形式検査（`isCardId()`、#365）を通る値にする。**`"demo_card"` のような
+// 値だと、ハンドラに届く前に形式検査の 404 で止まり、下のテストが見たい
+// 「届いたか」を見られなくなる。**
+const FAKE_CARD_ID = `nfc_${"0".repeat(20)}`;
+
 describe("アイランドが作る URL が、ハンドラに届く", () => {
   it("PUT /:cardId/target が 404 にならない", async () => {
-    const url = client[":cardId"].target.$url({ param: { cardId: "demo_card" } });
+    const url = client[":cardId"].target.$url({ param: { cardId: FAKE_CARD_ID } });
 
     // 接頭辞が二重になっていないこと自体も見る。**URL の形が崩れていても、
     // 下の fetch が 404 にならない組み合わせはありうる。**
-    expect(url.pathname).toBe(`${CARDS_BASE_PATH}/demo_card/target`);
+    expect(url.pathname).toBe(`${CARDS_BASE_PATH}/${FAKE_CARD_ID}/target`);
 
     const response = await createApp({ identity: identityWith({}) }).fetch(
       new Request(url, {
