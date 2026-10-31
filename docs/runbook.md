@@ -2315,6 +2315,36 @@ pnpm --filter @u18/auth-worker key:generate --apply-local
 
 公開鍵の行を入れずに Worker を起動すると、`/.well-known/jwks.json` は **503**（`jwks_unavailable`）を返す。鍵が 1 本も無い状態で空の JWKS を 200 で返すと、RP がそれを正常な応答としてキャッシュし、鍵を入れ直してもキャッシュが切れるまで「鍵が無い」状態を信じ続けるため。
 
+### 9.6 `client_secret` を回す（#445）
+
+秘密が漏れた、あるいは人の目に触れた疑いがあるときに使う。**`create` と違い、既存の `client_id` を持ったまま秘密だけを差し替える。**
+
+**生成と適用の 2 コマンドに分かれている。** 1 コマンドで「生成 → D1 を UPDATE → ファイルに書く」まで済ませると、新しい秘密を Worker 側（`wrangler secret put`）へ入れる**前**に D1 が書き変わってしまい、順序を選べなくなる（§4 の署名鍵が `generate` / `register` を分けているのと同じ理由）。
+
+```bash
+# 1. 新しい秘密を生成する。この時点では D1 に一切触れない。
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+pnpm client:generate-secret -- --out /tmp/u18-admin-secret.txt
+
+# 2. 新しい秘密を Worker へ入れる（admin-worker の場合。binding 名は
+#    apps/admin-worker/wrangler.jsonc の Secret 一覧を参照）。
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/admin-worker
+npx wrangler secret put OIDC_CLIENT_SECRET < /tmp/u18-admin-secret.txt
+
+# 3. D1 の client_secret_hash を同じファイルの中身で更新する。
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+pnpm client:rotate -- --client-id u18-admin --secret-file /tmp/u18-admin-secret.txt --remote
+
+# 4. 秘密をディスクに残さない。
+rm /tmp/u18-admin-secret.txt
+```
+
+**猶予期間は無い。** 手順 2 と手順 3 の間は、D1 がまだ旧ハッシュを持っている一方で Worker はもう新しい秘密を提示するので、その間そのクライアントは必ず `invalid_client` になる。2 と 3 は間を空けずに続けて実行すること。列を増やして猶予を持たせる設計も検討したが、落ちる相手はクライアント 1 つ・運用者 1 人の管理画面だけなので、この手順で十分と判断した（運用者の判断、2026-10-31）。
+
+**ファイルの中身をそのまま 2 で渡すこと。** `cat` で中身を見てから手で打ち直したり、別の端末に貼り直したりしない。手順 3 がハッシュ化するのも同じファイルの中身で、両者が読む値を完全に一致させることで「D1 のハッシュは合っているのに Worker が送る値だけ違う」という不一致を防いでいる。
+
+`rotate` は対象が `confidential` かつ失効していないことを先に確認する。`client_id` を打ち間違えたり public クライアントを指定したときは、D1 を書き換える前にエラーで止まる。
+
 ---
 
 ## 10. アカウント復旧
