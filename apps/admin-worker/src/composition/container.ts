@@ -3,6 +3,7 @@ import type {
   IdentityAdminDelegatedRpcContract,
   NfcAdminDelegatedRpcContract,
 } from "@u18/contracts";
+import { asFetcher } from "../infrastructure/http/auth-origin.gateway";
 import { asIdentityAdminDelegatedRpc } from "../infrastructure/rpc/identity-admin-delegated.gateway";
 import { asNfcAdminDelegatedRpc } from "../infrastructure/rpc/nfc-admin-delegated.gateway";
 import type { ApprovalRepository } from "../application/ports/approval.repository";
@@ -16,6 +17,16 @@ import { DiscoveryCache } from "../oidc/discovery-cache";
  * テストから本物の HTTP 無しで確かめるため（`oidc/discovery.ts` の
  * JSDoc を参照）。`approvals` を上書きできるのは、D1 を立てずに
  * ルーティングの分岐（承認済み／未承認）だけを確かめるテストのため。
+ *
+ * **既定の `fetcher` は `AUTH_ORIGIN` binding 経由である**（#439）。
+ * 以前は本物の `fetch` で `https://auth.under18.dev/...` を直接叩いて
+ * おり、本番で Cloudflare のループ防止（同一ゾーンへの Worker 発
+ * サブリクエストが discard prefix へ流れる）に当たって 522 で落ちた。
+ * `entrypoint` を指定しない Service Binding は、ゾーンのルーティングを
+ * 経由せずに auth-worker の公開 HTTP（`fetch` ハンドラそのもの）へ
+ * 繋がるので、この種の失敗が起こらない。discovery・JWKS・token 交換の
+ * どれもここを通るので、1 箇所直すだけで 3 つとも直る
+ * （`infrastructure/http/auth-origin.gateway.ts` を参照）。
  */
 
 export type Clock = { readonly now: () => Date };
@@ -48,7 +59,7 @@ export type ContainerOverrides = {
 const discoveryCaches = new Map<string, DiscoveryCache>();
 
 export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
-  const fetcher = overrides.fetcher ?? fetch;
+  const fetcher = overrides.fetcher ?? asFetcher(env.AUTH_ORIGIN);
   const clock = overrides.clock ?? systemClock;
   const issuer = env.AUTH_ISSUER;
 
