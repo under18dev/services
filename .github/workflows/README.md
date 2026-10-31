@@ -1005,16 +1005,27 @@ gh run list --branch "<branch>" --json headSha,conclusion | grep "$(git ls-remot
 | `ci.yml`             | PR / main への push                    | lint・prettier・typecheck・test・build。集約ジョブ `CI` をブランチ保護の required status check に使う               |
 | `deploy.yml`         | main への push（paths 絞り込み）・手動 | preflight → D1 マイグレーション → auth-worker → dashboard-worker の直列                                             |
 | `security.yml`       | PR / main への push / 週次             | CodeQL・dependency review・pnpm audit                                                                               |
-| `backup.yml`         | **日次 06:00 JST**・手動               | 2 つの D1 を取得 → 復元リハーサル → age で暗号化 → R2 へ put → 読み戻して確認（#325 / runbook §12.11）              |
+| `backup.yml`         | **日次 20:23 UTC**・手動               | 2 つの D1 を取得 → 復元リハーサル → age で暗号化 → R2 へ put → 読み戻して確認（#325 / runbook §12.11）              |
 | `d1-token-probe.yml` | 手動                                   | CI のトークンが**本番 D1 を読める**ことを、2 つの DB を実際に `d1 export --remote` して確かめる（age の往復も通す） |
 | `r2-token-probe.yml` | 手動                                   | CI のトークンが**R2 を扱える**ことを、実際に list → put → get → delete して確かめる                                 |
-| `backup-monitor.yml` | **日次 12:00 JST**・手動               | `backup.yml` とは別の経路で、R2 を外から見て日次バックアップが止まっていないか確かめる（#361）                      |
+| `backup-monitor.yml` | **日次 05:23 UTC**・手動               | `backup.yml` とは別の経路で、R2 を外から見て日次バックアップが止まっていないか確かめる（#361）                      |
 
 `deploy.yml` のデプロイ順は入れ替えないこと。dashboard-worker は auth-worker の `IdentityRPC` に Service Binding で依存するため、auth を先に出す（仕様書 4.4）。
 
 **probe が 2 本あるのは、確かめている先が違うから。** バックアップは `d1 export --remote`（読み出し）→ R2 へ put（書き込み）の 2 段で、**片方が通ってももう片方の保証にならない**（Cloudflare の API トークンは権限をリソース種別ごとに持つ）。どちらも**権限一覧を読むのではなく実際に操作する** —— 理由はそれぞれのファイルの冒頭にある。
 
 **`backup.yml` は `schedule:` を持つ 2 本目、`backup-monitor.yml` が 3 本目である**（1 本目は `security.yml` の `17 3 * * 1`）。時刻も曜日もぶつけていない。
+
+**2 本とも分を `:00` に置いていない。** 分を `:00` から外すのは**混む瞬間を避けるため**であって、**遅れ自体が消えるわけではない** —— この repo で観測できた `schedule` 起動実績は 2 例あり、どちらも分単位ではなく時間単位でずれていた。
+
+```
+security.yml の cron: 17 3 * * 1   → 5 時間 35 分遅れ（2026-10-26）
+backup.yml（変更前）:  0 21 * * *  → 3 時間 37 分遅れ（2026-10-31、成功はしている）
+```
+
+以前はここを「06:00 JST」「12:00 JST」と人が見やすい時刻で書いていたが、「schedule は数十分ずれる程度」という前提がこの 2 例で崩れた（実際に結果が出たのは 09:37 JST で、運用者は既に起きていた時刻だった）。そのため**分を散らして混雑を避ける**（`:23`）ことと、**遅れても検知できるだけの余白を閾値側に持たせる**（`check-backup-freshness.mjs` の `STALE_AFTER_HOURS`）方へ寄せた。人が読める時刻であることは設計上の要件ではない。
+
+**Cloudflare Worker の Cron Trigger への移行は検討し、見送った。** 運用者の判断で「定時性が必要なわけでもない」。`schedule:` の遅延を根本から断つなら候補になるが、バックアップ本体（`backup-d1.mjs`）は `wrangler` と `age` を `spawnSync` で呼び、**復元リハーサルまで回してから封をする**（`scripts/lib/restore-rehearsal.mjs`）CLI 前提の処理で、Worker のランタイム内では動かせない。移すとすれば「Worker の Cron Trigger → `repository_dispatch` → 既存の `backup.yml`」という中継になり、**遅延そのものは `repository_dispatch` を受けてからの GitHub Actions 起動待ちに残る**ため、遅延を無くす効果は限定的な割に構成が一段増える。時刻の正確さ（分単位でずれないこと）を要件から外した時点で、この移行の動機は無くなった。再検討するなら、まず「分単位の正確さが本当に要るか」から見直すこと。
 
 **`backup-monitor.yml` は `backup.yml` の中には置いていない。** 同じ `schedule:` の中に置いた見張りは、自分が走っていないことを観測できない —— `backup.yml` が止まれば、その見張りも一緒に止まる。**止まった場合にだけ沈黙する検査**になるため、独立したワークフローにした（#361）。
 
