@@ -35,7 +35,8 @@
  *
  *   node scripts/oauth-client.mjs create \
  *     --client-id u18-dashboard --name "u18 Dashboard" --type confidential \
- *     --redirect-uri https://auth.under18.dev/account/callback --first-party [--remote]
+ *     --redirect-uri https://auth.under18.dev/account/callback --first-party \
+ *     --out secret.txt [--remote]          # confidential には --out が必須
  *   node scripts/oauth-client.mjs disable --client-id u18-dashboard [--remote]
  *   node scripts/oauth-client.mjs list [--remote]
  *   node scripts/oauth-client.mjs seed-dev          # ローカル専用（下記）
@@ -67,6 +68,12 @@
  * だけなので、「手順書に『新旧どちらを先に入れても、もう片方が終わるまで
  * の間は必ず落ちる』と書く」ほうが安い（運用者の判断、2026-10-31）。
  * `generate-secret` の出力がその手順を案内する。
+ *
+ * **`create` も直した。** 今夜の秘密が人の目に触れたのは、回す手段が
+ * 無かったことだけでなく、`create` が平文を `console.log` に出していた
+ * ことが本体だった——回す手段だけ足しても、同じ経路で同じことがもう一度
+ * 起こせる。confidential クライアントの作成は `--out` を必須にし、
+ * `writeSecretFile` でファイルへ書いてパスだけ表示する形に変えた。
  */
 
 import { spawnSync } from "node:child_process";
@@ -77,6 +84,7 @@ import {
   checkRotationEligibility,
   generateClientSecret,
   hashClientSecret,
+  isValidClientSecretFormat,
   writeSecretFile,
 } from "./lib/client-secret.ts";
 import { describeWranglerFailure } from "./lib/wrangler-failure.ts";
@@ -277,7 +285,23 @@ function insertStatements(domain, options) {
   return { id, credential, statements };
 }
 
+/**
+ * **confidential クライアントの作成には `--out` が必須。**
+ *
+ * 以前はここで `console.log` に平文の秘密をそのまま出していた。
+ * `client_secret` が平文で人の目に触れた経路はまさにここで、#445 の
+ * 発端になった（回す手段を足しても、ここが開いたままでは同じことが
+ * もう一度起こせる）。`writeSecretFile`（`rotate` / `generate-secret` と
+ * 同じ関数）でファイルへ書き、パスだけを表示する。
+ */
 async function create(options) {
+  if (options.type === "confidential" && !options.out) {
+    throw new Error(
+      "--out は必須（confidential クライアントの作成）。新しい秘密を標準出力に出さないため、" +
+        "書き出し先のファイルパスを指定すること。public クライアントには secret が無いので不要",
+    );
+  }
+
   const domain = await loadDomain();
   const { id, credential, statements } = insertStatements(domain, options);
 
@@ -292,11 +316,18 @@ async function create(options) {
       : `登録した: client_id=${options.clientId} (内部 ID ${id})`,
   );
   if (credential !== null) {
+    if (options.dryRun) {
+      console.log("");
+      console.log(`  dry-run: 実行すれば新しい秘密が生成され、${options.out} に書かれる`);
+      return;
+    }
+    writeSecretFile(options.out, credential.secret);
     console.log("");
-    console.log(`  client_secret: ${credential.secret}`);
-    console.log("");
-    console.log("  この値はここにしか出ない。DB にはハッシュしか保存していない。");
-    console.log("  クライアントへ渡したら、端末のスクロールバッファと履歴から消すこと。");
+    console.log(`  新しい秘密はここに書いた: ${options.out}`);
+    console.log("  この値はここにしか無い。DB にはハッシュしか保存していない。");
+    console.log(
+      `  Worker へ渡したら（wrangler secret put <NAME> < ${options.out}）、ファイルを消すこと。`,
+    );
   }
 }
 
@@ -365,6 +396,9 @@ async function rotate(options) {
   // 対象が存在し、confidential で、失効していないことを先に確かめる。
   // 飛ばすと、client_id の打ち間違いや public クライアントの指定が
   // 「0 行更新」という地味な結果にしかならず、見落とされる。
+  // **この SELECT は --dry-run でも実行する。** 読み取りだけなので D1 を
+  // 変更しないが、「--dry-run は D1 へ一切触れない」と理解していると
+  // 食い違う。
   const rows = querySql(
     `select client_type, disabled_at from oauth_clients where client_id = ${quote(options.clientId)};`,
     options,
@@ -377,6 +411,19 @@ async function rotate(options) {
   // 完全に一致させることで「ハッシュは合っているのに Worker が送る値だけ
   // 違う」という今夜すでに 1 時間溶かした不一致を防ぐ。
   const secret = readFileSync(resolve(options.secretFile), "utf8");
+
+  // 中身の形を検査する。trim して救わない——救うと「ファイルの中身と
+  // wrangler secret put が送る値は完全に一致する」という設計の前提が
+  // 崩れる。空ファイル（誰でも知っている定数ハッシュが D1 に入り、
+  // client_secret に空文字を送れば認証が通る状態になる）や末尾の改行
+  // （エディタで開いて保存しただけで付く）を、ここで弾く。
+  if (!isValidClientSecretFormat(secret)) {
+    throw new Error(
+      `${options.secretFile} の中身が generate-secret の出力の形（base64url 43 文字）と違う。` +
+        " 空ファイル・末尾の改行・手で貼り直した値などが考えられる。" +
+        " generate-secret からやり直すこと（trim して通すことはしない）。",
+    );
+  }
   const hash = hashClientSecret(secret);
 
   runSql(

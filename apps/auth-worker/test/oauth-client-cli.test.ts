@@ -3,6 +3,7 @@ import {
   checkRotationEligibility,
   generateClientSecret,
   hashClientSecret,
+  isValidClientSecretFormat,
 } from "../scripts/lib/client-secret";
 import { Sha256TokenHasher } from "../src/infrastructure/crypto/web-crypto";
 
@@ -41,6 +42,46 @@ describe("ハッシュ方式が Worker 側と一致する", () => {
     const a = generateClientSecret();
     const b = generateClientSecret();
     expect(a.secret).not.toBe(b.secret);
+  });
+});
+
+/**
+ * `isValidClientSecretFormat`（レビュー指摘、2026-10-31）。
+ *
+ * `rotate` が `--secret-file` の中身をそのままハッシュ化する前に通す関門。
+ * 空ファイルや末尾の改行を素通りさせると、「D1 には空文字の定数ハッシュが
+ * 入る」「D1 のハッシュと wrangler secret put が送る値がずれる」という、
+ * このスクリプトが防ごうとしている不一致そのものを自分で作ってしまう。
+ */
+describe("isValidClientSecretFormat", () => {
+  it("generateClientSecret が作る形を受け入れる", () => {
+    const { secret } = generateClientSecret();
+    expect(isValidClientSecretFormat(secret)).toBe(true);
+  });
+
+  it("空文字を拒否する（空ファイルを指した場合に到達する）", () => {
+    expect(isValidClientSecretFormat("")).toBe(false);
+  });
+
+  it("末尾の改行を拒否する——trim して救わない", () => {
+    const { secret } = generateClientSecret();
+    expect(isValidClientSecretFormat(`${secret}\n`)).toBe(false);
+  });
+
+  it("前後の空白混じりを拒否する", () => {
+    const { secret } = generateClientSecret();
+    expect(isValidClientSecretFormat(` ${secret}`)).toBe(false);
+    expect(isValidClientSecretFormat(`${secret} `)).toBe(false);
+  });
+
+  it("長さが違う値を拒否する", () => {
+    expect(isValidClientSecretFormat("short")).toBe(false);
+  });
+
+  it("base64url に無い文字（+ や /）を拒否する", () => {
+    const { secret } = generateClientSecret();
+    const tampered = `${secret.slice(0, -1)}+`;
+    expect(isValidClientSecretFormat(tampered)).toBe(false);
   });
 });
 

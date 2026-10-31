@@ -46,6 +46,31 @@ export function generateClientSecret(): GeneratedClientSecret {
 }
 
 /**
+ * `generateClientSecret` が作る形そのもの（32 バイトの base64url、43 文字、
+ * パディング無し）。`rotate` が `--secret-file` の中身をこれで検査する。
+ *
+ * **空文字や末尾の改行を `trim()` で救わない。** 救うと「ファイルの中身と
+ * `wrangler secret put <NAME> < file` が送る値は完全に一致する」という
+ * 設計の前提が崩れる。弾いて作り直させるのが正しい形（運用者の指摘、
+ * 2026-10-31）。
+ *
+ * **何を防ぐか。** `--secret-file` が空ファイルを指していると（パスの
+ * 打ち間違い・`generate-secret` の失敗・`touch` での作り直し等）、
+ * `hashClientSecret("")` という**誰でも知っている定数**が D1 に入り、
+ * そのクライアントは「`client_secret` に空文字を送れば認証が通る」状態に
+ * なる——しかも `rotate` は成功したように見える。末尾に改行が 1 本
+ * 混ざった場合（エディタで開いて保存しただけで起こる）は、D1 のハッシュと
+ * `wrangler secret put` が実際に送る値がずれ、「ハッシュは合っているはずな
+ * のに invalid_client」という、このスクリプトがまさに防ごうとしている
+ * 失敗を再現する。
+ */
+const CLIENT_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+export function isValidClientSecretFormat(secret: string): boolean {
+  return CLIENT_SECRET_PATTERN.test(secret);
+}
+
+/**
  * 新しい秘密をファイルへ書く。**改行を付けない。**
  *
  * `wrangler secret put <NAME> < file` で読ませたとき、末尾の改行まで
