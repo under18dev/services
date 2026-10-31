@@ -35,20 +35,59 @@
  *
  *   node scripts/oauth-client.mjs create \
  *     --client-id u18-dashboard --name "u18 Dashboard" --type confidential \
- *     --redirect-uri https://auth.under18.dev/account/callback --first-party [--remote]
+ *     --redirect-uri https://auth.under18.dev/account/callback --first-party \
+ *     --out secret.txt [--remote]          # confidential には --out が必須
  *   node scripts/oauth-client.mjs disable --client-id u18-dashboard [--remote]
  *   node scripts/oauth-client.mjs list [--remote]
  *   node scripts/oauth-client.mjs seed-dev          # ローカル専用（下記）
+ *   node scripts/oauth-client.mjs generate-secret --out secret.txt
+ *   node scripts/oauth-client.mjs rotate --client-id u18-admin --secret-file secret.txt [--remote]
  *
  * 既定は `--local`（miniflare のローカル D1）。本番へ当てるときだけ `--remote` を付ける。
  * `--dry-run` を付けると SQL を表示するだけで実行しない。レビューを挟みたいとき、
  * あるいは運用手順として SQL を記録に残したいときに使う。
+ *
+ * ## 2026-10-31: 秘密を回す手段を足した（#445）
+ *
+ * `client_secret` が平文で人の目に触れる経路を通った。**ところが回す
+ * 手段が無かった。** `create` しか無く、`client_id` に一意制約がある
+ * ので作り直しもできない——漏れても差し替えられない状態そのものが穴
+ * だった。
+ *
+ * **`generate-secret` と `rotate` を分けてある。** 「生成 → D1 を UPDATE →
+ * ファイルに書く」を 1 コマンドにまとめると、新しい秘密を
+ * `wrangler secret put` で Worker 側へ入れる**前**に D1 が書き変わって
+ * しまい、「先に Worker へ入れてから D1 を更新する」という順序を踏む
+ * 余地が無くなる。`signing-key.mjs` が `generate`（ローカルだけ）と
+ * `register`（本番の反映）を分けているのと同じ理由（あちらの
+ * 「なぜ本番 D1 を触るコマンドを足したのか」を参照——禁じているのは
+ * 「1 発で全部やる」コマンドであって、各ステップを実行可能にすることではない）。
+ *
+ * **猶予期間は持たない。** `secret_hash_previous` のような列を増やす
+ * 設計も検討したが、落ちる相手はクライアント 1 つ・運用者 1 人の管理画面
+ * だけなので、「手順書に『新旧どちらを先に入れても、もう片方が終わるまで
+ * の間は必ず落ちる』と書く」ほうが安い（運用者の判断、2026-10-31）。
+ * `generate-secret` の出力がその手順を案内する。
+ *
+ * **`create` も直した。** 今夜の秘密が人の目に触れたのは、回す手段が
+ * 無かったことだけでなく、`create` が平文を `console.log` に出していた
+ * ことが本体だった——回す手段だけ足しても、同じ経路で同じことがもう一度
+ * 起こせる。confidential クライアントの作成は `--out` を必須にし、
+ * `writeSecretFile` でファイルへ書いてパスだけ表示する形に変えた。
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  checkRotationEligibility,
+  generateClientSecret,
+  hashClientSecret,
+  isValidClientSecretFormat,
+  writeSecretFile,
+} from "./lib/client-secret.ts";
+import { describeWranglerFailure } from "./lib/wrangler-failure.ts";
 
 const WORKER_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const DATABASE_NAME = "u18-identity";
@@ -81,20 +120,52 @@ function quote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+/**
+ * wrangler を呼ぶ。
+ *
+ * **`--json` を付けた wrangler は、エラーを stdout に JSON で書く。
+ * stderr は空である**（`admin-role.mjs` / `lib/wrangler-failure.ts` で
+ * 実測済み）。`json` のとき stdout を pipe で捕まえるので、失敗したときに
+ * それを捨てると原因がどこにも残らない——`describeWranglerFailure` に
+ * 渡して伝える。
+ */
+function wrangler(args, { json = false } = {}) {
+  const result = spawnSync("npx", ["wrangler", ...args], {
+    cwd: WORKER_DIR,
+    stdio: json ? ["inherit", "pipe", "inherit"] : "inherit",
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      describeWranglerFailure({
+        status: result.status,
+        stdout: result.stdout,
+        remote: args.includes("--remote"),
+      }),
+    );
+  }
+  return result.stdout ?? "";
+}
+
 function runSql(sql, { remote, dryRun }) {
   if (dryRun) {
     console.log(sql);
     return;
   }
   // シェルを通さない。引数配列で渡すので、SQL に含まれる記号が解釈されない。
-  const result = spawnSync(
-    "npx",
-    ["wrangler", "d1", "execute", DATABASE_NAME, remote ? "--remote" : "--local", "--command", sql],
-    { cwd: WORKER_DIR, stdio: "inherit" },
+  wrangler(["d1", "execute", DATABASE_NAME, remote ? "--remote" : "--local", "--command", sql]);
+}
+
+/** 結果の行を読む。`rotate` の対象確認（#445）に使う。 */
+function querySql(sql, { remote }) {
+  const stdout = wrangler(
+    ["d1", "execute", DATABASE_NAME, remote ? "--remote" : "--local", "--json", "--command", sql],
+    { json: true },
   );
-  if (result.status !== 0) {
-    throw new Error(`wrangler d1 execute が失敗した (exit ${result.status})`);
-  }
+  const start = stdout.indexOf("[");
+  if (start < 0) throw new Error(`wrangler の出力を JSON として読めなかった:\n${stdout}`);
+  const parsed = JSON.parse(stdout.slice(start));
+  return Array.isArray(parsed) ? (parsed[0]?.results ?? []) : (parsed.results ?? []);
 }
 
 function parseArgs(argv) {
@@ -132,6 +203,12 @@ function parseArgs(argv) {
       case "--allow-loopback-http":
         options.allowLoopbackHttp = true;
         break;
+      case "--out":
+        options.out = next();
+        break;
+      case "--secret-file":
+        options.secretFile = next();
+        break;
       case "--remote":
         options.remote = true;
         break;
@@ -143,18 +220,6 @@ function parseArgs(argv) {
     }
   }
   return options;
-}
-
-/**
- * `client_secret` を 1 度だけ表示する。
- *
- * DB に入れるのはハッシュだけ（仕様書 7.1）。平文はこの出力にしか存在しないので、
- * 取り損ねたら再発行するしかない。これは不便ではなく仕様で、
- * 「後から誰でも読み出せる平文」を作らないための形。
- */
-function generateSecret() {
-  const secret = randomBytes(32).toString("base64url");
-  return { secret, hash: createHash("sha256").update(secret, "utf8").digest("hex") };
 }
 
 function insertStatements(domain, options) {
@@ -193,7 +258,9 @@ function insertStatements(domain, options) {
   const id = options.id ?? newClientId();
   // ハッシュを外から渡せるのも seed-dev のためだけ。通常は必ず新しい秘密を作る。
   const credential =
-    options.secretHash === undefined && options.type === "confidential" ? generateSecret() : null;
+    options.secretHash === undefined && options.type === "confidential"
+      ? generateClientSecret()
+      : null;
   const secretHash = options.secretHash ?? credential?.hash ?? null;
 
   // seed は再実行されうるので、既にあれば黙って飛ばす。通常の登録では
@@ -218,7 +285,23 @@ function insertStatements(domain, options) {
   return { id, credential, statements };
 }
 
+/**
+ * **confidential クライアントの作成には `--out` が必須。**
+ *
+ * 以前はここで `console.log` に平文の秘密をそのまま出していた。
+ * `client_secret` が平文で人の目に触れた経路はまさにここで、#445 の
+ * 発端になった（回す手段を足しても、ここが開いたままでは同じことが
+ * もう一度起こせる）。`writeSecretFile`（`rotate` / `generate-secret` と
+ * 同じ関数）でファイルへ書き、パスだけを表示する。
+ */
 async function create(options) {
+  if (options.type === "confidential" && !options.out) {
+    throw new Error(
+      "--out は必須（confidential クライアントの作成）。新しい秘密を標準出力に出さないため、" +
+        "書き出し先のファイルパスを指定すること。public クライアントには secret が無いので不要",
+    );
+  }
+
   const domain = await loadDomain();
   const { id, credential, statements } = insertStatements(domain, options);
 
@@ -233,11 +316,18 @@ async function create(options) {
       : `登録した: client_id=${options.clientId} (内部 ID ${id})`,
   );
   if (credential !== null) {
+    if (options.dryRun) {
+      console.log("");
+      console.log(`  dry-run: 実行すれば新しい秘密が生成され、${options.out} に書かれる`);
+      return;
+    }
+    writeSecretFile(options.out, credential.secret);
     console.log("");
-    console.log(`  client_secret: ${credential.secret}`);
-    console.log("");
-    console.log("  この値はここにしか出ない。DB にはハッシュしか保存していない。");
-    console.log("  クライアントへ渡したら、端末のスクロールバッファと履歴から消すこと。");
+    console.log(`  新しい秘密はここに書いた: ${options.out}`);
+    console.log("  この値はここにしか無い。DB にはハッシュしか保存していない。");
+    console.log(
+      `  Worker へ渡したら（wrangler secret put <NAME> < ${options.out}）、ファイルを消すこと。`,
+    );
   }
 }
 
@@ -254,6 +344,104 @@ async function disable(options) {
     options.dryRun
       ? `dry-run: 上の SQL を流せば client_id=${options.clientId} が失効する`
       : `失効させた: client_id=${options.clientId}`,
+  );
+}
+
+/**
+ * 新しい `client_secret` をファイルへ書く（#445）。**D1 には触れない。**
+ *
+ * 生成と適用（`rotate`）を分けてある理由はファイル冒頭の #445 の節を参照。
+ */
+function generateSecretSteps(options) {
+  if (!options.out) {
+    throw new Error(
+      "--out は必須。新しい秘密を標準出力に出さないため、書き出し先のファイルパスを指定すること",
+    );
+  }
+
+  const { secret } = generateClientSecret();
+  writeSecretFile(options.out, secret);
+
+  console.log(`書いた: ${options.out}`);
+  console.log("");
+  console.log("次の 2 つを、間を空けずに実行すること:");
+  console.log(
+    `  npx wrangler secret put <NAME> --config <worker 側の wrangler.jsonc> < ${options.out}`,
+  );
+  console.log(
+    `  node scripts/oauth-client.mjs rotate --client-id <ID> --secret-file ${options.out} [--remote]`,
+  );
+  console.log("");
+  console.log(
+    "どちらを先にしても、もう片方が終わるまでの間はそのクライアントが" +
+      " invalid_client を返し続ける（猶予期間を持たない設計）。先に進める前に" +
+      " 両方のコマンドを手元に用意しておくこと。",
+  );
+  console.log("");
+  console.log(`両方終わったら ${options.out} を消すこと。`);
+}
+
+/**
+ * `generate-secret` が書いたファイルの中身を D1 の `client_secret_hash` へ
+ * 反映する（#445）。**ここでは新しい秘密を作らない。**
+ */
+async function rotate(options) {
+  if (!options.clientId) throw new Error("--client-id は必須");
+  if (!options.secretFile) {
+    throw new Error(
+      "--secret-file は必須。先に `generate-secret --out <path>` で作ったファイルを渡すこと",
+    );
+  }
+
+  // 対象が存在し、confidential で、失効していないことを先に確かめる。
+  // 飛ばすと、client_id の打ち間違いや public クライアントの指定が
+  // 「0 行更新」という地味な結果にしかならず、見落とされる。
+  // **この SELECT は --dry-run でも実行する。** 読み取りだけなので D1 を
+  // 変更しないが、「--dry-run は D1 へ一切触れない」と理解していると
+  // 食い違う。
+  const rows = querySql(
+    `select client_type, disabled_at from oauth_clients where client_id = ${quote(options.clientId)};`,
+    options,
+  );
+  const eligibility = checkRotationEligibility(options.clientId, rows[0]);
+  if (!eligibility.ok) throw new Error(eligibility.reason);
+
+  // ファイルの中身をそのままハッシュ化する。trim しない —— `wrangler secret
+  // put <NAME> < file` も同じファイルをそのまま読むので、両者が読む中身を
+  // 完全に一致させることで「ハッシュは合っているのに Worker が送る値だけ
+  // 違う」という今夜すでに 1 時間溶かした不一致を防ぐ。
+  const secret = readFileSync(resolve(options.secretFile), "utf8");
+
+  // 中身の形を検査する。trim して救わない——救うと「ファイルの中身と
+  // wrangler secret put が送る値は完全に一致する」という設計の前提が
+  // 崩れる。空ファイル（誰でも知っている定数ハッシュが D1 に入り、
+  // client_secret に空文字を送れば認証が通る状態になる）や末尾の改行
+  // （エディタで開いて保存しただけで付く）を、ここで弾く。
+  if (!isValidClientSecretFormat(secret)) {
+    throw new Error(
+      `${options.secretFile} の中身が generate-secret の出力の形（base64url 43 文字）と違う。` +
+        " 空ファイル・末尾の改行・手で貼り直した値などが考えられる。" +
+        " generate-secret からやり直すこと（trim して通すことはしない）。",
+    );
+  }
+  const hash = hashClientSecret(secret);
+
+  runSql(
+    `update oauth_clients set client_secret_hash = ${quote(hash)}, updated_at = unixepoch() * 1000
+     where client_id = ${quote(options.clientId)} and client_type = 'confidential' and disabled_at is null;`,
+    options,
+  );
+
+  console.log("");
+  if (options.dryRun) {
+    console.log(`dry-run: 上の SQL を流せば client_id=${options.clientId} の秘密が入れ替わる`);
+    return;
+  }
+  console.log(`回した: client_id=${options.clientId}`);
+  console.log("");
+  console.log(
+    `D1 は ${options.secretFile} の中身しか受け付けない。まだ wrangler secret put` +
+      " していなければ今すぐ実行すること（このクライアントは invalid_client を返し続けている）。",
   );
 }
 
@@ -325,10 +513,7 @@ async function seedDev(options) {
       allowLoopbackHttp: true,
       // 固定の秘密をそのままハッシュ化して入れる。create と違い新しい秘密を作らない
       // （E2E が決め打ちで使えないと意味がない）。
-      secretHash:
-        client.secret === null
-          ? null
-          : createHash("sha256").update(client.secret, "utf8").digest("hex"),
+      secretHash: client.secret === null ? null : hashClientSecret(client.secret),
       ifNotExists: true,
     });
     runSql(statements.join("\n"), options);
@@ -362,8 +547,16 @@ async function main() {
     case "seed-dev":
       await seedDev(options);
       break;
+    case "generate-secret":
+      generateSecretSteps(options);
+      break;
+    case "rotate":
+      await rotate(options);
+      break;
     default:
-      console.error("使い方: node scripts/oauth-client.mjs <create|disable|list|seed-dev> [...]");
+      console.error(
+        "使い方: node scripts/oauth-client.mjs <create|disable|list|seed-dev|generate-secret|rotate> [...]",
+      );
       process.exitCode = 1;
   }
 }

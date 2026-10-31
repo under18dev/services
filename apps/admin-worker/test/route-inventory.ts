@@ -32,6 +32,29 @@ export const PUBLIC_ROUTES: readonly Route[] = [
 ];
 
 /**
+ * Kiwa UI のスタイルシート（#447）。**配信ルートを登録していなかった**
+ * ——`ui/asset-paths.ts` が `<link>` 用のパスを作るだけで、それを返す
+ * `app.get` がどこにも無く、全画面が素の HTML で描かれていた。
+ *
+ * **ハッシュは手で書けないので `<hash>` と書く**（#211、dashboard-worker
+ * と同じ形）。`route-inventory.test.ts` が `normalizeAssetHash` で実物を
+ * 畳んでから比べる。
+ */
+export const ASSET_ROUTES: readonly Route[] = [{ method: "GET", path: "/ui/kiwa.<hash>.css" }];
+
+/**
+ * 外形から確かめられるページ（#447、`scripts/smoke-asset-probe.sh` /
+ * `check-asset-probe-pages.mjs` が読む）。
+ *
+ * **`/` ではなく `/callback` を宣言する。** `/` は未ログインで `/login` へ
+ * 302 するだけで画面を持たないので、ここからは CSS への参照を読めない。
+ * `/callback` は裸で叩いても（state も code も無くても）`MessagePage`
+ * （Kiwa UI）を 400 で返すので、未認証でも引ける
+ * （`src/presentation/http/app.tsx` の `/callback` ハンドラ）。
+ */
+export const PROBE_PAGES: readonly string[] = ["/callback"];
+
+/**
  * 入口。セッションの有無・承認の有無で `/login` か `/pending` かへ
  * 振り分けるだけで、それ自体は画面を持たない。
  */
@@ -58,9 +81,13 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
    * フォームの `action` が同じなので、一覧には 1 行しか出てこない。
    */
   { method: "POST", path: "/nfc/batch-disable" },
+  /** `/nfc/batch-disable` の逆（#436）。同じ理由で 1 本が 2 段階を兼ねる。 */
+  { method: "POST", path: "/nfc/batch-reinstate" },
   { method: "POST", path: "/nfc/:cardId/disable" },
   { method: "POST", path: "/nfc/:cardId/release" },
   { method: "POST", path: "/nfc/:cardId/reinstate" },
+  /** `/nfc/:cardId/reinstate`（→ active）の対。所有者の無いカード専用（#436）。 */
+  { method: "POST", path: "/nfc/:cardId/reinstate-to-issued" },
   { method: "POST", path: "/nfc/:cardId/target" },
   { method: "POST", path: "/clients" },
   { method: "POST", path: "/clients/disable" },
@@ -74,6 +101,7 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
 /** 実行時に登録されているべきもの全部。 */
 export const EXPECTED_ROUTES: readonly Route[] = [
   ...PUBLIC_ROUTES,
+  ...ASSET_ROUTES,
   ...ROOT_ROUTES,
   ...PENDING_ROUTES,
   ...NAV_PAGE_ROUTES,

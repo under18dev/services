@@ -15,6 +15,8 @@
     "client:disable": "node scripts/oauth-client.mjs disable",
     "client:list": "node scripts/oauth-client.mjs list",
     "client:seed-dev": "node scripts/oauth-client.mjs seed-dev",
+    "client:generate-secret": "node scripts/oauth-client.mjs generate-secret",
+    "client:rotate": "node scripts/oauth-client.mjs rotate",
     "admin:status": "node scripts/admin-role.mjs status",
     "admin:grant": "node scripts/admin-role.mjs grant",
     "admin:revoke": "node scripts/admin-role.mjs revoke",

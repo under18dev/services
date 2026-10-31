@@ -107,6 +107,15 @@ export type NfcPageProps = {
   readonly batchDisableError: string | null;
   /** 直前の一括無効化で実際に止めた枚数（PRG で戻ってきたとき）。 */
   readonly batchDisabledCount: number | null;
+  /**
+   * batch 一括復帰の 2 段階確認（#436）。`batchDisable` と対称——非 null
+   * なら確認待ちの状態、`null` なら通常の「バッチ名を入力する」フォーム。
+   */
+  readonly batchReinstate: { readonly batch: string; readonly count: number } | null;
+  /** 確認の再入力が一致しなかったときの文言。`batchReinstate` とセットで使う。 */
+  readonly batchReinstateError: string | null;
+  /** 直前の一括復帰で実際に戻した枚数（PRG で戻ってきたとき）。 */
+  readonly batchReinstatedCount: number | null;
 };
 
 /**
@@ -126,14 +135,26 @@ export type NfcPageProps = {
  * からカードが消える操作で、本人には説明の付かない消え方をする
  * （`docs/nfc-cards-operations.md` §4 を参照）。
  *
- * ## `disabled` のカードには「復帰させる」だけを出す（#427）
+ * ## `disabled` のカードは、所有者の有無でボタンを分ける（#427 / #436）
  *
- * **`active` へ戻すだけ。** 手放す・遷移先を変えるとはまとめない——
- * 「戻したい」と「渡したい」は運営側の判断が違う場面で、1 操作に混ぜると
- * 復帰のつもりが次の拾得者へ渡る事故を作れる（delegated RPC 側の
- * `DelegatedReinstateCardUseCase` の冒頭を参照）。渡したい場合は、復帰
- * させたあとであらためて「手放させる」を押す——弱い操作を 2 つ並べる
- * ほうが、強い操作を 1 つ作るより安全という #422 と同じ判断。
+ * **所有者がいれば「復帰させる」（→ active）。** 手放す・遷移先を変える
+ * とはまとめない——「戻したい」と「渡したい」は運営側の判断が違う場面で、
+ * 1 操作に混ぜると復帰のつもりが次の拾得者へ渡る事故を作れる
+ * （delegated RPC 側の `DelegatedReinstateCardUseCase` の冒頭を参照）。
+ * 渡したい場合は、復帰させたあとであらためて「手放させる」を押す——
+ * 弱い操作を 2 つ並べるほうが、強い操作を 1 つ作るより安全という #422
+ * と同じ判断。
+ *
+ * **所有者が無ければ「未紐づけへ戻す」（→ issued）。** batch 一括無効化
+ * （または単発の運営操作）で止めた `issued` 由来のカードがこちら。
+ * **「復帰させる」を出さない** —— 押しても `reinstateAsAdmin` の
+ * `owner_user_id is not null` という WHERE 句（#450 のレビューで追加）
+ * に弾かれて何も起きない（「そのカードは見つかりませんでした。」に
+ * 落ちる）ので、そもそも出す意味が無い。元々は「出すと所有者の無い
+ * まま `active` になる」壊れた行ができる経路だった——
+ * `docs/nfc-cards-operations.md` §6 が警告する形そのもの。いまは
+ * Repository 側の不変条件が守るので UI はユーザー体験の問題になった。
+ * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
  *
  * ## `issued` のカードにも単発の「無効化する」を出す（#427）
  *
@@ -147,6 +168,21 @@ const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToke
   csrfToken,
 }) => {
   if (card.status === "disabled") {
+    if (card.ownerUserId === null) {
+      return (
+        <form method="post" action={`/nfc/${card.cardId}/reinstate-to-issued`}>
+          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+          <button
+            type="submit"
+            class={getButtonClasses("outline", "sm")}
+            aria-label={`${card.cardId} を未紐づけへ戻す`}
+          >
+            未紐づけへ戻す
+          </button>
+        </form>
+      );
+    }
+
     return (
       <form method="post" action={`/nfc/${card.cardId}/reinstate`}>
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
@@ -232,6 +268,9 @@ export const NfcPage: FC<NfcPageProps> = ({
   batchDisable,
   batchDisableError,
   batchDisabledCount,
+  batchReinstate,
+  batchReinstateError,
+  batchReinstatedCount,
 }) => (
   <KiwaShell
     title="NFC カード"
@@ -330,7 +369,8 @@ export const NfcPage: FC<NfcPageProps> = ({
         <CardDescription>
           配布前の箱ごと盗難など、<strong>未紐づけ（まだ誰のものでもない）のカードだけ</strong>
           をバッチ単位で止めます。<strong>誰かのカードは対象になりません。</strong>
-          戻す手段はまだありません——実行前によく確かめてください。
+          戻すときは下の「バッチを一括で復帰させる」を使ってください ——
+          <strong>このバッチの一括無効化で止めたカードだけ</strong>が対象です。
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -391,6 +431,82 @@ export const NfcPage: FC<NfcPageProps> = ({
               </label>
               <button type="submit" class={DANGER_BUTTON_CLASS}>
                 {batchDisable.count} 枚を無効化する
+              </button>
+            </form>
+            <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
+              キャンセルする
+            </a>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>バッチを一括で復帰させる</CardTitle>
+        <CardDescription>
+          上の一括無効化で止めたカードを、<strong>同じバッチ単位</strong>で未紐づけへ戻します。
+          <strong>単発の操作で個別に止めたカードは対象になりません。</strong>
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {batchReinstatedCount === null ? null : (
+          <p class={`${ITEM_META_CLASS} mb-4`} role="status">
+            {batchReinstatedCount} 枚を未紐づけへ戻しました。
+          </p>
+        )}
+        {batchReinstate === null ? (
+          <form method="post" action="/nfc/batch-reinstate" class="flex flex-col gap-4">
+            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+            <label class={FIELD_CLASS} for="batch-reinstate-name">
+              <span class={LABEL_CLASS}>バッチ名</span>
+              <input
+                id="batch-reinstate-name"
+                class={INPUT_CLASS}
+                type="text"
+                name="batch"
+                required
+                maxlength={64}
+                autocapitalize="off"
+              />
+            </label>
+            <button type="submit" class={getButtonClasses("outline")}>
+              対象を確認する
+            </button>
+          </form>
+        ) : (
+          <div class="flex flex-col gap-4">
+            {batchReinstateError === null ? null : (
+              <p
+                class="rounded-lg border border-destructive/40 bg-background-subtle px-3 py-2.5 text-sm text-destructive"
+                role="alert"
+              >
+                {batchReinstateError}
+              </p>
+            )}
+            <p class={ITEM_META_CLASS} role="status">
+              バッチ「{batchReinstate.batch}」の一括無効化で止めたカードが{" "}
+              <strong>{batchReinstate.count} 枚</strong>あります。
+              本当に戻す場合は、下にバッチ名をもう一度入力してください。
+            </p>
+            <form method="post" action="/nfc/batch-reinstate" class="flex flex-col gap-4">
+              <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+              <input type="hidden" name="target_batch" value={batchReinstate.batch} />
+              <label class={FIELD_CLASS} for="batch-reinstate-confirm">
+                <span class={LABEL_CLASS}>確認のため、バッチ名をもう一度入力してください</span>
+                <input
+                  id="batch-reinstate-confirm"
+                  class={INPUT_CLASS}
+                  type="text"
+                  name="batch"
+                  required
+                  maxlength={64}
+                  autocapitalize="off"
+                  placeholder={batchReinstate.batch}
+                />
+              </label>
+              <button type="submit" class={getButtonClasses("outline")}>
+                {batchReinstate.count} 枚を未紐づけへ戻す
               </button>
             </form>
             <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">

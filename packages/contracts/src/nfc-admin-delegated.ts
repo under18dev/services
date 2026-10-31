@@ -67,6 +67,16 @@ export const reinstateCardDelegatedInputSchema = z.object({
 export type ReinstateCardDelegatedInput = z.infer<typeof reinstateCardDelegatedInputSchema>;
 export type ReinstateCardDelegatedResult = RpcResult<null>;
 
+export const reinstateCardToIssuedDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  cardId: z.string().min(1),
+});
+
+export type ReinstateCardToIssuedDelegatedInput = z.infer<
+  typeof reinstateCardToIssuedDelegatedInputSchema
+>;
+export type ReinstateCardToIssuedDelegatedResult = RpcResult<null>;
+
 export const countBatchIssuedCardsDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   batch: z.string().min(1).max(64),
@@ -84,6 +94,28 @@ export const batchDisableCardsDelegatedInputSchema = z.object({
 
 export type BatchDisableCardsDelegatedInput = z.infer<typeof batchDisableCardsDelegatedInputSchema>;
 export type BatchDisableCardsDelegatedResult = RpcResult<{
+  readonly cardIds: readonly string[];
+}>;
+
+export const countDisabledInBatchDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  batch: z.string().min(1).max(64),
+});
+
+export type CountDisabledInBatchDelegatedInput = z.infer<
+  typeof countDisabledInBatchDelegatedInputSchema
+>;
+export type CountDisabledInBatchDelegatedResult = RpcResult<{ readonly count: number }>;
+
+export const reinstateBatchToIssuedCardsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  batch: z.string().min(1).max(64),
+});
+
+export type ReinstateBatchToIssuedCardsDelegatedInput = z.infer<
+  typeof reinstateBatchToIssuedCardsDelegatedInputSchema
+>;
+export type ReinstateBatchToIssuedCardsDelegatedResult = RpcResult<{
   readonly cardIds: readonly string[];
 }>;
 
@@ -175,6 +207,16 @@ export interface NfcAdminDelegatedRpcContract {
    */
   reinstateCard(input: ReinstateCardDelegatedInput): Promise<ReinstateCardDelegatedResult>;
   /**
+   * 無効化された、所有者の無い（`issued` 由来の）カード 1 枚を `issued`
+   * へ戻す（#436、`reinstateCard` の対——所有者ありは `reinstateCard`、
+   * 所有者無しはこちら）。`reinstateCard` を所有者の無いカードへ呼ぶと
+   * 所有者の無いまま `active` になる壊れた行ができるため、呼び分けが
+   * 要る。理由は `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
+   */
+  reinstateCardToIssued(
+    input: ReinstateCardToIssuedDelegatedInput,
+  ): Promise<ReinstateCardToIssuedDelegatedResult>;
+  /**
    * batch 一括無効化の確認画面が出す件数（#427「配布前の箱ごと盗難」）。
    * **書き込まない。** 2 段階確認の 1 段階目が呼ぶ——
    * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
@@ -184,12 +226,28 @@ export interface NfcAdminDelegatedRpcContract {
   ): Promise<CountBatchIssuedCardsDelegatedResult>;
   /**
    * batch 単位で `issued`（未紐づけ）のカードを一括無効化する（#427）。
-   * **`active` は対象外。** 理由・監査・戻す経路が無いことは
-   * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
+   * **`active` は対象外。** 理由・監査は `DelegatedBatchDisableCardsUseCase`
+   * の冒頭を参照。戻す経路は `reinstateBatchToIssuedCards`（#436）。
    */
   batchDisableCards(
     input: BatchDisableCardsDelegatedInput,
   ): Promise<BatchDisableCardsDelegatedResult>;
+  /**
+   * batch 一括復帰の確認画面が出す件数（#436）。**書き込まない。**
+   * 2 段階確認の 1 段階目が呼ぶ——`countBatchIssuedCards` と対称。
+   */
+  countDisabledInBatch(
+    input: CountDisabledInBatchDelegatedInput,
+  ): Promise<CountDisabledInBatchDelegatedResult>;
+  /**
+   * batch 単位で一括無効化された `issued` 由来のカードを一括で `issued`
+   * へ戻す（#436、`batchDisableCards` の逆）。**この一括操作で無効化
+   * された行だけが対象。** 理由は `DelegatedReinstateBatchToIssuedCardsUseCase`
+   * の冒頭を参照。
+   */
+  reinstateBatchToIssuedCards(
+    input: ReinstateBatchToIssuedCardsDelegatedInput,
+  ): Promise<ReinstateBatchToIssuedCardsDelegatedResult>;
   /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
   /** 状態ごとの枚数。入力は無い（#449）。 */

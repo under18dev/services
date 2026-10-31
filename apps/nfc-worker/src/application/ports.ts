@@ -187,10 +187,10 @@ export interface CardRepository {
    * 一致するというだけで巻き込まない——想定（配布前の盗難）に対しては
    * `issued` だけで足りる。
    *
-   * **戻す経路はまだ無い。** `reinstateAsAdmin`（#434）は `disabled` →
-   * `active` で、ここが作る `issued` → `disabled` の逆（`disabled` →
-   * `issued`）とは別の遷移——転用すると、所有者の無いカードが `active`
-   * になる壊れた行ができる。#436 で追跡する。
+   * **戻す経路は `reinstateBatchToIssuedAsAdmin`（#436）。**
+   * `reinstateAsAdmin`（#434）は `disabled` → `active` で、ここが作る
+   * `issued` → `disabled` の逆（`disabled` → `issued`）とは別の遷移——
+   * 転用すると、所有者の無いカードが `active` になる壊れた行ができる。
    *
    * @returns 実際に無効化できたカードの ID。**D1 の 1 文の
    *   `UPDATE ... RETURNING` なので、この戻り値自体が「何枚効いたか」の
@@ -209,6 +209,39 @@ export interface CardRepository {
    * だけで、2 段階確認の 1 段階目はこれだけを呼ぶ。
    */
   countIssuedInBatch(batch: string): Promise<number>;
+
+  /**
+   * batch 単位で、無効化された `issued` 由来のカードを一括で `issued` へ
+   * 戻す（#436「一括で止められるのに一括で戻せない」）。
+   *
+   * **`disableBatchAsAdmin` の逆。** WHERE 句は 3 条件——`batch` が一致・
+   * `status = 'disabled'`・`owner_user_id is null`。最後の条件は
+   * `disableBatchAsAdmin` が `issued`（所有者なし）しか対象にしないことの
+   * 裏返しで、万一どこか別の経路で `active` 由来の `disabled` 行が
+   * 紛れ込んでも、このメソッドが `active` になる事故を起こさないための
+   * 保険である。
+   *
+   * **`disabled_reason = ADMIN_BATCH_DISABLED_REASON` も WHERE 句に入れる。**
+   * `batch` 列はカードの配布ロット（発行時に決まる）であって、無効化した
+   * 操作を表さない——同じロットのカードを単発の運営操作で無効化した行まで
+   * 一括復帰が巻き込まないために要る。理由は `domain/services/
+   * disabled-reason.ts` と `DelegatedBatchDisableCardsUseCase` の冒頭を
+   * 参照。
+   *
+   * @returns 実際に `issued` へ戻せたカードの ID。`disableBatchAsAdmin` と
+   *   同じ単一 `UPDATE ... RETURNING` の保証を持つ。
+   */
+  reinstateBatchToIssuedAsAdmin(
+    batch: string,
+    now: Date,
+  ): Promise<readonly { readonly id: string }[]>;
+
+  /**
+   * batch 一括復帰の確認画面が出す件数（#436）。**書き込まない。**
+   * `reinstateBatchToIssuedAsAdmin` と同じ条件で数えるだけで、2 段階
+   * 確認の 1 段階目はこれだけを呼ぶ（`countIssuedInBatch` と対称）。
+   */
+  countDisabledInBatch(batch: string): Promise<number>;
 
   /**
    * 状態ごとの枚数（#449、admin-worker のホーム用）。
@@ -277,8 +310,43 @@ export interface CardRepository {
    * `disabledReason` を戻すだけでよい——元の所有者・遷移先はそのまま
    * 残っている。WHERE 句は `disabled` であることだけを条件にする
    * （`releaseAsAdmin` が `active` だけを条件にするのと対称）。
+   *
+   * **`owner_user_id is not null` を WHERE 句に持つ（#450 のレビューで
+   * 追加）。** 所有者の無い行（batch 一括無効化で止めた `issued` 由来の
+   * カード）へこれを呼ぶと、所有者の無いまま `active` になる——
+   * `reinstateBatchToIssuedAsAdmin` の冒頭が警告する壊れた行そのもの。
+   * **`CardActions` がボタンを出し分けているだけでは守れない** ——
+   * ルート（`/nfc/:cardId/reinstate`）を直接 POST すれば UI の分岐を
+   * 迂回できるので、不変条件は Repository の WHERE 句側に持たせる。
+   * この条件を足しても**本来 `active` だったカードの復帰は巻き込まない**
+   * ——所有者は `claim` で付き、`disable` 系は消さないので、`active` 由来
+   * の `disabled` 行は常に所有者を持つ。対になる `reinstateToIssuedAsAdmin`
+   * （下）は所有者が無い行を担当する。
    */
   reinstateAsAdmin(cardId: string, now: Date): Promise<boolean>;
+
+  /**
+   * 無効化された、所有者の無い（`issued` 由来の）カード 1 枚を `issued`
+   * へ戻す（#436、`reinstateBatchToIssuedAsAdmin` の単発版）。
+   *
+   * **WHERE 句は `id` · `status = 'disabled'` · `owner_user_id is null`
+   * の 3 条件。** `disabled_reason` では絞らない——バッチ一括無効化版
+   * （`reinstateBatchToIssuedAsAdmin`）と違い、**これは 1 枚を名指しで
+   * 戻す操作**なので、「個別に止めた理由を一括操作が消す」事故が起こり
+   * えない。単発の運営操作（`admin_action`）で止めた未紐づけカードも
+   * これで戻せるほうが実務に合う、という判断（選べる余地があることは
+   * 認識している）。
+   *
+   * ## なぜこれが要るのか
+   *
+   * `reinstateAsAdmin`（上）は `owner_user_id` を見ずに `active` を書く。
+   * **バッチ一括無効化で止めた未紐づけカードへ `reinstateAsAdmin` を
+   * 1 枚だけ呼ぶと、所有者の無いまま `active` になる**——
+   * `reinstateBatchToIssuedAsAdmin` の冒頭が警告する壊れた行そのもの。
+   * `CardActions`（admin-worker）は `card.ownerUserId === null` のとき
+   * こちらを出し、`reinstateAsAdmin` の単発版へのボタンを出さない。
+   */
+  reinstateToIssuedAsAdmin(cardId: string, now: Date): Promise<boolean>;
 }
 
 /** カードに起きたことの記録（`nfc_card_events`）。 */

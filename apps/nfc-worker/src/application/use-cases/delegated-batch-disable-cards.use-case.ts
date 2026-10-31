@@ -1,3 +1,4 @@
+import { ADMIN_BATCH_DISABLED_REASON } from "../../domain/services/disabled-reason";
 import type { CardEventRecorder, CardRepository, Clock, NfcOutcome } from "../ports";
 import { outcomeOk } from "../ports";
 
@@ -38,7 +39,7 @@ export type DelegatedBatchDisableCardsOutput = {
  * `active | issued` へ広げ、単発でも `issued` を無効化できるようにした
  * （本 PR に同梱）。
  *
- * ## 戻す経路はまだ無い（#436）
+ * ## 戻す経路（#436）
  *
  * `DelegatedReinstateCardUseCase`（#434）は `disabled` → `active` で、
  * 元々 `active` だったカードを前提にしている（所有者・遷移先をそのまま
@@ -46,8 +47,7 @@ export type DelegatedBatchDisableCardsOutput = {
  * なので、戻すなら `disabled` → `issued` であるべきで、`reinstateCard`
  * をそのまま転用すると**所有者の無いカードが `active` になる**、
  * `docs/nfc-cards-operations.md` §6 が警告する壊れた行ができる。
- * **一括で止められるのに一括で戻せない非対称が残っている**——#436 で
- * 追跡する。
+ * **`DelegatedReinstateBatchToIssuedCardsUseCase`（#436）がこの逆を持つ。**
  *
  * ## 冪等性は「該当なし」として表れる
  *
@@ -55,28 +55,32 @@ export type DelegatedBatchDisableCardsOutput = {
  * 無効化済みのカードを自然に除外する。同じバッチへ二度叩いても、
  * 2 回目は対象 0 件になるだけで失敗にはならない。
  *
- * ## 監査: 新しいイベント名は増やさない
+ * ## 監査: 新しいイベント名は増やさない。**理由コードは増やした**（#436）
  *
- * 対象カードの数ぶん `card.disabled` を書く。単発の運営操作
- * （`DelegatedDisableCardUseCase`）と同じイベント名・同じ
- * `reason: "admin_action"` を使い、`metadata.batch` でこの一括操作の
- * 一部だったことを残す——「どのカードが止まったか」は `cardId` から、
- * 「どの一括操作でか」は `metadata.batch` から、どちらも後から引ける。
+ * 対象カードの数ぶん `card.disabled` を書く。イベント名は単発の運営操作
+ * （`DelegatedDisableCardUseCase`）と同じ `card.disabled` を使い、
+ * `metadata.batch` でこの一括操作の一部だったことを残す——「どのカードが
+ * 止まったか」は `cardId` から、「どの一括操作でか」は `metadata.batch`
+ * から、どちらも後から引ける。
  *
- * **`reason` に新しい値（例: 盗難を示す値）を足さない。** `issued` の
- * カードには所有者がいないので、理由コードを読むのは運営だけ——見る
- * 相手が `nfc_cards.disabled_reason` の値と `metadata.batch` の 2 箇所に
- * 分かれるだけで、新しい値を足す翻訳・保持区分・網羅性テストの対価に
- * 見合わない。
+ * **`disabled_reason` だけは単発操作と別の値（`ADMIN_BATCH_DISABLED_REASON`）
+ * にした。** 以前は単発操作と同じ `"admin_action"` を使っていたが、
+ * **一括復帰（#436）が「このバッチ名で一括無効化された行だけ」を戻す
+ * ために、単発操作と区別できる値が要る**——`batch` 列はカードの配布
+ * ロットであって無効化した操作を表さないので、`batch` が一致するだけでは
+ * 「一括無効化で止めたか」を判定できない。理由は `domain/services/
+ * disabled-reason.ts` を参照。イベントの `metadata.reason` も同じ値に
+ * 揃えてある（1 つの操作が 2 つの違う文字列で説明される状態を増やさない）。
  *
- * **`nfc_cards.disabled_reason` の語彙は、いま 4 つの出どころが食い
- * 違っている**（この issue で気づいた。直すのは本 PR の範囲外）:
+ * **`nfc_cards.disabled_reason` の語彙は、まだ複数の出どころが食い
+ * 違っている**（#427 で気づいた。全体を揃えるのは本 PR の範囲外）:
  *
  * |                    | 値                                              |
  * | ------------------ | ----------------------------------------------- |
  * | schema のコメント  | `"lost"`, `"abuse"`, `"ops"`（例として）        |
  * | 利用者が選べる値    | `lost` \| `unused`（`cards.routes.ts` の `POST /:cardId/disable`） |
- * | 運営が書く値        | `admin_action`（`AdminDisableCardUseCase` / `DelegatedDisableCardUseCase` の両方、本 UseCase もこれを踏襲） |
+ * | 単発の運営操作      | `admin_action`（`AdminDisableCardUseCase` / `DelegatedDisableCardUseCase`） |
+ * | 一括無効化（本 UseCase） | `admin_batch`（#436、`ADMIN_BATCH_DISABLED_REASON`） |
  * | 利用者向け文書      | 「なくした・盗られた」としか書かない            |
  *
  * 実装に型の制約が無いので、どれが正しいかを機械が言わない。
@@ -92,14 +96,18 @@ export class DelegatedBatchDisableCardsUseCase {
     input: DelegatedBatchDisableCardsInput,
   ): Promise<NfcOutcome<DelegatedBatchDisableCardsOutput>> {
     const now = this.clock.now();
-    const rows = await this.cards.disableBatchAsAdmin(input.batch, "admin_action", now);
+    const rows = await this.cards.disableBatchAsAdmin(
+      input.batch,
+      ADMIN_BATCH_DISABLED_REASON,
+      now,
+    );
 
     for (const row of rows) {
       await this.events.record({
         cardId: row.id,
         event: "card.disabled",
         actorUserId: input.actorUserId,
-        metadata: { reason: "admin_action", actingAsAdmin: true, batch: input.batch },
+        metadata: { reason: ADMIN_BATCH_DISABLED_REASON, actingAsAdmin: true, batch: input.batch },
       });
     }
 

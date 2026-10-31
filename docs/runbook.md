@@ -2245,20 +2245,22 @@ pnpm --filter @u18/auth-worker client:create -- \
   --type confidential \
   --first-party \
   --redirect-uri https://auth.under18.dev/account/callback \
+  --out /tmp/u18-dashboard-secret.txt \
   --remote
 ```
 
 | オプション            | 意味                                                                   |
 | --------------------- | ---------------------------------------------------------------------- |
-| `--type confidential` | `client_secret` を持つ。生成した秘密は**実行時に 1 度だけ表示される**  |
-| `--type public`       | 秘密を持たず PKCE だけで認証する（仕様書 5.1）                         |
+| `--type confidential` | `client_secret` を持つ。**`--out` が必須**（下記）                     |
+| `--type public`       | 秘密を持たず PKCE だけで認証する（仕様書 5.1）。`--out` は不要         |
+| `--out`               | 生成した秘密を書き出すファイルパス（confidential のとき必須）          |
 | `--first-party`       | u18 公式サービス。同意画面を省略してよい                               |
 | `--redirect-uri`      | 複数回指定できる。完全一致で検証されるので、クエリまで含めて実物を書く |
 | `--scopes`            | 既定は `openid profile email`                                          |
 | `--remote`            | 本番 D1 に対して実行する。付けないとローカル D1（miniflare）に入る     |
 | `--dry-run`           | SQL を表示するだけで実行しない。レビューや記録に残したいときに使う     |
 
-**`client_secret` は DB にハッシュしか入らない**（仕様書 7.1）。平文は実行時の出力にしか存在せず、取り損ねたら再発行するしかない。これは不便ではなく、「後から誰でも読み出せる平文」を作らないための形である。出力は端末のスクロールバッファと履歴に残るので、クライアントへ渡したら §2.4.1 と同じ要領で消すこと。
+**`client_secret` は DB にハッシュしか入らない**（仕様書 7.1）。平文は `--out` で指定したファイル（パーミッション 600、改行無し）にしか存在せず、取り損ねたら再発行するしかない。これは不便ではなく、「後から誰でも読み出せる平文を作らない」ための形である。**以前はここで標準出力にそのまま表示していたが、#445 でその経路自体が秘密の露出につながったため、ファイル書き出しに変えた。** クライアントへ渡したら（`wrangler secret put <NAME> < /tmp/u18-dashboard-secret.txt`）、ファイルを消すこと。
 
 同じ `client_id` の二重登録は `oauth_clients_client_id_unique` が止める。スクリプト側では存在確認をしていない。「確認してから挿す」に分けると、同時に 2 本走ったときに両方が「無い」と判断しうるため。
 
@@ -2314,6 +2316,38 @@ pnpm --filter @u18/auth-worker key:generate --apply-local
 秘密鍵（`d` 入り）は `.dev.vars` へ貼り、公開鍵だけが `signing_key_metadata` に入る。`--apply-local` はローカル D1 への投入まで行う。**本番用の `--apply-remote` は用意していない。** 本番の鍵投入は「先に JWKS へ公開してから署名を切り替える」という時間差のある手順（§4.2）であり、1 コマンドで済ませてよい操作ではないため。
 
 公開鍵の行を入れずに Worker を起動すると、`/.well-known/jwks.json` は **503**（`jwks_unavailable`）を返す。鍵が 1 本も無い状態で空の JWKS を 200 で返すと、RP がそれを正常な応答としてキャッシュし、鍵を入れ直してもキャッシュが切れるまで「鍵が無い」状態を信じ続けるため。
+
+### 9.6 `client_secret` を回す（#445）
+
+秘密が漏れた、あるいは人の目に触れた疑いがあるときに使う。**`create` と違い、既存の `client_id` を持ったまま秘密だけを差し替える。**
+
+**生成と適用の 2 コマンドに分かれている。** 1 コマンドで「生成 → D1 を UPDATE → ファイルに書く」まで済ませると、新しい秘密を Worker 側（`wrangler secret put`）へ入れる**前**に D1 が書き変わってしまい、順序を選べなくなる（§4 の署名鍵が `generate` / `register` を分けているのと同じ理由）。
+
+```bash
+# 1. 新しい秘密を生成する。この時点では D1 に一切触れない。
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+pnpm client:generate-secret -- --out /tmp/u18-admin-secret.txt
+
+# 2. 新しい秘密を Worker へ入れる（admin-worker の場合。binding 名は
+#    apps/admin-worker/wrangler.jsonc の Secret 一覧を参照）。
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/admin-worker
+npx wrangler secret put OIDC_CLIENT_SECRET < /tmp/u18-admin-secret.txt
+
+# 3. D1 の client_secret_hash を同じファイルの中身で更新する。
+cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/auth-worker
+pnpm client:rotate -- --client-id u18-admin --secret-file /tmp/u18-admin-secret.txt --remote
+
+# 4. 秘密をディスクに残さない。
+rm /tmp/u18-admin-secret.txt
+```
+
+**猶予期間は無い。** 手順 2 と手順 3 の間は、D1 がまだ旧ハッシュを持っている一方で Worker はもう新しい秘密を提示するので、その間そのクライアントは必ず `invalid_client` になる。2 と 3 は間を空けずに続けて実行すること。列を増やして猶予を持たせる設計も検討したが、落ちる相手はクライアント 1 つ・運用者 1 人の管理画面だけなので、この手順で十分と判断した（運用者の判断、2026-10-31）。
+
+**ファイルの中身をそのまま 2 で渡すこと。** `cat` で中身を見てから手で打ち直したり、別の端末に貼り直したりしない。手順 3 がハッシュ化するのも同じファイルの中身で、両者が読む値を完全に一致させることで「D1 のハッシュは合っているのに Worker が送る値だけ違う」という不一致を防いでいる。
+
+`rotate` は対象が `confidential` かつ失効していないことを先に確認する。`client_id` を打ち間違えたり public クライアントを指定したときは、D1 を書き換える前にエラーで止まる。**この対象確認の SELECT だけは `--dry-run` でも実行する。** 読み取りだけなので D1 は変更しないが、「`--dry-run` は D1 へ一切触れない」と理解していると食い違う。
+
+`--secret-file` の中身が `generate-secret` の出力の形（base64url 43 文字）と一致しない場合もエラーで止まる。**空ファイルを trim して通すことはしない。** `--secret-file` のパスを打ち間違えて空ファイルを指すと、誰でも計算できる「空文字の SHA-256」が D1 に入り、そのクライアントは `client_secret` に空文字を送るだけで認証が通る状態になる——しかも `rotate` は一見成功したように見える。末尾に改行が 1 本混ざった場合（エディタで開いて保存しただけで起こる）も同様に、ハッシュと実際に送られる値がずれる。どちらも `generate-secret` からやり直すこと。
 
 ---
 
