@@ -300,13 +300,17 @@ export interface CardRepository {
    * 残っている。WHERE 句は `disabled` であることだけを条件にする
    * （`releaseAsAdmin` が `active` だけを条件にするのと対称）。
    *
-   * **`owner_user_id` を見ない。** 所有者の無い行（batch 一括無効化で
-   * 止めた `issued` 由来のカード）へこれを呼ぶと、**所有者の無いまま
-   * `active` になる**——`reinstateBatchToIssuedAsAdmin` の冒頭が警告する
-   * 壊れた行そのもの。**この呼び出し自体は直さない**（#434 の既存契約を
-   * 変えると、本来 `active` だったカードの復帰まで巻き込む）。対になる
-   * `reinstateToIssuedAsAdmin`（下）を使う側（`CardActions`）で
-   * `ownerUserId` を見て呼び分ける。
+   * **`owner_user_id is not null` を WHERE 句に持つ（#450 のレビューで
+   * 追加）。** 所有者の無い行（batch 一括無効化で止めた `issued` 由来の
+   * カード）へこれを呼ぶと、所有者の無いまま `active` になる——
+   * `reinstateBatchToIssuedAsAdmin` の冒頭が警告する壊れた行そのもの。
+   * **`CardActions` がボタンを出し分けているだけでは守れない** ——
+   * ルート（`/nfc/:cardId/reinstate`）を直接 POST すれば UI の分岐を
+   * 迂回できるので、不変条件は Repository の WHERE 句側に持たせる。
+   * この条件を足しても**本来 `active` だったカードの復帰は巻き込まない**
+   * ——所有者は `claim` で付き、`disable` 系は消さないので、`active` 由来
+   * の `disabled` 行は常に所有者を持つ。対になる `reinstateToIssuedAsAdmin`
+   * （下）は所有者が無い行を担当する。
    */
   reinstateAsAdmin(cardId: string, now: Date): Promise<boolean>;
 

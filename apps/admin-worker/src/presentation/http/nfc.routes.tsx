@@ -212,12 +212,17 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
    * （#436、上の `/reinstate`（→ active）の対）。
    *
    * **`CardActions` が `card.ownerUserId === null` のときだけこちらを
-   * 出す。** 上の `/reinstate` は所有者を見ずに `active` を書くので、
-   * 所有者の無いカードへ呼ぶと所有者の無いまま `active` になる——
-   * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。**ルートを分けて
-   * あるのは UI の分岐だけに頼らないため**——`:cardId/reinstate` を直接
-   * POST されても、この経路を使わない限り所有者の無いカードは `active`
-   * にならない。
+   * 出す。** 上の `/reinstate` へ所有者の無いカードを渡すと、所有者の
+   * 無いまま `active` になる壊れた行ができる——
+   * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
+   *
+   * **ルートを分けているのは UI の見た目の整理のためで、不変条件そのもの
+   * はここでは守られていない。** `:cardId/reinstate` を直接 POST された
+   * 場合に所有者の無いカードが `active` にならないのは、`reinstateAsAdmin`
+   * 自身の WHERE 句（`owner_user_id is not null`、#450 のレビューで追加）
+   * が理由——Repository 層の不変条件であって、ルートを分けたことの効果
+   * ではない（#450 レビューの指摘: コメントが「ルートを分けたから守られる」
+   * と書いていたが、データ層を直さない限り成り立っていなかった）。
    */
   app.post("/nfc/:cardId/reinstate-to-issued", pageSecurityHeaders, async (c) => {
     const form = await c.req.formData().catch(() => null);

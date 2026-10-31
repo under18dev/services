@@ -147,10 +147,13 @@ export type NfcPageProps = {
  *
  * **所有者が無ければ「未紐づけへ戻す」（→ issued）。** batch 一括無効化
  * （または単発の運営操作）で止めた `issued` 由来のカードがこちら。
- * **「復帰させる」を出してはいけない** —— あちらは所有者を見ずに
- * `active` を書くので、所有者の無いカードへ呼ぶと所有者の無いまま
- * `active` になる壊れた行ができる（#450 のレビューで見つかった、
- * `docs/nfc-cards-operations.md` §6 が警告する形そのもの）。
+ * **「復帰させる」を出さない** —— 押しても `reinstateAsAdmin` の
+ * `owner_user_id is not null` という WHERE 句（#450 のレビューで追加）
+ * に弾かれて何も起きない（「そのカードは見つかりませんでした。」に
+ * 落ちる）ので、そもそも出す意味が無い。元々は「出すと所有者の無い
+ * まま `active` になる」壊れた行ができる経路だった——
+ * `docs/nfc-cards-operations.md` §6 が警告する形そのもの。いまは
+ * Repository 側の不変条件が守るので UI はユーザー体験の問題になった。
  * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
  *
  * ## `issued` のカードにも単発の「無効化する」を出す（#427）

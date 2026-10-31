@@ -159,6 +159,28 @@ describe("disable / release", () => {
   });
 });
 
+describe("reinstateAsAdmin", () => {
+  it("所有者の無い disabled カードへは効かない——所有者の無いまま active になる事故を防ぐ（#450 のレビュー）", async () => {
+    const cardId = await seedIssuedCard();
+    await repository().disableAsAdmin(cardId, "admin_action", new Date());
+
+    const reinstated = await repository().reinstateAsAdmin(cardId, new Date());
+
+    expect(reinstated).toBe(false);
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("disabled");
+    expect(card?.ownerUserId).toBeNull();
+  });
+
+  it("所有者のいる disabled カードは従来どおり active へ戻す", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().disable(cardId, "usr_taro", "lost", new Date());
+
+    expect(await repository().reinstateAsAdmin(cardId, new Date())).toBe(true);
+    expect((await repository().findById(cardId))?.status).toBe("active");
+  });
+});
+
 describe("reinstateToIssuedAsAdmin", () => {
   it("所有者の無い disabled カードを issued へ戻す", async () => {
     const cardId = await seedIssuedCard();

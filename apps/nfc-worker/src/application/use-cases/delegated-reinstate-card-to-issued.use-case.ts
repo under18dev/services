@@ -17,17 +17,22 @@ export type DelegatedReinstateCardToIssuedInput = {
  * カード 1 枚を `issued` へ戻す（#436、`reinstateBatchToIssuedCards` の
  * 単発版）。
  *
- * ## なぜこれが要るのか——`reinstateCard` を 1 枚に対して呼ぶと壊れる
+ * ## なぜこれが要るのか——`reinstateCard` を 1 枚に対して呼ぶと壊れていた
  *
- * `DelegatedReinstateCardUseCase`（#434、`disabled` → `active`）は
- * `owner_user_id` を見ずに `active` を書く。**バッチ一括無効化で止めた
- * 未紐づけカードへそちらを 1 枚だけ呼ぶと、所有者の無いまま `active` に
- * なる**——`DelegatedReinstateBatchToIssuedCardsUseCase` の冒頭が警告する
- * 壊れた行そのもの。admin-worker の `CardActions` が `disabled` のカード
- * すべてに無条件で「復帰させる」（`reinstateCard` 行き）を出していたのが
- * #450 のレビューで見つかった——**UI の分岐だけで塞ぐと、
- * `/nfc/:cardId/reinstate` を直接 POST すれば抜けるので、Repository の
- * WHERE 句にこの対になる口を持たせる。**
+ * **#450 のレビューで見つかった時点では**、`DelegatedReinstateCardUseCase`
+ * （#434、`disabled` → `active`）は `owner_user_id` を見ずに `active` を
+ * 書いていた。admin-worker の `CardActions` が `disabled` のカードすべて
+ * に無条件で「復帰させる」（`reinstateCard` 行き）を出していたので、
+ * バッチ一括無効化で止めた未紐づけカードを 1 枚だけ「復帰させる」と、
+ * 所有者の無いまま `active` になる壊れた行ができた——
+ * `DelegatedReinstateBatchToIssuedCardsUseCase` の冒頭が警告する形
+ * そのもの。**同じレビューで `reinstateAsAdmin` の WHERE 句に
+ * `owner_user_id is not null` を足したので、いまは `reinstateCard` を
+ * 所有者の無いカードへ直接 POST しても何も起きない**（`CardRepository`
+ * の `reinstateAsAdmin` 宣言を参照）。この UseCase は不変条件の最後の砦
+ * ではなく、**所有者の無いカードに正しい遷移先（`issued`）を提供する**
+ * ための経路——`reinstateCard` が守る先（`active`）とは違うので、
+ * 1 本にまとめず別の UseCase のままにしてある。
  *
  * ## 理由コードでは絞らない
  *

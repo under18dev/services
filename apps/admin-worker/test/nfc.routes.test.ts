@@ -204,8 +204,9 @@ describe("GET /nfc", () => {
   });
 
   it("所有者の無い disabled（issued 由来）には「未紐づけへ戻す」だけを出す（#436）", async () => {
-    // **これが #450 レビューの本体。** 所有者を見ずに active を書く
-    // reinstate を、所有者の無いカードへ誘導してはいけない。
+    // **これが #450 レビューの本体。** reinstate（→ active）は押しても
+    // Repository 側の owner_user_id is not null で弾かれるだけだが、
+    // そもそも誘導しない——正しい遷移先（issued）のボタンを出す。
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeNfcCards({
       listAllCards: async () =>

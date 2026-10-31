@@ -250,6 +250,22 @@ describe("reinstateCard", () => {
     expect(!result.ok && result.error.code).toBe("not_found");
   });
 
+  it("所有者の無い disabled（issued 由来）カードは対象外——所有者の無いまま active になる事故を防ぐ（#450 のレビュー）", async () => {
+    // **`CardActions` のボタンが出し分けていても、このルートへ直接
+    // POST すれば UI の分岐を迂回できる。** 不変条件は Repository の
+    // WHERE 句（`owner_user_id is not null`）側で守る。
+    const cardId = await seedIssuedCard();
+    await rpc.disableCard({ actorUserId: ACTOR, cardId });
+
+    const result = await rpc.reinstateCard({ actorUserId: ACTOR, cardId });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("not_found");
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("disabled");
+    expect(card?.ownerUserId).toBeNull();
+  });
+
   it("存在しないカードは not_found", async () => {
     const result = await rpc.reinstateCard({ actorUserId: ACTOR, cardId: "nfc_does_not_exist" });
 
