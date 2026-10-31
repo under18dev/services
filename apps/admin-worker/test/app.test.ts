@@ -480,6 +480,38 @@ describe("承認リスト", () => {
     expect(html).toContain("いま取れません");
   });
 
+  it("塊の 1 つが reject しても、他の塊とサインイン情報は出す（#452）", async () => {
+    // **上のテストとは違う失敗の形。** `rpcErr` は値として返るので
+    // `Promise.all` でも問題にならない——ここで確かめたいのは
+    // Service Binding 自体の失敗や例外（= reject）で、`Promise.all` の
+    // ままだとこの 1 件でホーム全体が 500 になる。
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+
+    const app = createApp({
+      approvals,
+      nfcCards: {
+        ...minimalNfcCards(),
+        countCards: () => Promise.reject(new Error("binding unavailable")),
+      },
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        countOAuthClients: async () => rpcOk(7),
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("usr_ok");
+    expect(html).toMatch(/OAuth クライアント[\s\S]*?<span[^>]*>7<\/span>/);
+    expect(html).toContain("いま取れません");
+  });
+
   it("未ログインで /pending を開くとログインへ送る", async () => {
     const app = createApp({ approvals: fakeApprovals([]) });
     const response = await app.fetch(new Request(`${ORIGIN}/pending`), env, executionContext());

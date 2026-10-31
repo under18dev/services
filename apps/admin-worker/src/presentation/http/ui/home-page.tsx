@@ -19,7 +19,7 @@ import { formatDateTime } from "./format";
  * #443（完了済み）の段階では、Kiwa UI の `Card` 1 枚に「サインイン
  * しました」とリンク列挙を並べただけだった——**枠には入ったが、
  * ダッシュボードではなかった。** ここでは「いま何が起きているか」が
- * 開いた瞬間に分かるよう、**手当てが要る数**（押すとその一覧へ飛ぶ）と
+ * 開いた瞬間に分かるよう、**いまの状態を表す数**（押すとその一覧へ飛ぶ）と
  * **直近の管理操作**を最初に出す。
  *
  * ## 承認待ちの人数は出さない（運用者の優先度 ① だが、出せない）
@@ -127,7 +127,7 @@ export const HomePage: FC<HomePageProps> = ({
     brandHref="/"
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="u18 Admin"
-    lead="いま手当てが要るものです。押すとその一覧へ飛びます。"
+    lead="いまの状態です。押すとその一覧へ飛びます。"
   >
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <NfcCountTile counts={nfcCounts} />
