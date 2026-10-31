@@ -16,6 +16,7 @@ import {
   type BatchDisableCardsDelegatedResult,
   type CountBatchIssuedCardsDelegatedInput,
   type CountBatchIssuedCardsDelegatedResult,
+  type CountCardsDelegatedResult,
   type CountDisabledInBatchDelegatedInput,
   type CountDisabledInBatchDelegatedResult,
   type DisableCardDelegatedInput,
@@ -310,6 +311,18 @@ export class NfcAdminDelegatedRPC
       })),
       truncated: result.value.truncated,
     });
+  }
+
+  /**
+   * 状態ごとの枚数（admin-worker のホーム用、#449）。**`listAllCards` を
+   * 呼んで数えない。** `countByStatus` が `group by` 1 クエリで返す。
+   */
+  async countCards(): Promise<CountCardsDelegatedResult> {
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedCountCards.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
   }
 
   /**

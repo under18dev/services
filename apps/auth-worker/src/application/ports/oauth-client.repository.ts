@@ -61,6 +61,16 @@ export interface OAuthClientRepository {
   listAll(): Promise<readonly OAuthClient[]>;
 
   /**
+   * 登録済みのクライアント数（admin-worker のホーム用、#449）。
+   *
+   * **`listAll` を呼んで数えないこと。** 列挙する理由が無い集計だけの
+   * 用途に、全件読み込みを持ち込まない——登録数が増えたときの一覧の
+   * 肥大化と、集計だけしたい呼び出し側の負荷が無関係になるようにする。
+   * **失効済みも数える**（`listAll` と同じ理由——事実を返す）。
+   */
+  count(): Promise<number>;
+
+  /**
    * confidential クライアントの `client_secret` を照合する。
    *
    * 平文を受け取り、ハッシュ化と**定時間比較**まで実装側で完結させる。

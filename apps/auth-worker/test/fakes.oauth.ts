@@ -64,6 +64,10 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
     return [...this.store.values()].map((props) => OAuthClient.fromPersistence(props));
   }
 
+  async count(): Promise<number> {
+    return this.store.size;
+  }
+
   async verifySecret(clientId: string, presentedSecret: string): Promise<boolean> {
     const props = this.store.get(clientId);
     if (props === undefined) return false;
