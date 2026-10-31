@@ -1,6 +1,7 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
 import type { Context, Hono } from "hono";
-import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { CSRF_FIELD_NAME, CSRF_REJECTED_MESSAGE, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { serviceUnavailable } from "./ui/message-page";
 import { AuditPage } from "./ui/audit-page";
 import type { AppBindings } from "./types";
 
@@ -20,7 +21,7 @@ export function registerAuditRoutes(app: Hono<AppBindings>): void {
     const form = await c.req.formData().catch(() => null);
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const event = form.get("event")?.toString().trim() ?? "";
@@ -58,7 +59,7 @@ async function renderAuditPage(
     ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
   });
   if (!page.ok) {
-    return c.text("しばらくしてからもう一度お試しください。", 503);
+    return serviceUnavailable(c);
   }
 
   c.header("Cache-Control", "no-store");

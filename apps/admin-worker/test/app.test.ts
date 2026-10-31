@@ -135,7 +135,7 @@ describe("/callback — 全体の往復", () => {
     expect(await homeResponse.text()).toContain("usr_admin_1");
   });
 
-  it("state が一致しなければ 400 で、セッションは作られない", async () => {
+  it("state が一致しなければ 400 で、セッションは作られない。Kiwa の外枠でログインへ戻る導線を持つ（#443）", async () => {
     const idp = await createFakeIdp(env.AUTH_ISSUER);
     const app = createApp({ fetcher: idp.fetcherReturning("unused") });
 
@@ -154,6 +154,11 @@ describe("/callback — 全体の往復", () => {
     expect(response.headers.getSetCookie().some((c) => c.includes("u18_admin_session="))).toBe(
       false,
     );
+    const html = await response.text();
+    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain('href="/login"');
+    // **内部の理由（state_mismatch 等）は画面に出さない。** `fail()` の方針。
+    expect(html).not.toContain("state_mismatch");
   });
 
   it("login-state Cookie が無ければ 400（CSRF/リプレイ対策）", async () => {
@@ -257,7 +262,10 @@ describe("acr の確認（決定 8、#390）", () => {
     );
     // 攻撃ではなく本人の選択なので、やり直し方を具体的に伝える
     // （`fail()` の「画面に理由を出さない」方針とは別——`app.ts` を参照）。
-    expect(await response.text()).toContain("パスキー");
+    const html = await response.text();
+    expect(html).toContain("パスキー");
+    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain('href="/login"');
   });
 
   it("acr が u18 の定義する水準と違えば 403", async () => {
@@ -329,6 +337,10 @@ describe("承認リスト", () => {
     expect(html).toContain("admin-approval.mjs grant");
     expect(html).toContain("--sub usr_waiting");
     expect(html).toContain("--super");
+    // **コピーできるように `<textarea readonly>` にしてある**（#443）。
+    // `<pre><code>` のままだとドラッグでしかコピーできない。
+    expect(html).toMatch(/<textarea[^>]*readonly[^>]*>/);
+    expect(html).toMatch(/<link rel="stylesheet"/);
   });
 
   it("承認済みが /pending を開くと / へ戻される（ループにしない）", async () => {
@@ -346,7 +358,7 @@ describe("承認リスト", () => {
     expect(response.headers.get("Location")).toBe("/");
   });
 
-  it("承認されていれば / が見える", async () => {
+  it("承認されていれば / が見える。Kiwa の外枠とナビを持つ（#443）", async () => {
     const approvals = fakeApprovals(["usr_ok"]);
     const sessionCookie = await loginAs("usr_ok", approvals);
 
@@ -358,7 +370,14 @@ describe("承認リスト", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("usr_ok");
+    const html = await response.text();
+    expect(html).toContain("usr_ok");
+    expect(html).toMatch(/<link rel="stylesheet"/);
+    // 4 枚すべてへの導線を持つ——プレースホルダ時代のリンク列挙を踏襲する。
+    expect(html).toContain('href="/nfc"');
+    expect(html).toContain('href="/clients"');
+    expect(html).toContain('href="/users"');
+    expect(html).toContain('href="/audit"');
   });
 
   it("未ログインで /pending を開くとログインへ送る", async () => {

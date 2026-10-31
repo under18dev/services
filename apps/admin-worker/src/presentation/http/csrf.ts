@@ -52,6 +52,21 @@ export function ensureCsrfToken(c: Context<AppBindings>): string {
  *
  * Origin とトークンの**両方**を要求する。片方でも欠けたら拒否する。
  */
+/**
+ * CSRF 検証に落ちたときの画面向け文言（#443）。
+ *
+ * **他の全部が日本語なので、`"forbidden"` を 1 語だけ英語で出していた
+ * ものを置き換える。** `routes.tsx` 側のフォーム POST はどれもここを
+ * 使う——文言を変えるとき 1 箇所で揃うようにする。
+ *
+ * **フルページでは描き直さない。** 複数タブを開いたままの二重送信で
+ * 起きることが多い稀な経路で、再構築に要るコストに見合わない。
+ * 再読み込みを促す 1 文で足りる（nfc-worker の同名ファイルの
+ * `c.text("forbidden", 403)` も同じ判断——既存の方針を踏襲した）。
+ */
+export const CSRF_REJECTED_MESSAGE =
+  "操作を確認できませんでした。ページを再読み込みしてから、もう一度お試しください。";
+
 export function isValidCsrf(c: Context<AppBindings>, submitted: string | undefined): boolean {
   return isValidCsrfCheck({
     originAllowed: isTrustedOrigin(

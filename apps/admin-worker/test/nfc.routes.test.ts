@@ -195,7 +195,7 @@ describe("GET /nfc", () => {
     expect(html).toContain("上限で打ち切られています");
   });
 
-  it("listAllCards が失敗したら 503", async () => {
+  it("listAllCards が失敗したら 503。Kiwa の外枠と再読み込みの導線を持つ（#443）", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeNfcCards({
       listAllCards: async () => rpcErr(RpcErrorCode.Internal, "boom"),
@@ -209,6 +209,11 @@ describe("GET /nfc", () => {
     );
 
     expect(response.status).toBe(503);
+    const html = await response.text();
+    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain("しばらくしてからもう一度お試しください。");
+    // **再読み込みの導線は「いまのページ」自身へ。** 別の画面へ飛ばさない。
+    expect(html).toContain('href="/nfc"');
   });
 
   it("発行直後は枚数を出す（PRG）", async () => {
@@ -228,7 +233,7 @@ describe("GET /nfc", () => {
 });
 
 describe("POST /nfc（発行）", () => {
-  it("CSRF トークンが無ければ 403 で、issueCards を呼ばない", async () => {
+  it("CSRF トークンが無ければ 403 で、issueCards を呼ばない。文言は日本語（#443）", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc, calls } = fakeNfcCards();
     const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
@@ -246,6 +251,8 @@ describe("POST /nfc（発行）", () => {
 
     expect(response.status).toBe(403);
     expect(calls.issueCards).toHaveLength(0);
+    // **英語 1 語の "forbidden" のまま出さない。** 他が日本語なので浮く。
+    expect(await response.text()).not.toBe("forbidden");
   });
 
   it("CSRF が通れば issueCards を actorUserId 付きで呼び、PRG で戻す", async () => {

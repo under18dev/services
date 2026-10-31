@@ -1,6 +1,7 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
 import type { Context, Hono } from "hono";
-import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { CSRF_FIELD_NAME, CSRF_REJECTED_MESSAGE, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { serviceUnavailable } from "./ui/message-page";
 import { cardTapUrl } from "./nfc-tap-url";
 import { NfcPage } from "./ui/nfc-page";
 import type { AppBindings } from "./types";
@@ -68,7 +69,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     const result = await container.nfcCards.listAllCards();
 
     if (!result.ok) {
-      return c.text("しばらくしてからもう一度お試しください。", 503);
+      return serviceUnavailable(c);
     }
 
     const tapUrls = result.value.cards
@@ -96,7 +97,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -123,7 +124,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -145,7 +146,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -173,7 +174,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -195,7 +196,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -243,7 +244,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -261,7 +262,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         batch: typed,
       });
       if (!counted.ok) {
-        return c.text("しばらくしてからもう一度お試しください。", 503);
+        return serviceUnavailable(c);
       }
       if (counted.value.count === 0) {
         return renderNfcPageWithError(c, "そのバッチには未紐づけのカードがありません。");
@@ -276,7 +277,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         batch: targetBatch,
       });
       if (!counted.ok) {
-        return c.text("しばらくしてからもう一度お試しください。", 503);
+        return serviceUnavailable(c);
       }
       return renderNfcPageWithBatchConfirm(
         c,
@@ -310,7 +311,7 @@ async function renderNfcPageWithError(c: Context<AppBindings>, message: string):
   const result = await container.nfcCards.listAllCards();
 
   if (!result.ok) {
-    return c.text("しばらくしてからもう一度お試しください。", 503);
+    return serviceUnavailable(c);
   }
 
   const tapUrls = result.value.cards
@@ -348,7 +349,7 @@ async function renderNfcPageWithBatchConfirm(
   const result = await container.nfcCards.listAllCards();
 
   if (!result.ok) {
-    return c.text("しばらくしてからもう一度お試しください。", 503);
+    return serviceUnavailable(c);
   }
 
   const tapUrls = result.value.cards

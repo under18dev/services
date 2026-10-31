@@ -1,7 +1,8 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
 import type { IdentityAdminDelegatedRpcContract, RpcError, SuspendReason } from "@u18/contracts";
 import type { Context, Hono } from "hono";
-import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { CSRF_FIELD_NAME, CSRF_REJECTED_MESSAGE, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { serviceUnavailable } from "./ui/message-page";
 import { UsersPage } from "./ui/users-page";
 import type { AppBindings } from "./types";
 
@@ -79,7 +80,7 @@ async function renderUsersPage(
 
   const page = await listUsers(container.identityAdmin, session.sub, options);
   if (!page.ok) {
-    return c.text("しばらくしてからもう一度お試しください。", 503);
+    return serviceUnavailable(c);
   }
 
   c.header("Cache-Control", "no-store");
@@ -124,7 +125,7 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
     const form = await c.req.formData().catch(() => null);
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const query = form.get("query")?.toString().trim() ?? "";
@@ -140,7 +141,7 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
     const form = await c.req.formData().catch(() => null);
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -173,7 +174,7 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
     const form = await c.req.formData().catch(() => null);
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
@@ -197,7 +198,7 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
     const form = await c.req.formData().catch(() => null);
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
+      return c.text(CSRF_REJECTED_MESSAGE, 403);
     }
 
     const session = c.get("session");
