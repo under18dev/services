@@ -89,6 +89,7 @@ export function toClientSummary(client: OAuthClient): OAuthClientSummary {
     clientType: client.clientType,
     isFirstParty: client.isFirstParty,
     logoUrl: client.logoUrl,
+    ownerUserId: client.ownerUserId,
     redirectUris: [...client.redirectUris],
     scopes: [...client.allowedScopes],
     createdAt: client.createdAt.toISOString(),

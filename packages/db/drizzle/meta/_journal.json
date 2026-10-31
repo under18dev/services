@@ -57,6 +57,13 @@
       "when": 1793264202638,
       "tag": "0007_cuddly_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793451646082,
+      "tag": "0008_sticky_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

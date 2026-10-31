@@ -167,6 +167,32 @@ const ClientRow: FC<{ readonly client: OAuthClientSummary; readonly csrfToken: s
         <li class={ITEM_RAW_CLASS}>{uri}</li>
       ))}
     </ul>
+    <p class={ITEM_META_CLASS}>持ち主: {client.ownerUserId ?? "—"}</p>
+    {/*
+      **持ち主は `usr_xxx` の生の ID で出す。** 利用者名まで引いて解決
+      すると、この画面を開くたびに Users テーブルへの引き直しが増える——
+      NFC カード管理画面が `ownerUserId` を生のまま出しているのと同じ判断
+      （低頻度の管理操作のために往復を増やす見合いが無い、PR #441 参照）。
+    */}
+    <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
+      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+      <input type="hidden" name="client_id" value={client.clientId} />
+      <label class={FIELD_CLASS}>
+        <span class={LABEL_CLASS}>持ち主の userId（空欄で外す）</span>
+        <input
+          class={INPUT_CLASS}
+          type="text"
+          name="owner_user_id"
+          maxlength={64}
+          value={client.ownerUserId ?? ""}
+        />
+      </label>
+      <div>
+        <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+          持ち主を変更する
+        </button>
+      </div>
+    </form>
     {client.isFirstParty ? (
       <p class={ITEM_META_CLASS}>
         u18 公式のクライアントは、この画面からは失効させられません。

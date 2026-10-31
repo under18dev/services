@@ -91,6 +91,7 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/nfc/:cardId/target" },
   { method: "POST", path: "/clients" },
   { method: "POST", path: "/clients/disable" },
+  { method: "POST", path: "/clients/owner" },
   { method: "POST", path: "/users/search" },
   { method: "POST", path: "/users/:userId/suspend" },
   { method: "POST", path: "/users/:userId/reinstate" },

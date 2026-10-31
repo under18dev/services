@@ -92,4 +92,19 @@ export interface OAuthClientRepository {
 
   /** 失効させる。すでに失効済みなら false（冪等）。 */
   disable(clientId: string, at: Date): Promise<boolean>;
+
+  /**
+   * 持ち主を設定・変更する（#441）。**`null` を渡せば外せる。**
+   *
+   * `disable` と違い、一方向の遷移ではないので「既に設定済みなら false」
+   * のような冪等性の WHERE 句は要らない——同じ値を渡しても、別の値に
+   * 変えても、どちらも正当な呼び出しである。失効済みのクライアントの
+   * 持ち主も変えられる（記録の訂正は止める理由にならない）。
+   *
+   * `ownerUserId` の実在確認はここでは行わない——呼び出し側
+   * （`DelegatedSetOAuthClientOwnerUseCase`）が `UserRepository` で
+   * 確かめてから渡す（決定 12 と同じ筋。admin-worker の申告を
+   * auth-worker が信じない）。
+   */
+  setOwner(clientId: string, ownerUserId: string | null): Promise<boolean>;
 }

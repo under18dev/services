@@ -266,6 +266,7 @@ describe("createOAuthClient", () => {
         count: neverCalled("count"),
         verifySecret: neverCalled("verifySecret"),
         disable: neverCalled("disable"),
+        setOwner: neverCalled("setOwner"),
       },
     });
 

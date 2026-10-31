@@ -88,6 +88,7 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
       allowedScopes: input.allowedScopes,
       isFirstParty: input.isFirstParty,
       logoUrl: input.logoUrl,
+      ownerUserId: null,
       disabledAt: null,
       redirectUris: [...new Set(input.redirectUris)],
       createdAt: new Date(),
@@ -103,6 +104,13 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
     const props = this.store.get(clientId);
     if (props === undefined || props.disabledAt !== null) return false;
     this.store.set(clientId, { ...props, disabledAt: at });
+    return true;
+  }
+
+  async setOwner(clientId: string, ownerUserId: string | null): Promise<boolean> {
+    const props = this.store.get(clientId);
+    if (props === undefined) return false;
+    this.store.set(clientId, { ...props, ownerUserId });
     return true;
   }
 }

@@ -101,6 +101,12 @@ export type OAuthClientSummary = {
   readonly createdAt: string;
   /** ISO 8601 (UTC)。失効していなければ null。 */
   readonly disabledAt: string | null;
+  /**
+   * このクライアントの持ち主（#441）。**`null` は「不明」であって
+   * 「持ち主がいない」ではない。** 既存の行には遡って決められる持ち主が
+   * 無いので、画面は `—` で出すこと（`batch` と同じ扱い）。
+   */
+  readonly ownerUserId: string | null;
 };
 
 /**

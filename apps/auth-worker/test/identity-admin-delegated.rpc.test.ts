@@ -309,6 +309,134 @@ describe("createOAuthClient / disableOAuthClient", () => {
   });
 });
 
+describe("setOAuthClientOwner", () => {
+  it("持ち主を設定でき、一覧にも反映される", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const owner: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+
+    const result = await rpc.setOAuthClientOwner({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      ownerUserId: owner.userId,
+    });
+
+    expect(result.ok).toBe(true);
+    const list = await rpc.listOAuthClients({ actorUserId: admin.userId });
+    const updated = list.ok
+      ? list.value.find((c) => c.clientId === created.value.client.clientId)
+      : undefined;
+    expect(updated?.ownerUserId).toBe(owner.userId);
+  });
+
+  it("null を渡すと持ち主を外せる", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const owner: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+    await rpc.setOAuthClientOwner({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      ownerUserId: owner.userId,
+    });
+
+    const result = await rpc.setOAuthClientOwner({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      ownerUserId: null,
+    });
+
+    expect(result.ok).toBe(true);
+    const list = await rpc.listOAuthClients({ actorUserId: admin.userId });
+    const updated = list.ok
+      ? list.value.find((c) => c.clientId === created.value.client.clientId)
+      : undefined;
+    expect(updated?.ownerUserId).toBeNull();
+  });
+
+  it("実在しない ownerUserId は invalid_input で弾く（行は変わらない）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+
+    const result = await rpc.setOAuthClientOwner({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      ownerUserId: "usr_does_not_exist",
+    });
+
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+    const row = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, created.value.client.clientId))
+      .get();
+    expect(row?.ownerUserId).toBeNull();
+  });
+
+  it("未登録の client_id は not_found", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const owner: SeededUser = await seedLoggedInUser();
+
+    const result = await rpc.setOAuthClientOwner({
+      actorUserId: admin.userId,
+      clientId: "u18-never-existed",
+      ownerUserId: owner.userId,
+    });
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("監査に前後の値が残り、氏名・メールアドレスは含まれない", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const owner: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+
+    await rpc.setOAuthClientOwner({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      ownerUserId: owner.userId,
+    });
+
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "oauth.client.owner_changed"))
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "success", userId: admin.userId });
+    const metadata = rows[0]?.metadata as Record<string, unknown>;
+    expect(metadata).toMatchObject({
+      clientId: created.value.client.clientId,
+      previousOwnerUserId: null,
+      newOwnerUserId: owner.userId,
+    });
+    expect(JSON.stringify(rows[0])).not.toContain(owner.username);
+  });
+});
+
 describe("IdentityAdminRpcContract（dashboard 向け）は影響を受けない", () => {
   it("sessionToken 必須のままである（delegated 契約が型で混ざっていない）", async () => {
     const { IdentityAdminRPC } = await import("../src/presentation/rpc/identity-admin.entrypoint");
