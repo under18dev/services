@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import type { Clock } from "../src/composition/container";
+import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { createFakeIdp } from "./fake-idp";
 import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
 
@@ -155,7 +156,7 @@ describe("/callback — 全体の往復", () => {
       false,
     );
     const html = await response.text();
-    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
     expect(html).toContain('href="/login"');
     // **内部の理由（state_mismatch 等）は画面に出さない。** `fail()` の方針。
     expect(html).not.toContain("state_mismatch");
@@ -264,7 +265,7 @@ describe("acr の確認（決定 8、#390）", () => {
     // （`fail()` の「画面に理由を出さない」方針とは別——`app.ts` を参照）。
     const html = await response.text();
     expect(html).toContain("パスキー");
-    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
     expect(html).toContain('href="/login"');
   });
 
@@ -340,7 +341,7 @@ describe("承認リスト", () => {
     // **コピーできるように `<textarea readonly>` にしてある**（#443）。
     // `<pre><code>` のままだとドラッグでしかコピーできない。
     expect(html).toMatch(/<textarea[^>]*readonly[^>]*>/);
-    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
   });
 
   it("承認済みが /pending を開くと / へ戻される（ループにしない）", async () => {
@@ -372,7 +373,7 @@ describe("承認リスト", () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("usr_ok");
-    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
     // 4 枚すべてへの導線を持つ——プレースホルダ時代のリンク列挙を踏襲する。
     expect(html).toContain('href="/nfc"');
     expect(html).toContain('href="/clients"');

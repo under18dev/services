@@ -15,6 +15,7 @@ import type {
   UpdateCardTargetDelegatedInput,
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
+import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
 
 /**
@@ -210,7 +211,7 @@ describe("GET /nfc", () => {
 
     expect(response.status).toBe(503);
     const html = await response.text();
-    expect(html).toMatch(/<link rel="stylesheet"/);
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
     expect(html).toContain("しばらくしてからもう一度お試しください。");
     // **再読み込みの導線は「いまのページ」自身へ。** 別の画面へ飛ばさない。
     expect(html).toContain('href="/nfc"');
