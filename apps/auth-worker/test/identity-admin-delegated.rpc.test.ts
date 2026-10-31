@@ -83,16 +83,67 @@ describe("actorUserId は検証しない。実在だけ確かめる", () => {
     expect(!result.ok && result.error.code).toBe("invalid_input");
   });
 
-  it("読み取り（listUsers / listOAuthClients / listAuditLogs）は実在確認すら求めない", async () => {
+  it("読み取り（listUsers / listOAuthClients / countOAuthClients / listAuditLogs）は実在確認すら求めない", async () => {
     // 読み取りは `actorUserId` を監査へ書かないので、確かめる理由も無い
     // （書く操作とは非対称。`DelegatedListUsersUseCase` の JSDoc 参照）。
     const users1 = await rpc.listUsers({ actorUserId: "usr_does_not_exist" });
     const clients1 = await rpc.listOAuthClients({ actorUserId: "usr_does_not_exist" });
+    const count1 = await rpc.countOAuthClients({ actorUserId: "usr_does_not_exist" });
     const logs1 = await rpc.listAuditLogs({ actorUserId: "usr_does_not_exist" });
 
     expect(users1.ok).toBe(true);
     expect(clients1.ok).toBe(true);
+    expect(count1.ok).toBe(true);
     expect(logs1.ok).toBe(true);
+  });
+});
+
+describe("countOAuthClients", () => {
+  it("登録した分だけ増える", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const before = await rpc.countOAuthClients({ actorUserId: admin.userId });
+    expect(before.ok, "countOAuthClients が失敗した").toBe(true);
+    const beforeCount = before.ok ? before.value : 0;
+
+    await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "App A",
+      clientType: "public",
+      redirectUris: ["https://a.example/cb"],
+    });
+    await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "App B",
+      clientType: "public",
+      redirectUris: ["https://b.example/cb"],
+    });
+
+    const after = await rpc.countOAuthClients({ actorUserId: admin.userId });
+    // **既存の件数（u18-dashboard のような既定のクライアント）には
+    // 依存させない。** 「作った 2 件ぶん増えた」ことだけを見る。
+    expect(after.ok && after.value).toBe(beforeCount + 2);
+  });
+
+  it("失効済みも数える（listAll と同じ事実をそのまま返す判断）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const before = await rpc.countOAuthClients({ actorUserId: admin.userId });
+    expect(before.ok).toBe(true);
+    const beforeCount = before.ok ? before.value : 0;
+
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+    await rpc.disableOAuthClient({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+    });
+
+    const after = await rpc.countOAuthClients({ actorUserId: admin.userId });
+    expect(after.ok && after.value).toBe(beforeCount + 1);
   });
 });
 

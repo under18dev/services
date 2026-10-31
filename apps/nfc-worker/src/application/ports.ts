@@ -211,6 +211,17 @@ export interface CardRepository {
   countIssuedInBatch(batch: string): Promise<number>;
 
   /**
+   * 状態ごとの枚数（#449、admin-worker のホーム用）。
+   *
+   * **`listAllCards` を数える代わりにこれを使うこと。** あちらは
+   * `MAX_ADMIN_LIST`（500）で打ち切るので、それを超えた枚数での合計は
+   * 不正確になる——いまの物理枚数（60 枚前後）では超えないが、
+   * 「一覧を全部引いて数える」形にしないという判断そのものは件数に
+   * 依存させない。
+   */
+  countByStatus(): Promise<Readonly<Record<CardStatus, number>>>;
+
+  /**
    * 運営による遷移先の変更（#382「他人のカードへの操作」2 本目）。
    *
    * **`updateTarget` との違いは所有者を WHERE 句に持たないことだけ**で、

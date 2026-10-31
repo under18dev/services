@@ -1,10 +1,19 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { Clock } from "../src/composition/container";
 import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { createFakeIdp } from "./fake-idp";
-import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
+import {
+  ORIGIN,
+  cookieHeaderFrom,
+  executionContext,
+  fakeApprovals,
+  loginAs,
+  minimalIdentityAdmin,
+  minimalNfcCards,
+} from "./helpers";
 
 function fixedClock(ms: number): Clock {
   return { now: () => new Date(ms) };
@@ -106,6 +115,8 @@ describe("/callback — 全体の往復", () => {
       fetcher: idp.fetcherReturning(idToken),
       clock,
       approvals,
+      nfcCards: minimalNfcCards(),
+      identityAdmin: minimalIdentityAdmin(),
     });
 
     // ③ /callback
@@ -363,7 +374,11 @@ describe("承認リスト", () => {
     const approvals = fakeApprovals(["usr_ok"]);
     const sessionCookie = await loginAs("usr_ok", approvals);
 
-    const app = createApp({ approvals });
+    const app = createApp({
+      approvals,
+      nfcCards: minimalNfcCards(),
+      identityAdmin: minimalIdentityAdmin(),
+    });
     const response = await app.fetch(
       new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
       env,
@@ -379,6 +394,90 @@ describe("承認リスト", () => {
     expect(html).toContain('href="/clients"');
     expect(html).toContain('href="/users"');
     expect(html).toContain('href="/audit"');
+  });
+
+  it("/ は NFC・クライアントの集計と直近の監査ログをダッシュボードとして出す（#449）", async () => {
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+
+    const app = createApp({
+      approvals,
+      nfcCards: {
+        ...minimalNfcCards(),
+        countCards: async () => rpcOk({ issued: 3, active: 5, disabled: 1 }),
+      },
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        countOAuthClients: async () => rpcOk(2),
+        listAuditLogs: async () =>
+          rpcOk({
+            entries: [
+              {
+                id: "aud_1",
+                event: "ops.user.suspended",
+                userId: "usr_taro",
+                actor: "admin-worker",
+                outcome: "success",
+                reason: "abuse",
+                metadata: null,
+                ipHash: null,
+                userAgent: null,
+                createdAt: "2026-10-31T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          }),
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    // **一覧を全部引いて数えていない。** `countCards` / `countOAuthClients`
+    // が返した数字がそのまま出る。単独の数字（"3" 等）は CSS のハッシュや
+    // viewport のメタタグにも出るので、ラベルの直後に来ることまで見る。
+    expect(html).toMatch(/未紐づけ[^<]*<span[^>]*>3<\/span>/);
+    expect(html).toMatch(/有効[^<]*<span[^>]*>5<\/span>/);
+    expect(html).toMatch(/無効化済み[^<]*<span[^>]*>1<\/span>/);
+    expect(html).toMatch(/OAuth クライアント[\s\S]*?<span[^>]*>2<\/span>/);
+    expect(html).toContain("ops.user.suspended");
+    expect(html).toContain("usr_taro");
+    // **承認待ちの人数は出さない**（admin-worker に「承認待ち」の行が
+    // 存在しないため。`home-page.tsx` の冒頭を参照）。
+    expect(html).not.toContain("承認待ちの人数");
+  });
+
+  it("一部の集計が失敗しても、他の塊とサインイン情報は出す（#449）", async () => {
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+
+    const app = createApp({
+      approvals,
+      nfcCards: {
+        ...minimalNfcCards(),
+        countCards: async () => rpcErr(RpcErrorCode.Internal, "boom"),
+      },
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        countOAuthClients: async () => rpcOk(7),
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    // **画面全体は潰れない。** `serviceUnavailable`（503）は使わない。
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("usr_ok");
+    expect(html).toMatch(/OAuth クライアント[\s\S]*?<span[^>]*>7<\/span>/);
+    expect(html).toContain("いま取れません");
   });
 
   it("未ログインで /pending を開くとログインへ送る", async () => {

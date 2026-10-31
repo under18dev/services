@@ -263,6 +263,7 @@ describe("createOAuthClient", () => {
         findByClientId: neverCalled("findByClientId"),
         listRedirectUris: neverCalled("listRedirectUris"),
         listAll: neverCalled("listAll"),
+        count: neverCalled("count"),
         verifySecret: neverCalled("verifySecret"),
         disable: neverCalled("disable"),
       },

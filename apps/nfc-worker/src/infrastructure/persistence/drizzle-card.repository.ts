@@ -1,7 +1,7 @@
 import { type NfcDatabase, nfcCards } from "@u18/nfc-db";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { CardRepository, NewCard } from "../../application/ports";
-import { Card, type CardProps } from "../../domain/entities/card";
+import { Card, type CardProps, type CardStatus } from "../../domain/entities/card";
 
 type CardRow = typeof nfcCards.$inferSelect;
 
@@ -171,6 +171,27 @@ export class DrizzleCardRepository implements CardRepository {
       .where(and(eq(nfcCards.batch, batch), eq(nfcCards.status, "issued")))
       .all();
     return rows.length;
+  }
+
+  /**
+   * 状態ごとの枚数（#449）。**`group by` で 1 クエリ。** `listAllCards` の
+   * ように行を読んでから JS 側で数えない——列挙する理由が無い集計だけの
+   * 用途に、`MAX_ADMIN_LIST` の打ち切りを持ち込まないため。
+   *
+   * **出なかった状態は 0 で埋める。** 物理枚数が少ないうちは `disabled`
+   * が 1 件も無い日もある——`group by` の結果にその行ごと現れないので、
+   * 呼び出し側が「キーが無ければ 0」を書かずに済むよう、ここで埋める。
+   */
+  async countByStatus(): Promise<Readonly<Record<CardStatus, number>>> {
+    const rows = await this.db
+      .select({ status: nfcCards.status, total: sql<number>`count(*)` })
+      .from(nfcCards)
+      .groupBy(nfcCards.status)
+      .all();
+
+    const counts: Record<CardStatus, number> = { issued: 0, active: 0, disabled: 0 };
+    for (const row of rows) counts[row.status] = Number(row.total);
+    return counts;
   }
 
   /**

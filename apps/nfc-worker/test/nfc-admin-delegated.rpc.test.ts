@@ -371,6 +371,32 @@ describe("listAllCards", () => {
   });
 });
 
+describe("countCards", () => {
+  it("状態ごとの枚数を返す", async () => {
+    await seedIssuedCard();
+    await seedIssuedCard();
+    const toDisable = await seedActiveCard("usr_taro");
+    await seedActiveCard("usr_jiro");
+    await rpc.disableCard({ actorUserId: ACTOR, cardId: toDisable });
+
+    const result = await rpc.countCards();
+
+    expect(result.ok, "countCards が失敗した").toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual({ issued: 2, active: 1, disabled: 1 });
+  });
+
+  it("1 枚も無い状態は出なかった状態も 0 で埋める", async () => {
+    const result = await rpc.countCards();
+
+    expect(result.ok).toBe(true);
+    // **`active`/`disabled` が 1 件も無くても、キー自体は無くならない。**
+    // group by の結果に出なかった状態を、呼び出し側が `?? 0` を
+    // 書かずに済むよう埋めてある（`countByStatus` の冒頭を参照）。
+    expect(!result.ok ? undefined : result.value).toEqual({ issued: 0, active: 0, disabled: 0 });
+  });
+});
+
 describe("issueCards", () => {
   it("カードを発行し、actorUserId を監査へ残す", async () => {
     const result = await rpc.issueCards({ actorUserId: ACTOR, count: 3, batch: "lot-x" });

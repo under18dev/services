@@ -1,4 +1,5 @@
 import {
+  countOAuthClientsDelegatedInputSchema,
   createOAuthClientDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
   listAuditLogsDelegatedInputSchema,
@@ -9,6 +10,8 @@ import {
   rpcErr,
   rpcOk,
   suspendUserDelegatedInputSchema,
+  type CountOAuthClientsDelegatedInput,
+  type CountOAuthClientsDelegatedResult,
   type CreateOAuthClientDelegatedInput,
   type CreateOAuthClientDelegatedResult,
   type DisableOAuthClientDelegatedInput,
@@ -165,6 +168,19 @@ export class IdentityAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk(result.value.map(toClientSummary));
+  }
+
+  async countOAuthClients(
+    input: CountOAuthClientsDelegatedInput,
+  ): Promise<CountOAuthClientsDelegatedResult> {
+    const parsed = countOAuthClientsDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedCountOAuthClients.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(result.value);
   }
 
   async createOAuthClient(

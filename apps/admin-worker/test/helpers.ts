@@ -1,7 +1,54 @@
 import { env } from "cloudflare:test";
+import type {
+  IdentityAdminDelegatedRpcContract,
+  NfcAdminDelegatedRpcContract,
+} from "@u18/contracts";
+import { rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { ApprovalRepository } from "../src/application/ports/approval.repository";
 import { createFakeIdp } from "./fake-idp";
+
+function unused(name: string): () => never {
+  return () => {
+    throw new Error(`${name} は呼ばれない想定のテストで呼ばれた`);
+  };
+}
+
+/**
+ * ホーム（`/`）が呼ぶ分だけ答える最小限の fake（#449）。
+ *
+ * ログイン・承認の往復だけを見たいテスト（`app.test.ts`）は、各
+ * routes.test.ts が持つ呼び出し追跡つきの fake を要らない——`/` が
+ * 503 にならない程度の答えだけ要る。call の記録は持たない。
+ */
+export function minimalNfcCards(): NfcAdminDelegatedRpcContract {
+  return {
+    disableCard: unused("disableCard"),
+    updateCardTarget: unused("updateCardTarget"),
+    releaseCard: unused("releaseCard"),
+    reinstateCard: unused("reinstateCard"),
+    countBatchIssuedCards: unused("countBatchIssuedCards"),
+    batchDisableCards: unused("batchDisableCards"),
+    listAllCards: unused("listAllCards"),
+    issueCards: unused("issueCards"),
+    countCards: async () => rpcOk({ issued: 0, active: 0, disabled: 0 }),
+  };
+}
+
+/** 同上、`IdentityAdminDelegatedRpcContract` 版。 */
+export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
+  return {
+    listUsers: unused("listUsers"),
+    suspendUser: unused("suspendUser"),
+    reinstateUser: unused("reinstateUser"),
+    revokeUserSessions: unused("revokeUserSessions"),
+    listOAuthClients: unused("listOAuthClients"),
+    createOAuthClient: unused("createOAuthClient"),
+    disableOAuthClient: unused("disableOAuthClient"),
+    countOAuthClients: async () => rpcOk(0),
+    listAuditLogs: async () => rpcOk({ entries: [], nextCursor: null }),
+  };
+}
 
 export const ORIGIN = env.ADMIN_ORIGIN;
 

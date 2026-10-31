@@ -115,6 +115,17 @@ export type ListAllCardsDelegatedResult = RpcResult<{
   readonly truncated: boolean;
 }>;
 
+/**
+ * 状態ごとの枚数（admin-worker のホーム用、#449）。
+ *
+ * **`listAllCards` を呼んで数えないこと。** あちらは `MAX_ADMIN_LIST` で
+ * 打ち切るので、合計の用途には向かない——集計は nfc-worker 側の
+ * `group by` 1 クエリで行う（`DelegatedCountCardsUseCase` を参照）。
+ */
+export type CountCardsDelegatedResult = RpcResult<
+  Readonly<Record<AdminCardStatusDelegated, number>>
+>;
+
 export const issueCardsDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   count: z.number().int().min(1),
@@ -181,5 +192,7 @@ export interface NfcAdminDelegatedRpcContract {
   ): Promise<BatchDisableCardsDelegatedResult>;
   /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
+  /** 状態ごとの枚数。入力は無い（#449）。 */
+  countCards(): Promise<CountCardsDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;
 }
