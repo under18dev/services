@@ -30,30 +30,38 @@
 
 ### 手順
 
-**先に Secret の受け皿を用意してから `create` を打つこと。** CLI が平文の
-`client_secret` を出すのは**1 度だけ**で、取り損ねるとクライアントを
-作り直すしかない。
+**`confidential` クライアントの `create` には `--out` が必須**（#445）。
+`client_secret` を標準出力に出さず、指定したファイルへ書く——今夜
+これが平文で人の目に触れた経路そのものだったため、`oauth-client.mjs`
+自身がもう標準出力を選べないようにしてある。手順は `docs/runbook.md`
+§9.6（`client_secret` を回す）と同じ形——ファイルへ書き、
+`wrangler secret put` にファイルから読ませ、最後に消す。**人の手で値を
+貼り直させないこと。**
 
 ```bash
 # 1. まず SESSION_SECRET を用意して admin-worker に設定しておく
-#    （この順序には意味が無いが、2 の直後に client_secret を控える
-#     操作へすぐ移れるよう、先に済ませておく）
+#    （この順序には意味が無いが、2〜4 を間を空けずに続けられるよう
+#     先に済ませておく——平文の秘密がディスクに残る時間を短くするため）
 node -e 'console.log(crypto.randomUUID()+crypto.randomUUID())'
 cd apps/admin-worker
 npx wrangler secret put SESSION_SECRET --env production
 # 貼り付けて Enter
 
-# 2. OAuth クライアントを登録する（--dry-run でまず SQL を確認してよい）
+# 2. OAuth クライアントを登録する（--dry-run でまず SQL を確認してよい）。
+#    client_secret は画面に出ず、--out で指定したファイルへ書かれる。
 cd ../auth-worker
 node scripts/oauth-client.mjs create \
   --client-id u18-admin --name "u18 Admin" --type confidential \
   --redirect-uri https://admin.under18.dev/callback \
-  --first-party --remote
+  --first-party --out /tmp/u18-admin-secret.txt --remote
 
-# 3. 出力された client_secret を、間を置かずに admin-worker の Secret へ
+# 3. 生成された秘密を、間を置かずに admin-worker の Secret へ入れる。
+#    ファイルの中身をそのまま渡すこと——cat で見てから打ち直さない。
 cd ../admin-worker
-npx wrangler secret put OIDC_CLIENT_SECRET --env production
-# 2. の出力をそのまま貼り付けて Enter
+npx wrangler secret put OIDC_CLIENT_SECRET --env production < /tmp/u18-admin-secret.txt
+
+# 4. 秘密をディスクに残さない。
+rm /tmp/u18-admin-secret.txt
 ```
 
 **`redirect_uri` は `https://admin.under18.dev/callback` で固定。** OAuth の
