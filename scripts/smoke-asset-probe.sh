@@ -16,9 +16,10 @@
 #
 # ## 1 ページでは足りない
 #
-# **ハッシュ付きアセットを配る Worker は 3 つある。** auth-worker
-# （`/login`）、dashboard-worker（`/account`）、nfc-worker（`/account/nfc`）。
-# **それぞれが自分でバンドルを生成し、自分でハッシュを決めている。**
+# **ハッシュ付きアセットを配る Worker は 4 つある。** auth-worker
+# （`/login`）、dashboard-worker（`/account`）、nfc-worker（`/account/nfc`）、
+# admin-worker（`/callback`、#447）。**それぞれが自分でバンドルを生成し、
+# 自分でハッシュを決めている。**
 #
 # 以前はこの検査が `/login` だけを見ていた。つまり **auth-worker の
 # ハッシュだけが本番で確かめられていて、dashboard-worker のほうは
@@ -42,7 +43,7 @@ set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
   echo "usage: $0 <origin> <worker-name> [page:prefix ...]" >&2
-  echo "  worker-name: auth-worker / dashboard-worker / nfc-worker" >&2
+  echo "  worker-name: auth-worker / dashboard-worker / nfc-worker / admin-worker" >&2
   exit 2
 fi
 
