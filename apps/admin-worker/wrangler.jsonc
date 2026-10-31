@@ -64,6 +64,35 @@
       "service": "u18-nfc",
       "entrypoint": "NfcAdminDelegatedRPC",
     },
+    // **`entrypoint` を指定しない。** auth-worker の既定の `fetch`
+    // ハンドラ（公開 HTTP そのもの）に繋ぐための binding で、RPC
+    // Entrypoint ではない（#439）。
+    //
+    // **以前は `fetch()` で `https://auth.under18.dev/...` を直接叩いて
+    // いた。** 本番でこれが 522 で落ち、`/login` が丸ごと使えなくなった
+    // ——Cloudflare が、同一アカウント・同一ゾーンへの Worker 発
+    // サブリクエストをループ防止のため discard prefix（`100::`）へ流す
+    // 挙動に当たったため。外から直接叩けば 200 だった——**壊れるのは
+    // Worker 発のサブリクエストだけ**。
+    //
+    // **Service Binding はゾーンのルーティングを経由しない**ので、この
+    // 種の失敗が起こらない。`container.ts` の `fetcher` をこの binding
+    // 経由に差し替えるだけで、discovery・JWKS・token 交換の 3 つが
+    // 一度に直る——全部 `container.fetcher` を通っているため。
+    //
+    // **RPC 化しなかった理由。** `/oauth/token` を RPC として公開すると、
+    // クライアント認証・PKCE 検証・コード消費を auth-worker の外から
+    // 呼べる形で公開することになり、変更が一段大きくなる。`entrypoint`
+    // 無しの binding なら、公開 HTTP のコードを 1 行も変えずに済む。
+    //
+    // **束縛表（`scripts/check-service-bindings.mjs`）のメソッド単位の
+    // allow-list はここには掛からない。** 掛ける対象が無い——`entrypoint`
+    // 無しの binding が繋がる先は auth-worker の**公開 HTTP そのもの**で、
+    // 外から誰でも叩けるものより強い権限は 1 つも増えない。
+    {
+      "binding": "AUTH_ORIGIN",
+      "service": "u18-auth",
+    },
   ],
 
   "vars": {
@@ -119,6 +148,10 @@
           // （dashboard-worker の IDENTITY と同じ）で明示する。
           "service": "u18-nfc-production",
           "entrypoint": "NfcAdminDelegatedRPC",
+        },
+        {
+          "binding": "AUTH_ORIGIN",
+          "service": "u18-auth-production",
         },
       ],
       "vars": {
