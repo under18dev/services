@@ -1,4 +1,4 @@
-import { pageSecurityHeaders } from "@u18/web-ui";
+import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { createContainer, type ContainerOverrides } from "../../composition/container";
@@ -21,6 +21,8 @@ import { registerAuditRoutes } from "./audit.routes";
 import { registerClientsRoutes } from "./clients.routes";
 import { registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
+import { KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
+import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
 import { HomePage } from "./ui/home-page";
 import { MessagePage } from "./ui/message-page";
 import { PendingPage } from "./ui/pending-page";
@@ -95,8 +97,13 @@ const SCOPE = "openid";
  */
 const REQUIRED_ACR = "passkey";
 
-/** セッションを要求しない経路。OIDC のラウンドトリップそのものと死活監視。 */
-const PUBLIC_PATHS = new Set(["/health", "/login", "/callback", "/logout"]);
+/**
+ * セッションを要求しない経路。OIDC のラウンドトリップそのものと死活監視、
+ * それに CSS（#447）——未ログインの画面（`/login` 失敗時の `/callback` 等）も
+ * これを読むので、セッションより先に配らないと「ログイン画面自体が
+ * スタイルを失う」ことになる。
+ */
+const PUBLIC_PATHS = new Set(["/health", "/login", "/callback", "/logout", KIWA_STYLESHEET_PATH]);
 
 /** 承認待ちの画面。ログイン済みだが承認リストに無い人の行き先。ガードの対象外。 */
 const PENDING_PATH = "/pending";
@@ -157,6 +164,25 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   });
 
   app.get("/health", (c) => c.json({ status: "ok", service: "u18-admin" }));
+
+  /**
+   * Kiwa UI のスタイルシート（#447）。
+   *
+   * **配信ルートを 1 度も登録していなかった。** `KIWA_STYLESHEET_PATH` は
+   * `<link>` から参照されるだけで（`ui/asset-paths.ts`）、それを実際に
+   * 返す `app.get` がどこにも無く、全画面が素の HTML で描かれていた
+   * （nfc-worker の `cards-ui.routes.tsx` と同じ形をここでも登録する）。
+   *
+   * URL に内容ハッシュが入っているので `immutable` で配信してよい。
+   * `PUBLIC_PATHS` にも入れてある——セッションが無い `/callback` の
+   * 失敗画面も、ログイン前の `/login` も、これを読む。
+   */
+  app.get(KIWA_STYLESHEET_PATH, (c) =>
+    c.body(KIWA_STYLESHEET, 200, {
+      "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
+    }),
+  );
 
   /**
    * ログイン開始。PKCE + state + nonce を作り、login-state Cookie へ

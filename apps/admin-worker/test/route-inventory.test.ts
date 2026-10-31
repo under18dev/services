@@ -1,3 +1,4 @@
+import { normalizeAssetHash } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import { EXPECTED_ROUTES } from "./route-inventory";
@@ -15,7 +16,7 @@ describe("ルートの一覧", () => {
     ...new Set(
       createApp()
         .routes.filter((route) => route.method !== "ALL")
-        .map((route) => `${route.method} ${route.path}`),
+        .map((route) => `${route.method} ${normalizeAssetHash(route.path)}`),
     ),
   ];
 
