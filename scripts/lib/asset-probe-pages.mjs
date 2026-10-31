@@ -28,6 +28,25 @@
  *
  * 片方にしか無い Worker があれば落ちる。
  *
+ * ## この検査が前提にしていること、前提が崩れたときの穴（#453）
+ *
+ * 上の突き合わせは全部、**`route-inventory.ts` に `ASSET_ROUTES` が
+ * 書かれていること**を前提にしている。#447 では admin-worker にその
+ * ルートを返す `app.get` 自体が無く、`ASSET_ROUTES` も空だった——
+ * この検査から見ると「アセットを配っていない Worker」と区別が付かず、
+ * `assets.length === 0` で早期に通り過ぎ、何も言わなかった。
+ *
+ * **実際に #447 を早期発見できたはずなのは `asset-coverage.test.ts` の
+ * 最初のアサーション**（`EXPECTED_ASSETS.length > 0`）で、admin-worker
+ * だけこのファイル自体が無かった。「新しい Worker を増やしたとき、
+ * `route-inventory.ts` を書くところまでは進んだが `asset-coverage.test.ts`
+ * を作り忘れる」という、もう 1 段手前の取りこぼしがある。
+ *
+ * そこで、**`ASSET_ROUTES` が 1 件でもある Worker には
+ * `test/asset-coverage.test.ts` が存在すること**も、ここで突き合わせる
+ * （`checkAssetCoverageTestExists`）。中身の正しさは問わない——
+ * 存在すれば `pnpm -r test` がそのまま検証する。無いことだけがここの関心。
+ *
  * ## 確かめられない Worker は、確かめられないと宣言させる
  *
  * nfc-worker の `/account/nfc` は**未ログインで 302 を返す**ので、外から
@@ -36,7 +55,7 @@
  * 書かせ、理由が無ければ落とす。
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -153,6 +172,22 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
         "`ページ:接頭辞` の組になっていない要素がある）。書き方を変えたなら readProbeDeclaration も直すこと。",
     );
     return { ok: false, problems, declared: {} };
+  }
+
+  // **外から確かめられるかどうかに関係なく要る。**（#453）下のループは
+  // UNPROBEABLE な Worker を素通りするが、`asset-coverage.test.ts` は
+  // Worker 自身のテスト環境でレンダリングするので、外部から未認証で
+  // 引けるかどうかは無関係——nfc-worker も持っている。
+  for (const { name, assets, hasAssetCoverageTest } of workers) {
+    if (assets.length === 0) continue;
+    if (hasAssetCoverageTest) continue;
+    problems.push(
+      `${name}: ハッシュ付きアセット（${assets.join(", ")}）を route-inventory.ts に ` +
+        `宣言していますが、test/asset-coverage.test.ts がありません。宣言した ASSET_ROUTES を ` +
+        `実際にどこかのページが参照しているかは、この検査以外のどこも確かめていません。` +
+        `他の Worker の asset-coverage.test.ts と同じ形で足すこと（#447 はこれが無かったために ` +
+        `見つからなかった）。`,
+    );
   }
 
   for (const { name, assets, probePages: inventoryPages } of workers) {
@@ -279,13 +314,20 @@ export function collect(root = ROOT) {
         text = readFileSync(inventory, "utf8");
       } catch {
         // route-inventory を持たない Worker。アセットの有無はここでは分からない。
-        return { name: e.name, assets: [], probePages: null, hasInventory: false };
+        return {
+          name: e.name,
+          assets: [],
+          probePages: null,
+          hasInventory: false,
+          hasAssetCoverageTest: false,
+        };
       }
       return {
         name: e.name,
         assets: readAssetRoutes(text),
         probePages: readProbePagesDeclaration(text),
         hasInventory: true,
+        hasAssetCoverageTest: existsSync(join(appsDir, e.name, "test/asset-coverage.test.ts")),
       };
     });
   return { probeText, deployText, workers };

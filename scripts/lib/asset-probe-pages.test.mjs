@@ -44,12 +44,14 @@ const WORKERS = [
     assets: ["/ui/u18.<hash>.css"],
     probePages: ["/login"],
     hasInventory: true,
+    hasAssetCoverageTest: true,
   },
   {
     name: "dashboard-worker",
     assets: ["/account/ui/u18.<hash>.css"],
     probePages: ["/account"],
     hasInventory: true,
+    hasAssetCoverageTest: true,
   },
 ];
 
@@ -106,13 +108,48 @@ test("配っているのに宣言が無ければ落ちる", () => {
     probeText: PROBE,
     workers: [
       ...WORKERS,
-      { name: "nfc-worker", assets: ["/x/ui/a.css"], probePages: [], hasInventory: true },
+      {
+        name: "nfc-worker",
+        assets: ["/x/ui/a.css"],
+        probePages: [],
+        hasInventory: true,
+        hasAssetCoverageTest: true,
+      },
     ],
     unprobeable: {},
     deployText: DEPLOY,
   });
   assert.equal(result.ok, false);
-  assert.match(result.problems.join("\n"), /nfc-worker: ハッシュ付きアセット/);
+  assert.match(result.problems.join("\n"), /nfc-worker: ハッシュ付きアセット.*宣言がありません/s);
+});
+
+test("asset-coverage.test.ts が無ければ落ちる（#453）", () => {
+  // #447 の実際の穴——ASSET_ROUTES はあるのに、参照されているかを
+  // 確かめるテストファイル自体が無かった。
+  const result = check({
+    probeText: PROBE,
+    workers: [{ ...WORKERS[0], hasAssetCoverageTest: false }, WORKERS[1]],
+    unprobeable: {},
+    deployText: DEPLOY,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join("\n"), /auth-worker.*asset-coverage\.test\.ts がありません/s);
+});
+
+test("asset-coverage.test.ts の有無は、外から確かめられるかどうかと無関係", () => {
+  // UNPROBEABLE な Worker（外部から見えない）でも、Worker 自身の
+  // レンダリングで確かめるテストは要る。
+  const result = check({
+    probeText: PROBE,
+    workers: [WORKERS[0], { ...WORKERS[1], hasAssetCoverageTest: false }],
+    unprobeable: { "dashboard-worker": "外から読めない理由がここに書いてある" },
+    deployText: DEPLOY,
+  });
+  assert.equal(result.ok, false);
+  assert.match(
+    result.problems.join("\n"),
+    /dashboard-worker.*asset-coverage\.test\.ts がありません/s,
+  );
 });
 
 test("アセットを配っていない Worker は無視する", () => {
@@ -131,7 +168,13 @@ test("UNPROBEABLE の理由が空なら落ちる", () => {
     probeText: PROBE,
     workers: [
       ...WORKERS,
-      { name: "w", assets: ["/x/ui/a.css"], probePages: [], hasInventory: true },
+      {
+        name: "w",
+        assets: ["/x/ui/a.css"],
+        probePages: [],
+        hasInventory: true,
+        hasAssetCoverageTest: true,
+      },
     ],
     unprobeable: { w: "   " },
     deployText: DEPLOY,
