@@ -318,4 +318,26 @@ export class DrizzleCardRepository implements CardRepository {
       .returning({ id: nfcCards.id });
     return rows.length > 0;
   }
+
+  /**
+   * 無効化された、所有者の無い（`issued` 由来の）カード 1 枚を `issued`
+   * へ戻す（#436、`reinstateBatchToIssuedAsAdmin` の単発版）。
+   * `disabled_reason` では絞らない——単発で名指しする操作のため
+   * （`CardRepository` の宣言を参照）。
+   */
+  async reinstateToIssuedAsAdmin(cardId: string, now: Date): Promise<boolean> {
+    const rows = await this.db
+      .update(nfcCards)
+      .set({
+        status: "issued",
+        disabledAt: null,
+        disabledReason: null,
+        updatedAt: now,
+      })
+      .where(
+        and(eq(nfcCards.id, cardId), eq(nfcCards.status, "disabled"), isNull(nfcCards.ownerUserId)),
+      )
+      .returning({ id: nfcCards.id });
+    return rows.length > 0;
+  }
 }

@@ -63,6 +63,8 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/nfc/:cardId/disable" },
   { method: "POST", path: "/nfc/:cardId/release" },
   { method: "POST", path: "/nfc/:cardId/reinstate" },
+  /** `/nfc/:cardId/reinstate`（→ active）の対。所有者の無いカード専用（#436）。 */
+  { method: "POST", path: "/nfc/:cardId/reinstate-to-issued" },
   { method: "POST", path: "/nfc/:cardId/target" },
   { method: "POST", path: "/clients" },
   { method: "POST", path: "/clients/disable" },

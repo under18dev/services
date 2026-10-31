@@ -135,14 +135,23 @@ export type NfcPageProps = {
  * からカードが消える操作で、本人には説明の付かない消え方をする
  * （`docs/nfc-cards-operations.md` §4 を参照）。
  *
- * ## `disabled` のカードには「復帰させる」だけを出す（#427）
+ * ## `disabled` のカードは、所有者の有無でボタンを分ける（#427 / #436）
  *
- * **`active` へ戻すだけ。** 手放す・遷移先を変えるとはまとめない——
- * 「戻したい」と「渡したい」は運営側の判断が違う場面で、1 操作に混ぜると
- * 復帰のつもりが次の拾得者へ渡る事故を作れる（delegated RPC 側の
- * `DelegatedReinstateCardUseCase` の冒頭を参照）。渡したい場合は、復帰
- * させたあとであらためて「手放させる」を押す——弱い操作を 2 つ並べる
- * ほうが、強い操作を 1 つ作るより安全という #422 と同じ判断。
+ * **所有者がいれば「復帰させる」（→ active）。** 手放す・遷移先を変える
+ * とはまとめない——「戻したい」と「渡したい」は運営側の判断が違う場面で、
+ * 1 操作に混ぜると復帰のつもりが次の拾得者へ渡る事故を作れる
+ * （delegated RPC 側の `DelegatedReinstateCardUseCase` の冒頭を参照）。
+ * 渡したい場合は、復帰させたあとであらためて「手放させる」を押す——
+ * 弱い操作を 2 つ並べるほうが、強い操作を 1 つ作るより安全という #422
+ * と同じ判断。
+ *
+ * **所有者が無ければ「未紐づけへ戻す」（→ issued）。** batch 一括無効化
+ * （または単発の運営操作）で止めた `issued` 由来のカードがこちら。
+ * **「復帰させる」を出してはいけない** —— あちらは所有者を見ずに
+ * `active` を書くので、所有者の無いカードへ呼ぶと所有者の無いまま
+ * `active` になる壊れた行ができる（#450 のレビューで見つかった、
+ * `docs/nfc-cards-operations.md` §6 が警告する形そのもの）。
+ * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
  *
  * ## `issued` のカードにも単発の「無効化する」を出す（#427）
  *
@@ -156,6 +165,21 @@ const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToke
   csrfToken,
 }) => {
   if (card.status === "disabled") {
+    if (card.ownerUserId === null) {
+      return (
+        <form method="post" action={`/nfc/${card.cardId}/reinstate-to-issued`}>
+          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+          <button
+            type="submit"
+            class={getButtonClasses("outline", "sm")}
+            aria-label={`${card.cardId} を未紐づけへ戻す`}
+          >
+            未紐づけへ戻す
+          </button>
+        </form>
+      );
+    }
+
     return (
       <form method="post" action={`/nfc/${card.cardId}/reinstate`}>
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
@@ -342,7 +366,8 @@ export const NfcPage: FC<NfcPageProps> = ({
         <CardDescription>
           配布前の箱ごと盗難など、<strong>未紐づけ（まだ誰のものでもない）のカードだけ</strong>
           をバッチ単位で止めます。<strong>誰かのカードは対象になりません。</strong>
-          戻す手段はまだありません——実行前によく確かめてください。
+          戻すときは下の「バッチを一括で復帰させる」を使ってください ——
+          <strong>このバッチの一括無効化で止めたカードだけ</strong>が対象です。
         </CardDescription>
       </CardHeader>
       <CardContent>

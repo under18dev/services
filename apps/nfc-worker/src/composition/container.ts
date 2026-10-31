@@ -15,6 +15,7 @@ import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-
 import { DelegatedIssueCardsUseCase } from "../application/use-cases/delegated-issue-cards.use-case";
 import { DelegatedListAllCardsUseCase } from "../application/use-cases/delegated-list-all-cards.use-case";
 import { DelegatedReinstateBatchToIssuedCardsUseCase } from "../application/use-cases/delegated-reinstate-batch-to-issued-cards.use-case";
+import { DelegatedReinstateCardToIssuedUseCase } from "../application/use-cases/delegated-reinstate-card-to-issued.use-case";
 import { DelegatedReinstateCardUseCase } from "../application/use-cases/delegated-reinstate-card.use-case";
 import { DelegatedReleaseCardUseCase } from "../application/use-cases/delegated-release-card.use-case";
 import { DelegatedUpdateCardTargetUseCase } from "../application/use-cases/delegated-update-card-target.use-case";
@@ -115,6 +116,12 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       delegatedCountBatchIssuedCards: new DelegatedCountBatchIssuedCardsUseCase(cards),
       delegatedReleaseCard: new DelegatedReleaseCardUseCase(cards, events, clock),
       delegatedReinstateCard: new DelegatedReinstateCardUseCase(cards, events, clock),
+      // reinstateCard（→ active）の単発版（#436、→ issued）。
+      delegatedReinstateCardToIssued: new DelegatedReinstateCardToIssuedUseCase(
+        cards,
+        events,
+        clock,
+      ),
       // バッチ一括無効化の逆（#436）。
       delegatedReinstateBatchToIssuedCards: new DelegatedReinstateBatchToIssuedCardsUseCase(
         cards,

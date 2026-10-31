@@ -67,6 +67,16 @@ export const reinstateCardDelegatedInputSchema = z.object({
 export type ReinstateCardDelegatedInput = z.infer<typeof reinstateCardDelegatedInputSchema>;
 export type ReinstateCardDelegatedResult = RpcResult<null>;
 
+export const reinstateCardToIssuedDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  cardId: z.string().min(1),
+});
+
+export type ReinstateCardToIssuedDelegatedInput = z.infer<
+  typeof reinstateCardToIssuedDelegatedInputSchema
+>;
+export type ReinstateCardToIssuedDelegatedResult = RpcResult<null>;
+
 export const countBatchIssuedCardsDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   batch: z.string().min(1).max(64),
@@ -185,6 +195,16 @@ export interface NfcAdminDelegatedRpcContract {
    * 判断）。理由は `DelegatedReinstateCardUseCase` の冒頭を参照。
    */
   reinstateCard(input: ReinstateCardDelegatedInput): Promise<ReinstateCardDelegatedResult>;
+  /**
+   * 無効化された、所有者の無い（`issued` 由来の）カード 1 枚を `issued`
+   * へ戻す（#436、`reinstateCard` の対——所有者ありは `reinstateCard`、
+   * 所有者無しはこちら）。`reinstateCard` を所有者の無いカードへ呼ぶと
+   * 所有者の無いまま `active` になる壊れた行ができるため、呼び分けが
+   * 要る。理由は `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
+   */
+  reinstateCardToIssued(
+    input: ReinstateCardToIssuedDelegatedInput,
+  ): Promise<ReinstateCardToIssuedDelegatedResult>;
   /**
    * batch 一括無効化の確認画面が出す件数（#427「配布前の箱ごと盗難」）。
    * **書き込まない。** 2 段階確認の 1 段階目が呼ぶ——

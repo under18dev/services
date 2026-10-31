@@ -207,6 +207,43 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     return c.redirect("/nfc", 303);
   });
 
+  /**
+   * 無効化された、所有者の無い（`issued` 由来の）カードを `issued` へ戻す
+   * （#436、上の `/reinstate`（→ active）の対）。
+   *
+   * **`CardActions` が `card.ownerUserId === null` のときだけこちらを
+   * 出す。** 上の `/reinstate` は所有者を見ずに `active` を書くので、
+   * 所有者の無いカードへ呼ぶと所有者の無いまま `active` になる——
+   * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。**ルートを分けて
+   * あるのは UI の分岐だけに頼らないため**——`:cardId/reinstate` を直接
+   * POST されても、この経路を使わない限り所有者の無いカードは `active`
+   * にならない。
+   */
+  app.post("/nfc/:cardId/reinstate-to-issued", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, "/nfc");
+    }
+
+    const session = c.get("session");
+    const cardId = c.req.param("cardId");
+
+    const container = c.get("container");
+    const result = await container.nfcCards.reinstateCardToIssued({
+      actorUserId: session.sub,
+      cardId,
+    });
+
+    if (!result.ok) {
+      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect("/nfc", 303);
+  });
+
   app.post("/nfc/:cardId/target", pageSecurityHeaders, async (c) => {
     const form = await c.req.formData().catch(() => null);
 

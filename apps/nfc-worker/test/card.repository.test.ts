@@ -159,6 +159,55 @@ describe("disable / release", () => {
   });
 });
 
+describe("reinstateToIssuedAsAdmin", () => {
+  it("所有者の無い disabled カードを issued へ戻す", async () => {
+    const cardId = await seedIssuedCard();
+    await repository().disableAsAdmin(cardId, "admin_action", new Date());
+
+    const reinstated = await repository().reinstateToIssuedAsAdmin(cardId, new Date());
+
+    expect(reinstated).toBe(true);
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("issued");
+    expect(card?.ownerUserId).toBeNull();
+    expect(card?.disabledAt).toBeNull();
+    expect(card?.disabledReason).toBeNull();
+  });
+
+  it("理由コードを問わない（単発で名指しする操作のため、admin_batch で止めた行も戻せる）", async () => {
+    const cardId = await seedIssuedCard("bunkasai-2026");
+    await repository().disableBatchAsAdmin(
+      "bunkasai-2026",
+      ADMIN_BATCH_DISABLED_REASON,
+      new Date(),
+    );
+
+    expect(await repository().reinstateToIssuedAsAdmin(cardId, new Date())).toBe(true);
+  });
+
+  it("所有者がいれば戻さない——reinstateAsAdmin（→ active）との呼び分けの核心", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().disable(cardId, "usr_taro", "lost", new Date());
+
+    const reinstated = await repository().reinstateToIssuedAsAdmin(cardId, new Date());
+
+    expect(reinstated).toBe(false);
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("disabled");
+    expect(card?.ownerUserId).toBe("usr_taro");
+  });
+
+  it("issued（一度も無効化されていない）のカードには効かない", async () => {
+    const cardId = await seedIssuedCard();
+
+    expect(await repository().reinstateToIssuedAsAdmin(cardId, new Date())).toBe(false);
+  });
+
+  it("存在しないカードでも例外を投げない", async () => {
+    expect(await repository().reinstateToIssuedAsAdmin(newCardId(), new Date())).toBe(false);
+  });
+});
+
 describe("reinstateBatchToIssuedAsAdmin", () => {
   it("そのバッチの、一括無効化専用の理由コードを持つ行だけを issued へ戻す", async () => {
     const cardId = await seedIssuedCard("bunkasai-2026");
