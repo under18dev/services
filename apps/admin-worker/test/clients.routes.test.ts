@@ -11,6 +11,7 @@ import type {
   OAuthClientSummary,
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
+import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
 
 /**
@@ -156,6 +157,9 @@ describe("POST /clients（登録）", () => {
 
     expect(response.status).toBe(403);
     expect(calls.createOAuthClient).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
+    expect(html).toContain('href="/clients"');
   });
 
   it("種別を選んでいなければ RPC を呼ばず、やり直せる文言を出す", async () => {

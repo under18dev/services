@@ -11,6 +11,7 @@ import type {
   UserAdminSummary,
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
+import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
 
 /**
@@ -167,6 +168,9 @@ describe("POST /users/search", () => {
 
     expect(response.status).toBe(403);
     expect(calls.listUsers).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
+    expect(html).toContain('href="/users"');
   });
 
   it("CSRF が通れば query を渡して絞り込む", async () => {

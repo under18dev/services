@@ -21,6 +21,9 @@ import { registerAuditRoutes } from "./audit.routes";
 import { registerClientsRoutes } from "./clients.routes";
 import { registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
+import { HomePage } from "./ui/home-page";
+import { MessagePage } from "./ui/message-page";
+import { PendingPage } from "./ui/pending-page";
 import type { AppBindings } from "./types";
 
 /**
@@ -201,7 +204,7 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
    * 「認可コードを知っているだけの第三者」に token エンドポイントを
    * 叩かせる足がかりを与える。
    */
-  app.get("/callback", async (c) => {
+  app.get("/callback", pageSecurityHeaders, async (c) => {
     const container = c.get("container");
     const { env } = container;
 
@@ -210,7 +213,16 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       // 同じ方針——画面に出すと、攻撃者に何を直せばよいか教える。
       console.warn(JSON.stringify({ event: "admin.callback_rejected", reason }));
       c.header("Set-Cookie", clearLoginStateCookie(env.ENVIRONMENT), { append: true });
-      return c.text("ログインをやり直してください。", 400, { "Cache-Control": "no-store" });
+      c.header("Cache-Control", "no-store");
+      return c.html(
+        <MessagePage
+          title="ログインをやり直してください"
+          message="ログインをやり直してください。"
+          actionHref="/login"
+          actionLabel="ログイン画面へ"
+        />,
+        400,
+      );
     };
 
     if (c.req.query("error") !== undefined) {
@@ -266,10 +278,12 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       c.header("Set-Cookie", clearLoginStateCookie(env.ENVIRONMENT), { append: true });
       c.header("Cache-Control", "no-store");
       return c.html(
-        "<!doctype html><html><body>" +
-          "<p>この管理画面はパスキーでログインした場合のみ使えます。</p>" +
-          `<p><a href="/login">パスキーでログインし直す</a></p>` +
-          "</body></html>",
+        <MessagePage
+          title="パスキーでのログインが必要です"
+          message="この管理画面はパスキーでログインした場合のみ使えます。"
+          actionHref="/login"
+          actionLabel="パスキーでログインし直す"
+        />,
         403,
       );
     }
@@ -333,30 +347,22 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     // ホーム（下の `/` ハンドラ）が `sub` を出しているのに、未承認の
     // ここだけ出していなかった（出すべきなのは逆の側だった）。
     return c.html(
-      "<!doctype html><html><body>" +
-        "<p>ログインできました。使えるようにするには、承認の権限を持つ人に次の ID を伝えてください。</p>" +
-        `<p>${renderSub(session.sub)}</p>` +
-        "<p>（承認する人向け。最初の 1 人には <code>--super</code> が要ります）</p>" +
-        `<pre><code>node apps/admin-worker/scripts/admin-approval.mjs grant --sub ${escapeHtml(session.sub)} --actor &lt;実行者&gt; --super --remote</code></pre>` +
-        "</body></html>",
+      <PendingPage
+        sub={session.sub}
+        grantCommand={`node apps/admin-worker/scripts/admin-approval.mjs grant --sub ${session.sub} --actor <実行者> --super --remote`}
+      />,
     );
   });
 
   /**
-   * プレースホルダのホーム。**画面はここに積む。**
+   * ホーム。**画面はここに積む。**
    *
    * ここへ来る時点で、上のガードが承認済みであることを確かめている。
    */
   app.get("/", pageSecurityHeaders, (c) => {
     const session = c.get("session");
     c.header("Cache-Control", "no-store");
-    return c.html(
-      `<!doctype html><html><body><p>サインインしました: ${renderSub(session.sub)}</p>` +
-        `<p><a href="/nfc">NFC カード</a></p>` +
-        `<p><a href="/clients">OAuth クライアント</a></p>` +
-        `<p><a href="/users">利用者</a></p>` +
-        `<p><a href="/audit">監査ログ</a></p></body></html>`,
-    );
+    return c.html(<HomePage sub={session.sub} />);
   });
 
   // NFC カードの管理（#382 / #390 決定 16 ③）。上のガードが既にセッション・
@@ -371,26 +377,4 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   registerClientsRoutes(app);
 
   return app;
-}
-
-/**
- * `session.sub` を HTML へ埋め込む形を 1 箇所に揃える。
- *
- * 承認待ち（`/pending`）と承認済み（`/`）の両方がこれを呼ぶ。別々に
- * `escapeHtml` を呼ぶ形にすると、書式を変えたとき片方だけ直される——
- * このリポジトリで繰り返し踏んできた形（#369 の記録を参照）。
- */
-function renderSub(sub: string): string {
-  // `sub` は `newUserId()` の形（英数字と `_`）しか取らないはずだが、
-  // ID Token の検証をすり抜けた値をそのまま HTML へ流し込む経路を
-  // 作らないため、文字参照にしてから埋める。
-  return `<code>${escapeHtml(sub)}</code>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

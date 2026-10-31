@@ -51,6 +51,11 @@ export function ensureCsrfToken(c: Context<AppBindings>): string {
  * form POST を受け取ってよいかを判定する。
  *
  * Origin とトークンの**両方**を要求する。片方でも欠けたら拒否する。
+ *
+ * 落ちたときの画面は `ui/message-page.tsx` の `csrfRejected()` を使う
+ * こと（#443）。以前はここに `"forbidden"` を英語のまま返していたが、
+ * 運用者の指示（人がブラウザで到達しうる経路は全部 Kiwa UI で作り込む）
+ * を受けて置き換えた。
  */
 export function isValidCsrf(c: Context<AppBindings>, submitted: string | undefined): boolean {
   return isValidCsrfCheck({
