@@ -333,14 +333,19 @@ jobs:
       # curl とリトライの実体は scripts/smoke-probe.sh にある。3 つの Worker
       # すべてが同じものを使う。複数箇所に写すと片方だけ直す事故が起きる。
       #
-      # PRODUCTION_URL が未設定の間は skip する。
+      # **PRODUCTION_URL が無ければ落とす。** 以前は「issuer ドメインが
+      # 決まるまで（#33）コストを掛けない」という理由で警告だけ出して
+      # skip していたが、4 つの Worker 全部が本番で動いている今はその
+      # 理由が成立しない。admin-worker で ADMIN_URL が未設定のまま
+      # 気づかれず、デプロイ後検査が一度も走っていなかった（#453）。
+      # 変数の不在は「まだ設定していない」ではなく「設定し忘れた」。
       - name: Smoke test the deployed Worker
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the smoke test."
-            exit 0
+            echo "::error::PRODUCTION_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-probe.sh "${PRODUCTION_URL%/}/health" 200 \
             --jq .status ok \
@@ -385,8 +390,8 @@ jobs:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the form smoke test."
-            exit 0
+            echo "::error::PRODUCTION_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-form-probe.sh "${PRODUCTION_URL%/}"
 
@@ -430,8 +435,8 @@ jobs:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the asset smoke test."
-            exit 0
+            echo "::error::PRODUCTION_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           # ページは渡さない。**どのページを引くかはスクリプト側が持つ** ——
           # ここに書くと、`check:asset-pages` が突き合わせる相手が
@@ -455,8 +460,8 @@ jobs:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the passkey smoke test."
-            exit 0
+            echo "::error::PRODUCTION_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-passkey-probe.sh "${PRODUCTION_URL%/}"
 
@@ -534,8 +539,8 @@ jobs:
           NFC_SHORT_URL: ${{ vars.NFC_SHORT_URL }}
         run: |
           if [ -z "$NFC_SHORT_URL" ]; then
-            echo "::warning::NFC_SHORT_URL repository variable is not set, skipping the smoke test. Set it to the production short-URL origin (e.g. https://go.under18.dev)."
-            exit 0
+            echo "::error::NFC_SHORT_URL repository variable is not set. Set it to the production short-URL origin (e.g. https://go.under18.dev); the Worker is already live, so this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-probe.sh "${NFC_SHORT_URL%/}/c/deploy_smoke_probe" 404 \
             --contains "このカードは利用できません。"
@@ -586,8 +591,8 @@ jobs:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the smoke test."
-            exit 0
+            echo "::error::PRODUCTION_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-probe.sh "${PRODUCTION_URL%/}/account/api/me" 401 \
             --jq .error unauthenticated \
@@ -612,8 +617,8 @@ jobs:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
         run: |
           if [ -z "$PRODUCTION_URL" ]; then
-            echo "::warning::PRODUCTION_URL repository variable is not set, skipping the asset smoke test."
-            exit 0
+            echo "::error::PRODUCTION_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-asset-probe.sh "${PRODUCTION_URL%/}" dashboard-worker
 
@@ -701,8 +706,8 @@ jobs:
           ADMIN_URL: ${{ vars.ADMIN_URL }}
         run: |
           if [ -z "$ADMIN_URL" ]; then
-            echo "::warning::ADMIN_URL repository variable is not set, skipping the smoke test."
-            exit 0
+            echo "::error::ADMIN_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
 
           status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${ADMIN_URL%/}/")"
@@ -726,7 +731,7 @@ jobs:
           ADMIN_URL: ${{ vars.ADMIN_URL }}
         run: |
           if [ -z "$ADMIN_URL" ]; then
-            echo "::warning::ADMIN_URL repository variable is not set, skipping the asset smoke test."
-            exit 0
+            echo "::error::ADMIN_URL repository variable is not set. The Worker is already live in production; this is a configuration gap, not a bootstrap state."
+            exit 1
           fi
           scripts/smoke-asset-probe.sh "${ADMIN_URL%/}" admin-worker
