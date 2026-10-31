@@ -1,7 +1,7 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
 import type { Context, Hono } from "hono";
-import { CSRF_FIELD_NAME, CSRF_REJECTED_MESSAGE, ensureCsrfToken, isValidCsrf } from "./csrf";
-import { serviceUnavailable } from "./ui/message-page";
+import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { csrfRejected, serviceUnavailable } from "./ui/message-page";
 import { ClientsPage, type CreatedClient } from "./ui/clients-page";
 import type { AppBindings } from "./types";
 
@@ -77,7 +77,7 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text(CSRF_REJECTED_MESSAGE, 403);
+      return csrfRejected(c, "/clients");
     }
 
     const session = c.get("session");
@@ -121,7 +121,7 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return c.text(CSRF_REJECTED_MESSAGE, 403);
+      return csrfRejected(c, "/clients");
     }
 
     const session = c.get("session");

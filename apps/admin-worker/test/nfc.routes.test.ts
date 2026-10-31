@@ -252,8 +252,12 @@ describe("POST /nfc（発行）", () => {
 
     expect(response.status).toBe(403);
     expect(calls.issueCards).toHaveLength(0);
+    const html = await response.text();
     // **英語 1 語の "forbidden" のまま出さない。** 他が日本語なので浮く。
-    expect(await response.text()).not.toBe("forbidden");
+    expect(html).not.toBe("forbidden");
+    // Kiwa の外枠で描き、/nfc へ戻る導線を持つ（#443）。
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
+    expect(html).toContain('href="/nfc"');
   });
 
   it("CSRF が通れば issueCards を actorUserId 付きで呼び、PRG で戻す", async () => {

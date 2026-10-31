@@ -55,6 +55,36 @@ export function serviceUnavailable(c: Context<AppBindings>): Response | Promise<
   );
 }
 
+/**
+ * CSRF 検証に落ちたときの応答（nfc / clients / users / audit の各
+ * routes.tsx が共有する、#443）。
+ *
+ * **運用者の立っている指示（2026-10-31）—— 「人がブラウザで到達しうる
+ * 経路は全部 Kiwa UI で作り込む」を受けて、`c.text(..., 403)` から
+ * 切り替えた。** 以前は「フォーム POST の失敗は稀な経路で、フルページの
+ * 再構築コストに見合わない」として素のテキストに留めていたが、
+ * `MessagePage` はもともとデータの再取得を要らない作りなので、
+ * **再構築コストという理由自体が成立していなかった。**
+ *
+ * **行き先は `returnTo`——フォームが置かれていたページ**（例: `/nfc`）。
+ * `c.req.path` を使わないのは、POST 先（`/nfc/:cardId/disable` など）に
+ * は GET のハンドラが無く、そこへ `<a href>` で戻ると 404 するため。
+ */
+export function csrfRejected(
+  c: Context<AppBindings>,
+  returnTo: string,
+): Response | Promise<Response> {
+  return c.html(
+    <MessagePage
+      title="操作を確認できませんでした"
+      message="操作を確認できませんでした。ページを再読み込みしてから、もう一度お試しください。"
+      actionHref={returnTo}
+      actionLabel="ページに戻る"
+    />,
+    403,
+  );
+}
+
 export const MessagePage: FC<MessagePageProps> = ({ title, message, actionHref, actionLabel }) => (
   <KiwaShell
     title={title}

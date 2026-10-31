@@ -7,6 +7,7 @@ import type {
   ListAuditLogsDelegatedInput,
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
+import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
 
 /**
@@ -126,6 +127,9 @@ describe("POST /audit/search", () => {
 
     expect(response.status).toBe(403);
     expect(calls.listAuditLogs).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
+    expect(html).toContain('href="/audit"');
   });
 
   it("CSRF が通れば event・user_id・outcome を渡して絞り込む", async () => {
