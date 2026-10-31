@@ -715,3 +715,18 @@ jobs:
               exit 1
               ;;
           esac
+
+      # **自分のデプロイ直後に、自分のアセットを引く**（dashboard-worker と
+      # 同じ理由、#447）。`/` は未ログインで `/login` へ 302 するだけで
+      # 画面を持たないので、**`/callback` を裸で引く** —— 未認証・無効な
+      # state でも `MessagePage`（Kiwa UI）を 400 で返すので、ここから
+      # CSS の参照を読める（#443）。
+      - name: Smoke test the assets the page references
+        env:
+          ADMIN_URL: ${{ vars.ADMIN_URL }}
+        run: |
+          if [ -z "$ADMIN_URL" ]; then
+            echo "::warning::ADMIN_URL repository variable is not set, skipping the asset smoke test."
+            exit 0
+          fi
+          scripts/smoke-asset-probe.sh "${ADMIN_URL%/}" admin-worker

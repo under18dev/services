@@ -83,6 +83,14 @@ probe_pages_for() {
   case "$1" in
     auth-worker) echo "/login:/ui/" ;;
     dashboard-worker) echo "/account:/account/ui/" ;;
+    # **`/` ではなく `/callback` を引く**（#447）。`/` は未ログインで
+    # `/login` へ 302 するだけで画面を持たないので、ここからは参照を
+    # 読めない。`/callback` は裸で叩いても（state も code も無くても）
+    # `MessagePage`（Kiwa UI）を 400 で返すので、未認証でも引ける
+    # （`apps/admin-worker/src/presentation/http/app.tsx` の `fail()`）。
+    # 接頭辞は auth-worker と同じ形——admin-worker もルート直下に
+    # `/ui/` を持つ別オリジンである。
+    admin-worker) echo "/callback:/ui/" ;;
     *) echo "" ;;
   esac
 }
