@@ -1,7 +1,8 @@
 import { type NfcDatabase, nfcCards } from "@u18/nfc-db";
-import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { CardRepository, NewCard } from "../../application/ports";
 import { Card, type CardProps } from "../../domain/entities/card";
+import { ADMIN_BATCH_DISABLED_REASON } from "../../domain/services/disabled-reason";
 
 type CardRow = typeof nfcCards.$inferSelect;
 
@@ -174,6 +175,49 @@ export class DrizzleCardRepository implements CardRepository {
   }
 
   /**
+   * batch 単位で `issued` 由来の `disabled` を一括で `issued` へ戻す
+   * （#436、`disableBatchAsAdmin` の逆）。**`owner_user_id is null` と
+   * `disabled_reason` の両方を WHERE 句に持つ**——前者は「元々 issued
+   * だったか」、後者は「この一括操作で無効化されたか」を見る。
+   * `ownerUserId` / `targetUrl` には触らない（`disableBatchAsAdmin` が
+   * それらを変えていないので、戻す必要も無い——`reinstateAsAdmin` と
+   * 同じ判断）。
+   */
+  async reinstateBatchToIssuedAsAdmin(
+    batch: string,
+    now: Date,
+  ): Promise<readonly { readonly id: string }[]> {
+    return await this.db
+      .update(nfcCards)
+      .set({ status: "issued", disabledAt: null, disabledReason: null, updatedAt: now })
+      .where(
+        and(
+          eq(nfcCards.batch, batch),
+          eq(nfcCards.status, "disabled"),
+          isNull(nfcCards.ownerUserId),
+          eq(nfcCards.disabledReason, ADMIN_BATCH_DISABLED_REASON),
+        ),
+      )
+      .returning({ id: nfcCards.id });
+  }
+
+  async countDisabledInBatch(batch: string): Promise<number> {
+    const rows = await this.db
+      .select({ id: nfcCards.id })
+      .from(nfcCards)
+      .where(
+        and(
+          eq(nfcCards.batch, batch),
+          eq(nfcCards.status, "disabled"),
+          isNull(nfcCards.ownerUserId),
+          eq(nfcCards.disabledReason, ADMIN_BATCH_DISABLED_REASON),
+        ),
+      )
+      .all();
+    return rows.length;
+  }
+
+  /**
    * 運営による遷移先の変更（#382）。**所有者を WHERE 句に持たない。**
    *
    * `updateTarget` と同じ条件付き UPDATE で、違いは所有者を問わないこと
@@ -260,6 +304,15 @@ export class DrizzleCardRepository implements CardRepository {
    * 無効化されたカードを `active` へ戻す（#427）。**`ownerUserId` /
    * `targetUrl` には触らない** —— `disableAsAdmin` がそれらを変えて
    * いないので、ここで戻す必要も無い。
+   *
+   * **`owner_user_id is not null` を WHERE 句に持つ（#450 のレビューで
+   * 追加）。** これが無いと、所有者の無いカード（batch 一括無効化で
+   * 止めた `issued` 由来のカード）へこれを直接呼べてしまい、所有者の
+   * 無いまま `active` になる壊れた行ができる——
+   * `reinstateToIssuedAsAdmin`（下）の存在がそれを防ぐのは、**UI が
+   * `CardActions` でボタンを出し分けている間だけ**で、ルートを直接
+   * 叩けば抜けていた。ここで止めることで、呼び出し元（UI・ルート）の
+   * 正しさに関係なく不変条件が保たれる。
    */
   async reinstateAsAdmin(cardId: string, now: Date): Promise<boolean> {
     const rows = await this.db
@@ -270,7 +323,35 @@ export class DrizzleCardRepository implements CardRepository {
         disabledReason: null,
         updatedAt: now,
       })
-      .where(and(eq(nfcCards.id, cardId), eq(nfcCards.status, "disabled")))
+      .where(
+        and(
+          eq(nfcCards.id, cardId),
+          eq(nfcCards.status, "disabled"),
+          isNotNull(nfcCards.ownerUserId),
+        ),
+      )
+      .returning({ id: nfcCards.id });
+    return rows.length > 0;
+  }
+
+  /**
+   * 無効化された、所有者の無い（`issued` 由来の）カード 1 枚を `issued`
+   * へ戻す（#436、`reinstateBatchToIssuedAsAdmin` の単発版）。
+   * `disabled_reason` では絞らない——単発で名指しする操作のため
+   * （`CardRepository` の宣言を参照）。
+   */
+  async reinstateToIssuedAsAdmin(cardId: string, now: Date): Promise<boolean> {
+    const rows = await this.db
+      .update(nfcCards)
+      .set({
+        status: "issued",
+        disabledAt: null,
+        disabledReason: null,
+        updatedAt: now,
+      })
+      .where(
+        and(eq(nfcCards.id, cardId), eq(nfcCards.status, "disabled"), isNull(nfcCards.ownerUserId)),
+      )
       .returning({ id: nfcCards.id });
     return rows.length > 0;
   }
