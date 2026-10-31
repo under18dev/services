@@ -1,8 +1,10 @@
 import {
   batchDisableCardsDelegatedInputSchema,
   countBatchIssuedCardsDelegatedInputSchema,
+  countDisabledInBatchDelegatedInputSchema,
   disableCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
+  reinstateBatchToIssuedCardsDelegatedInputSchema,
   reinstateCardDelegatedInputSchema,
   releaseCardDelegatedInputSchema,
   rpcErr,
@@ -13,12 +15,16 @@ import {
   type BatchDisableCardsDelegatedResult,
   type CountBatchIssuedCardsDelegatedInput,
   type CountBatchIssuedCardsDelegatedResult,
+  type CountDisabledInBatchDelegatedInput,
+  type CountDisabledInBatchDelegatedResult,
   type DisableCardDelegatedInput,
   type DisableCardDelegatedResult,
   type IssueCardsDelegatedInput,
   type IssueCardsDelegatedResult,
   type ListAllCardsDelegatedResult,
   type NfcAdminDelegatedRpcContract,
+  type ReinstateBatchToIssuedCardsDelegatedInput,
+  type ReinstateBatchToIssuedCardsDelegatedResult,
   type ReinstateCardDelegatedInput,
   type ReinstateCardDelegatedResult,
   type ReleaseCardDelegatedInput,
@@ -210,6 +216,46 @@ export class NfcAdminDelegatedRPC
 
     const container = createContainer(this.env);
     const result = await container.useCases.delegatedBatchDisableCards.execute({
+      actorUserId: parsed.data.actorUserId,
+      batch: parsed.data.batch,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({ cardIds: result.value.cardIds });
+  }
+
+  /**
+   * batch 一括復帰の確認画面が出す件数（#436）。**書き込まない。**
+   */
+  async countDisabledInBatch(
+    input: CountDisabledInBatchDelegatedInput,
+  ): Promise<CountDisabledInBatchDelegatedResult> {
+    const parsed = countDisabledInBatchDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or batch is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedCountDisabledInBatch.execute({
+      batch: parsed.data.batch,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({ count: result.value.count });
+  }
+
+  /**
+   * batch 単位で一括無効化された `issued` 由来のカードを一括で `issued`
+   * へ戻す（#436、`batchDisableCards` の逆）。**この一括操作で無効化
+   * された行だけが対象。** 理由は
+   * `DelegatedReinstateBatchToIssuedCardsUseCase` の冒頭を参照。
+   */
+  async reinstateBatchToIssuedCards(
+    input: ReinstateBatchToIssuedCardsDelegatedInput,
+  ): Promise<ReinstateBatchToIssuedCardsDelegatedResult> {
+    const parsed = reinstateBatchToIssuedCardsDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or batch is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedReinstateBatchToIssuedCards.execute({
       actorUserId: parsed.data.actorUserId,
       batch: parsed.data.batch,
     });

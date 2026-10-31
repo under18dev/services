@@ -38,6 +38,9 @@ const ISSUED_COUNT_PARAM = "issued";
 /** batch 一括無効化の直後に「何枚止めたか」を運ぶクエリ名（#427）。 */
 const BATCH_DISABLED_COUNT_PARAM = "batch_disabled";
 
+/** batch 一括復帰の直後に「何枚戻したか」を運ぶクエリ名（#436）。 */
+const BATCH_REINSTATED_COUNT_PARAM = "batch_reinstated";
+
 const TARGET_URL_REASON_LABEL: Readonly<Record<string, string>> = {
   not_absolute: "URL は https:// から始まる絶対 URL で入力してください。",
   too_long: "URL が長すぎます。短いものをお使いください。",
@@ -57,6 +60,14 @@ function issuedCountFromQuery(raw: string | undefined): number | null {
 
 /** `ISSUED_COUNT_PARAM` と違い 0 を許す——該当なしで一括無効化が実行されうる。 */
 function batchDisabledCountFromQuery(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+/** `batchDisabledCountFromQuery` と同じ理由で 0 を許す。 */
+function batchReinstatedCountFromQuery(raw: string | undefined): number | null {
   if (raw === undefined) return null;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0) return null;
@@ -88,6 +99,11 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         batchDisable={null}
         batchDisableError={null}
         batchDisabledCount={batchDisabledCountFromQuery(c.req.query(BATCH_DISABLED_COUNT_PARAM))}
+        batchReinstate={null}
+        batchReinstateError={null}
+        batchReinstatedCount={batchReinstatedCountFromQuery(
+          c.req.query(BATCH_REINSTATED_COUNT_PARAM),
+        )}
       />,
     );
   });
@@ -297,6 +313,78 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     c.header("Cache-Control", "no-store");
     return c.redirect(`/nfc?${BATCH_DISABLED_COUNT_PARAM}=${result.value.cardIds.length}`, 303);
   });
+
+  /**
+   * batch 単位で一括無効化されたカードを一括で `issued` へ戻す（#436
+   * 「一括で止められるのに一括で戻せない」）。**この一括操作で無効化
+   * された行だけが対象**——理由は
+   * `DelegatedReinstateBatchToIssuedCardsUseCase` の冒頭を参照。
+   *
+   * **2 段階の retype 確認は `/nfc/batch-disable` と同じ形にした。**
+   * 止めるときと戻すときで確認の重さを変える理由が無い——`39` の指示
+   * どおり「止めたときと同じ画面・同じ粒度で押せる」ことを優先した。
+   */
+  app.post("/nfc/batch-reinstate", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, "/nfc");
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const typed = form.get("batch")?.toString().trim() ?? "";
+    const targetBatch = form.get("target_batch")?.toString().trim() ?? "";
+
+    if (targetBatch === "") {
+      if (typed === "") {
+        return renderNfcPageWithError(c, "バッチ名を入力してください。");
+      }
+
+      const counted = await container.nfcCards.countDisabledInBatch({
+        actorUserId: session.sub,
+        batch: typed,
+      });
+      if (!counted.ok) {
+        return serviceUnavailable(c);
+      }
+      if (counted.value.count === 0) {
+        return renderNfcPageWithError(c, "そのバッチには、一括無効化で止めたカードがありません。");
+      }
+
+      return renderNfcPageWithBatchReinstateConfirm(c, {
+        batch: typed,
+        count: counted.value.count,
+      });
+    }
+
+    if (typed !== targetBatch) {
+      const counted = await container.nfcCards.countDisabledInBatch({
+        actorUserId: session.sub,
+        batch: targetBatch,
+      });
+      if (!counted.ok) {
+        return serviceUnavailable(c);
+      }
+      return renderNfcPageWithBatchReinstateConfirm(
+        c,
+        { batch: targetBatch, count: counted.value.count },
+        "入力が一致しません。もう一度バッチ名を入力してください。",
+      );
+    }
+
+    const result = await container.nfcCards.reinstateBatchToIssuedCards({
+      actorUserId: session.sub,
+      batch: targetBatch,
+    });
+    if (!result.ok) {
+      return renderNfcPageWithError(c, "しばらくしてからもう一度お試しください。");
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect(`/nfc?${BATCH_REINSTATED_COUNT_PARAM}=${result.value.cardIds.length}`, 303);
+  });
 }
 
 /**
@@ -330,6 +418,9 @@ async function renderNfcPageWithError(c: Context<AppBindings>, message: string):
       batchDisable={null}
       batchDisableError={null}
       batchDisabledCount={null}
+      batchReinstate={null}
+      batchReinstateError={null}
+      batchReinstatedCount={null}
     />,
     400,
   );
@@ -368,6 +459,50 @@ async function renderNfcPageWithBatchConfirm(
       batchDisable={batchDisable}
       batchDisableError={error}
       batchDisabledCount={null}
+      batchReinstate={null}
+      batchReinstateError={null}
+      batchReinstatedCount={null}
+    />,
+    error === null ? 200 : 400,
+  );
+}
+
+/**
+ * batch 一括復帰の確認画面を描き直す（#436）。**一覧をもう一度引く**
+ * のは `renderNfcPageWithBatchConfirm` と同じ理由——直前の操作の結果を
+ * 手で足すと、食い違いを作れる。
+ */
+async function renderNfcPageWithBatchReinstateConfirm(
+  c: Context<AppBindings>,
+  batchReinstate: { readonly batch: string; readonly count: number },
+  error: string | null = null,
+): Promise<Response> {
+  const container = c.get("container");
+  const result = await container.nfcCards.listAllCards();
+
+  if (!result.ok) {
+    return serviceUnavailable(c);
+  }
+
+  const tapUrls = result.value.cards
+    .filter((card) => card.status === "issued")
+    .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+
+  c.header("Cache-Control", "no-store");
+  return c.html(
+    <NfcPage
+      cards={result.value.cards}
+      truncated={result.value.truncated}
+      tapUrls={tapUrls}
+      csrfToken={ensureCsrfToken(c)}
+      issuedCount={null}
+      error={null}
+      batchDisable={null}
+      batchDisableError={null}
+      batchDisabledCount={null}
+      batchReinstate={batchReinstate}
+      batchReinstateError={error}
+      batchReinstatedCount={null}
     />,
     error === null ? 200 : 400,
   );

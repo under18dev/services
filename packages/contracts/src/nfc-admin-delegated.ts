@@ -87,6 +87,28 @@ export type BatchDisableCardsDelegatedResult = RpcResult<{
   readonly cardIds: readonly string[];
 }>;
 
+export const countDisabledInBatchDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  batch: z.string().min(1).max(64),
+});
+
+export type CountDisabledInBatchDelegatedInput = z.infer<
+  typeof countDisabledInBatchDelegatedInputSchema
+>;
+export type CountDisabledInBatchDelegatedResult = RpcResult<{ readonly count: number }>;
+
+export const reinstateBatchToIssuedCardsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  batch: z.string().min(1).max(64),
+});
+
+export type ReinstateBatchToIssuedCardsDelegatedInput = z.infer<
+  typeof reinstateBatchToIssuedCardsDelegatedInputSchema
+>;
+export type ReinstateBatchToIssuedCardsDelegatedResult = RpcResult<{
+  readonly cardIds: readonly string[];
+}>;
+
 /**
  * 一覧・発行で使う、運営向けの表示用データ。
  *
@@ -173,12 +195,28 @@ export interface NfcAdminDelegatedRpcContract {
   ): Promise<CountBatchIssuedCardsDelegatedResult>;
   /**
    * batch 単位で `issued`（未紐づけ）のカードを一括無効化する（#427）。
-   * **`active` は対象外。** 理由・監査・戻す経路が無いことは
-   * `DelegatedBatchDisableCardsUseCase` の冒頭を参照。
+   * **`active` は対象外。** 理由・監査は `DelegatedBatchDisableCardsUseCase`
+   * の冒頭を参照。戻す経路は `reinstateBatchToIssuedCards`（#436）。
    */
   batchDisableCards(
     input: BatchDisableCardsDelegatedInput,
   ): Promise<BatchDisableCardsDelegatedResult>;
+  /**
+   * batch 一括復帰の確認画面が出す件数（#436）。**書き込まない。**
+   * 2 段階確認の 1 段階目が呼ぶ——`countBatchIssuedCards` と対称。
+   */
+  countDisabledInBatch(
+    input: CountDisabledInBatchDelegatedInput,
+  ): Promise<CountDisabledInBatchDelegatedResult>;
+  /**
+   * batch 単位で一括無効化された `issued` 由来のカードを一括で `issued`
+   * へ戻す（#436、`batchDisableCards` の逆）。**この一括操作で無効化
+   * された行だけが対象。** 理由は `DelegatedReinstateBatchToIssuedCardsUseCase`
+   * の冒頭を参照。
+   */
+  reinstateBatchToIssuedCards(
+    input: ReinstateBatchToIssuedCardsDelegatedInput,
+  ): Promise<ReinstateBatchToIssuedCardsDelegatedResult>;
   /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;

@@ -1,6 +1,9 @@
 import { newCardId } from "@u18/domain";
+import { nfcCards } from "@u18/nfc-db";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { repository, resetDatabase, seedActiveCard, seedIssuedCard } from "./helpers";
+import { ADMIN_BATCH_DISABLED_REASON } from "../src/domain/services/disabled-reason";
+import { db, repository, resetDatabase, seedActiveCard, seedIssuedCard } from "./helpers";
 
 /**
  * 状態遷移の前提条件が **WHERE 句に入っていること**を、本物の D1 で確かめる。
@@ -153,6 +156,95 @@ describe("disable / release", () => {
     await repository().disable(cardId, "usr_taro", "lost", new Date());
 
     expect(await repository().release(cardId, "usr_taro", new Date())).toBe(false);
+  });
+});
+
+describe("reinstateBatchToIssuedAsAdmin", () => {
+  it("そのバッチの、一括無効化専用の理由コードを持つ行だけを issued へ戻す", async () => {
+    const cardId = await seedIssuedCard("bunkasai-2026");
+    await repository().disableBatchAsAdmin(
+      "bunkasai-2026",
+      ADMIN_BATCH_DISABLED_REASON,
+      new Date(),
+    );
+
+    const rows = await repository().reinstateBatchToIssuedAsAdmin("bunkasai-2026", new Date());
+
+    expect(rows.map((row) => row.id)).toEqual([cardId]);
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("issued");
+    expect(card?.disabledAt).toBeNull();
+    expect(card?.disabledReason).toBeNull();
+  });
+
+  it("理由コードが違えば戻さない（単発の運営操作との区別）", async () => {
+    const cardId = await seedIssuedCard("bunkasai-2026");
+    await repository().disableBatchAsAdmin("bunkasai-2026", "admin_action", new Date());
+
+    const rows = await repository().reinstateBatchToIssuedAsAdmin("bunkasai-2026", new Date());
+
+    expect(rows).toHaveLength(0);
+    expect((await repository().findById(cardId))?.status).toBe("disabled");
+  });
+
+  it("owner_user_id が付いていれば、理由コードが一致していても戻さない（#436 の保険）", async () => {
+    // **通常の UseCase からはこの行は作れない**（`disableBatchAsAdmin` は
+    // `issued` しか対象にせず、`issued` は所有者を持たない）。WHERE 句の
+    // `owner_user_id is null` がそれ自体で守っていることを、行を直接
+    // 書き換えて確かめる。
+    const cardId = await seedActiveCard("usr_taro");
+    await repository().disable(cardId, "usr_taro", "lost", new Date());
+    await db()
+      .update(nfcCards)
+      .set({ batch: "bunkasai-2026", disabledReason: ADMIN_BATCH_DISABLED_REASON })
+      .where(eq(nfcCards.id, cardId))
+      .run();
+
+    const rows = await repository().reinstateBatchToIssuedAsAdmin("bunkasai-2026", new Date());
+
+    expect(rows).toHaveLength(0);
+    const card = await repository().findById(cardId);
+    expect(card?.status).toBe("disabled");
+    expect(card?.ownerUserId).toBe("usr_taro");
+  });
+
+  it("別バッチには触らない", async () => {
+    const cardId = await seedIssuedCard("other-batch");
+    await repository().disableBatchAsAdmin("other-batch", ADMIN_BATCH_DISABLED_REASON, new Date());
+
+    const rows = await repository().reinstateBatchToIssuedAsAdmin("bunkasai-2026", new Date());
+
+    expect(rows).toHaveLength(0);
+    expect((await repository().findById(cardId))?.status).toBe("disabled");
+  });
+
+  it("既に issued のカードには影響しない（冪等の根拠）", async () => {
+    await seedIssuedCard("bunkasai-2026");
+
+    const rows = await repository().reinstateBatchToIssuedAsAdmin("bunkasai-2026", new Date());
+
+    expect(rows).toHaveLength(0);
+  });
+});
+
+describe("countDisabledInBatch", () => {
+  it("reinstateBatchToIssuedAsAdmin と同じ条件で数える", async () => {
+    await seedIssuedCard("bunkasai-2026");
+    await seedIssuedCard("bunkasai-2026");
+    await repository().disableBatchAsAdmin(
+      "bunkasai-2026",
+      ADMIN_BATCH_DISABLED_REASON,
+      new Date(),
+    );
+    // 単発操作で止めた 1 枚は数えない。
+    const individuallyDisabled = await seedIssuedCard("bunkasai-2026");
+    await repository().disableAsAdmin(individuallyDisabled, "admin_action", new Date());
+
+    expect(await repository().countDisabledInBatch("bunkasai-2026")).toBe(2);
+  });
+
+  it("該当が無ければ 0", async () => {
+    expect(await repository().countDisabledInBatch("no-such-batch")).toBe(0);
   });
 });
 

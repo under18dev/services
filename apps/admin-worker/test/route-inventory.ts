@@ -58,6 +58,8 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
    * フォームの `action` が同じなので、一覧には 1 行しか出てこない。
    */
   { method: "POST", path: "/nfc/batch-disable" },
+  /** `/nfc/batch-disable` の逆（#436）。同じ理由で 1 本が 2 段階を兼ねる。 */
+  { method: "POST", path: "/nfc/batch-reinstate" },
   { method: "POST", path: "/nfc/:cardId/disable" },
   { method: "POST", path: "/nfc/:cardId/release" },
   { method: "POST", path: "/nfc/:cardId/reinstate" },
