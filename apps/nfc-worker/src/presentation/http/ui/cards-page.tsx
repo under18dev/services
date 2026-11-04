@@ -1,4 +1,4 @@
-import { ACCOUNT_HOME_PATH, accountNavFor } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
 import {
   Badge,
   Card,
@@ -137,7 +137,7 @@ const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
  * 無効化の理由の表示用ラベル（#382）。
  *
  * **生の理由コードをそのまま出していた**（`lost` / `unused` が英語の
- * ままだった）。**運営が止めたことを所有者に伝える**（`AdminDisableCardUseCase`
+ * ままだった）。**運営が止めたことを所有者に伝える**（`DelegatedDisableCardUseCase`
  * の "admin_action"）には、この値を人間に読める日本語へ訳す必要がある。
  *
  * **運営が黙って止めると問い合わせが来る。** ここで一覧に出す文言が、
@@ -284,18 +284,13 @@ const CardRow: FC<{ readonly card: CardView }> = ({ card }) => (
 );
 
 export type CardsPageProps = {
-  /**
-   * 管理の節を出すか（#333）。**必須にしてある** —— 既定値を置くと、
-   * 次に足した画面だけ渡し忘れた状態が作れて、しかも落ちない。
-   */
-  readonly isAdmin: boolean;
   readonly cards: readonly CardView[];
 };
 
-export const CardsPage: FC<CardsPageProps> = ({ cards, isAdmin }) => (
+export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
   <KiwaShell
     title="NFC カード"
-    nav={accountNavFor(isAdmin)}
+    nav={ACCOUNT_NAV_GROUPS}
     brandHref={ACCOUNT_HOME_PATH}
     // **Worker ごとに違う。** この Worker が自分で配信している CSS
     // （借りない理由は `asset-paths.ts` の #211 の節）。

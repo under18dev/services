@@ -106,12 +106,24 @@ export function toClientSummary(client: OAuthClient): OAuthClientSummary {
  * `IdentityRPC` に置くと、**あれを束縛している Worker は全部**呼べる
  * ことになる —— いまの束縛元は dashboard-worker と **nfc-worker** の 2 つ。
  *
- * nfc-worker は設計上**管理者のセッショントークンを扱う**（運営による
- * カード発行の可否を `SessionSummary.isAdmin` で決める。#187）。つまり
- * **管理者の新しいセッションが日常的にあの Worker を通る**うえ、
+ * nfc-worker は長らく**管理者のセッショントークンを扱っていた**（運営に
+ * よるカード発行の可否を `SessionSummary.isAdmin` で決めていた。#187）。
+ * つまり**管理者の新しいセッションが日常的にあの Worker を通る**うえ、
  * あちらはレート制限も `no-store` の既定化も外れている（脅威モデル N-5）。
  * 侵害されたときに「通りかかった管理者のセッションで OAuth クライアントを
  * 登録できる」状態は作らない。
+ *
+ * ## この Entrypoint は、いま誰も束縛していない（#433）
+ *
+ * 唯一の消費者だった dashboard-worker の管理画面が
+ * `admin.under18.dev`（admin-worker）へ移り、あちらは `sessionToken` を
+ * 要求しない `IdentityAdminDelegatedRPC` を束縛している。
+ *
+ * **消していない。** クラスを消すと、束縛し直したい人が
+ * `IdentityRPC` へメソッドを足すほうを選びうる —— 上の「分けてある理由」
+ * がまさにそれを避けるためである。`check-service-bindings.mjs` の
+ * `ALLOWED_ENTRYPOINT_CONSUMERS` は、この Entrypoint を**空集合**で
+ * 残してあるので、誰かが束縛した瞬間に落ちる。
  *
  * **`caller` では代えられない。** あれは自己申告で、認可には使えない
  * （仕様書 §14.1 決定 12）。`entrypoint` は Cloudflare 側で強制されるので、

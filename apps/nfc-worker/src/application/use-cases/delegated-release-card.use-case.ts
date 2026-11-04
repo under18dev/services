@@ -33,14 +33,15 @@ export type DelegatedReleaseCardInput = {
  *
  * ## 冪等
  *
- * 既に `issued` のカードへもう一度叩いても失敗にしない（`AdminDisableCardUseCase`
+ * 既に `issued` のカードへもう一度叩いても失敗にしない（`DelegatedDisableCardUseCase`
  * と同じ判断）。`disabled` のカードは対象外——`releaseAsAdmin` の WHERE 句
  * （`active` のみ）がそれを守る。
  *
  * ## 監査: イベント名は増やさない
  *
- * `card.released` を使い回す。`AdminDisableCardUseCase` が `card.disabled`
- * を使い回して `metadata.actingAsAdmin` で区別しているのと同じ判断——
+ * `card.released` を使い回す。`DelegatedDisableCardUseCase` が
+ * `card.disabled` を使い回して `metadata.actingAsAdmin` で区別して
+ * いるのと同じ判断——
  * 「同じ操作を誰が行ったか」であって「別の操作」ではないので、保持区分・
  * 掃除の対象が event 名で決まる仕組みに新しい名前を増やす理由が無い。
  *
@@ -55,7 +56,7 @@ export type DelegatedReleaseCardInput = {
  *
  * `NfcFailure.card_not_found` の畳み込みは、**カード ID を総当たりする
  * 相手から「実在するか」を隠すため**の設計（`disclosure.ts` / 本ファイルの
- * 冒頭）。admin-worker はその相手ではない——`listAllCards` で状態ごと
+ * 冒頭）。admin-worker はその相手ではない——`delegatedListAllCards` で状態ごと
  * 見えているカードに対して同じ値を返されると、「実在しない」と誤解する
  * 損のほうが大きい。**ここは `DelegatedUpdateCardTargetUseCase` と
  * 同じ既存の畳み方を踏襲しているだけ**で、admin 向けに専用の失敗種別を

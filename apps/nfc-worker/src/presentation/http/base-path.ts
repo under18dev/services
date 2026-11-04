@@ -37,17 +37,19 @@ export const CARDS_UI_PATH = "/account/nfc";
 export const CLAIM_UI_PATH = `${CARDS_UI_PATH}/claim`;
 
 /**
- * 運営向けのカード管理画面（#338 Step 3）。
+ * ## 運営向けの画面はこの Worker に無い（#433）
  *
- * **`/account/admin/nfc` ではない。** あちらは dashboard-worker に届くので、
- * NFC の D1 を持たないあの Worker から**こちらへ Service Binding を増やす**
- * ことになる。#331 のレビューで `IdentityAdminRPC` を**分離した**のと
- * 逆向きなので採らない。`/account/nfc/*` は既にこの Worker に来ている。
+ * かつて `ADMIN_UI_PATH = "/account/nfc/admin"` がここにあり、全カードの
+ * 一覧・発行・他人のカードの無効化を 1 枚で持っていた。**運営向けの画面は
+ * `admin.under18.dev/nfc`（admin-worker）へ移設済み**で、両方に置くと
+ * 同じ機能が 2 箇所にある状態になる —— 片方だけ直されても、どちらも
+ * 落ちない。
  *
- * **`CARDS_UI_PATH` の下に置く**のは `CLAIM_UI_PATH` と同じ理由 ——
- * auth-worker の `sanitizeReturnTo` に何も足さずにログインから戻れる。
+ * **この Worker が `auth.under18.dev` に持つのは、利用者向けの
+ * `CARDS_UI_PATH` と `CLAIM_UI_PATH` だけである。** 運営の操作は
+ * admin-worker からの delegated RPC
+ * （`presentation/rpc/nfc-admin-delegated.entrypoint.ts`）で入ってくる。
  */
-export const ADMIN_UI_PATH = `${CARDS_UI_PATH}/admin`;
 
 /**
  * 短縮 URL の経路（`redirect.routes.ts` の `GET /c/:cardId`）。

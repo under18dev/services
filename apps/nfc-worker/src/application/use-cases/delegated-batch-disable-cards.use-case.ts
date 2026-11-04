@@ -79,7 +79,7 @@ export type DelegatedBatchDisableCardsOutput = {
  * | ------------------ | ----------------------------------------------- |
  * | schema のコメント  | `"lost"`, `"abuse"`, `"ops"`（例として）        |
  * | 利用者が選べる値    | `lost` \| `unused`（`cards.routes.ts` の `POST /:cardId/disable`） |
- * | 単発の運営操作      | `admin_action`（`AdminDisableCardUseCase` / `DelegatedDisableCardUseCase`） |
+ * | 単発の運営操作      | `admin_action`（`DelegatedDisableCardUseCase`）                             |
  * | 一括無効化（本 UseCase） | `admin_batch`（#436、`ADMIN_BATCH_DISABLED_REASON`） |
  * | 利用者向け文書      | 「なくした・盗られた」としか書かない            |
  *

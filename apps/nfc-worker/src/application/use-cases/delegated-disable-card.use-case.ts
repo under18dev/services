@@ -17,20 +17,21 @@ export type DelegatedDisableCardInput = {
  * 運営（admin-worker 経由）が、他人のカードを無効化する（#382 /
  * #390 決定 16 ③）。
  *
- * ## `AdminDisableCardUseCase` との違いは、認可を持たないことだけ
+ * ## ここは認可を持たない
  *
- * `AdminDisableCardUseCase` は `sessionToken` を受け取り、
- * `requireAdminUserId` で `isAdmin` を確かめてから操作する ——
- * **`/account/nfc/admin` のセッション Cookie 経由の自己サービス UI
- * 専用**である。
- *
- * こちらは admin-worker の delegated RPC からだけ呼ばれる。認可は
- * 既に admin-worker が済ませているので、`IdentityGateway` への依存を
+ * admin-worker の delegated RPC からだけ呼ばれる。認可は既に
+ * admin-worker が済ませているので、`IdentityGateway` への依存を
  * 持たない —— **依存が無いこと自体が「ここでは認可しない」設計の表明**
  * である（依存を持たせると、持っているのに呼ばない形になり、次に読む
  * 人が「呼び忘れでは」と疑う余地を作る）。
  *
- * ## 冪等性・監査は `AdminDisableCardUseCase` と揃える
+ * **#433 まで兄弟が居た。** `AdminDisableCardUseCase` が `sessionToken`
+ * を受け取り、`requireAdminUserId` で `isAdmin` を確かめてから同じことを
+ * していた —— `/account/nfc/admin`（セッション Cookie 経由の運営画面）
+ * 専用である。あの画面ごと消えたので、**他人のカードを止める口は
+ * これ 1 本になった。**
+ *
+ * ## 冪等性・監査
  *
  * 既に無効化済みのカードへもう一度叩いても失敗にしない。`actorUserId`
  * をそのまま `nfc_card_events.actor_user_id` へ記録し、`metadata` に

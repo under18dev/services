@@ -4,45 +4,13 @@ import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui"
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 import { getCookie } from "hono/cookie";
-import {
-  ADMIN_UI_PATH,
-  CARDS_UI_PATH,
-  CLAIM_CARD_PARAM,
-  CLAIM_UI_PATH,
-  cardTapUrl,
-} from "../base-path";
+import { CARDS_UI_PATH, CLAIM_CARD_PARAM, CLAIM_UI_PATH } from "../base-path";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "../csrf";
-import { MAX_ISSUE_COUNT } from "../../../application/use-cases/issue-cards.use-case";
 import type { AppBindings } from "../types";
-import { AdminPage } from "./admin-page";
 import { CardsPage } from "./cards-page";
 import { ClaimPage } from "./claim-page";
-
-/**
- * 発行の直後に「何枚出したか」を運ぶクエリ名（#382）。
- *
- * **枚数だけ。カード ID は運ばない。** URL に載った ID は CSRF 失敗時の
- * ログへ落ちる（`base-path.ts` の `CLAIM_CARD_PARAM` に経緯がある）。
- * **新しいカードは `issued` なので、戻った先の一覧に必ず入っている。**
- */
-const ISSUED_COUNT_PARAM = "issued";
-
-/**
- * クエリの枚数を読む。**数でなければ何も出さない。**
- *
- * **利用者が書き換えられる値である。** そのまま画面へ出すと、
- * 攻撃者が選んだ文字列を管理画面に表示させられる（auth-worker の
- * `LoginView.notice` が同じ理由で固定文言に限っている）。
- * ここでは**整数に落ちるものだけ**を通し、文言はサーバー側で組む。
- */
-function issuedCountFromQuery(raw: string | undefined): number | null {
-  if (raw === undefined) return null;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_ISSUE_COUNT) return null;
-  return parsed;
-}
 
 /**
  * カード一覧の画面（#31 の管理 API に対する UI）。
@@ -119,190 +87,7 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     // キャッシュしない。カードの状態は所有者固有で、共有キャッシュに
     // 載ると他人に見える（#125 と同じ理由）。
     c.header("Cache-Control", "no-store");
-    return c.html(<CardsPage cards={result.value.cards} isAdmin={result.value.isAdmin} />);
-  });
-
-  /**
-   * 運営向けのカード管理画面（#338 Step 3）。
-   *
-   * ## 管理者以外には 404
-   *
-   * **403 を返さない。** #331 / #333 の判断（「管理画面は管理者以外には
-   * 存在しない」）をこの画面にも適用する。403 は「在るが権限が無い」と
-   * 読めるので、**管理画面の所在を未管理者へ教える。**
-   *
-   * **判定はここに書かない。** `ListAllCardsUseCase` の
-   * `requireAdminUserId` が持っていて、ここは `forbidden` を 404 に
-   * 翻訳するだけである（経路が増えたときに素通りする形を作らないため）。
-   *
-   * ## 未ログインはログインへ。順序に意味がある
-   *
-   * `unauthenticated` だけを `/login` へ送る。**`forbidden` を混ぜて
-   * ログインへ送らないこと** —— 管理者でない利用者が延々とログインし直す。
-   *
-   * ## 焼く用の URL はここで組む
-   *
-   * `cardTapUrl()` が要る `SHORT_URL_ORIGIN` は env にある。
-   * **画面コンポーネントへ env を渡さない** —— ホストを画面が決める形に
-   * なり、焼いたタグだけが古いまま残る（`base-path.ts`）。
-   *
-   * **`issued` だけを入れる。** 紐づけ済みを混ぜると、誰かの手元にある
-   * タグを上書きする形になる（`admin-page.tsx` の冒頭）。
-   */
-  app.get(ADMIN_UI_PATH, pageSecurityHeaders, async (c) => {
-    const result = await c
-      .get("container")
-      .useCases.listAllCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
-
-    if (!result.ok) {
-      if (result.failure.kind === "unauthenticated") {
-        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(c.req.url)), 302);
-      }
-      // **管理者でなければ「無い」。** 本文も 404 のそれに揃える。
-      if (result.failure.kind === "forbidden") {
-        return c.notFound();
-      }
-      return c.text("しばらくしてからもう一度お試しください。", 503);
-    }
-
-    const tapUrls = result.value.cards
-      .filter((card) => card.status === "issued")
-      .map((card) => cardTapUrl(c.env.SHORT_URL_ORIGIN, card.cardId));
-
-    // カードの一覧は運営固有ではないが、**未紐づけの ID が本文に入る。**
-    // 中間キャッシュに残す理由が無い。
-    c.header("Cache-Control", "no-store");
-    return c.html(
-      <AdminPage
-        list={result.value}
-        tapUrls={tapUrls}
-        // **管理者だと分かってから用意する。** 畳んだ側で `Set-Cookie`
-        // すると、非管理者にも Cookie が増える（紐づけ画面と同じ判断）。
-        csrfToken={ensureCsrfToken(c)}
-        issuedCount={issuedCountFromQuery(c.req.query(ISSUED_COUNT_PARAM))}
-        error={null}
-      />,
-    );
-  });
-
-  /**
-   * カードを発行する（#382）。**この Worker で 2 本目の form POST。**
-   *
-   * ## JavaScript を要求しない
-   *
-   * 1 本目（紐づけ）と同じ理由である —— **JS の有無で出し分けると、
-   * JS が落ちている人は発行だけ済んで URL を受け取れない。** 発行は
-   * 取り消せないので、その状態がいちばん困る。
-   *
-   * ## 成功したら 303 で GET へ戻す（PRG）
-   *
-   * **発行は取り消せない。** 200 で画面を描くと、再読み込みで同じ POST が
-   * 飛び、**もう一度発行される。** 紐づけ画面の PRG は「失敗して見える」を
-   * 避けるためだったが、こちらは**実害が出る。**
-   *
-   * **出した ID は運ばない。** 新しいカードは `issued` なので、戻った先の
-   * `<textarea>` に**必ず入っている。** クエリに載せるのは枚数だけ ——
-   * ID を URL へ置くと CSRF 失敗時のログに落ちる（`base-path.ts`）。
-   *
-   * ## 管理者判定は UseCase の中
-   *
-   * `IssueCardsUseCase` の `requireAdminUserId` が持つ。GET と同じく
-   * `forbidden` を 404 へ翻訳する —— **管理画面は管理者以外には存在しない。**
-   */
-  app.post(ADMIN_UI_PATH, pageSecurityHeaders, async (c) => {
-    const form = await c.req.formData().catch(() => null);
-
-    // **CSRF で弾いた場合も 404 にしない。** こちらは「在るが今の要求は
-    // 通せない」で、相手は既に管理画面を開けている（= 管理者である）。
-    // 403 を返して理由は書かない（何を直せばよいか教えない）。
-    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
-      c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
-    }
-
-    const count = Number(form.get("count")?.toString() ?? "");
-    const rawBatch = form.get("batch")?.toString().trim() ?? "";
-
-    const result = await c
-      .get("container")
-      .useCases.issueCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)), {
-        count,
-        // 空文字は「指定なし」。`""` のまま渡すと、ロット名が空のカードと
-        // 指定しなかったカードが区別できなくなる。
-        batch: rawBatch === "" ? null : rawBatch,
-      });
-
-    if (!result.ok) {
-      if (result.failure.kind === "unauthenticated") {
-        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(ADMIN_UI_PATH)), 302);
-      }
-      if (result.failure.kind === "forbidden") return c.notFound();
-      if (result.failure.kind === "identity_unavailable") {
-        return c.text("しばらくしてからもう一度お試しください。", 503);
-      }
-      // **入力が通らなかった。** 枚数の範囲は UseCase が持っている
-      // （`MAX_ISSUE_COUNT`）ので、ここでは文言だけを出す。
-      return renderAdminWithError(c, `枚数は 1〜${MAX_ISSUE_COUNT} の数で指定してください。`);
-    }
-
-    c.header("Cache-Control", "no-store");
-    return c.redirect(`${ADMIN_UI_PATH}?${ISSUED_COUNT_PARAM}=${result.value.length}`, 303);
-  });
-
-  /**
-   * 運営が、他人のカードを無効化する（#382「他人のカードへの操作」）。
-   *
-   * **緊急の要望として先に入れた。** 遷移先の書き換え・所有者の付け替え
-   * より先に無効化を入れるのは、**止めれば遷移先が何であっても到達しない**
-   * ため（`AdminDisableCardUseCase` に詳しい）。
-   *
-   * ## JavaScript を要求しない
-   *
-   * 発行フォームと同じ理由で、**一覧の行ごとに小さな form を 1 本ずつ
-   * 置く。** 島を新しく作らない —— この画面はまだ島を持たず、JS 無しで
-   * 完結する形を保つほうが、1 つの画面に 2 つの流儀を混ぜるより読みやすい。
-   *
-   * ## 管理者判定は UseCase の中
-   *
-   * `AdminDisableCardUseCase` の `requireAdminUserId` が持つ。GET と同じく
-   * `forbidden` を 404 へ翻訳する。
-   *
-   * ## 成功したら 303 で一覧へ戻す（PRG）
-   *
-   * 一覧の「無効化済み」バッジで結果が見えるので、issue のような
-   * クエリ経由の完了文言は運ばない。
-   */
-  app.post(`${ADMIN_UI_PATH}/:cardId/disable`, pageSecurityHeaders, async (c) => {
-    const form = await c.req.formData().catch(() => null);
-
-    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
-      c.header("Cache-Control", "no-store");
-      return c.text("forbidden", 403);
-    }
-
-    const cardId = c.req.param("cardId");
-    if (!isCardId(cardId)) {
-      return renderAdminWithError(c, "そのカードは見つかりませんでした。");
-    }
-
-    const result = await c.get("container").useCases.adminDisableCard.execute({
-      sessionToken: getCookie(c, sessionCookieName(c.env.ENVIRONMENT)),
-      cardId,
-    });
-
-    if (!result.ok) {
-      if (result.failure.kind === "unauthenticated") {
-        return c.redirect(loginUrlWithReturnTo(returnToForCurrentRequest(ADMIN_UI_PATH)), 302);
-      }
-      if (result.failure.kind === "forbidden") return c.notFound();
-      if (result.failure.kind === "identity_unavailable") {
-        return c.text("しばらくしてからもう一度お試しください。", 503);
-      }
-      return renderAdminWithError(c, "そのカードは見つかりませんでした。");
-    }
-
-    c.header("Cache-Control", "no-store");
-    return c.redirect(ADMIN_UI_PATH, 303);
+    return c.html(<CardsPage cards={result.value.cards} />);
   });
 
   /**
@@ -352,11 +137,7 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
 
     c.header("Cache-Control", "no-store");
     return c.html(
-      <ClaimPage
-        cardId={result.value.claimable ? cardId : null}
-        csrfToken={csrfToken}
-        isAdmin={result.value.isAdmin}
-      />,
+      <ClaimPage cardId={result.value.claimable ? cardId : null} csrfToken={csrfToken} />,
     );
   });
 
@@ -384,10 +165,7 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     const form = await c.req.formData().catch(() => null);
     const concealed = () => {
       c.header("Cache-Control", "no-store");
-      // **`isAdmin` は `false`。** ここは CSRF 拒否でも通るので、
-      // **セッションを確かめる前に出ることがある** —— 管理者かどうかを
-      // 決める材料が無い。「分からないときは出さない」側に倒す。
-      return c.html(<ClaimPage cardId={null} csrfToken="" isAdmin={false} />, 400);
+      return c.html(<ClaimPage cardId={null} csrfToken="" />, 400);
     };
 
     if (form === null) return concealed();
@@ -421,42 +199,4 @@ export function registerCardsUiRoutes(app: Hono<AppBindings>, path: string): voi
     c.header("Cache-Control", "no-store");
     return c.redirect(CARDS_UI_PATH, 303);
   });
-}
-
-/**
- * 発行に失敗したときに管理画面を描き直す（#382）。
- *
- * **303 で戻さない。** PRG は成功した操作のためのもので、失敗を
- * クエリへ載せると**文言を URL から差し替えられる**（`issuedCountFromQuery`
- * と同じ理由）。ここは 400 で描く —— 入力が残らないのは痛いが、
- * **枚数は 1 つしか無いので打ち直しは一瞬**である。
- *
- * **ここへ来るのは管理者だけ。** CSRF を通り、`requireAdminUserId` も
- * 通ったうえで入力が弾かれた経路である。
- */
-async function renderAdminWithError(c: Context<AppBindings>, message: string): Promise<Response> {
-  const result = await c
-    .get("container")
-    .useCases.listAllCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
-
-  if (!result.ok) {
-    // 直前まで通っていたものが落ちた。利用者にできることは無い。
-    return c.text("しばらくしてからもう一度お試しください。", 503);
-  }
-
-  const tapUrls = result.value.cards
-    .filter((card) => card.status === "issued")
-    .map((card) => cardTapUrl(c.env.SHORT_URL_ORIGIN, card.cardId));
-
-  c.header("Cache-Control", "no-store");
-  return c.html(
-    <AdminPage
-      list={result.value}
-      tapUrls={tapUrls}
-      csrfToken={ensureCsrfToken(c)}
-      issuedCount={null}
-      error={message}
-    />,
-    400,
-  );
 }

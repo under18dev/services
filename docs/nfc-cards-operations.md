@@ -231,35 +231,33 @@ POST https://auth.under18.dev/account/nfc/cards/<cardId>/disable
 
 ## 1-2. 手で発行する（退路）
 
-**スクリプトが使えない環境のため。** ブラウザの開発者コンソールか `curl` で。
+> **`POST https://auth.under18.dev/account/nfc/cards` は #433 で消えた。**
+> 管理画面は #412 で `admin.under18.dev/nfc` へ移り、#390 の「移したら
+> 消す」をここで実行した。**セッション Cookie の `isAdmin` で通る発行の口は、
+> もう `auth.under18.dev` に無い。**
 
-**管理者だけが叩ける。** `scripts/nfc-burn.py` が叩いているのもこの経路である。
+**いま手で発行するなら `admin.under18.dev/nfc` の画面である。** 枚数と
+ロット名を入れて送ると、`303` で `/nfc?issued=<枚数>` に戻る。
 
-> **この経路は #390 の段取り 5 / 6 で消える。** 管理画面は #412 で
-> `admin.under18.dev/nfc` へ移っており、#390 は「移したら消す」と書いている。
-> **消えたときに何を決め直すことになるか**は `scripts/nfc-burn.py` の
-> docstring にまとめてある（`admin.under18.dev/nfc` は HTML フォームで、
-> **発行しても Card ID が応答に返らない**）。
+**機械向けの口はいま無い。** `scripts/nfc-burn.py` が叩いていたのが上の
+JSON API で、**あちらは発行と書き込みが繋がっているスクリプトなので、
+この口が無いと動かない。** 代わりをどこに置くかは未決である ——
+選択肢と、それぞれの引き換えは `scripts/nfc-burn.py` の docstring
+（「この発行経路は…」の節）にそのまま残してある。**1（admin-worker に
+JSON の発行エンドポイントを足す）が薦められている。**
 
-```http
-POST https://auth.under18.dev/account/nfc/cards
-Content-Type: application/json
-Origin: https://auth.under18.dev
-Cookie: <管理者のセッション>
+**`admin.under18.dev/nfc` をスクリプトの向き先に替えるだけでは済まない。**
+あちらは HTML フォームで、
 
-{ "count": 1, "batch": "bunkasai-2026" }
-```
+- **CSRF トークンが要る**（`GET /nfc` の hidden を拾って送り直す）
+- **`POST /nfc` は cardId を返さない** —— 成功しても `303` で戻るだけで、
+  出た ID が応答に無い。発行の直後に一覧を引いて差分を取るのは、
+  **同時に誰かが発行していれば決められない。**
 
-|         |                                                          |
-| ------- | -------------------------------------------------------- |
-| `count` | 1〜200。**取り消せないので小さく刻む**                   |
-| `batch` | 任意。配布の単位。**後からロットごとに止めるときに使う** |
+### 発行したカードの ID はどこで見るか
 
-**応答にカード ID が並ぶ。**
-
-```json
-{ "cards": [{ "cardId": "nfc_hdt62b396zy809mmqk3v" }] }
-```
+**`admin.under18.dev/nfc` の一覧に出る。** 未紐づけ（`issued`）のカードの
+焼く URL も、そこに 1 行 1 枚で並ぶ（#377）。
 
 ### タグに焼く値は、これをそのまま URL に入れたもの
 
@@ -287,15 +285,14 @@ https://go.under18.dev/c/nfc_hdt62b396zy809mmqk3v
 ^https://go\.under18\.dev/c/nfc_[0-9abcdefghjkmnpqrstvwxyz]{20}$
 ```
 
-**焼く URL の一覧は、管理画面（`/account/nfc/admin`）にも出ている**（#377）—— **未紐づけのカードだけ**が 1 行 1 枚で並ぶ。手で焼くならそこからコピーする。**スクリプトを使うなら、一覧を見る必要も無い**（発行と書き込みが繋がっているので）。
+**焼く URL の一覧は、管理画面（`admin.under18.dev/nfc`）に出ている**（#377 / #412）—— **未紐づけのカードだけ**が 1 行 1 枚で並ぶ。手で焼くならそこからコピーする。
 
-### 管理者の条件
+### 管理画面に入れる条件
 
-**Passkey で張ったセッションでなければ `isAdmin` が立たない**（仕様書
-§14.1 決定 8、RR-5）。メール OTP でログインしただけでは 403 になる。
-
-**`Origin` と `Content-Type: application/json` の両方が要る。**
-どちらが欠けても 403（`cards.routes.ts` の門番）。
+**admin-worker の承認リストに載っていること。** 本人確認は u18 Identity へ
+の OIDC ログインで、`acr` まで見る（`apps/admin-worker/src/presentation/http/app.tsx`）
+—— **Passkey で張ったセッションでなければ通らない**のは `auth` 側に画面が
+あった頃（仕様書 §14.1 決定 8、RR-5）と同じである。
 
 ### 取りこぼしても大丈夫
 

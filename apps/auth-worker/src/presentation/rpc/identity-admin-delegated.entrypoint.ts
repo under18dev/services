@@ -68,8 +68,12 @@ import {
  * `ListUsersUseCase` 等をそのまま呼ばず、`Delegated*UseCase` を新設した。
  * 共有しているのは Repository・Domain の純粋関数（検証ロジックなど）で、
  * 「管理者のセッションを確かめる」部分だけが無い。`NfcAdminDelegatedRPC`
- * が `AdminDisableCardUseCase` と `DelegatedDisableCardUseCase` を
- * 分けたのと同じ形（94 の実装、d5 のレビュー済み）。
+ * が `AdminDisableCardUseCase`（セッション Cookie 経由）と
+ * `DelegatedDisableCardUseCase` を分けたのと同じ形（94 の実装、d5 の
+ * レビュー済み）。**あちらのセッション版は #433 で消えた**（運営向けの
+ * 画面が `/account/*` から admin.under18.dev へ移ったため）。
+ * **こちらの `IdentityRPC` 側の兄弟は残っている** —— `getProfile` などは
+ * 利用者本人が通る経路で、運営向けではない。
  */
 export class IdentityAdminDelegatedRPC
   extends WorkerEntrypoint<Env>

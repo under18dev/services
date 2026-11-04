@@ -64,14 +64,11 @@ import { GRANTS_PATH } from "./asset-paths";
  */
 
 export type AppsPageProps = {
-  /** 管理の節を出すか（#333）。`AccountShell` が必須にしている。 */
-  readonly isAdmin: boolean;
   readonly view: AppCatalogView;
 };
 
-export const AppsPage: FC<AppsPageProps> = ({ view, isAdmin }) => (
+export const AppsPage: FC<AppsPageProps> = ({ view }) => (
   <AccountShell
-    isAdmin={isAdmin}
     title="アプリ"
     heading="u18 Identity で使えるアプリ"
     lead="u18 Identity のアカウントでそのまま使えるアプリの一覧です。あなたがアクセスを許可したアプリは「連携アプリ」で確認できます。"

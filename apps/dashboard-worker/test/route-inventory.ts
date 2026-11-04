@@ -96,27 +96,13 @@ export const PAGE_ROUTES = [
   // アプリ」の案内（全件ではない）。中身はコードに持っているが
   // （`ui/app-catalog.ts`）、公開面としては画面が 1 枚増えている。
   { method: "GET", path: "/account/apps" },
-  // **管理者だけに出る 1 枚と、その更新系 2 本**（#308 / #333）。
+  // **`/account/admin/*` の 8 本は #433 で消えた。** 利用者の管理・
+  // 監査ログ・OAuth クライアントは `admin.under18.dev`（admin-worker）
+  // にあり、**この Worker が持つのは利用者向けの画面だけである。**
+  // ここへ管理の行を足し直すと、運営の入口が 2 つに戻る。
   //
-  // **非管理者にも登録されている。** 経路そのものを `isAdmin` で生やし
-  // 分けると、**「管理者のときだけ存在する route」**ができ、
-  // `route-reachability.test.ts` が見ているのと別のアプリになる。
-  // 管理者でないセッションには auth-worker が `not_found` を返し、
-  // 画面が 404 に translate する。
-  { method: "GET", path: "/account/admin/users" },
-  // **絞り込みと続きの読み込み**（#375）。検索語がメールアドレスに
-  // なりうるので、GET のクエリではなく POST の本文で渡す。
-  { method: "POST", path: "/account/admin/users/search" },
-  // 停止・解除・セッションの失効（#375）。**1 本の口に畳んである** ——
-  // 経路ごとに `isAdmin` の確認を書き分けないため。
-  { method: "POST", path: "/account/admin/users/action" },
-  { method: "GET", path: "/account/admin/audit" },
-  { method: "POST", path: "/account/admin/audit/search" },
-  { method: "GET", path: "/account/admin/clients" },
-  // **POST がこの Worker に入るのはここが最初である**（#340 で CSRF の
-  // 仕組みだけ先に入れてあった）。hidden と Origin の両方を要求する。
-  { method: "POST", path: "/account/admin/clients/create" },
-  { method: "POST", path: "/account/admin/clients/disable" },
+  // **これでこの Worker に form POST は 1 本も無い。** `http/csrf.ts` は
+  // 残してあるが、守っているものは無い（あちらの冒頭に理由がある）。
   // **ハッシュは手で書けないので `<hash>` と書く**（#211）。突き合わせる
   // 側が実際のパスを正規化してから比べる。**ハッシュが入らなくなったら、
   // 正規化しても `<hash>` にならないのでここで落ちる。**

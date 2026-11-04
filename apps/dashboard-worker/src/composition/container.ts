@@ -1,9 +1,5 @@
-import type { IdentityAdminGateway, IdentityGateway } from "../application/ports";
+import type { IdentityGateway } from "../application/ports";
 import { RpcIdentityGateway, asIdentityRpc } from "../infrastructure/rpc/identity.gateway";
-import {
-  RpcIdentityAdminGateway,
-  asIdentityAdminRpc,
-} from "../infrastructure/rpc/identity-admin.gateway";
 
 /**
  * 依存性の組み立て（仕様書 2.3）。
@@ -17,16 +13,20 @@ import {
  * dashboard が DB を直接触り始めたということなので、設計を見直すこと。
  */
 export type Container = {
-  readonly identity: IdentityGateway;
   /**
-   * 管理用（#333）。**別の binding（`IDENTITY_ADMIN`）から組み立てる。**
+   * **この Worker が持つ Gateway はこれ 1 本である**（#433）。
    *
-   * ここで `env.IDENTITY` を渡しても型は通る（どちらも `Fetcher`）が、
-   * **呼んだ先に管理用のメソッドは無い**ので実行時に落ちる。
-   * `asIdentityAdminRpc` を分けてあるのはその取り違えを 1 箇所に
-   * 閉じ込めるためで、**渡す binding を間違えないのはここの責任である。**
+   * かつては管理用の `identityAdmin`（auth-worker の `IdentityAdminRPC`
+   * を束縛した別 binding）も組み立てていた。運営向けの画面を
+   * `admin.under18.dev` へ移したので、呼ぶ側ごと消した —— **あちらは
+   * `IdentityAdminDelegatedRPC` を自分で束縛している。**
+   *
+   * **binding も `wrangler.jsonc` から落としてある。** 誰も呼ばない
+   * binding を残すと、この Worker は「管理用の口を叩ける権限」だけを
+   * 持ち続ける。Service Binding はメソッド単位で絞れないので、
+   * **残っていること自体が到達範囲である**（#308 / 脅威モデル RR-21）。
    */
-  readonly identityAdmin: IdentityAdminGateway;
+  readonly identity: IdentityGateway;
 };
 
 /**
@@ -36,8 +36,5 @@ export type Container = {
  * キャッシュしない。生成コストはオブジェクト確保のみ。
  */
 export function createContainer(env: Env): Container {
-  return {
-    identity: new RpcIdentityGateway(asIdentityRpc(env.IDENTITY)),
-    identityAdmin: new RpcIdentityAdminGateway(asIdentityAdminRpc(env.IDENTITY_ADMIN)),
-  };
+  return { identity: new RpcIdentityGateway(asIdentityRpc(env.IDENTITY)) };
 }

@@ -218,7 +218,7 @@ export class DrizzleCardRepository implements CardRepository {
   }
 
   /**
-   * 状態ごとの枚数（#449）。**`group by` で 1 クエリ。** `listAllCards` の
+   * 状態ごとの枚数（#449）。**`group by` で 1 クエリ。** `delegatedListAllCards` の
    * ように行を読んでから JS 側で数えない——列挙する理由が無い集計だけの
    * 用途に、`MAX_ADMIN_LIST` の打ち切りを持ち込まないため。
    *

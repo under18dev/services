@@ -42,8 +42,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 /**
  * RPC のエラー契約を、この Worker のドメイン語彙へ翻訳する。
  *
- * **`identity-admin.gateway.ts` も同じものを使う。** 翻訳を 2 本持つと、
- * `not_found` の扱いが片方だけずれる形が作れる。
+ * **この Worker の Gateway はこれ 1 本になった**（#433）。以前は
+ * `identity-admin.gateway.ts` もここを呼んでいて、翻訳を 2 本持つと
+ * `not_found` の扱いが片方だけずれる、という理由で共有していた。
+ * **`export` のままにしてあるのは、2 本目が戻ったときに写しを作らせない
+ * ため**である。
  */
 export function toFailure(error: RpcError): IdentityFailure {
   switch (error.code) {

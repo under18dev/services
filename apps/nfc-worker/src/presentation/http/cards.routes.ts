@@ -3,7 +3,6 @@ import { isCardId } from "@u18/domain";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { z } from "zod";
-import { MAX_ISSUE_COUNT } from "../../application/use-cases/issue-cards.use-case";
 import type { NfcFailure } from "../../domain/errors";
 import { isAllowedOrigin, isJsonRequest } from "./origin";
 import type { AppBindings } from "./types";
@@ -43,13 +42,6 @@ const disableSchema = z.object({
   reason: z.enum(["lost", "unused"]).default("lost"),
 });
 
-/** 発行の入力。上限は UseCase の `MAX_ISSUE_COUNT` と揃える。 */
-const issueSchema = z.object({
-  count: z.number().int().min(1).max(MAX_ISSUE_COUNT),
-  /** ロット名。配布の単位を後から辿るのに使う。 */
-  batch: z.string().min(1).max(64).optional(),
-});
-
 const claimSchema = z.object({
   cardId: cardIdSchema,
 });
@@ -58,9 +50,11 @@ function statusFor(failure: NfcFailure): 400 | 401 | 403 | 404 | 503 {
   switch (failure.kind) {
     case "unauthenticated":
       return 401;
-    // **403 を使ってよい唯一の経路。** 下の card_not_found が 403 を
-    // 避けているのは「他人のカード ID を当てた」ことを漏らさないためで、
-    // 発行エンドポイントの存在は秘密ではない（errors.ts の forbidden）。
+    // **`forbidden` を返す経路は #433 で無くなった**（運営向けの発行が
+    // この Worker の HTTP から消えた）が、`NfcFailure` には残っている
+    // ——`switch` の網羅性を保つために分岐も残す。**消すと、次に
+    // `forbidden` を返す UseCase が生えたとき、型は通るのに 403 を
+    // 返さなくなる。**
     case "forbidden":
       return 403;
     case "card_not_found":
@@ -132,31 +126,23 @@ function createCardsApi() {
       })
 
       /**
-       * 運営によるカード発行（#187、仕様書 §10 / §12）。
+       * ## 発行の口はここに無い（#433）
        *
-       * **管理者だけ。** 判定は UseCase の中（`requireAdminUserId`）にあり、
-       * ここには無い —— ルートに書くと、経路が増えたときに素通りする形を
-       * 作る（#186 の `rpc-parity.test.ts` で確かめた話と同じ）。
+       * `POST /account/nfc/cards` が**運営によるカード発行**だった
+       * （#187）。セッション Cookie の `isAdmin` で管理者を確かめる形で、
+       * **`/account/nfc` 側に残っていた最後の運営機能**である。
+       * 発行は `admin.under18.dev/nfc`（admin-worker → nfc-worker の
+       * `NfcAdminDelegatedRPC`）にあるので、両方に置くと入口が 2 つになる。
        *
-       * **#358 以降、応答に秘密は載らない。** 返るのはカード ID だけで、
-       * 取りこぼしても一覧から引き直せる。ただし**未紐づけのカードは
-       * ID を知っている人がタップすれば、その人のものになる** ——
-       * この応答は配布物そのものと同じ扱いにすること。
+       * **機械向けの発行の口は、いまどこにも無い。**
+       * `scripts/nfc-burn.py` がここを叩いていた（あのファイルの
+       * docstring が「段取り 5 / 6 で消える」と予告している）。あちらが
+       * 挙げている 3 つの選択肢のうち **1（admin-worker に JSON の発行
+       * エンドポイントを足す）** が薦められており、**それはこの PR の
+       * 範囲外である** —— admin-worker には触らない。
+       *
+       * **ここへ戻さないこと。** 戻すと #433 が消したものがそのまま戻る。
        */
-      .post("/", async (c) => {
-        const parsed = issueSchema.safeParse(await c.req.json().catch(() => null));
-        if (!parsed.success) return c.json({ error: "invalid_request" }, 400);
-
-        const result = await c
-          .get("container")
-          .useCases.issueCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)), {
-            count: parsed.data.count,
-            batch: parsed.data.batch ?? null,
-          });
-        if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-
-        return c.json({ cards: result.value }, 201);
-      })
 
       /** 自分のカード一覧。 */
       .get("/", async (c) => {
@@ -164,11 +150,11 @@ function createCardsApi() {
           .get("container")
           .useCases.listMyCards.execute(getCookie(c, sessionCookieName(c.env.ENVIRONMENT)));
         if (!result.ok) return c.json(bodyFor(result.failure), statusFor(result.failure));
-        // **`isAdmin` は API へ出さない。** `ListMyCardsUseCase` は画面の
-        // サイドバー用にそれも返すが、**この経路の消費者は一覧だけを
-        // 求めている** —— 混ぜると、JSON を読む側が「管理者かどうかは
-        // ここから取れる」と読む。`cards.api.test.ts` の「CardView の
-        // 項目だけを返す」が見ている。
+        // **`cards` だけを出す。** `ListMyCardsUseCase` は #433 まで
+        // `isAdmin` も返していた（画面のサイドバー用）が、運営向けの
+        // 項目が並びから消えたので要らなくなった。`cards.api.test.ts` の
+        // 「CardView の項目だけを返す」が、ここに別の値が混ざらないことを
+        // 見ている。
         return c.json({ cards: result.value.cards });
       })
 

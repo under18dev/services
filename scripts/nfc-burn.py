@@ -87,18 +87,21 @@ RC-S300 は PC/SC 2.0 準拠という報告を根拠にしているが、運用�
 （`packages/contracts/src/session-cookie.ts`）。`--api-origin` を
 `http://localhost:8787` などに向けるときは、そちらの名前で入れること。
 
-## **この発行経路は #390 の段取り 5 / 6 で消える（指揮役への申し送り）**
+## **この発行経路は #433 で消えた。いまこのスクリプトは発行できない**
 
-いま叩いているのは nfc-worker の JSON API:
+叩いていたのは nfc-worker の JSON API:
 
     POST https://auth.under18.dev/account/nfc/cards
 
-管理画面は **#412 で `admin.under18.dev/nfc` へ移った**（admin-worker の
-`nfc.routes.tsx`）。#390 の段取りは **5 で NFC の管理を移し、6 で旧経路を
-消す**と書いており、**「移したら消す」が明記されている。** この
-`/account/nfc/cards` は消える前提で読むこと。
+管理画面は **#412 で `admin.under18.dev/nfc` へ移り**（admin-worker の
+`nfc.routes.tsx`）、**#433 で `/account/nfc` 側の運営機能を消した** ——
+#390 の段取り 6（「移したら消す」）そのものである。
 
-**消えたときに、向き先を `admin.under18.dev/nfc` へ替えるだけでは済まない。**
+**つまり `--live-issue` は通らない。** `issue_card()` は要求を投げる前に
+`IssueError` で止まる。**機械向けの発行の口が決まるまで、このスクリプトで
+焼けるのは「偽物の cardId で手順だけ確かめる」ところまでである。**
+
+**向き先を `admin.under18.dev/nfc` へ替えるだけでは済まない。**
 あちらは HTML フォームで、
 
 - **CSRF トークンが要る。** `GET /nfc` を引いて hidden の値を拾い、Cookie と
@@ -109,8 +112,8 @@ RC-S300 は PC/SC 2.0 準拠という報告を根拠にしているが、運用�
   どれが出たか当てる」はこのスクリプトが避けている形そのもの**である
   （同時に誰かが発行していれば、一覧の側からは決められない）。
 
-**つまり、段取り 5 を進めるときに決めるのは「スクリプトをどう直すか」では
-なく「機械向けの発行の口をどこに置くか」である。** 選べるのは概ね 3 つ:
+**つまり、ここで決めるのは「スクリプトをどう直すか」ではなく
+「機械向けの発行の口をどこに置くか」である。** 選べるのは概ね 3 つ:
 
 1. **admin-worker に JSON の発行エンドポイントを足す**（`Origin` と
    `Content-Type: application/json` の 2 枚で守る。いまの `cards.routes.ts`
@@ -125,6 +128,9 @@ RC-S300 は PC/SC 2.0 準拠という報告を根拠にしているが、運用�
 **1 を薦める。** 2 は画面の都合とスクリプトの都合を 1 本の応答に混ぜる。
 3 は #390 が「同じ機能が 2 箇所にある期間が長いほど、片方だけ直される」と
 書いて避けた形そのものである。
+
+**1 を入れるときにこのスクリプトが直すのは 3 箇所** —— `DEFAULT_API_ORIGIN`、
+`CARDS_PATH`、そして `issue_card()` の冒頭にある停止ガードである。
 
 ## 前提にしていること（タグ側）
 
@@ -162,10 +168,22 @@ from nfc_ndef import decode_ndef_tlv, encode_ndef_tlv, to_pages  # noqa: E402
 #: セッション Cookie を受け取る環境変数。**値は絶対にここへ書かない。**
 SESSION_ENV = "U18_SESSION_COOKIE"
 
-#: 発行 API。`apps/nfc-worker/src/presentation/http/base-path.ts` の
-#: `CARDS_BASE_PATH` と揃える。**段取り 5 / 6 で消える**（docstring を参照）。
+#: 発行 API。**#433 で消えた**（docstring の「この発行経路は…」を参照）。
+#: 値を残してあるのは、代わりの口が決まったときに**どこを書き換えれば
+#: よいかを 1 箇所にまとめておく**ため。
 DEFAULT_API_ORIGIN = "https://auth.under18.dev"
 CARDS_PATH = "/account/nfc/cards"
+
+#: `issue_card()` が投げる前に止める理由。**404 を見せない** —— 404 は
+#: 「URL を間違えた」と読めるので、運用者が綴りを疑って時間を使う。
+ISSUE_ENDPOINT_GONE = (
+    "カードの発行 API は #433 で消えました"
+    f"（{DEFAULT_API_ORIGIN}{CARDS_PATH}）。"
+    " 発行は admin.under18.dev/nfc の画面にありますが、"
+    "あちらは HTML フォームで cardId を応答に返しません。"
+    " 機械向けの口をどこに置くかは未決です —— このファイルの docstring"
+    "「この発行経路は…」に選択肢と引き換えが書いてあります。"
+)
 
 #: タグへ焼く URL のホスト。`wrangler.jsonc` の `SHORT_URL_ORIGIN`（production）。
 DEFAULT_SHORT_URL_ORIGIN = "https://go.under18.dev"
@@ -257,6 +275,10 @@ def issue_card(api_origin: str, cookie: str, batch: str | None) -> str:
     生まれる。この関数が呼ばれるのは、**タグが読み取り機に載っていることを
     確かめたあと**だけ。
     """
+    # **投げる前に止める**（#433）。理由は `ISSUE_ENDPOINT_GONE`。
+    # 代わりの口が決まったら、この 1 行と上の 2 つの定数を直すこと。
+    raise IssueError(ISSUE_ENDPOINT_GONE)
+
     url = urllib.parse.urljoin(api_origin, CARDS_PATH)
     payload = {"count": 1} if batch is None else {"count": 1, "batch": batch}
     body = json.dumps(payload).encode("utf-8")
@@ -547,7 +569,7 @@ def dry_run(args) -> int:
 
     if args.live_issue:
         print(f"① 発行 API を叩きます（{args.api_origin}{CARDS_PATH}）")
-        print("   ** 本物のカードが 1 枚出ます。タグに焼かないので、これは孤児です。 **")
+        print("   ** この経路は #433 で消えています。下で止まります。 **")
         cookie = read_session_cookie()
         try:
             card_id = issue_card(args.api_origin, cookie, args.batch)

@@ -15,6 +15,37 @@ import { db, repository, resetDatabase, seedActiveCard, seedIssuedCard } from ".
 
 beforeEach(resetDatabase);
 
+/**
+ * **`listAll(limit)` は `limit + 1` 件返す**（#338 Step 3 / #433）。
+ *
+ * 多い 1 件は「まだ先がある」の合図で、呼ぶ側
+ * （`DelegatedListAllCardsUseCase`）が `truncated` に畳んで切り落とす。
+ * **約束が崩れると `truncated` が常に false になる** —— 運営は全部を見た
+ * つもりで一部を見ることになり、画面も RPC も落ちない。
+ *
+ * **ここで見るのは #433 以降である。** それまでは
+ * `apps/nfc-worker/test/admin.ui.test.ts` が `/account/nfc/admin` の画面を
+ * 引いて「上限で切ったことが出ている」を見ていたが、**あの画面ごと消えた。**
+ * 実際の上限（`MAX_ADMIN_LIST` = 500）を埋めるのは時間に見合わないので、
+ * **小さい `limit` で約束そのものを見る。**
+ */
+describe("listAll", () => {
+  it("limit より多く在れば limit + 1 件返す", async () => {
+    for (let i = 0; i < 3; i += 1) await seedIssuedCard();
+
+    expect(await repository().listAll(2)).toHaveLength(3);
+  });
+
+  it("limit 以下しか無ければ、在るだけ返す", async () => {
+    await seedIssuedCard();
+    await seedIssuedCard();
+
+    // **`limit + 1` を返すのは「先がある」ときだけ。** ここが 3 件に
+    // なると、2 枚しか無いのに `truncated` が立つ。
+    expect(await repository().listAll(2)).toHaveLength(2);
+  });
+});
+
 describe("updateTarget", () => {
   it("所有者でなければ false を返し、行も変わらない", async () => {
     const cardId = await seedActiveCard("usr_taro", "https://example.com/taro");

@@ -25,11 +25,15 @@ const TARO = "token-taro-0123456789abcdefghijklmn";
 const HANAKO = "token-hanako-0123456789abcdefghijk";
 const identity = identityWith({ [TARO]: "usr_taro", [HANAKO]: "usr_hanako" });
 
-/** 管理者のセッション。**サイドバーの出し分けを本物の画面で見る**のに要る（#333）。 */
+/**
+ * **管理者のセッション。** #433 のあとは「出ないこと」を見るために要る ——
+ * 一般利用者で引いて出ないのは当たり前で、**管理者で引いても出ない**ことが
+ * 言えないと、消したことの検査にならない。
+ */
 const ADMIN = "token-admin-0123456789abcdefghijk";
 const adminIdentity = identityWith({ [TARO]: "usr_taro", [ADMIN]: "usr_admin" }, ["usr_admin"]);
 
-/** サイドバーに出る管理の項目（`account-nav.ts` の `adminOnly`）。 */
+/** かつてサイドバーに出ていた運営向けの項目（`account-nav.ts`）。 */
 const ADMIN_NAV_LABEL = "カードの管理";
 
 async function open(cookie?: string, gateway = identity): Promise<Response> {
@@ -271,33 +275,36 @@ describe("片道の操作（#382）", () => {
 });
 
 /**
- * **サイドバーの管理の節**（#333 / #338 Step 3）。
+ * **サイドバーに運営向けの節が無いこと**（#433）。
  *
- * `account-nav.test.ts` にあった「本物の並びに `adminOnly` が 0 件」の
- * 見張りの置き換えである。あちらは**フィルタの振る舞い**を作り物の並びで
- * 固定していて、**本物の画面を 1 度も引いていなかった。**
+ * かつてここは逆を見ていた —— 管理者には「カードの管理」
+ * （`/account/nfc/admin`）が出て、一般利用者には出ない、という出し分けで
+ * ある。**運営向けの画面は `admin.under18.dev` へ移した**ので、いまは
+ * 誰にも出ない。
  *
  * **nfc-worker でも引く理由**は `account-nav.ts` の冒頭にある ——
- * 並びを読むのは 2 つの Worker で、**片方だけ条件を間違えた状態**が
- * 作れる。どちらの画面も落ちず、気づくのは「NFC の画面では管理の節が
- * 出ないのですが」と言われたときである。
+ * 並びを読むのは 2 つの Worker で、**片方だけ戻した状態**が作れる。
+ * どちらの画面も落ちず、気づくのは誰かが古い URL を押したときである。
+ * dashboard 側は `account-nav.test.ts` が並びの値を見ているが、
+ * **こちらは実際に描いた HTML を見る。**
  */
-describe("サイドバーの管理の節", () => {
-  it("管理者には出る", async () => {
+describe("サイドバーに運営向けの節は無い", () => {
+  it("管理者で引いても出ない", async () => {
     const html = await (await open(cookieFor(ADMIN), adminIdentity)).text();
 
-    expect(html).toContain(ADMIN_NAV_LABEL);
-    expect(html).toContain("/account/nfc/admin");
-    // 節の見出しも出ていること。項目だけ出て見出しが無いと迷子になる。
-    expect(html).toContain("管理");
+    expect(html, "運営向けの項目が戻っている").not.toContain(ADMIN_NAV_LABEL);
+    // **href も見る。** ラベルだけ変えて URL が残る形を拾うため。
+    expect(html, "運営向けの画面の URL が残っている").not.toContain("/account/nfc/admin");
+    // 節の見出しも無いこと。見出しだけ残ると中身の無い節が出る。
+    expect(html, "「管理」の節が戻っている").not.toContain(">管理<");
   });
 
-  it("一般利用者には出ない。リンクも本文に残らない", async () => {
-    const html = await (await open(cookieFor(TARO), adminIdentity)).text();
+  it("一般利用者でも、画面そのものは今までどおり出る", async () => {
+    // **ネガティブ確認が「画面ごと落ちている」で通らないようにする。**
+    // 上の 3 本は、500 を返していても全部緑になる。
+    const response = await open(cookieFor(TARO), adminIdentity);
 
-    expect(html, "管理の項目が非管理者に出ている").not.toContain(ADMIN_NAV_LABEL);
-    // **href も残らないこと。** ラベルだけ消して URL が残ると、
-    // 読めば分かる状態になる（`adminOnly` は隠すための仕掛けである）。
-    expect(html, "管理画面の URL が非管理者に出ている").not.toContain("/account/nfc/admin");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("NFC カード");
   });
 });

@@ -36,8 +36,6 @@ import { ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
 
 export type ProfilePageProps = {
   readonly profile: UserProfile;
-  /** 管理の節を出すか（#333）。`AccountShell` が必須にしている。 */
-  readonly isAdmin: boolean;
 };
 
 /** `<dt>` と `<dd>` の 1 組。**行の区切りは上の罫線が持つ。** */
@@ -48,9 +46,8 @@ const Fact: FC<{ readonly label: string; readonly children?: unknown }> = ({ lab
   </div>
 );
 
-export const ProfilePage: FC<ProfilePageProps> = ({ profile, isAdmin }) => (
+export const ProfilePage: FC<ProfilePageProps> = ({ profile }) => (
   <AccountShell
-    isAdmin={isAdmin}
     title="プロフィール"
     heading="プロフィール"
     lead="u18 Identity に登録されているあなたの情報です。"
