@@ -17,6 +17,8 @@ import type {
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { ContainerOverrides } from "../src/composition/container";
+import type { ApprovalRepository } from "../src/application/ports/approval.repository";
+import { ALL_DEFINED_PERMISSIONS, effectivePermissions } from "../src/domain/permissions";
 import { createFakeIdp } from "../test/fake-idp";
 import { KIWA_STYLESHEET } from "../src/presentation/http/ui/generated/kiwa-stylesheet";
 
@@ -426,9 +428,85 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
 const PENDING_SUB = "usr_preview_pending";
 const SUB = "usr_preview01";
 
-const approvals = {
-  isApproved: async (sub: string) => sub !== PENDING_SUB,
-  isSuperApprover: async () => false,
+// ------------------------------------------------------------------- 承認
+//
+// `test/helpers.ts` の `fakeApprovals` と同じ in-memory 実装。**そのままは
+// import できない**——あちらのファイルは `cloudflare:test` の `env` も
+// 読むので、plain Node では読み込めない。ロジックは完全に同じ。
+// `/approvals`（#190）のプレビューにも使うので、3 人ぶん用意する——
+// `SUB` 本人（super approver）と、権限を絞った一般の承認者 2 人。
+type FakeApprovalRow = {
+  isSuperApprover: boolean;
+  permissions: bigint;
+  approvedBySub: string | null;
+  createdAt: Date;
+};
+
+const approvalRows = new Map<string, FakeApprovalRow>([
+  [
+    SUB,
+    {
+      isSuperApprover: true,
+      permissions: ALL_DEFINED_PERMISSIONS,
+      approvedBySub: null,
+      createdAt: new Date(isoDaysAgo(300)),
+    },
+  ],
+  [
+    "usr_preview02",
+    {
+      isSuperApprover: false,
+      permissions: ALL_DEFINED_PERMISSIONS,
+      approvedBySub: SUB,
+      createdAt: new Date(isoDaysAgo(90)),
+    },
+  ],
+  [
+    "usr_preview09",
+    {
+      isSuperApprover: false,
+      permissions: 0n,
+      approvedBySub: SUB,
+      createdAt: new Date(isoDaysAgo(20)),
+    },
+  ],
+]);
+
+const approvals: ApprovalRepository = {
+  isApproved: async (sub) => approvalRows.has(sub),
+  isSuperApprover: async (sub) => approvalRows.get(sub)?.isSuperApprover ?? false,
+  countSuperApprovers: async () =>
+    [...approvalRows.values()].filter((row) => row.isSuperApprover).length,
+  getEffectivePermissions: async (sub) => {
+    const row = approvalRows.get(sub);
+    return row === undefined ? null : effectivePermissions(row);
+  },
+  listAll: async () =>
+    [...approvalRows.entries()]
+      .map(([sub, row]) => ({ sub, ...row }))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+  getBySub: async (sub) => {
+    const row = approvalRows.get(sub);
+    return row === undefined ? null : { sub, ...row };
+  },
+  grant: async (sub, isSuperApprover, approvedBySub) => {
+    const existing = approvalRows.get(sub);
+    approvalRows.set(sub, {
+      isSuperApprover,
+      permissions: existing?.permissions ?? 0n,
+      approvedBySub: existing?.approvedBySub ?? approvedBySub,
+      createdAt: existing?.createdAt ?? new Date(),
+    });
+    return { isSuperApprover };
+  },
+  revoke: async (sub) => approvalRows.delete(sub),
+  setPermissions: async (sub, permissions) => {
+    const existing = approvalRows.get(sub);
+    if (existing === undefined) return false;
+    approvalRows.set(sub, { ...existing, permissions });
+    return true;
+  },
+  recordAuditEvent: async () => undefined,
 };
 
 // ------------------------------------------------------------------- ログイン
@@ -528,6 +606,7 @@ async function main(): Promise<void> {
   );
   await addPage("clients", "OAuth クライアント（/clients）", "/clients", sessionCookie);
   await addPage("audit", "監査ログ（/audit）", "/audit", sessionCookie);
+  await addPage("approvals", "承認・権限の管理（/approvals、#190）", "/approvals", sessionCookie);
   await addPage("pending", "承認待ち（/pending）", "/pending", pendingCookie);
   await addPage(
     "callback-failure",
