@@ -103,6 +103,12 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     listAllCards: unused("listAllCards"),
     countCards: unused("countCards"),
     issueCards: unused("issueCards"),
+    tapTimeseries: unused("tapTimeseries"),
+    usageFunnel: unused("usageFunnel"),
+    batchAnalytics: unused("batchAnalytics"),
+    cardUsageRanking: unused("cardUsageRanking"),
+    disabledReasonBreakdown: unused("disabledReasonBreakdown"),
+    transferCountDistribution: unused("transferCountDistribution"),
     listCardsByOwner: async (input) => {
       calls.listCardsByOwner.push(input);
       return rpcOk({ cards: [card()] });
