@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { createIdentityDatabase, oauthClients, oauthRedirectUris } from "@u18/db";
+import { createIdentityDatabase, oauthClients, oauthRedirectUris, users } from "@u18/db";
 import { newClientId } from "@u18/domain";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +9,20 @@ import { Sha256TokenHasher, TimingSafeComparator } from "../src/infrastructure/c
 import { resetDatabase } from "./helpers";
 
 const hasher = new Sha256TokenHasher();
+
+/** `owner_user_id` の外部キー制約を満たすために要る、最小の利用者行。 */
+async function seedUser(db: ReturnType<typeof createIdentityDatabase>, id: string): Promise<void> {
+  await db
+    .insert(users)
+    .values({
+      id,
+      username: id,
+      displayName: id,
+      primaryEmail: `${id}@example.com`,
+      emailVerified: true,
+    })
+    .run();
+}
 
 async function aClientInput(
   overrides: Partial<CreateOAuthClientInput> = {},
@@ -231,6 +245,34 @@ describe("DrizzleOAuthClientRepository", () => {
 
   it("1 件も無ければ空配列", async () => {
     expect(await repo.listAll()).toEqual([]);
+  });
+
+  it("持ち主を設定・変更・解除できる", async () => {
+    await repo.create(await aClientInput());
+    await seedUser(db, "usr_alice");
+    await seedUser(db, "usr_bob");
+
+    expect(await repo.setOwner("u18-dashboard-test", "usr_alice")).toBe(true);
+    expect((await repo.findByClientId("u18-dashboard-test"))?.ownerUserId).toBe("usr_alice");
+
+    // disable と違い、何度でも変えられる（冪等性のための WHERE 句が無い）。
+    expect(await repo.setOwner("u18-dashboard-test", "usr_bob")).toBe(true);
+    expect((await repo.findByClientId("u18-dashboard-test"))?.ownerUserId).toBe("usr_bob");
+
+    expect(await repo.setOwner("u18-dashboard-test", null)).toBe(true);
+    expect((await repo.findByClientId("u18-dashboard-test"))?.ownerUserId).toBeNull();
+  });
+
+  it("未登録の client_id への設定は false を返す", async () => {
+    await seedUser(db, "usr_alice");
+
+    expect(await repo.setOwner("nope", "usr_alice")).toBe(false);
+  });
+
+  it("新規登録のクライアントは持ち主を持たない（既定は null）", async () => {
+    await repo.create(await aClientInput());
+
+    expect((await repo.findByClientId("u18-dashboard-test"))?.ownerUserId).toBeNull();
   });
 
   it("クライアントを削除すると Redirect URI も消える", async () => {

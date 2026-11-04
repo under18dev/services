@@ -49,6 +49,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     countOAuthClients: async () => rpcOk(0),
     createOAuthClient: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     disableOAuthClient: async () => rpcErr(RpcErrorCode.Internal, "unused"),
+    setOAuthClientOwner: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     listAuditLogs: async (input) => {
       calls.listAuditLogs.push(input);
       return rpcOk({ entries: [entry()], nextCursor: null });

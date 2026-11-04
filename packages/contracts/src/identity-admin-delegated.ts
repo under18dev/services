@@ -142,6 +142,19 @@ export type DisableOAuthClientDelegatedInput = z.infer<
 >;
 export type DisableOAuthClientDelegatedResult = RpcResult<{ readonly disabled: boolean }>;
 
+// ------------------------------------------------------ setOAuthClientOwner
+
+export const setOAuthClientOwnerDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  clientId: z.string().min(1).max(255),
+  /** `null` で持ち主を外す。 */
+  ownerUserId: z.string().min(1).max(64).nullable(),
+});
+export type SetOAuthClientOwnerDelegatedInput = z.infer<
+  typeof setOAuthClientOwnerDelegatedInputSchema
+>;
+export type SetOAuthClientOwnerDelegatedResult = RpcResult<null>;
+
 // ---------------------------------------------------------- listAuditLogs
 
 export const listAuditLogsDelegatedInputSchema = z.object({
@@ -183,5 +196,8 @@ export interface IdentityAdminDelegatedRpcContract {
   disableOAuthClient(
     input: DisableOAuthClientDelegatedInput,
   ): Promise<DisableOAuthClientDelegatedResult>;
+  setOAuthClientOwner(
+    input: SetOAuthClientOwnerDelegatedInput,
+  ): Promise<SetOAuthClientOwnerDelegatedResult>;
   listAuditLogs(input: ListAuditLogsDelegatedInput): Promise<ListAuditLogsDelegatedResult>;
 }

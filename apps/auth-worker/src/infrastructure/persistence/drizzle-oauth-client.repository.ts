@@ -21,6 +21,7 @@ function toDomain(row: OAuthClientRow, redirectUris: readonly string[]): OAuthCl
     allowedScopes: row.allowedScopes,
     isFirstParty: row.isFirstParty,
     logoUrl: row.logoUrl,
+    ownerUserId: row.ownerUserId,
     disabledAt: row.disabledAt,
     redirectUris,
     createdAt: row.createdAt,
@@ -173,6 +174,16 @@ export class DrizzleOAuthClientRepository implements OAuthClientRepository {
       .update(oauthClients)
       .set({ disabledAt: at })
       .where(and(eq(oauthClients.clientId, clientId), isNull(oauthClients.disabledAt)))
+      .returning({ id: oauthClients.id })
+      .all();
+    return rows.length > 0;
+  }
+
+  async setOwner(clientId: string, ownerUserId: string | null): Promise<boolean> {
+    const rows = await this.db
+      .update(oauthClients)
+      .set({ ownerUserId })
+      .where(eq(oauthClients.clientId, clientId))
       .returning({ id: oauthClients.id })
       .all();
     return rows.length > 0;

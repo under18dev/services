@@ -14,6 +14,8 @@ export type OAuthClientProps = {
   readonly allowedScopes: string;
   readonly isFirstParty: boolean;
   readonly logoUrl: string | null;
+  /** 持ち主（#441）。`null` は「不明」——既存の行には遡って決められない。 */
+  readonly ownerUserId: string | null;
   readonly disabledAt: Date | null;
   /** 登録済み Redirect URI。クライアントと同時に読み込む。 */
   readonly redirectUris: readonly string[];
@@ -52,6 +54,9 @@ export class OAuthClient {
   }
   get logoUrl(): string | null {
     return this.props.logoUrl;
+  }
+  get ownerUserId(): string | null {
+    return this.props.ownerUserId;
   }
   get disabledAt(): Date | null {
     return this.props.disabledAt;
