@@ -95,12 +95,13 @@ RC-S300 は PC/SC 2.0 準拠という報告を根拠にしているが、運用�
 `http://localhost:8790`（admin-worker の既定の開発ポート）などに
 向けるときは、そちらの名前で入れること。
 
-**未ログイン・未承認のときに何が返るかは未検証である。** admin-worker の
-セッションガード（`app.ts`）は 401 ではなく `/login` や `/pending` への
-302 を返す——`urllib` は既定で 302 を追うので、`issue_card()` は
-「201 ではなく 200 が返りました」という形で失敗するはずだが、**実機で
-確かめていない。** `hint_for()` の 401 の説明文はこの状況には当たらない
-可能性がある。
+**未ログイン・未承認は JSON で返る。** admin-worker のセッションガード
+（`app.ts`）は既定では `/login` / `/pending` への 302 だが、
+`Content-Type: application/json`（または `Accept: application/json`）が
+付いた要求には **302 を返さず** `401 {"error":"unauthenticated"}` /
+`403 {"error":"not_approved"}` を返す（レビューで追加）。このスクリプトは
+常に両方のヘッダを送るので、302 を `urllib` が追って `/login` の HTML を
+受け取ることは無い——`hint_for()` がこの 2 つを扱う。
 
 ## 機械向けの発行の口（#461、以前は #433 で消えていた）
 
@@ -232,23 +233,33 @@ def origin_of(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def hint_for(status: int) -> str:
+def hint_for(status: int, body: str = "") -> str:
+    """状態コードから考えられる原因を 1〜数行で返す。
+
+    **`body` で 403 を 2 通りに分ける。** `POST /nfc/cards` が返す 403 には
+    2 つの理由がある——Origin / Content-Type の門番（`origin.ts`）と、
+    セッションガード（`app.ts`）が未承認を JSON で返す `not_approved`
+    （レビューで追加）。どちらも同じ 403 だが、運用者が直すものが違う。
+    """
     if status == 401:
+        if '"error":"unauthenticated"' in body:
+            return (
+                f"    → ログインしていません。{SESSION_ENV} が空か、"
+                "セッションの期限が切れています。"
+                "admin.under18.dev で Passkey ログインし直し、"
+                "そちらのホストで Cookie を取り直してください。"
+            )
         return f"    → {SESSION_ENV} のセッションが切れているか、Cookie の名前が違います。"
     if status == 403:
-        # **#461 で理由が変わった。** admin-worker の `POST /nfc/cards` が
-        # 403 を返すのは Origin / Content-Type の 2 枚のどちらかだけ
-        # （`origin.ts` の `isAllowedOrigin` / `isJsonRequest`）。
-        # 「承認されていない」はここでは 403 にならない——`/pending` への
-        # 302 になるはずだが、**実機で確かめていない**（docstring参照）。
+        if '"error":"not_approved"' in body:
+            return (
+                "    → ログインはできていますが、admin_approvals に"
+                "まだ登録されていません。運営に承認してもらってください。"
+            )
         return (
             "    → 2 つのどちらか。\n"
             "       ・Origin が送れていない\n"
-            "       ・Content-Type が application/json になっていない\n"
-            "       （承認されていない・ログインしていない場合はここに来ない"
-            "はずです。201 でも 403 でもない応答が返ったら、"
-            f"{SESSION_ENV} を admin.under18.dev で取り直したセッションに"
-            "差し替えてください。）"
+            "       ・Content-Type が application/json になっていない"
         )
     return ""
 
@@ -291,7 +302,7 @@ def issue_card(api_origin: str, cookie: str, batch: str | None) -> str:
         # （`bodyFor()`）、秘密は入らない。
         detail = error.read().decode("utf-8", "replace")
         raise IssueError(
-            f"{error.code} {error.reason}\n    応答: {detail}\n{hint_for(error.code)}"
+            f"{error.code} {error.reason}\n    応答: {detail}\n{hint_for(error.code, detail)}"
         ) from error
     except urllib.error.URLError as error:
         raise IssueError(f"{url} へ届きません: {error.reason}") from error

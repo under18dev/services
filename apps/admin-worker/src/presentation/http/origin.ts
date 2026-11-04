@@ -45,3 +45,27 @@ export function isJsonRequest(c: Context<AppBindings>): boolean {
   if (contentType === undefined) return false;
   return contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
 }
+
+/**
+ * セッションガード（`app.ts`）が、未認証・未承認を JSON で答えるべきかの
+ * 判定（#461 レビュー）。
+ *
+ * ## なぜ要るのか
+ *
+ * ガードは既定で `/login` / `/pending` への **302** を返す——ブラウザの
+ * 画面遷移としては正しいが、`scripts/nfc-burn.py` のような機械が
+ * `POST /nfc/cards` を未認証で叩くと、`urllib` が既定で 302 を追い、
+ * **`/login` の HTML を 200 で受け取ってしまう。** JSON を期待している
+ * 側からは「何が起きたか分からない」失敗になる——運用者は Cookie を
+ * 手で用意する手順上、**最初の数回は必ずここを踏む。**
+ *
+ * **`Content-Type: application/json` だけでなく `Accept: application/json`
+ * も見る。** 発行 API（`POST /nfc/cards`）は前者で判定できるが、将来
+ * 同じガード配下に GET の JSON API が増えたときは Content-Type が無い
+ * （body が無い）ので、どちらか一方で拾えるようにしておく。
+ */
+export function wantsJsonResponse(c: Context<AppBindings>): boolean {
+  if (isJsonRequest(c)) return true;
+  const accept = c.req.header("Accept");
+  return accept !== undefined && accept.toLowerCase().includes("application/json");
+}

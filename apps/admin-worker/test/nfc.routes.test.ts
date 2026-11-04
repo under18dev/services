@@ -415,6 +415,52 @@ describe("POST /nfc（発行）", () => {
 });
 
 describe("POST /nfc/cards（機械向け JSON 発行 API、#461）", () => {
+  it("未ログインは 401 の JSON で答える（302 で /login へ送らない）", async () => {
+    // **機械向けレビューで足した分岐。** `wantsJsonResponse` が真なら
+    // セッションガード（`app.ts`）は 302 ではなく JSON を返す——`urllib`
+    // が 302 を追って `/login` の HTML を 200 として受け取る事故を防ぐ。
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: ORIGIN },
+        body: JSON.stringify({ count: 1 }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthenticated" });
+    expect(calls.issueCards).toHaveLength(0);
+  });
+
+  it("未承認は 403 の JSON で答える（302 で /pending へ送らない）", async () => {
+    const sessionCookie = await loginAs(SUB, fakeApprovals([]));
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          "Content-Type": "application/json",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ count: 1 }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "not_approved" });
+    expect(calls.issueCards).toHaveLength(0);
+  });
+
   it("Origin が無ければ 403 で、issueCards を呼ばない", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc, calls } = fakeNfcCards();
