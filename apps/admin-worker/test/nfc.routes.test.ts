@@ -414,6 +414,148 @@ describe("POST /nfc（発行）", () => {
   });
 });
 
+describe("POST /nfc/cards（機械向け JSON 発行 API、#461）", () => {
+  it("Origin が無ければ 403 で、issueCards を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ count: 1 }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.issueCards).toHaveLength(0);
+    expect(await response.json()).toEqual({ error: "forbidden" });
+  });
+
+  it("Content-Type が application/json でなければ 403 で、issueCards を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: "count=1",
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.issueCards).toHaveLength(0);
+  });
+
+  it("Origin と Content-Type が揃えば issueCards を actorUserId 付きで呼び、cardId を本文で返す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          "Content-Type": "application/json",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ count: 1, batch: "2026-bunkasai" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(201);
+    // **cardId が応答に載る。** 一覧を引き直して差分を取らせない
+    // （`scripts/nfc-burn.py` が避けている形、issue #461 の本体）。
+    expect(await response.json()).toEqual({ cards: [{ cardId: "nfc_0002" }] });
+    expect(calls.issueCards).toEqual([{ actorUserId: SUB, count: 1, batch: "2026-bunkasai" }]);
+  });
+
+  it("batch を省略すると null で渡す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          "Content-Type": "application/json",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ count: 1 }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(calls.issueCards).toEqual([{ actorUserId: SUB, count: 1, batch: null }]);
+  });
+
+  it("issueCards が invalid_input を返したら 400 で、コード名を本文に出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      issueCards: async () => rpcErr(RpcErrorCode.InvalidInput, "too_many"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          "Content-Type": "application/json",
+          Origin: ORIGIN,
+        },
+        body: JSON.stringify({ count: 999 }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_input" });
+  });
+
+  it("本文が JSON として読めなくても 403 にならず、issueCards 側の invalid_input に落ちる", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      issueCards: async () => rpcErr(RpcErrorCode.InvalidInput, "malformed"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/cards`, {
+        method: "POST",
+        headers: {
+          Cookie: sessionCookie,
+          "Content-Type": "application/json",
+          Origin: ORIGIN,
+        },
+        body: "not json",
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+  });
+});
+
 describe("POST /nfc/:cardId/disable", () => {
   it("CSRF トークンが無ければ 403 で、disableCard を呼ばない", async () => {
     const sessionCookie = await loginAsApproved();

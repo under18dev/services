@@ -74,6 +74,8 @@ export const NAV_PAGE_ROUTES: readonly Route[] = [
 /** 上の画面から呼ぶ更新系・検索系。 */
 export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/nfc" },
+  /** 機械向けの JSON 発行 API（#461、`scripts/nfc-burn.py` の退路）。 */
+  { method: "POST", path: "/nfc/cards" },
   /**
    * batch 単位の一括無効化（#427）。**この 1 本が 2 つの意味を持つ。**
    * `target_batch` が空なら 1 段階目（対象枚数を数えるだけ、書き込まない）、
