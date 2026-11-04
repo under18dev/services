@@ -29,6 +29,46 @@ describe("ビットを持たない相手は 403", () => {
     expect(response.status).toBe(403);
   });
 
+  it("ブラウザからの GET には MessagePage(HTML)を返す。素の JSON を見せない", async () => {
+    // 運用者の指示「人がブラウザで到達しうる経路は全部 Kiwa UI で
+    // 作り込む」——403 の `{"error":"forbidden"}` をそのまま見せていた
+    // 穴（3b のレビュー指摘）を固定する。
+    const approvals = fakeApprovals([SUB], [], { [SUB]: 0n });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Content-Type")).toContain("text/html");
+    const html = await response.text();
+    expect(html).toContain("ホームへ戻る");
+    // 理由（どのビットが足りないか）は出さない。
+    expect(html).not.toContain("NFC_READ");
+    expect(html).not.toContain("forbidden");
+  });
+
+  it("JSON を期待している呼び出し（#461 と同じ判定）には JSON のまま返す", async () => {
+    const approvals = fakeApprovals([SUB], [], { [SUB]: 0n });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, {
+        headers: { Cookie: sessionCookie, Accept: "application/json" },
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden" });
+  });
+
   it("NFC_READ だけ持っていても、書き込み系（POST /nfc）は 403", async () => {
     const approvals = fakeApprovals([SUB], [], { [SUB]: PERMISSION_BITS.NFC_READ });
     const sessionCookie = await loginAs(SUB, approvals);

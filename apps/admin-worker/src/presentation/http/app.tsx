@@ -30,7 +30,7 @@ import { registerUsersRoutes } from "./users.routes";
 import { KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
 import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
 import { HomePage } from "./ui/home-page";
-import { MessagePage } from "./ui/message-page";
+import { forbiddenPermission, MessagePage } from "./ui/message-page";
 import { PendingPage } from "./ui/pending-page";
 import type { AppBindings } from "./types";
 
@@ -211,6 +211,13 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
    * この自分自身の登録パターンのまま）場合は、ただの 404 として素通り
    * させる**——存在しないパスまで 403 にすると、タイプミスの URL が
    * 「権限が無い」と誤解される。
+   *
+   * **403 の応答は、呼び出し側が JSON を期待しているかで出し分ける**
+   * （`wantsJsonResponse`、#461 と同じ考え方）。素の
+   * `c.json({ error: "forbidden" }, 403)` を人がブラウザで踏むと、
+   * 運用者の指示「人がブラウザで到達しうる経路は全部 Kiwa UI で作り込む」
+   * に反する——`forbiddenPermission`（`ui/message-page.tsx`）が
+   * 理由を出さず次の一手（ホームへ戻る）だけを示す。
    */
   app.use("*", async (c, next) => {
     const url = new URL(c.req.url);
@@ -223,14 +230,19 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     const required = requiredPermissionFor(c.req.method, matchedPath);
     if (required === undefined) {
       // CI の二方向テストが本来ここを落とすはずの状態。すり抜けても拒否する。
-      return c.json({ error: "forbidden" }, 403);
+      // **JSON を期待している呼び出し（#461）にだけ JSON を返す。** それ
+      // 以外（ブラウザでの画面遷移）に素の JSON を見せない——運用者の指示
+      // 「人がブラウザで到達しうる経路は全部 Kiwa UI で作り込む」。
+      if (wantsJsonResponse(c)) return c.json({ error: "forbidden" }, 403);
+      return forbiddenPermission(c);
     }
 
     const session = c.get("session");
     const container = c.get("container");
     const effective = await container.approvals.getEffectivePermissions(session.sub);
     if (effective === null || !hasPermission(effective, required)) {
-      return c.json({ error: "forbidden" }, 403);
+      if (wantsJsonResponse(c)) return c.json({ error: "forbidden" }, 403);
+      return forbiddenPermission(c);
     }
 
     return next();
