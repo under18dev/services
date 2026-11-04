@@ -203,9 +203,10 @@ export const AUDIT_EVENTS = [
   /**
    * 管理者がクライアントの持ち主を設定・変更した（#441）。
    *
-   * **新しい名前にする。** `card.disabled` を `AdminDisableCardUseCase` が
-   * 使い回しているのは「本人の操作にも同じ名前が既にあった」場合
-   * （#430）で、持ち主の設定にはそもそも自己操作の対が無い——#434
+   * **新しい名前にする。** `card.disabled` を nfc-worker の
+   * `DelegatedDisableCardUseCase`（運営による無効化、`actingAsAdmin: true`
+   * で区別）が使い回しているのは「本人の操作にも同じ名前が既にあった」
+   * 場合（#430）で、持ち主の設定にはそもそも自己操作の対が無い——#434
    * （`card.reinstated`）と同じ判断で、使い回す先が無いので新設する。
    */
   "oauth.client.owner_changed",
