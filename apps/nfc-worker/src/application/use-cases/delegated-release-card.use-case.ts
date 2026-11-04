@@ -39,8 +39,9 @@ export type DelegatedReleaseCardInput = {
  *
  * ## 監査: イベント名は増やさない
  *
- * `card.released` を使い回す。`AdminDisableCardUseCase` が `card.disabled`
- * を使い回して `metadata.actingAsAdmin` で区別しているのと同じ判断——
+ * `card.released` を使い回す。`DelegatedDisableCardUseCase` が
+ * `card.disabled` を使い回して `metadata.actingAsAdmin` で区別して
+ * いるのと同じ判断——
  * 「同じ操作を誰が行ったか」であって「別の操作」ではないので、保持区分・
  * 掃除の対象が event 名で決まる仕組みに新しい名前を増やす理由が無い。
  *

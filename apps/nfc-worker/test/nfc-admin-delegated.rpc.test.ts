@@ -3,6 +3,7 @@ import { newCardId } from "@u18/domain";
 import { nfcCardEvents } from "@u18/nfc-db";
 import { desc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+import { MAX_ISSUE_COUNT } from "../src/application/use-cases/delegated-issue-cards.use-case";
 import { NfcAdminDelegatedRPC } from "../src/presentation/rpc/nfc-admin-delegated.entrypoint";
 import {
   db,
@@ -156,9 +157,9 @@ describe("releaseCard", () => {
       .all();
     const releasedEvent = rows.find((row) => row.event === "card.released");
 
-    // **イベント名は増やさない。** `AdminDisableCardUseCase` と同じ判断——
-    // 本人の release と同じ `card.released` を使い回し、`actingAsAdmin`
-    // で区別する。
+    // **イベント名は増やさない。** `DelegatedDisableCardUseCase` と同じ
+    // 判断—— 本人の release と同じ `card.released` を使い回し、
+    // `actingAsAdmin` で区別する。
     expect(releasedEvent?.actorUserId).toBe(ACTOR);
     expect(releasedEvent?.metadata?.["actingAsAdmin"]).toBe(true);
   });
@@ -449,11 +450,16 @@ describe("listAllCards", () => {
     expect(minedCard?.ownerUserId).toBe("usr_taro");
   });
 
-  it("上限で打ち切ったことを返す（セッション版と同じ上限）", async () => {
-    // **件数を埋めてまでは確かめない。** `MAX_ADMIN_LIST`（500）は
-    // `ListAllCardsUseCase` と共有しているので、こちらで固定したいのは
-    // 「0 枚のとき `truncated: false`」までで足りる —— 上限そのものの
-    // 単体確認はセッション版のテストが持っている。
+  it("上限で打ち切ったことを返す", async () => {
+    // **件数を埋めてまでは確かめない。** 500 枚を入れる時間に見合わない。
+    // ここで固定したいのは「0 枚のとき `truncated: false`」まで。
+    //
+    // **かつて `MAX_ADMIN_LIST` をセッション版（`ListAllCardsUseCase`）と
+    // 共有しており、上限はあちらのテストが見ていた。** #433 でセッション版が
+    // 消え、定数もこのファイルが試す use-case 側へ移った。`truncated` の
+    // 計算（`rows.length > MAX_ADMIN_LIST`）は `listAll(limit)` が
+    // `limit + 1` 件返す約束に乗っていて、**その約束は
+    // `card.repository.test.ts` の `listAll` が見ている。**
     const result = await rpc.listAllCards();
 
     expect(result.ok).toBe(true);
@@ -515,6 +521,43 @@ describe("issueCards", () => {
 
     const after = await rpc.listAllCards();
     expect(!after.ok ? undefined : after.value.cards).toHaveLength(0);
+  });
+
+  /**
+   * **上限（`MAX_ISSUE_COUNT`）を見る**（#433）。
+   *
+   * かつてこれは `apps/nfc-worker/test/card-issue.test.ts` が持っていた
+   * —— セッション Cookie 経由の発行 API を HTTP の入口から叩く形である。
+   * **その入口は #433 で消え、定数も `delegated-issue-cards.use-case.ts`
+   * へ移った**ので、見る場所をこちらへ移した。
+   *
+   * **枚数は 200 を書かない。** 定数を変えたときに一緒に動いてほしい ——
+   * 固定するのは「上限ちょうどは通り、1 枚超えると通らない」のほうである。
+   * `MAX_ISSUE_COUNT` そのものの値は、下の 1 本が別に見る。
+   */
+  it("上限ちょうどは通り、1 枚超えると invalid_input", async () => {
+    const over = await rpc.issueCards({
+      actorUserId: ACTOR,
+      count: MAX_ISSUE_COUNT + 1,
+      batch: null,
+    });
+
+    expect(over.ok, "上限超過が通ってしまった").toBe(false);
+    expect(!over.ok && over.error.code).toBe("invalid_input");
+
+    // **上限ちょうどは実際に発行する。** 境界の片側だけを見ると、
+    // 「何枚でも拒否する」に変えても緑のままになる。
+    const exact = await rpc.issueCards({ actorUserId: ACTOR, count: MAX_ISSUE_COUNT, batch: null });
+
+    expect(exact.ok, "上限ちょうどが拒否された").toBe(true);
+    expect(!exact.ok ? undefined : exact.value.cards).toHaveLength(MAX_ISSUE_COUNT);
+  }, 30_000);
+
+  it("上限は 200 枚である", () => {
+    // **文書が言う値と実装を突き合わせる**（脅威モデル N-8 の緩和 (3)、
+    // `docs/nfc-cards-operations.md`）。片方だけ動かすと、運用の手順書が
+    // 静かに嘘になる。
+    expect(MAX_ISSUE_COUNT).toBe(200);
   });
 
   it("batch を指定しなければ null のまま発行される", async () => {
