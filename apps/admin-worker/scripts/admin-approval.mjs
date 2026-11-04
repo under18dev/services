@@ -17,6 +17,12 @@
  *   node scripts/admin-approval.mjs list [--remote]
  *   node scripts/admin-approval.mjs grant  --sub usr_xxx --actor <実行者> [--super] [--remote]
  *   node scripts/admin-approval.mjs revoke --sub usr_xxx --actor <実行者> [--remote]
+ *   node scripts/admin-approval.mjs grant-permission  --sub usr_xxx --bit NFC_WRITE --actor <実行者> [--remote]
+ *   node scripts/admin-approval.mjs revoke-permission --sub usr_xxx --bit NFC_WRITE --actor <実行者> [--remote]
+ *
+ * `--super` の降格・`revoke`・`revoke-permission` は、自分で自分を
+ * 締め出せないかを先に確かめる（#190、`src/domain/approval-guard.ts`）。
+ * **ここで拒否されたら D1 には一切触らない。**
  *
  * 既定は `--local`（miniflare のローカル D1）。本番へ当てるときだけ `--remote`。
  * `--dry-run` は SQL を表示するだけで実行しない。
@@ -55,6 +61,38 @@ async function loadSql() {
     );
   }
 }
+
+/**
+ * 締め出し防止の判定とビットの定義は Worker 側の実装をそのまま読み込む
+ * （`loadSql` と同じ理由——書き写すと CLI とテストが別物になる）。
+ */
+async function loadDomain() {
+  try {
+    const [permissions, guard, auditEvents] = await Promise.all([
+      import(join(WORKER_DIR, "src/domain/permissions.ts")),
+      import(join(WORKER_DIR, "src/domain/approval-guard.ts")),
+      // approval.sql.ts は型だけで APPROVAL_AUDIT_EVENTS を再輸出しない
+      // （Node の ESM ローダーが拡張子無しの相対 import を解決できない
+      // ため、approval.sql.ts 自身の冒頭コメントを参照）。値はここで直接読む。
+      import(join(WORKER_DIR, "src/domain/approval-audit-events.ts")),
+    ]);
+    return { ...permissions, ...guard, ...auditEvents };
+  } catch (error) {
+    throw new Error(
+      `TypeScript を直接読み込めなかった。Node 22.18 以降（型ストリップ対応）が要る: ${error}`,
+    );
+  }
+}
+
+/**
+ * CLI には「いま実行しているのが誰か」という u18 Identity の `sub` が無い。
+ * `--actor` は監査ログ用の自由文字列（GitHub ハンドル等）で、`sub` とは
+ * 別の名前空間——たまたま一致することは実質無い。**だから CLI 経由では
+ * 「自分自身を締め出す」側の判定は意味を持たず、`totalSuperApproverCount`
+ * を使った「最後の 1 人」の判定だけが実際に効く。** 自分自身の判定は
+ * `session.sub` を持てる将来の `/approvals` 画面側で効く。
+ */
+const NO_ACTOR_SUB = "__cli_has_no_actor_sub__";
 
 /**
  * wrangler を呼ぶ。
@@ -127,6 +165,9 @@ function parseArgs(argv) {
       case "--super":
         options.superApprover = true;
         break;
+      case "--bit":
+        options.bit = next();
+        break;
       case "--remote":
         options.remote = true;
         break;
@@ -155,7 +196,24 @@ function requireActor(options) {
   if (!options.actor) throw new Error("--actor は必須（誰が実行したかを監査ログに残す）");
 }
 
-function printRow(row) {
+/**
+ * 権限の内訳を表示用の文字列にする。
+ *
+ * **super は保存された `permissions` を読まず、常に「全部（super approver）」
+ * と表示する。** 保存値から組み立てると、ビットを足した日に表示だけ
+ * 古いままになる（`src/domain/permissions.ts` 冒頭のコメントと同じ理由）。
+ */
+function formatPermissionsForDisplay(domain, row) {
+  const effective = domain.effectivePermissions({
+    isSuperApprover: Boolean(row.is_super_approver),
+    permissions: domain.parsePermissions(row.permissions ?? "0"),
+  });
+  const names = domain.permissionNames(effective);
+  if (names === "ALL") return "全部（super approver）";
+  return names.length === 0 ? "（無し）" : names.join(", ");
+}
+
+function printRow(row, domain) {
   if (row === undefined) {
     console.log("承認されていない。--sub を確認すること");
     return;
@@ -163,6 +221,9 @@ function printRow(row) {
   console.log(`  id:                ${row.id}`);
   console.log(`  sub:               ${row.sub}`);
   console.log(`  is_super_approver: ${row.is_super_approver ? "はい" : "いいえ"}`);
+  if (domain !== undefined) {
+    console.log(`  permissions:       ${formatPermissionsForDisplay(domain, row)}`);
+  }
   console.log(`  approved_by_sub:   ${row.approved_by_sub ?? "（CLI でのブートストラップ）"}`);
   console.log(`  created_at:        ${new Date(row.created_at).toISOString()}`);
 }
@@ -175,7 +236,8 @@ async function status(options) {
     console.log(statement);
     return;
   }
-  printRow(queryRows(statement, options)[0]);
+  const domain = await loadDomain();
+  printRow(queryRows(statement, options)[0], domain);
 }
 
 async function list(options) {
@@ -190,21 +252,52 @@ async function list(options) {
     console.log("承認されている人が 1 人も居ない。");
     return;
   }
+  const domain = await loadDomain();
   for (const row of rows) {
-    printRow(row);
+    printRow(row, domain);
     console.log("");
   }
   console.log(`合計 ${rows.length} 人`);
+}
+
+/**
+ * super approver の降格を伴う `grant`（`--super` を付けずに既存の super を
+ * 更新する呼び出し）の前に、締め出し防止を確かめる。
+ *
+ * **D1 を 1 回余計に読む**（現在の状態・super の人数）。承認の変更は
+ * 低頻度の手動操作なので、読みが 1 回増えるコストより先に確かめられる
+ * ことを優先する。
+ */
+async function guardSuperApproverChange(options, sql, domain) {
+  const current = queryRows(sql.approvalStatusSql(options.sub), options)[0];
+  const targetIsCurrentlySuperApprover = Boolean(current?.is_super_approver);
+  const newIsSuperApprover = options.superApprover === true;
+  if (!targetIsCurrentlySuperApprover || newIsSuperApprover) return; // 昇格・新規・変更なしは常に通る
+
+  const totalSuperApproverCount = queryRows(sql.countSuperApproversSql(), options)[0]?.count ?? 0;
+  const result = domain.checkSuperApproverChange({
+    actorSub: NO_ACTOR_SUB,
+    targetSub: options.sub,
+    targetIsCurrentlySuperApprover,
+    newIsSuperApprover,
+    totalSuperApproverCount,
+  });
+  if (!result.ok) throw new Error(result.reason);
 }
 
 async function grant(options) {
   requireSub(options);
   requireActor(options);
   const sql = await loadSql();
+  const domain = await loadDomain();
+
+  if (!options.dryRun) {
+    await guardSuperApproverChange(options, sql, domain);
+  }
 
   const grantStatement = sql.grantApprovalSql(options.sub, options.superApprover === true);
   const auditStatement = sql.approvalAuditSql({
-    event: sql.APPROVAL_AUDIT_EVENTS.granted.event,
+    event: domain.APPROVAL_AUDIT_EVENTS.granted.event,
     sub: options.sub,
     actor: options.actor,
     reason: options.reason ?? "manual_grant",
@@ -231,10 +324,24 @@ async function revoke(options) {
   requireSub(options);
   requireActor(options);
   const sql = await loadSql();
+  const domain = await loadDomain();
+
+  if (!options.dryRun) {
+    const current = queryRows(sql.approvalStatusSql(options.sub), options)[0];
+    const targetIsCurrentlySuperApprover = Boolean(current?.is_super_approver);
+    const totalSuperApproverCount = queryRows(sql.countSuperApproversSql(), options)[0]?.count ?? 0;
+    const result = domain.checkApprovalRevocation({
+      actorSub: NO_ACTOR_SUB,
+      targetSub: options.sub,
+      targetIsCurrentlySuperApprover,
+      totalSuperApproverCount,
+    });
+    if (!result.ok) throw new Error(result.reason);
+  }
 
   const revokeStatement = sql.revokeApprovalSql(options.sub);
   const auditStatement = sql.approvalAuditSql({
-    event: sql.APPROVAL_AUDIT_EVENTS.revoked.event,
+    event: domain.APPROVAL_AUDIT_EVENTS.revoked.event,
     sub: options.sub,
     actor: options.actor,
     reason: options.reason ?? "manual_revoke",
@@ -256,6 +363,103 @@ async function revoke(options) {
   console.log(`承認を剥奪した: ${options.sub}`);
 }
 
+function requireBit(options, domain) {
+  if (!options.bit) throw new Error("--bit は必須");
+  if (!(options.bit in domain.PERMISSION_BITS)) {
+    throw new Error(
+      `--bit は次のいずれか: ${Object.keys(domain.PERMISSION_BITS).join(", ")}（渡された値: ${options.bit}）`,
+    );
+  }
+}
+
+async function grantPermission(options) {
+  requireSub(options);
+  requireActor(options);
+  const sql = await loadSql();
+  const domain = await loadDomain();
+  requireBit(options, domain);
+
+  const current = queryRows(sql.approvalStatusSql(options.sub), options)[0];
+  if (current === undefined) throw new Error(`${options.sub} は承認されていない`);
+
+  const bit = domain.PERMISSION_BITS[options.bit];
+  const newPermissions = domain.formatPermissions(
+    domain.parsePermissions(current.permissions) | bit,
+  );
+  const setStatement = sql.setPermissionsSql(options.sub, newPermissions);
+  const auditStatement = sql.approvalAuditSql({
+    event: domain.APPROVAL_AUDIT_EVENTS.permissionGranted.event,
+    sub: options.sub,
+    actor: options.actor,
+    reason: options.reason ?? "manual_grant",
+    detail: options.bit,
+  });
+
+  if (options.dryRun) {
+    console.log([setStatement, auditStatement].join("\n\n"));
+    return;
+  }
+
+  const rows = queryRows(setStatement, options);
+  if (rows.length === 0) {
+    console.log("付与しなかった（想定外。直前の読み取りで承認済みを確認している）。");
+    process.exitCode = 1;
+    return;
+  }
+  runSql(auditStatement, options);
+
+  console.log(`付与した: ${options.sub} に ${options.bit}`);
+}
+
+async function revokePermission(options) {
+  requireSub(options);
+  requireActor(options);
+  const sql = await loadSql();
+  const domain = await loadDomain();
+  requireBit(options, domain);
+
+  const current = queryRows(sql.approvalStatusSql(options.sub), options)[0];
+  if (current === undefined) throw new Error(`${options.sub} は承認されていない`);
+
+  const bit = domain.PERMISSION_BITS[options.bit];
+
+  if (!options.dryRun) {
+    const result = domain.checkPermissionRevocation({
+      actorSub: NO_ACTOR_SUB,
+      targetSub: options.sub,
+      isApprovalGrantBit: options.bit === "APPROVAL_GRANT",
+    });
+    if (!result.ok) throw new Error(result.reason);
+  }
+
+  const newPermissions = domain.formatPermissions(
+    domain.parsePermissions(current.permissions) & ~bit,
+  );
+  const setStatement = sql.setPermissionsSql(options.sub, newPermissions);
+  const auditStatement = sql.approvalAuditSql({
+    event: domain.APPROVAL_AUDIT_EVENTS.permissionRevoked.event,
+    sub: options.sub,
+    actor: options.actor,
+    reason: options.reason ?? "manual_revoke",
+    detail: options.bit,
+  });
+
+  if (options.dryRun) {
+    console.log([setStatement, auditStatement].join("\n\n"));
+    return;
+  }
+
+  const rows = queryRows(setStatement, options);
+  if (rows.length === 0) {
+    console.log("剥奪しなかった（想定外。直前の読み取りで承認済みを確認している）。");
+    process.exitCode = 1;
+    return;
+  }
+  runSql(auditStatement, options);
+
+  console.log(`剥奪した: ${options.sub} から ${options.bit}`);
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const options = parseArgs(rest);
@@ -273,9 +477,16 @@ async function main() {
     case "revoke":
       await revoke(options);
       break;
+    case "grant-permission":
+      await grantPermission(options);
+      break;
+    case "revoke-permission":
+      await revokePermission(options);
+      break;
     default:
       console.error(
-        "使い方: node scripts/admin-approval.mjs <status|list|grant|revoke> --sub <sub> ...",
+        "使い方: node scripts/admin-approval.mjs " +
+          "<status|list|grant|revoke|grant-permission|revoke-permission> --sub <sub> ...",
       );
       process.exitCode = 1;
   }

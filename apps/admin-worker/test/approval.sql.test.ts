@@ -1,13 +1,15 @@
 import { adminApprovalEvents, adminApprovals, createAdminDatabase } from "@u18/admin-db";
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { APPROVAL_AUDIT_EVENTS } from "../src/domain/approval-audit-events";
 import {
-  APPROVAL_AUDIT_EVENTS,
   approvalAuditSql,
   approvalStatusSql,
+  countSuperApproversSql,
   grantApprovalSql,
   listApprovalsSql,
   revokeApprovalSql,
+  setPermissionsSql,
   sqlLiteral,
 } from "../src/infrastructure/persistence/approval.sql";
 
@@ -92,6 +94,66 @@ describe("listApprovalsSql", () => {
   });
 });
 
+describe("0002_backfill_existing_approvals_permissions.sql（#190）", () => {
+  // **実際のマイグレーションファイルをそのまま流す。** コピーした SQL では
+  // なく、本番が実行するのと同じ文字列（`vitest.config.ts` が Node 側で
+  // 読んで渡している）を使う——ロジックを書き写すと、ファイルを直しても
+  // テストが古いままになりうる。
+  //
+  // `setup.ts` は全マイグレーションを空の DB に適用済みなので、ここでは
+  // 「移行より前から居た行」を再現するために、行を作ってからもう一度
+  // 同じ SQL を流す。
+  it("super も非 super も、既存の承認済み行は全ビットになる（今日できていたことを明日もできる）", async () => {
+    await run(grantApprovalSql("usr_super", true));
+    await run(grantApprovalSql("usr_plain", false));
+
+    await env.ADMIN_DB.prepare(env.TEST_PERMISSIONS_BACKFILL_SQL).run();
+
+    const rows = await run(listApprovalsSql());
+    const permissions = Object.fromEntries(rows.map((row) => [row.sub, row.permissions]));
+    expect(permissions["usr_super"]).toBe("255");
+    expect(permissions["usr_plain"]).toBe("255");
+  });
+
+  it("255 は 8 ビット全部（NFC_READ〜APPROVAL_GRANT）", () => {
+    // マイグレーションの SQL はハードコードされた定数なので、`permissions.ts`
+    // の定義とここで独立に突き合わせる——どちらかだけ直すと気づけない。
+    expect(255).toBe(2 ** 8 - 1);
+  });
+});
+
+describe("countSuperApproversSql", () => {
+  it("super が居なければ 0", async () => {
+    await run(grantApprovalSql("usr_a", false));
+    const rows = await run(countSuperApproversSql());
+    expect(rows[0]?.count).toBe(0);
+  });
+
+  it("super の人数だけを数える（非 super は数えない）", async () => {
+    await run(grantApprovalSql("usr_a", false));
+    await run(grantApprovalSql("usr_b", true));
+    await run(grantApprovalSql("usr_c", true));
+    const rows = await run(countSuperApproversSql());
+    expect(rows[0]?.count).toBe(2);
+  });
+});
+
+describe("setPermissionsSql", () => {
+  it("permissions を書き換える", async () => {
+    await run(grantApprovalSql("usr_a", false));
+    const rows = await run(setPermissionsSql("usr_a", "5"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.permissions).toBe("5");
+
+    const status = await run(approvalStatusSql("usr_a"));
+    expect(status[0]?.permissions).toBe("5");
+  });
+
+  it("承認されていない sub は 0 行", async () => {
+    expect(await run(setPermissionsSql("usr_not_approved", "1"))).toHaveLength(0);
+  });
+});
+
 describe("approvalAuditSql", () => {
   it("承認・剥奪の記録を残す", async () => {
     await run(
@@ -127,5 +189,48 @@ describe("approvalAuditSql", () => {
       `select actor from admin_approval_events where sub = ${sqlLiteral("usr_bootstrap")};`,
     );
     expect(events[0]?.actor).toBe("operator-handle");
+  });
+
+  it("承認そのものの付与・剥奪では detail が null", async () => {
+    await run(
+      approvalAuditSql({
+        event: APPROVAL_AUDIT_EVENTS.granted.event,
+        sub: "usr_a",
+        actor: "github-handle",
+        reason: "manual_grant",
+      }),
+    );
+    const events = await run(
+      `select detail from admin_approval_events where sub = ${sqlLiteral("usr_a")};`,
+    );
+    expect(events[0]?.detail).toBeNull();
+  });
+
+  it("権限ビットの変更は、生の数値ではなくビットの記号名を detail に残す（#190）", () => {
+    const sql = approvalAuditSql({
+      event: APPROVAL_AUDIT_EVENTS.permissionGranted.event,
+      sub: "usr_a",
+      actor: "github-handle",
+      reason: "manual_grant",
+      detail: "NFC_WRITE",
+    });
+    expect(sql).toContain("NFC_WRITE");
+  });
+
+  it("権限ビットの変更が実際に detail 列へ記号名のまま残る", async () => {
+    await run(
+      approvalAuditSql({
+        event: APPROVAL_AUDIT_EVENTS.permissionGranted.event,
+        sub: "usr_a",
+        actor: "github-handle",
+        reason: "manual_grant",
+        detail: "NFC_WRITE",
+      }),
+    );
+    const events = await run(
+      `select event, detail from admin_approval_events where sub = ${sqlLiteral("usr_a")};`,
+    );
+    expect(events[0]?.event).toBe("ops.permission.granted");
+    expect(events[0]?.detail).toBe("NFC_WRITE");
   });
 });

@@ -85,6 +85,32 @@ export function csrfRejected(
   );
 }
 
+/**
+ * 操作ごとの権限ガード（#190）に落ちたときの応答。
+ *
+ * **理由を出さない。** 「どのビットが足りないか」を出すと、権限の内訳を
+ * 外から探る手がかりになる——`fail()` の既存方針と同じ。**次の一手だけ
+ * 置く**（ホームへ戻る）。`serviceUnavailable` / `csrfRejected` と同じ
+ * `MessagePage` に寄せる——`c.json({ error: "forbidden" }, 403)` を
+ * そのまま人の目に触れる経路に残さない（運用者の指示「人がブラウザで
+ * 到達しうる経路は全部 Kiwa UI で作り込む」）。
+ *
+ * **行き先はホーム（`/`）。** 押しても戻れる元のページ（例: `/nfc`）は
+ * 権限が無い本人には結局また 403 になるので、`csrfRejected` の
+ * 「いたページへ戻す」とは違い、確実に開けるホームへ送る。
+ */
+export function forbiddenPermission(c: Context<AppBindings>): Response | Promise<Response> {
+  return c.html(
+    <MessagePage
+      title="この操作の権限がありません"
+      message="この操作には権限が必要です。管理者に依頼してください。"
+      actionHref="/"
+      actionLabel="ホームへ戻る"
+    />,
+    403,
+  );
+}
+
 export const MessagePage: FC<MessagePageProps> = ({ title, message, actionHref, actionLabel }) => (
   <KiwaShell
     title={title}

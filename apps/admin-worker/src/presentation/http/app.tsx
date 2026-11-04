@@ -1,7 +1,10 @@
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
+import { routePath } from "hono/route";
 import { createContainer, type ContainerOverrides } from "../../composition/container";
+import { hasPermission } from "../../domain/permissions";
+import { requiredPermissionFor } from "./route-permissions";
 import { buildAuthorizationUrl } from "../../oidc/authorize-url";
 import {
   buildLoginStateCookie,
@@ -17,6 +20,7 @@ import { deriveCodeChallenge, generateCodeVerifier, generateOpaqueValue } from "
 import { sanitizeReturnTo } from "../../oidc/return-to";
 import { createSessionToken, verifySessionToken } from "../../oidc/session";
 import { exchangeAuthorizationCode } from "../../oidc/token-exchange";
+import { registerApprovalsRoutes } from "./approvals.routes";
 import { registerAuditRoutes } from "./audit.routes";
 import { wantsJsonResponse } from "./origin";
 import { registerClientsRoutes } from "./clients.routes";
@@ -26,7 +30,7 @@ import { registerUsersRoutes } from "./users.routes";
 import { KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
 import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
 import { HomePage } from "./ui/home-page";
-import { MessagePage } from "./ui/message-page";
+import { forbiddenPermission, MessagePage } from "./ui/message-page";
 import { PendingPage } from "./ui/pending-page";
 import type { AppBindings } from "./types";
 
@@ -178,6 +182,69 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     }
 
     c.set("session", session);
+    return next();
+  });
+
+  /**
+   * 操作ごとの権限ガード（#190）。**上のガードより後、各ルートより前。**
+   *
+   * ここまで来ているのは「承認済み」（または `/pending` 自身）だけ。
+   * `/`・`/pending`・`PUBLIC_PATHS` はホームの概要や入口であって個別の
+   * 操作を行わないので、対象外のまま通す。
+   *
+   * **宣言は `route-permissions.ts` の `ROUTE_PERMISSIONS` に 1 箇所だけ**
+   * 持つ。ここでは判定しか書かない——判定を散らすと、ルートを足したのに
+   * ここを書き忘れて緩いまま通る経路ができる。
+   *
+   * **マッチしたルートの「パターン」で引く。** 生のリクエストパス
+   * （`/nfc/nfc_abc123/disable`）では対応表の `/nfc/:cardId/disable` に
+   * 当たらない。Hono が解決したパターンを得るには、`c.req.routePath`
+   * （非推奨）ではなく `hono/route` の `routePath(c, -1)` を使うこと——
+   * **ミドルウェアの中で既定の `routePath(c)` を呼ぶと、ミドルウェア自身の
+   * 登録パターン（`"/*"`）が返り、最終的に応答するハンドラのパターンは
+   * `-1`（末尾）でしか取れない**（実測、Hono 4.13）。
+   *
+   * **対応表に無いルートに実際にマッチしたら 403（既定は拒否）。**
+   * `test/route-permissions.test.ts` が「宣言の無いルートを足せない」こと
+   * を CI で見るが、万一それをすり抜けても安全側に倒す。一方、
+   * **どのルートにもマッチしていない（`routePath(c, -1)` が `"/*"`、
+   * この自分自身の登録パターンのまま）場合は、ただの 404 として素通り
+   * させる**——存在しないパスまで 403 にすると、タイプミスの URL が
+   * 「権限が無い」と誤解される。
+   *
+   * **403 の応答は、呼び出し側が JSON を期待しているかで出し分ける**
+   * （`wantsJsonResponse`、#461 と同じ考え方）。素の
+   * `c.json({ error: "forbidden" }, 403)` を人がブラウザで踏むと、
+   * 運用者の指示「人がブラウザで到達しうる経路は全部 Kiwa UI で作り込む」
+   * に反する——`forbiddenPermission`（`ui/message-page.tsx`）が
+   * 理由を出さず次の一手（ホームへ戻る）だけを示す。
+   */
+  app.use("*", async (c, next) => {
+    const url = new URL(c.req.url);
+    if (PUBLIC_PATHS.has(url.pathname)) return next();
+    if (url.pathname === PENDING_PATH || url.pathname === "/") return next();
+
+    const matchedPath = routePath(c, -1);
+    if (matchedPath === "/*") return next(); // どのルートにもマッチしていない。404 は下流に任せる。
+
+    const required = requiredPermissionFor(c.req.method, matchedPath);
+    if (required === undefined) {
+      // CI の二方向テストが本来ここを落とすはずの状態。すり抜けても拒否する。
+      // **JSON を期待している呼び出し（#461）にだけ JSON を返す。** それ
+      // 以外（ブラウザでの画面遷移）に素の JSON を見せない——運用者の指示
+      // 「人がブラウザで到達しうる経路は全部 Kiwa UI で作り込む」。
+      if (wantsJsonResponse(c)) return c.json({ error: "forbidden" }, 403);
+      return forbiddenPermission(c);
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const effective = await container.approvals.getEffectivePermissions(session.sub);
+    if (effective === null || !hasPermission(effective, required)) {
+      if (wantsJsonResponse(c)) return c.json({ error: "forbidden" }, 403);
+      return forbiddenPermission(c);
+    }
+
     return next();
   });
 
@@ -447,6 +514,10 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   // OAuth クライアントの管理（#308 / #333 / #390 決定 16 ③ 段取り 3）。
   // 上のガードが既にセッション・承認済みであることを確かめている。
   registerClientsRoutes(app);
+
+  // 承認者・権限の管理（#190）。上のガードに加え、操作ごとの権限ガード
+  // （`route-permissions.ts` の `APPROVAL_GRANT`）がこの経路を守っている。
+  registerApprovalsRoutes(app);
 
   return app;
 }
