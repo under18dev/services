@@ -9,7 +9,17 @@
  * 出し、CLI とテストの両方が同じ文字列を使う形にする
  * （`apps/auth-worker/src/infrastructure/persistence/admin-role.sql.ts`
  * と同じ方針）。
+ *
+ * **`ApprovalAuditEvent` は型だけ import する。** CLI（`admin-approval.mjs`）
+ * はこのファイルを Node から直接 `import()` するが、Node の ESM ローダーは
+ * 拡張子無しの相対 import（`../../domain/approval-audit-events`）を `.ts` へ
+ * 自動解決しない。型だけの import は型ストリップで消え、実行時に解決を
+ * 試みないのでこの問題を起こさない——値（`APPROVAL_AUDIT_EVENTS`）は
+ * ここから再輸出せず、CLI は `domain/approval-audit-events.ts` を直接
+ * `loadDomain()` で読む（`approval-guard.ts` が同じ理由で
+ * `./permissions` の import 自体を無くしたのと同じ考え方）。
  */
+import type { ApprovalAuditEvent } from "../../domain/approval-audit-events";
 
 /**
  * SQL リテラルへ落とす。
@@ -99,26 +109,7 @@ export function setPermissionsSql(sub: string, permissions: string): string {
 returning id, permissions;`;
 }
 
-/**
- * 承認・剥奪のイベント名。
- *
- * **プロパティの形で書く。** auth-worker の `ADMIN_ROLE_AUDIT_EVENTS` の
- * コメントにある理由——登録簿の走査が拾うのはこの形で、型の union だけに
- * すると「宣言はあるが検査の視野に入らない」ができる。admin-worker の
- * 監査イベントの登録簿はまだ無いので、いまは**この定数自体が登録簿**で
- * あり、将来そちらを作るときはここから移す。
- */
-export const APPROVAL_AUDIT_EVENTS = {
-  granted: { event: "ops.approval.granted" },
-  revoked: { event: "ops.approval.revoked" },
-  /** 個別の権限ビットを付与した（#190）。 */
-  permissionGranted: { event: "ops.permission.granted" },
-  /** 個別の権限ビットを剥奪した（#190）。 */
-  permissionRevoked: { event: "ops.permission.revoked" },
-} as const satisfies Record<string, { event: string }>;
-
-export type ApprovalAuditEvent =
-  (typeof APPROVAL_AUDIT_EVENTS)[keyof typeof APPROVAL_AUDIT_EVENTS]["event"];
+export type { ApprovalAuditEvent };
 
 /**
  * 承認・剥奪・権限の変更を監査ログに残す。

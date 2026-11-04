@@ -115,15 +115,13 @@ export function fakeApprovals(
     events,
     isApproved: async (sub) => rows.has(sub),
     isSuperApprover: async (sub) => rows.get(sub)?.isSuperApprover ?? false,
-    countSuperApprovers: async () =>
-      [...rows.values()].filter((row) => row.isSuperApprover).length,
+    countSuperApprovers: async () => [...rows.values()].filter((row) => row.isSuperApprover).length,
     getEffectivePermissions: async (sub) => {
       const row = rows.get(sub);
       if (row === undefined) return null;
       return effectivePermissions(row);
     },
-    listAll: async () =>
-      [...rows.entries()].map(([sub, row]) => ({ sub, ...row })),
+    listAll: async () => [...rows.entries()].map(([sub, row]) => ({ sub, ...row })),
     getBySub: async (sub) => {
       const row = rows.get(sub);
       return row === undefined ? null : { sub, ...row };

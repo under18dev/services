@@ -1,4 +1,4 @@
-import type { ApprovalAuditEvent } from "../../infrastructure/persistence/approval.sql";
+import type { ApprovalAuditEvent } from "../../domain/approval-audit-events";
 import type { EffectivePermissions } from "../../domain/permissions";
 
 export type ApprovalListRow = {

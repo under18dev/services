@@ -60,10 +60,7 @@
       "indexes": {
         "admin_approval_events_sub_idx": {
           "name": "admin_approval_events_sub_idx",
-          "columns": [
-            "sub",
-            "created_at"
-          ],
+          "columns": ["sub", "created_at"],
           "isUnique": false
         }
       },
@@ -123,9 +120,7 @@
       "indexes": {
         "admin_approvals_sub_unique": {
           "name": "admin_approvals_sub_unique",
-          "columns": [
-            "sub"
-          ],
+          "columns": ["sub"],
           "isUnique": true
         }
       },

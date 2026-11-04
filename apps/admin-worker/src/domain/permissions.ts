@@ -76,8 +76,7 @@ export type ApprovalRow = {
 };
 
 export type EffectivePermissions =
-  | { readonly kind: "super" }
-  | { readonly kind: "bits"; readonly bits: bigint };
+  { readonly kind: "super" } | { readonly kind: "bits"; readonly bits: bigint };
 
 /**
  * 判定にも表示にも使う、唯一の入口。

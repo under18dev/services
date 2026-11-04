@@ -68,11 +68,15 @@ async function loadSql() {
  */
 async function loadDomain() {
   try {
-    const [permissions, guard] = await Promise.all([
+    const [permissions, guard, auditEvents] = await Promise.all([
       import(join(WORKER_DIR, "src/domain/permissions.ts")),
       import(join(WORKER_DIR, "src/domain/approval-guard.ts")),
+      // approval.sql.ts は型だけで APPROVAL_AUDIT_EVENTS を再輸出しない
+      // （Node の ESM ローダーが拡張子無しの相対 import を解決できない
+      // ため、approval.sql.ts 自身の冒頭コメントを参照）。値はここで直接読む。
+      import(join(WORKER_DIR, "src/domain/approval-audit-events.ts")),
     ]);
-    return { ...permissions, ...guard };
+    return { ...permissions, ...guard, ...auditEvents };
   } catch (error) {
     throw new Error(
       `TypeScript を直接読み込めなかった。Node 22.18 以降（型ストリップ対応）が要る: ${error}`,
@@ -285,15 +289,15 @@ async function grant(options) {
   requireSub(options);
   requireActor(options);
   const sql = await loadSql();
+  const domain = await loadDomain();
 
   if (!options.dryRun) {
-    const domain = await loadDomain();
     await guardSuperApproverChange(options, sql, domain);
   }
 
   const grantStatement = sql.grantApprovalSql(options.sub, options.superApprover === true);
   const auditStatement = sql.approvalAuditSql({
-    event: sql.APPROVAL_AUDIT_EVENTS.granted.event,
+    event: domain.APPROVAL_AUDIT_EVENTS.granted.event,
     sub: options.sub,
     actor: options.actor,
     reason: options.reason ?? "manual_grant",
@@ -320,13 +324,12 @@ async function revoke(options) {
   requireSub(options);
   requireActor(options);
   const sql = await loadSql();
+  const domain = await loadDomain();
 
   if (!options.dryRun) {
-    const domain = await loadDomain();
     const current = queryRows(sql.approvalStatusSql(options.sub), options)[0];
     const targetIsCurrentlySuperApprover = Boolean(current?.is_super_approver);
-    const totalSuperApproverCount =
-      queryRows(sql.countSuperApproversSql(), options)[0]?.count ?? 0;
+    const totalSuperApproverCount = queryRows(sql.countSuperApproversSql(), options)[0]?.count ?? 0;
     const result = domain.checkApprovalRevocation({
       actorSub: NO_ACTOR_SUB,
       targetSub: options.sub,
@@ -338,7 +341,7 @@ async function revoke(options) {
 
   const revokeStatement = sql.revokeApprovalSql(options.sub);
   const auditStatement = sql.approvalAuditSql({
-    event: sql.APPROVAL_AUDIT_EVENTS.revoked.event,
+    event: domain.APPROVAL_AUDIT_EVENTS.revoked.event,
     sub: options.sub,
     actor: options.actor,
     reason: options.reason ?? "manual_revoke",
@@ -380,10 +383,12 @@ async function grantPermission(options) {
   if (current === undefined) throw new Error(`${options.sub} は承認されていない`);
 
   const bit = domain.PERMISSION_BITS[options.bit];
-  const newPermissions = domain.formatPermissions(domain.parsePermissions(current.permissions) | bit);
+  const newPermissions = domain.formatPermissions(
+    domain.parsePermissions(current.permissions) | bit,
+  );
   const setStatement = sql.setPermissionsSql(options.sub, newPermissions);
   const auditStatement = sql.approvalAuditSql({
-    event: sql.APPROVAL_AUDIT_EVENTS.permissionGranted.event,
+    event: domain.APPROVAL_AUDIT_EVENTS.permissionGranted.event,
     sub: options.sub,
     actor: options.actor,
     reason: options.reason ?? "manual_grant",
@@ -432,7 +437,7 @@ async function revokePermission(options) {
   );
   const setStatement = sql.setPermissionsSql(options.sub, newPermissions);
   const auditStatement = sql.approvalAuditSql({
-    event: sql.APPROVAL_AUDIT_EVENTS.permissionRevoked.event,
+    event: domain.APPROVAL_AUDIT_EVENTS.permissionRevoked.event,
     sub: options.sub,
     actor: options.actor,
     reason: options.reason ?? "manual_revoke",

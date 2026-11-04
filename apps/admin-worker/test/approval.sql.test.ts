@@ -1,8 +1,8 @@
 import { adminApprovalEvents, adminApprovals, createAdminDatabase } from "@u18/admin-db";
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { APPROVAL_AUDIT_EVENTS } from "../src/domain/approval-audit-events";
 import {
-  APPROVAL_AUDIT_EVENTS,
   approvalAuditSql,
   approvalStatusSql,
   countSuperApproversSql,

@@ -22,11 +22,15 @@ import { PERMISSION_BITS, type PermissionBitName } from "../../domain/permission
 
 export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   "GET /nfc": "NFC_READ",
+  // 解析画面（#454）。読み取り専用（タップ時系列・ファネル・バッチ別・死蔵検出）。
+  "GET /nfc/analytics": "NFC_READ",
   "GET /clients": "CLIENT_READ",
   "GET /users": "USER_READ",
   "GET /audit": "AUDIT_READ",
 
   "POST /nfc": "NFC_WRITE",
+  // 機械向けの JSON 発行 API（#461、scripts/nfc-burn.py の退路）。
+  "POST /nfc/cards": "NFC_WRITE",
   "POST /nfc/batch-disable": "NFC_WRITE",
   "POST /nfc/batch-reinstate": "NFC_WRITE",
   "POST /nfc/:cardId/disable": "NFC_WRITE",

@@ -5,7 +5,7 @@ import {
   checkSuperApproverChange,
 } from "../../domain/approval-guard";
 import { PERMISSION_BITS, type PermissionBitName } from "../../domain/permissions";
-import { APPROVAL_AUDIT_EVENTS } from "../../infrastructure/persistence/approval.sql";
+import { APPROVAL_AUDIT_EVENTS } from "../../domain/approval-audit-events";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { csrfRejected } from "./ui/message-page";
 import { ApprovalsPage } from "./ui/approvals-page";

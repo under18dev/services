@@ -44,7 +44,11 @@ async function post(
   return app.fetch(
     new Request(`${ORIGIN}${path}`, {
       method: "POST",
-      headers: { Cookie: cookie, Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        Cookie: cookie,
+        Origin: ORIGIN,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
       body,
     }),
     env,

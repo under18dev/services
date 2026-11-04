@@ -89,11 +89,7 @@ const ApprovalRow: FC<{
         super approver は全操作を無条件に行えます。個別の権限ビットは意味を持ちません。
       </p>
     ) : (
-      <form
-        method="post"
-        action={`/approvals/${approval.sub}/permissions`}
-        class={ITEM_BODY_CLASS}
-      >
+      <form method="post" action={`/approvals/${approval.sub}/permissions`} class={ITEM_BODY_CLASS}>
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
         <fieldset class={FIELD_CLASS}>
           <span class={LABEL_CLASS}>権限</span>
@@ -104,8 +100,7 @@ const ApprovalRow: FC<{
                 name="bit"
                 value={name}
                 checked={(approval.permissions & PERMISSION_BITS[name]) !== 0n}
-              />
-              {" "}
+              />{" "}
               {name}
             </label>
           ))}
