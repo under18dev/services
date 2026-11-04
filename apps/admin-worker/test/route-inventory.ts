@@ -81,6 +81,8 @@ export const NAV_PAGE_ROUTES: readonly Route[] = [
   { method: "GET", path: "/users" },
   { method: "GET", path: "/users/:userId" },
   { method: "GET", path: "/audit" },
+  /** 承認者・権限の管理（#190）。 */
+  { method: "GET", path: "/approvals" },
 ];
 
 /** 上の画面から呼ぶ更新系・検索系。 */
@@ -111,6 +113,11 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/users/:userId/reinstate" },
   { method: "POST", path: "/users/:userId/revoke-sessions" },
   { method: "POST", path: "/audit/search" },
+  // 承認者・権限の管理（#190）。
+  { method: "POST", path: "/approvals" },
+  { method: "POST", path: "/approvals/:sub/super" },
+  { method: "POST", path: "/approvals/:sub/permissions" },
+  { method: "POST", path: "/approvals/:sub/revoke" },
 ];
 
 /** 実行時に登録されているべきもの全部。 */

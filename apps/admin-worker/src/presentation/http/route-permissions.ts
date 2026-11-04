@@ -51,6 +51,7 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
 
   // 承認者・権限の管理画面（#190）。
   "GET /approvals": "APPROVAL_GRANT",
+  "POST /approvals": "APPROVAL_GRANT",
   "POST /approvals/:sub/super": "APPROVAL_GRANT",
   "POST /approvals/:sub/permissions": "APPROVAL_GRANT",
   "POST /approvals/:sub/revoke": "APPROVAL_GRANT",

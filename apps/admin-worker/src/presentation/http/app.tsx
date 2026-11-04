@@ -20,6 +20,7 @@ import { deriveCodeChallenge, generateCodeVerifier, generateOpaqueValue } from "
 import { sanitizeReturnTo } from "../../oidc/return-to";
 import { createSessionToken, verifySessionToken } from "../../oidc/session";
 import { exchangeAuthorizationCode } from "../../oidc/token-exchange";
+import { registerApprovalsRoutes } from "./approvals.routes";
 import { registerAuditRoutes } from "./audit.routes";
 import { wantsJsonResponse } from "./origin";
 import { registerClientsRoutes } from "./clients.routes";
@@ -501,6 +502,10 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   // OAuth クライアントの管理（#308 / #333 / #390 決定 16 ③ 段取り 3）。
   // 上のガードが既にセッション・承認済みであることを確かめている。
   registerClientsRoutes(app);
+
+  // 承認者・権限の管理（#190）。上のガードに加え、操作ごとの権限ガード
+  // （`route-permissions.ts` の `APPROVAL_GRANT`）がこの経路を守っている。
+  registerApprovalsRoutes(app);
 
   return app;
 }
