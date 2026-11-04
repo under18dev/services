@@ -27,11 +27,14 @@
  * 存在しない。ここで欲しいのは**名前が解決すること**だけなので、
  * 本物の形を写していない。写すと二重管理になり、ずれても誰も気づかない。
  *
- * **それでも binding の「名前」は要る。** `container.ts` が
- * `env.IDENTITY_ADMIN` を読む以上、プロパティが無ければここで落ちる ——
- * #333 で実際に落ちた。**型は `Fetcher`（= `unknown`）のままでよい。**
- * ここで欲しいのは名前の解決だけで、形の正しさは
- * `worker-configuration.d.ts` を読む本体側が見ている。
+ * **それでも binding の「名前」は要る。** `container.ts` が読む binding の
+ * プロパティが無ければ、ここで落ちる —— #333 で実際に落ちた。
+ * **型は `Fetcher`（= `unknown`）のままでよい。** ここで欲しいのは名前の
+ * 解決だけで、形の正しさは `worker-configuration.d.ts` を読む本体側が
+ * 見ている。
+ *
+ * **`IDENTITY_ADMIN` は #433 で消えた。** `container.ts` が読まなくなった
+ * ので、ここに残すと「本物より多い名前」を抱えることになる。
  */
 
 declare type Fetcher = unknown;
@@ -39,6 +42,4 @@ declare type Fetcher = unknown;
 declare interface Env {
   readonly ENVIRONMENT: string;
   readonly IDENTITY: Fetcher;
-  /** 管理用 Entrypoint（#333）。**名前だけ。** 本体は別 binding である。 */
-  readonly IDENTITY_ADMIN: Fetcher;
 }

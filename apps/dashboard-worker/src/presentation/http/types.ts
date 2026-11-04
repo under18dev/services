@@ -1,4 +1,4 @@
-import type { IdentityAdminGateway, IdentityGateway } from "../../application/ports";
+import type { IdentityGateway } from "../../application/ports";
 
 /**
  * Hono アプリの型パラメータ。
@@ -8,5 +8,5 @@ import type { IdentityAdminGateway, IdentityGateway } from "../../application/po
  */
 export type AppBindings = {
   Bindings: Env;
-  Variables: { identity: IdentityGateway; identityAdmin: IdentityAdminGateway };
+  Variables: { identity: IdentityGateway };
 };

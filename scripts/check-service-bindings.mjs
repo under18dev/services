@@ -63,15 +63,16 @@ const EXTERNAL_SERVICES = new Set();
  *
  * auth-worker は 2 つの Entrypoint を公開している。
  *
- * - `IdentityRPC` —— セッション・プロフィール・Passkey・同意（#187 の
- *   `isAdmin` を含む）。dashboard-worker と nfc-worker が使う
+ * - `IdentityRPC` —— セッション・プロフィール・Passkey・同意。
+ *   dashboard-worker と nfc-worker が使う
  * - `IdentityAdminRPC` —— OAuth クライアントの登録・一覧・失効（#308）。
- *   **dashboard-worker だけ**
+ *   **いまは誰も束縛していない**（#433）
  *
- * **nfc-worker をここに足さないこと。** あちらは設計上、運営（＝管理者）の
- * セッショントークンを扱う（カード発行の可否を `SessionSummary.isAdmin` で
- * 決める）。侵害されたとき、通りかかった管理者の新しいセッションで
- * OAuth クライアントを登録できる状態になる（脅威モデル RR-21 / N-5）。
+ * **`IdentityAdminRPC` を誰かに戻さないこと。** 運営向けの画面は
+ * `admin.under18.dev` へ移り、あちらは `sessionToken` を要求しない
+ * `IdentityAdminDelegatedRPC` を束縛している。セッション越しの管理 RPC を
+ * `/account/*` 側の Worker へ戻すと、**運営の入口が 2 つに戻る**
+ * （#433 が消したもの）。
  *
  * ## なぜ検査するのか
  *
@@ -86,7 +87,10 @@ const EXTERNAL_SERVICES = new Set();
  */
 const ALLOWED_ENTRYPOINT_CONSUMERS = new Map([
   ["IdentityRPC", new Set(["dashboard-worker", "nfc-worker"])],
-  ["IdentityAdminRPC", new Set(["dashboard-worker"])],
+  // #433 で dashboard-worker の束縛を外した。**空のまま残してある** ——
+  // 行ごと消すと、次に誰かが束縛したときの失敗が「表に無い Entrypoint」
+  // という別の文言になり、**なぜ誰も束縛していないのかが読めない。**
+  ["IdentityAdminRPC", new Set()],
   // #390 決定 16 ③。admin-worker が利用者の停止・解除・OAuth クライアント
   // の登録・失効を呼ぶための delegated RPC。`sessionToken` を要求しない
   // ので、束縛できるのが admin-worker だけであることがここでしか

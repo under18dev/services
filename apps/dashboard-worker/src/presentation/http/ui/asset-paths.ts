@@ -129,69 +129,18 @@ export const APPS_ROUTE = "/apps";
 export const APPS_PATH = `${ACCOUNT_BASE_PATH}${APPS_ROUTE}` as const;
 
 /**
- * OAuth クライアントの管理（#308 / #333）。**管理者だけ。**
+ * ## 運営向けのパスはここに無い（#433）
  *
- * **`/account/admin` そのものは作らない。** 作ると、サイドバーから
- * 辿れないページが 1 枚できる（`account-nav.ts` の「押しても何も無い
- * リンクを置かない」の裏返しで、こちらは「辿れないページを置かない」）。
- * 管理の節には**行き先のある項目だけ**が並ぶ。
+ * かつてここには `/admin/users`・`/admin/audit`・`/admin/clients` と
+ * その更新系（計 8 本）が並んでいた。**運営向けの画面は
+ * `admin.under18.dev`（admin-worker）へ移設済み**で、両方に置くと
+ * 「同じ機能が 2 箇所にある」状態になる —— 片方だけ直された状態が
+ * 作れて、しかもどちらも落ちない。
  *
- * 更新系はこの下にぶら下げる。**別の接頭辞に置かない** —— 管理の経路が
- * 2 か所に散ると、`isAdmin` の確認を片方だけ忘れた状態が作れる。
+ * **この Worker が受け持つのは `/account/*` の利用者向けだけである。**
+ * 管理の画面をここへ足し直さないこと。足すなら admin-worker の
+ * `ui/nav.ts` と `test/route-inventory.ts` の側である。
  */
-/**
- * 利用者の管理（#375）。**管理者だけ。**
- *
- * **一覧の GET と、検索の POST を分けてある。** 検索語はメールアドレス
- * になりうるので、**クエリに載せない** —— `csrf.ts` が CSRF 失敗時の
- * ログに `pathname` を書く（`search` は意図的に落としている）が、
- * パスに入れればそれが残る。#358 が `CLAIM_CARD_PARAM` で辿った道と
- * 同じ理由で、**こちらは逆向きに「クエリにも置かない」**にした ——
- * 検索語は Referer にも履歴にも残る。
- */
-export const ADMIN_USERS_ROUTE = "/admin/users";
-export const ADMIN_USERS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_ROUTE}` as const;
-
-/** 検索と続きの読み込み（form POST）。**検索語を URL に出さないため。** */
-export const ADMIN_USERS_SEARCH_ROUTE = "/admin/users/search";
-export const ADMIN_USERS_SEARCH_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_SEARCH_ROUTE}` as const;
-
-/**
- * 利用者への操作（#375）。**停止・解除・セッションの失効。**
- *
- * **1 本の口にまとめてある。** 画面の form が `action` を押し分ける形
- * （`<button name="action" value="suspend">`）で、**経路ごとに
- * `isAdmin` の確認を書き分けない** —— 管理の経路が散ると、片方だけ
- * 忘れた状態が作れる（`ADMIN_CLIENTS_ROUTE` の JSDoc と同じ判断）。
- */
-export const ADMIN_USERS_ACTION_ROUTE = "/admin/users/action";
-export const ADMIN_USERS_ACTION_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_USERS_ACTION_ROUTE}` as const;
-
-/**
- * 監査ログの閲覧（#375 / #382）。**管理者だけ。**
- *
- * `ADMIN_USERS_ROUTE` と同じ形 —— 検索語（イベント名・利用者 ID）を
- * URL に載せない。GET は新しい順の先頭だけ、絞り込みと続きの読み込みは
- * POST の本文で渡す。
- */
-export const ADMIN_AUDIT_ROUTE = "/admin/audit";
-export const ADMIN_AUDIT_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_AUDIT_ROUTE}` as const;
-
-export const ADMIN_AUDIT_SEARCH_ROUTE = "/admin/audit/search";
-export const ADMIN_AUDIT_SEARCH_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_AUDIT_SEARCH_ROUTE}` as const;
-
-export const ADMIN_CLIENTS_ROUTE = "/admin/clients";
-export const ADMIN_CLIENTS_PATH = `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_ROUTE}` as const;
-
-/** 登録（form POST）。応答に `client_secret` の平文が 1 度だけ出る。 */
-export const ADMIN_CLIENTS_CREATE_ROUTE = "/admin/clients/create";
-export const ADMIN_CLIENTS_CREATE_PATH =
-  `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_CREATE_ROUTE}` as const;
-
-/** 失効（form POST）。冪等。 */
-export const ADMIN_CLIENTS_DISABLE_ROUTE = "/admin/clients/disable";
-export const ADMIN_CLIENTS_DISABLE_PATH =
-  `${ACCOUNT_BASE_PATH}${ADMIN_CLIENTS_DISABLE_ROUTE}` as const;
 
 /**
  * NFC カードの管理画面。**この Worker は配信しない** —— nfc-worker が
