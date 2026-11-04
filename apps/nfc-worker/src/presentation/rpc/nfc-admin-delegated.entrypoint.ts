@@ -1,5 +1,6 @@
 import {
   batchDisableCardsDelegatedInputSchema,
+  cardUsageRankingDelegatedInputSchema,
   countBatchIssuedCardsDelegatedInputSchema,
   countDisabledInBatchDelegatedInputSchema,
   disableCardDelegatedInputSchema,
@@ -10,15 +11,20 @@ import {
   releaseCardDelegatedInputSchema,
   rpcErr,
   rpcOk,
+  tapTimeseriesDelegatedInputSchema,
   updateCardTargetDelegatedInputSchema,
   type AdminCardStatusDelegated,
+  type BatchAnalyticsDelegatedResult,
   type BatchDisableCardsDelegatedInput,
   type BatchDisableCardsDelegatedResult,
+  type CardUsageRankingDelegatedInput,
+  type CardUsageRankingDelegatedResult,
   type CountBatchIssuedCardsDelegatedInput,
   type CountBatchIssuedCardsDelegatedResult,
   type CountCardsDelegatedResult,
   type CountDisabledInBatchDelegatedInput,
   type CountDisabledInBatchDelegatedResult,
+  type DisabledReasonBreakdownDelegatedResult,
   type DisableCardDelegatedInput,
   type DisableCardDelegatedResult,
   type IssueCardsDelegatedInput,
@@ -34,8 +40,12 @@ import {
   type ReleaseCardDelegatedInput,
   type ReleaseCardDelegatedResult,
   type RpcErrorCode,
+  type TapTimeseriesDelegatedInput,
+  type TapTimeseriesDelegatedResult,
+  type TransferCountDistributionDelegatedResult,
   type UpdateCardTargetDelegatedInput,
   type UpdateCardTargetDelegatedResult,
+  type UsageFunnelDelegatedResult,
 } from "@u18/contracts";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createContainer } from "../../composition/container";
@@ -346,5 +356,69 @@ export class NfcAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
 
     return rpcOk({ cards: result.value.map((card) => ({ cardId: card.cardId })) });
+  }
+
+  /**
+   * NFC の解析画面（#454）。6 本とも読み取り専用——認可を持たず、
+   * `actorUserId` も受け取らない（`listAllCards` と同じ判断）。
+   */
+  async tapTimeseries(input: TapTimeseriesDelegatedInput): Promise<TapTimeseriesDelegatedResult> {
+    const parsed = tapTimeseriesDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "days is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedTapTimeseries.execute({
+      days: parsed.data.days,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
+  }
+
+  async usageFunnel(): Promise<UsageFunnelDelegatedResult> {
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedUsageFunnel.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
+  }
+
+  async batchAnalytics(): Promise<BatchAnalyticsDelegatedResult> {
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedBatchAnalytics.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
+  }
+
+  async cardUsageRanking(
+    input: CardUsageRankingDelegatedInput,
+  ): Promise<CardUsageRankingDelegatedResult> {
+    const parsed = cardUsageRankingDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "limit is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedCardUsageRanking.execute({
+      limit: parsed.data.limit,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
+  }
+
+  async disabledReasonBreakdown(): Promise<DisabledReasonBreakdownDelegatedResult> {
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedDisabledReasonBreakdown.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
+  }
+
+  async transferCountDistribution(): Promise<TransferCountDistributionDelegatedResult> {
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedTransferCountDistribution.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
   }
 }

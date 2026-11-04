@@ -1,4 +1,4 @@
-import { inArray, sql } from "drizzle-orm";
+import { gte, inArray, sql } from "drizzle-orm";
 import { nfcCardTaps, type NfcDatabase } from "@u18/nfc-db";
 import type { CardTapRecorder } from "../../application/ports";
 
@@ -41,5 +41,25 @@ export class DrizzleCardTapRecorder implements CardTapRecorder {
       .all();
 
     return new Map(rows.map((row) => [row.cardId, Number(row.total)]));
+  }
+
+  async dailyTotals(
+    sinceDate: string,
+  ): Promise<readonly { readonly date: string; readonly total: number }[]> {
+    const rows = await this.db
+      .select({ date: nfcCardTaps.date, total: sql<number>`sum(${nfcCardTaps.count})` })
+      .from(nfcCardTaps)
+      .where(gte(nfcCardTaps.date, sinceDate))
+      .groupBy(nfcCardTaps.date)
+      .all();
+    return rows.map((row) => ({ date: row.date, total: Number(row.total) }));
+  }
+
+  async countDistinctWithTaps(): Promise<number> {
+    const rows = await this.db
+      .select({ total: sql<number>`count(distinct ${nfcCardTaps.cardId})` })
+      .from(nfcCardTaps)
+      .all();
+    return Number(rows[0]?.total ?? 0);
   }
 }

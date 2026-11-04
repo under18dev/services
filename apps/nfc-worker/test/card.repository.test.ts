@@ -366,3 +366,95 @@ describe("listByOwner", () => {
     expect(await repository().listByOwner("usr_taro")).toHaveLength(0);
   });
 });
+
+describe("countTotal / countClaimedEver（#454）", () => {
+  it("countTotal は status を問わず全カードを数える", async () => {
+    await seedIssuedCard();
+    await seedActiveCard("usr_taro");
+    const disabled = await seedActiveCard("usr_hanako");
+    await repository().disable(disabled, "usr_hanako", "lost", new Date());
+
+    expect(await repository().countTotal()).toBe(3);
+  });
+
+  it("countClaimedEver は、無効化されても active だった事実を数え続ける", async () => {
+    await seedActiveCard("usr_taro");
+    const disabledAfterActive = await seedActiveCard("usr_hanako");
+    await repository().disable(disabledAfterActive, "usr_hanako", "lost", new Date());
+    await seedIssuedCard(); // 一度も紐づいていない
+
+    expect(await repository().countClaimedEver()).toBe(2);
+    // 参考: status だけで数えると active の 1 枚しか見えない
+    // （disabled 側は `disabledReasonBreakdown` のテストが確かめている）。
+    const card = await repository().findById(disabledAfterActive);
+    expect(card?.status).toBe("disabled");
+    expect(card?.claimedAt).not.toBeNull();
+  });
+
+  it("1 枚も無ければ 0", async () => {
+    expect(await repository().countTotal()).toBe(0);
+    expect(await repository().countClaimedEver()).toBe(0);
+  });
+});
+
+describe("disabledReasonBreakdown（#454）", () => {
+  it("disabled のカードだけを reason 別に数える。issued / active は含めない", async () => {
+    const a = await seedActiveCard("usr_taro");
+    await repository().disable(a, "usr_taro", "lost", new Date());
+    const b = await seedActiveCard("usr_hanako");
+    await repository().disable(b, "usr_hanako", "lost", new Date());
+    const c = await seedIssuedCard("bunkasai-2026");
+    await repository().disableAsAdmin(c, "admin_batch", new Date());
+    await seedIssuedCard(); // disabled ではない
+
+    const rows = await repository().disabledReasonBreakdown();
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { reason: "lost", count: 2 },
+        { reason: "admin_batch", count: 1 },
+      ]),
+    );
+    expect(rows.reduce((sum, row) => sum + row.count, 0)).toBe(3);
+  });
+
+  it("1 枚も無効化されていなければ空配列", async () => {
+    await seedIssuedCard();
+    expect(await repository().disabledReasonBreakdown()).toEqual([]);
+  });
+});
+
+describe("transferCountDistribution（#454）", () => {
+  it("0 / 1 / 2 / 3 以上に束ねる", async () => {
+    await seedIssuedCard(); // transferCount 0
+
+    const oneTransfer = await seedActiveCard("usr_taro");
+    await repository().release(oneTransfer, "usr_taro", new Date());
+    await repository().claim(oneTransfer, "usr_hanako", new Date()); // 1
+
+    const threeTransfers = await seedIssuedCard();
+    await repository().claim(threeTransfers, "usr_a", new Date()); // 初回は数えない
+    await repository().release(threeTransfers, "usr_a", new Date());
+    await repository().claim(threeTransfers, "usr_b", new Date()); // 1
+    await repository().release(threeTransfers, "usr_b", new Date());
+    await repository().claim(threeTransfers, "usr_c", new Date()); // 2
+    await repository().release(threeTransfers, "usr_c", new Date());
+    await repository().claim(threeTransfers, "usr_d", new Date()); // 3
+
+    const distribution = await repository().transferCountDistribution();
+
+    expect(distribution.zero).toBe(1);
+    expect(distribution.one).toBe(1);
+    expect(distribution.two).toBe(0);
+    expect(distribution.threeOrMore).toBe(1);
+  });
+
+  it("1 枚も無ければ全部 0", async () => {
+    expect(await repository().transferCountDistribution()).toEqual({
+      zero: 0,
+      one: 0,
+      two: 0,
+      threeOrMore: 0,
+    });
+  });
+});

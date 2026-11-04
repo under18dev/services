@@ -1,15 +1,20 @@
 import { systemClock } from "@u18/domain";
 import { createNfcDatabase } from "@u18/nfc-db";
 import type {
+  CardAnalyticsRepository,
   CardRepository,
   CardTapRecorder,
   ExpiredEventPurger,
   ExpiredTapPurger,
   IdentityGateway,
 } from "../application/ports";
+import { AdminDisableCardUseCase } from "../application/use-cases/admin-disable-card.use-case";
+import { DelegatedBatchAnalyticsUseCase } from "../application/use-cases/delegated-batch-analytics.use-case";
 import { DelegatedBatchDisableCardsUseCase } from "../application/use-cases/delegated-batch-disable-cards.use-case";
+import { DelegatedCardUsageRankingUseCase } from "../application/use-cases/delegated-card-usage-ranking.use-case";
 import { DelegatedCountBatchIssuedCardsUseCase } from "../application/use-cases/delegated-count-batch-issued-cards.use-case";
 import { DelegatedCountDisabledInBatchUseCase } from "../application/use-cases/delegated-count-disabled-in-batch.use-case";
+import { DelegatedDisabledReasonBreakdownUseCase } from "../application/use-cases/delegated-disabled-reason-breakdown.use-case";
 import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-disable-card.use-case";
 import { DelegatedIssueCardsUseCase } from "../application/use-cases/delegated-issue-cards.use-case";
 import { DelegatedCountCardsUseCase } from "../application/use-cases/delegated-count-cards.use-case";
@@ -18,7 +23,10 @@ import { DelegatedReinstateBatchToIssuedCardsUseCase } from "../application/use-
 import { DelegatedReinstateCardToIssuedUseCase } from "../application/use-cases/delegated-reinstate-card-to-issued.use-case";
 import { DelegatedReinstateCardUseCase } from "../application/use-cases/delegated-reinstate-card.use-case";
 import { DelegatedReleaseCardUseCase } from "../application/use-cases/delegated-release-card.use-case";
+import { DelegatedTapTimeseriesUseCase } from "../application/use-cases/delegated-tap-timeseries.use-case";
+import { DelegatedTransferCountDistributionUseCase } from "../application/use-cases/delegated-transfer-count-distribution.use-case";
 import { DelegatedUpdateCardTargetUseCase } from "../application/use-cases/delegated-update-card-target.use-case";
+import { DelegatedUsageFunnelUseCase } from "../application/use-cases/delegated-usage-funnel.use-case";
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
 import { ListMyCardsUseCase } from "../application/use-cases/list-cards.use-case";
@@ -28,6 +36,7 @@ import { PurgeExpiredTapsUseCase } from "../application/use-cases/purge-expired-
 import { ResolveCardUseCase } from "../application/use-cases/resolve-card.use-case";
 import { UpdateCardTargetUseCase } from "../application/use-cases/update-card-target.use-case";
 import { ViewClaimUseCase } from "../application/use-cases/view-claim.use-case";
+import { DrizzleCardAnalyticsRepository } from "../infrastructure/persistence/drizzle-card-analytics.repository";
 import { DrizzleCardEventRecorder } from "../infrastructure/persistence/drizzle-card-event.recorder";
 import { DrizzleCardRepository } from "../infrastructure/persistence/drizzle-card.repository";
 import { DrizzleCardTapRecorder } from "../infrastructure/persistence/drizzle-card-tap.recorder";
@@ -55,6 +64,7 @@ export type ContainerOverrides = {
   readonly eventPurger?: ExpiredEventPurger;
   readonly cardTaps?: CardTapRecorder;
   readonly tapPurger?: ExpiredTapPurger;
+  readonly analytics?: CardAnalyticsRepository;
 };
 
 export type Container = ReturnType<typeof createContainer>;
@@ -87,10 +97,13 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
   // 運営向け一覧（`delegatedListAllCards`）の両方から使う。
   const cardTaps = overrides.cardTaps ?? new DrizzleCardTapRecorder(db);
   const tapPurger = overrides.tapPurger ?? new DrizzleExpiredTapPurger(db);
+  // `nfc_cards` と `nfc_card_taps` を JOIN する集計（#454「解析」）。
+  // 理由は `CardAnalyticsRepository` の宣言を参照。
+  const analytics = overrides.analytics ?? new DrizzleCardAnalyticsRepository(db);
   const clock = systemClock;
 
   return {
-    repositories: { cards, cardTaps },
+    repositories: { cards, cardTaps, analytics },
     services: { identity, clock },
     useCases: {
       resolveCard: new ResolveCardUseCase(cards),
@@ -129,6 +142,15 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       delegatedCountDisabledInBatch: new DelegatedCountDisabledInBatchUseCase(cards),
       delegatedListAllCards: new DelegatedListAllCardsUseCase(cards, cardTaps),
       delegatedCountCards: new DelegatedCountCardsUseCase(cards),
+      // NFC の解析画面（#454）。6 本とも読み取り専用、認可を持たない
+      // ——他の delegated 読み取り専用 UseCase（`delegatedListAllCards` 等）
+      // と同じ判断。
+      delegatedTapTimeseries: new DelegatedTapTimeseriesUseCase(cardTaps, clock),
+      delegatedUsageFunnel: new DelegatedUsageFunnelUseCase(cards, cardTaps),
+      delegatedBatchAnalytics: new DelegatedBatchAnalyticsUseCase(analytics, clock),
+      delegatedCardUsageRanking: new DelegatedCardUsageRankingUseCase(analytics),
+      delegatedDisabledReasonBreakdown: new DelegatedDisabledReasonBreakdownUseCase(cards),
+      delegatedTransferCountDistribution: new DelegatedTransferCountDistributionUseCase(cards),
       delegatedIssueCards: new DelegatedIssueCardsUseCase(cards, events, clock),
       delegatedUpdateCardTarget: new DelegatedUpdateCardTargetUseCase(
         cards,

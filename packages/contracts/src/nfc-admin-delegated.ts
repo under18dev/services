@@ -171,6 +171,76 @@ export type IssueCardsDelegatedResult = RpcResult<{
 }>;
 
 /**
+ * NFC の解析画面（#454）。読み取り専用で `actorUserId` を受け取らない
+ * ——監査イベントを書かない操作は実在確認の対象にもならない
+ * （`listAllCards` と同じ判断）。
+ */
+export const tapTimeseriesDelegatedInputSchema = z.object({
+  days: z.union([z.literal(30), z.literal(90), z.literal(180)]),
+});
+
+export type TapTimeseriesDelegatedInput = z.infer<typeof tapTimeseriesDelegatedInputSchema>;
+export type TapTimeseriesDelegatedResult = RpcResult<{
+  readonly dailyTotals: readonly { readonly date: string; readonly total: number }[];
+  readonly totalTaps: number;
+  readonly dailyAverage: number;
+  readonly maxDay: { readonly date: string; readonly total: number } | null;
+  readonly retentionDays: number;
+}>;
+
+export type UsageFunnelDelegatedResult = RpcResult<{
+  readonly issued: number;
+  readonly claimedEver: number;
+  readonly tappedEver: number;
+  readonly retentionDays: number;
+}>;
+
+export type BatchAnalyticsDelegatedResult = RpcResult<{
+  readonly rows: readonly {
+    readonly batch: string | null;
+    readonly issued: number;
+    readonly claimedEver: number;
+    readonly disabled: number;
+    readonly tapsAllTime: number;
+    readonly tapsLast7d: number;
+  }[];
+}>;
+
+export const cardUsageRankingDelegatedInputSchema = z.object({
+  limit: z.number().int().min(1).max(100),
+});
+
+export type CardUsageRankingDelegatedInput = z.infer<typeof cardUsageRankingDelegatedInputSchema>;
+export type CardUsageRankingDelegatedResult = RpcResult<{
+  readonly ranking: readonly {
+    readonly cardId: string;
+    readonly batch: string | null;
+    readonly status: AdminCardStatusDelegated;
+    readonly total: number;
+  }[];
+  readonly dormant: {
+    readonly count: number;
+    readonly rows: readonly {
+      readonly cardId: string;
+      readonly batch: string | null;
+      readonly claimedAt: string;
+      readonly status: AdminCardStatusDelegated;
+    }[];
+  };
+}>;
+
+export type DisabledReasonBreakdownDelegatedResult = RpcResult<{
+  readonly rows: readonly { readonly reason: string | null; readonly count: number }[];
+}>;
+
+export type TransferCountDistributionDelegatedResult = RpcResult<{
+  readonly zero: number;
+  readonly one: number;
+  readonly two: number;
+  readonly threeOrMore: number;
+}>;
+
+/**
  * `NfcAdminDelegatedRPC` の契約。
  *
  * **メソッドが増えるたびに、ここと Entrypoint の両方を変えること。**
@@ -253,4 +323,27 @@ export interface NfcAdminDelegatedRpcContract {
   /** 状態ごとの枚数。入力は無い（#449）。 */
   countCards(): Promise<CountCardsDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;
+
+  /**
+   * NFC の解析画面（#454）。6 本とも読み取り専用。
+   *
+   * タップの日次時系列。`days` は `30 | 90 | 180` の 3 択——画面はここで
+   * 検証に落ちることが無いよう、呼ぶ前に不正値を 30 へ丸めること
+   * （`DelegatedTapTimeseriesUseCase` の冒頭を参照）。
+   */
+  tapTimeseries(input: TapTimeseriesDelegatedInput): Promise<TapTimeseriesDelegatedResult>;
+  /** 発行 → 引き取り → 使用のファネル。入力は無い。 */
+  usageFunnel(): Promise<UsageFunnelDelegatedResult>;
+  /** バッチ単位の集計（発行・引き取り・無効化・タップ）。入力は無い。 */
+  batchAnalytics(): Promise<BatchAnalyticsDelegatedResult>;
+  /**
+   * タップ上位ランキングと、引き取り済みでタップ 0 件の死蔵検出。
+   * **`ownerUserId` を返さない**（`DelegatedCardUsageRankingUseCase` の
+   * 冒頭を参照）。
+   */
+  cardUsageRanking(input: CardUsageRankingDelegatedInput): Promise<CardUsageRankingDelegatedResult>;
+  /** `disabled_reason` 別の内訳。入力は無い。出てきた値をそのまま返す。 */
+  disabledReasonBreakdown(): Promise<DisabledReasonBreakdownDelegatedResult>;
+  /** `transferCount` の分布（0 / 1 / 2 / 3 以上）。入力は無い。 */
+  transferCountDistribution(): Promise<TransferCountDistributionDelegatedResult>;
 }
