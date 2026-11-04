@@ -45,6 +45,27 @@ export const adminApprovals = sqliteTable(
      */
     isSuperApprover: integer("is_super_approver", { mode: "boolean" }).notNull().default(false),
 
+    /**
+     * 操作ごとの細かい権限（#190）。**BigInt をそのまま 10 進文字列にして持つ。**
+     *
+     * JS のビット演算子はオペランドを 32 ビット符号付き整数に落とすので、
+     * `number` では 32 本目から静かに壊れる。SQLite/D1 に BigInt 用の列型は
+     * 無いので、`integer` 列に収めて D1 のドライバ（JS の `number`）を経由
+     * させず、**TEXT 列へ 10 進文字列で書く**ことで壊れる経路自体を無くす。
+     * `apps/admin-worker/src/domain/permissions.ts` が唯一の読み書き口。
+     *
+     * **SQL 側でビット条件（`where permissions & 4`）は書けない。** TEXT 列
+     * なので、権限での絞り込みは必ずアプリ側で行うこと。いまの行数
+     * （数行）では問題にならないが、後から SQL で絞ろうとすると詰まる。
+     *
+     * `is_super_approver` が立っている行は、全チェックを無条件にバイパス
+     * するので、この列の値は判定には使われない——`is_super_approver` が
+     * 「真」である限り、この列が何であっても関係ない。**判定も画面表示も
+     * 保存されたこの値から super の内訳を組み立てない**こと。表示は常に
+     * `effectivePermissions()` を経由する（`permissions.ts` 冒頭を参照）。
+     */
+    permissions: text("permissions").notNull().default("0"),
+
     /** 承認した人の sub。**最初の 1 人（CLI でのブートストラップ）は null。** */
     approvedBySub: text("approved_by_sub"),
 
@@ -81,6 +102,15 @@ export const adminApprovalEvents = sqliteTable(
     actor: text("actor").notNull(),
     /** 自由文の理由。個人情報は入れない（監査ログに個人情報を残さない、仕様書 7.1 と同じ方針）。 */
     reason: text("reason"),
+    /**
+     * 機械可読な内訳（#190）。権限ビットの変更では、**ビットの記号名**
+     * （例: `"NFC_WRITE"`）をここへ書く。生のビット値（数値）だけを残すと、
+     * 後から読む人がビットの定義をコードで調べ直さないと意味を復元できない
+     * ——監査ログは「人が読める形で残る」ことを要件にしている
+     * （#190 の受け入れ条件）。承認そのものの付与・剥奪（`reason` だけで
+     * 足りる）では null のまま。
+     */
+    detail: text("detail"),
     createdAt: createdAt(),
   },
   (table) => [index("admin_approval_events_sub_idx").on(table.sub, table.createdAt)],

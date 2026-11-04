@@ -61,14 +61,14 @@ export function revokeApprovalSql(sub: string): string {
 /** 1 件の状態を見るための SELECT。判定には使わない（CLI が人に見せるためだけ）。 */
 export function approvalStatusSql(sub: string): string {
   const subLiteral = sqlLiteral(sub);
-  return `select id, sub, is_super_approver, approved_by_sub, created_at
+  return `select id, sub, is_super_approver, permissions, approved_by_sub, created_at
     from admin_approvals
    where sub = ${subLiteral};`;
 }
 
 /** 承認済み全員。「誰が使ってよいか」を一覧する。 */
 export function listApprovalsSql(): string {
-  return `select id, sub, is_super_approver, approved_by_sub, created_at
+  return `select id, sub, is_super_approver, permissions, approved_by_sub, created_at
     from admin_approvals
 order by created_at asc;`;
 }

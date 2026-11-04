@@ -92,6 +92,34 @@ describe("listApprovalsSql", () => {
   });
 });
 
+describe("0002_backfill_existing_approvals_permissions.sql（#190）", () => {
+  // **実際のマイグレーションファイルをそのまま流す。** コピーした SQL では
+  // なく、本番が実行するのと同じ文字列（`vitest.config.ts` が Node 側で
+  // 読んで渡している）を使う——ロジックを書き写すと、ファイルを直しても
+  // テストが古いままになりうる。
+  //
+  // `setup.ts` は全マイグレーションを空の DB に適用済みなので、ここでは
+  // 「移行より前から居た行」を再現するために、行を作ってからもう一度
+  // 同じ SQL を流す。
+  it("super も非 super も、既存の承認済み行は全ビットになる（今日できていたことを明日もできる）", async () => {
+    await run(grantApprovalSql("usr_super", true));
+    await run(grantApprovalSql("usr_plain", false));
+
+    await env.ADMIN_DB.prepare(env.TEST_PERMISSIONS_BACKFILL_SQL).run();
+
+    const rows = await run(listApprovalsSql());
+    const permissions = Object.fromEntries(rows.map((row) => [row.sub, row.permissions]));
+    expect(permissions["usr_super"]).toBe("255");
+    expect(permissions["usr_plain"]).toBe("255");
+  });
+
+  it("255 は 8 ビット全部（NFC_READ〜APPROVAL_GRANT）", () => {
+    // マイグレーションの SQL はハードコードされた定数なので、`permissions.ts`
+    // の定義とここで独立に突き合わせる——どちらかだけ直すと気づけない。
+    expect(255).toBe(2 ** 8 - 1);
+  });
+});
+
 describe("approvalAuditSql", () => {
   it("承認・剥奪の記録を残す", async () => {
     await run(
