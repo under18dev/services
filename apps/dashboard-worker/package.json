@@ -16,7 +16,7 @@
     "@u18/contracts": "workspace:*",
     "@u18/domain": "workspace:*",
     "@u18/web-ui": "workspace:*",
-    "hono": "4.13.13"
+    "hono": "4.13.14"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
