@@ -48,6 +48,7 @@ export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
     listOAuthClients: unused("listOAuthClients"),
     createOAuthClient: unused("createOAuthClient"),
     disableOAuthClient: unused("disableOAuthClient"),
+    setOAuthClientOwner: unused("setOAuthClientOwner"),
     countOAuthClients: async () => rpcOk(0),
     listAuditLogs: async () => rpcOk({ entries: [], nextCursor: null }),
   };

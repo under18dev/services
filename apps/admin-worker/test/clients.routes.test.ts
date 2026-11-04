@@ -9,6 +9,8 @@ import type {
   IdentityAdminDelegatedRpcContract,
   ListOAuthClientsDelegatedResult,
   OAuthClientSummary,
+  SetOAuthClientOwnerDelegatedInput,
+  SetOAuthClientOwnerDelegatedResult,
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
@@ -36,6 +38,7 @@ function client(overrides: Partial<OAuthClientSummary> = {}): OAuthClientSummary
     scopes: ["openid", "profile", "email"],
     createdAt: "2026-10-01T00:00:00.000Z",
     disabledAt: null,
+    ownerUserId: null,
     ...overrides,
   };
 }
@@ -45,11 +48,13 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
   readonly calls: {
     createOAuthClient: CreateOAuthClientDelegatedInput[];
     disableOAuthClient: DisableOAuthClientDelegatedInput[];
+    setOAuthClientOwner: SetOAuthClientOwnerDelegatedInput[];
   };
 } {
   const calls = {
     createOAuthClient: [] as CreateOAuthClientDelegatedInput[],
     disableOAuthClient: [] as DisableOAuthClientDelegatedInput[],
+    setOAuthClientOwner: [] as SetOAuthClientOwnerDelegatedInput[],
   };
 
   const rpc: IdentityAdminDelegatedRpcContract = {
@@ -69,6 +74,10 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     disableOAuthClient: async (input): Promise<DisableOAuthClientDelegatedResult> => {
       calls.disableOAuthClient.push(input);
       return rpcOk({ disabled: true });
+    },
+    setOAuthClientOwner: async (input): Promise<SetOAuthClientOwnerDelegatedResult> => {
+      calls.setOAuthClientOwner.push(input);
+      return rpcOk(null);
     },
     listAuditLogs: async () => rpcOk({ entries: [], nextCursor: null }),
     ...overrides,
@@ -113,8 +122,11 @@ describe("GET /clients", () => {
     expect(html).toContain("App A");
     expect(html).toContain("App B");
     expect(html).toContain("u18 公式");
-    // 一次パーティには失効フォームが無い。
-    expect(html).not.toMatch(/name="client_id" value="app_b"/);
+    // 一次パーティには失効フォーム（持ち主変更フォームとは別の action）が無い。
+    const disableForms = [
+      ...html.matchAll(/<form method="post" action="\/clients\/disable">[\s\S]*?<\/form>/g),
+    ];
+    expect(disableForms.map((m) => m[0]).join("")).not.toContain('value="app_b"');
     expect(html).toMatch(/name="csrf_token"/);
   });
 
@@ -548,6 +560,161 @@ describe("POST /clients/disable", () => {
 
     const html = await response.text();
     expect(html).toContain("既に失効しています");
+  });
+});
+
+describe("GET /clients（持ち主の表示）", () => {
+  it("持ち主がいれば生の userId を出し、いなければ — を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listOAuthClients: async () =>
+        rpcOk([
+          client({ clientId: "app_owned", ownerUserId: "usr_alice" }),
+          client({ clientId: "app_unowned", ownerUserId: null }),
+        ]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("持ち主: usr_alice");
+    expect(html).toContain("持ち主: —");
+  });
+});
+
+describe("POST /clients/owner", () => {
+  it("CSRF トークンが無ければ 403 で、setOAuthClientOwner を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/owner`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: "app_0001", owner_user_id: "usr_alice" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.setOAuthClientOwner).toHaveLength(0);
+  });
+
+  it("CSRF が通れば setOAuthClientOwner を actorUserId 付きで呼ぶ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/owner`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          owner_user_id: "usr_alice",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.setOAuthClientOwner).toEqual([
+      { actorUserId: SUB, clientId: "app_0001", ownerUserId: "usr_alice" },
+    ]);
+    const html = await response.text();
+    expect(html).toContain("持ち主を変更しました。");
+  });
+
+  it("空欄で送ると null（持ち主を外す）として渡す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    await app.fetch(
+      new Request(`${ORIGIN}/clients/owner`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", owner_user_id: "", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(calls.setOAuthClientOwner).toEqual([
+      { actorUserId: SUB, clientId: "app_0001", ownerUserId: null },
+    ]);
+  });
+
+  it("実在しない userId（invalid_input）は言い直す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      setOAuthClientOwner: async () =>
+        rpcErr(RpcErrorCode.InvalidInput, "ownerUserId does not exist"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/owner`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          owner_user_id: "usr_does_not_exist",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("does not exist");
+    expect(html).toContain("見つかりません");
   });
 });
 

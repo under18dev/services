@@ -29,6 +29,17 @@ export const oauthClients = sqliteTable(
      */
     isFirstParty: integer("is_first_party", { mode: "boolean" }).notNull().default(false),
     logoUrl: text("logo_url"),
+    /**
+     * このクライアントの持ち主（#441）。**nullable。** 既存の行には
+     * 持ち主が無く、遡って決められない——`created()` を通さず入った行
+     * （最初の CLI 登録など）に嘘の既定値を入れないため、分からないものは
+     * `null` のままにする。管理画面は `—` で出す（`batch` と同じ扱い）。
+     *
+     * **`onDelete` を指定しない。** `users` の行は凍結で表現し物理削除
+     * しない（仕様書 14.1 決定 7）ので、参照先が消えて空振りする経路が
+     * そもそも無い。
+     */
+    ownerUserId: text("owner_user_id").references(() => users.id),
     /** 失効させたクライアントは即座に認可を拒否する。 */
     disabledAt: timestampMs("disabled_at"),
     createdAt: createdAt(),

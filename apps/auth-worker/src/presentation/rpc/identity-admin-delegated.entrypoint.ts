@@ -9,6 +9,7 @@ import {
   revokeUserSessionsDelegatedInputSchema,
   rpcErr,
   rpcOk,
+  setOAuthClientOwnerDelegatedInputSchema,
   suspendUserDelegatedInputSchema,
   type CountOAuthClientsDelegatedInput,
   type CountOAuthClientsDelegatedResult,
@@ -27,6 +28,8 @@ import {
   type ReinstateUserDelegatedResult,
   type RevokeUserSessionsDelegatedInput,
   type RevokeUserSessionsDelegatedResult,
+  type SetOAuthClientOwnerDelegatedInput,
+  type SetOAuthClientOwnerDelegatedResult,
   type SuspendUserDelegatedInput,
   type SuspendUserDelegatedResult,
 } from "@u18/contracts";
@@ -224,6 +227,23 @@ export class IdentityAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk({ disabled: result.value.disabled });
+  }
+
+  async setOAuthClientOwner(
+    input: SetOAuthClientOwnerDelegatedInput,
+  ): Promise<SetOAuthClientOwnerDelegatedResult> {
+    const parsed = setOAuthClientOwnerDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedSetOAuthClientOwner.execute({
+      actorUserId: parsed.data.actorUserId,
+      clientId: parsed.data.clientId,
+      ownerUserId: parsed.data.ownerUserId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(null);
   }
 
   async listAuditLogs(input: ListAuditLogsDelegatedInput): Promise<ListAuditLogsDelegatedResult> {

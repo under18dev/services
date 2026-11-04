@@ -200,6 +200,15 @@ export const AUDIT_EVENTS = [
    * 失効は正規のクライアントを黙って止める手口でもある。
    */
   "oauth.client.disabled",
+  /**
+   * 管理者がクライアントの持ち主を設定・変更した（#441）。
+   *
+   * **新しい名前にする。** `card.disabled` を `AdminDisableCardUseCase` が
+   * 使い回しているのは「本人の操作にも同じ名前が既にあった」場合
+   * （#430）で、持ち主の設定にはそもそも自己操作の対が無い——#434
+   * （`card.reinstated`）と同じ判断で、使い回す先が無いので新設する。
+   */
+  "oauth.client.owner_changed",
   /** 認可リクエストの受理・拒否。 */
   "oauth.authorize.decided",
   /** 認可コードの発行。 */
@@ -371,6 +380,13 @@ export const AUDIT_EVENT_RETENTION = {
   "oauth.client.created": { sink: "d1", retention: "security" },
   /** 失効。正規のクライアントを止める手口でもあるので、登録と同じだけ残す。 */
   "oauth.client.disabled": { sink: "d1", retention: "security" },
+  /**
+   * 持ち主の設定・変更（#441）。**侵害された管理者が、追及をかわすために
+   * 持ち主を書き換える**というのが具体的な懸念——「誰の持ち物か」という
+   * 記録そのものの正しさを、長く遡って確かめたい種類の情報なので、
+   * 登録・失効と同じ側に置く。
+   */
+  "oauth.client.owner_changed": { sink: "d1", retention: "security" },
   /** 本人によるセッション失効。「いつ気づいたか」の起点になる。 */
   "session.revoke": { sink: "d1", retention: "security" },
   /** ログアウト（全デバイス失効を含む）。乗っ取り後の後始末か本人かを後から分ける。 */

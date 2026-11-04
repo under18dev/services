@@ -62,6 +62,13 @@ function disableFailureMessage(code: string): string {
   return "いま失効させられません。しばらく待ってからもう一度お試しください。";
 }
 
+/** 持ち主の変更が通らなかった理由。 */
+function setOwnerFailureMessage(code: string): string {
+  if (code === "invalid_input") return "その userId の利用者が見つかりません。";
+  if (code === "not_found") return "そのクライアントが見つかりません。";
+  return "いま持ち主を変更できません。しばらく待ってからもう一度お試しください。";
+}
+
 export function registerClientsRoutes(app: Hono<AppBindings>): void {
   app.get("/clients", pageSecurityHeaders, (c) => renderClientsPage(c, {}));
 
@@ -145,6 +152,39 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
         ? "失効させました。以後このクライアントでの新しい認可は通りません。"
         : "このクライアントは既に失効しています。",
     });
+  });
+
+  /**
+   * 持ち主の設定・変更・解除（#441）。
+   *
+   * **空欄は「外す」であって「変更なし」ではない。** フォームは常にいまの
+   * 値を埋めて出しているので、空にして送る操作は意図的な解除としてそのまま
+   * `null` を渡す。
+   */
+  app.post("/clients/owner", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, "/clients");
+    }
+
+    const session = c.get("session");
+    const clientId = (form.get("client_id")?.toString() ?? "").trim();
+    const ownerUserId = (form.get("owner_user_id")?.toString() ?? "").trim();
+
+    const container = c.get("container");
+    const result = await container.identityAdmin.setOAuthClientOwner({
+      actorUserId: session.sub,
+      clientId,
+      ownerUserId: ownerUserId === "" ? null : ownerUserId,
+    });
+
+    if (!result.ok) {
+      return renderClientsPage(c, { error: setOwnerFailureMessage(result.error.code) });
+    }
+
+    return renderClientsPage(c, { notice: "持ち主を変更しました。" });
   });
 }
 

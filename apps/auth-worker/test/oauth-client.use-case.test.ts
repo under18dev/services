@@ -17,6 +17,7 @@ function aClientProps(overrides: Partial<OAuthClientProps> = {}): OAuthClientPro
     allowedScopes: "openid profile email",
     isFirstParty: true,
     logoUrl: null,
+    ownerUserId: null,
     disabledAt: null,
     redirectUris: ["https://app.example/cb"],
     createdAt: new Date("2026-10-24T00:00:00.000Z"),
