@@ -4,7 +4,6 @@ import {
   checkPermissionRevocation,
   checkSuperApproverChange,
 } from "../src/domain/approval-guard";
-import { PERMISSION_BITS } from "../src/domain/permissions";
 
 describe("checkSuperApproverChange", () => {
   it("昇格(非super→super)は常に通る", () => {
@@ -99,7 +98,7 @@ describe("checkPermissionRevocation", () => {
     const result = checkPermissionRevocation({
       actorSub: "usr_a",
       targetSub: "usr_b",
-      bit: PERMISSION_BITS.APPROVAL_GRANT,
+      isApprovalGrantBit: true,
     });
     expect(result.ok).toBe(true);
   });
@@ -108,7 +107,7 @@ describe("checkPermissionRevocation", () => {
     const result = checkPermissionRevocation({
       actorSub: "usr_a",
       targetSub: "usr_a",
-      bit: PERMISSION_BITS.NFC_WRITE,
+      isApprovalGrantBit: false,
     });
     expect(result.ok).toBe(true);
   });
@@ -117,7 +116,7 @@ describe("checkPermissionRevocation", () => {
     const result = checkPermissionRevocation({
       actorSub: "usr_a",
       targetSub: "usr_a",
-      bit: PERMISSION_BITS.APPROVAL_GRANT,
+      isApprovalGrantBit: true,
     });
     expect(result.ok).toBe(false);
   });
