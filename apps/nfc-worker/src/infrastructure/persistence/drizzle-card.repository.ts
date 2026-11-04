@@ -376,4 +376,55 @@ export class DrizzleCardRepository implements CardRepository {
       .returning({ id: nfcCards.id });
     return rows.length > 0;
   }
+
+  async countTotal(): Promise<number> {
+    const rows = await this.db
+      .select({ total: sql<number>`count(*)` })
+      .from(nfcCards)
+      .all();
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  async countClaimedEver(): Promise<number> {
+    const rows = await this.db
+      .select({ total: sql<number>`count(*)` })
+      .from(nfcCards)
+      .where(isNotNull(nfcCards.claimedAt))
+      .all();
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  async disabledReasonBreakdown(): Promise<
+    readonly { readonly reason: string | null; readonly count: number }[]
+  > {
+    const rows = await this.db
+      .select({ reason: nfcCards.disabledReason, count: sql<number>`count(*)` })
+      .from(nfcCards)
+      .where(eq(nfcCards.status, "disabled"))
+      .groupBy(nfcCards.disabledReason)
+      .all();
+    return rows.map((row) => ({ reason: row.reason, count: Number(row.count) }));
+  }
+
+  async transferCountDistribution(): Promise<{
+    readonly zero: number;
+    readonly one: number;
+    readonly two: number;
+    readonly threeOrMore: number;
+  }> {
+    const bucketExpr = sql<number>`case when ${nfcCards.transferCount} >= 3 then 3 else ${nfcCards.transferCount} end`;
+    const rows = await this.db
+      .select({ bucket: bucketExpr, count: sql<number>`count(*)` })
+      .from(nfcCards)
+      .groupBy(bucketExpr)
+      .all();
+
+    const result = { zero: 0, one: 0, two: 0, threeOrMore: 0 };
+    const key = { 0: "zero", 1: "one", 2: "two", 3: "threeOrMore" } as const;
+    for (const row of rows) {
+      const bucket = Number(row.bucket) as 0 | 1 | 2 | 3;
+      result[key[bucket]] = Number(row.count);
+    }
+    return result;
+  }
 }

@@ -349,6 +349,44 @@ export interface CardRepository {
    * こちらを出し、`reinstateAsAdmin` の単発版へのボタンを出さない。
    */
   reinstateToIssuedAsAdmin(cardId: string, now: Date): Promise<boolean>;
+
+  /** 発行された全カードの枚数（#454「解析」のファネルの起点）。 */
+  countTotal(): Promise<number>;
+
+  /**
+   * 一度でも紐づいたことがあるカードの枚数（#454）。
+   *
+   * **`status === "active"` の枚数とは違う。** `claimedAt` は `disable` /
+   * `disableAsAdmin` が触らないので、一度 `active` になったあと
+   * 無効化されたカードも数える——「引き取られたか」を聞いているので、
+   * 「いま有効か」とは別の質問（ファネルは通過した段のまま戻らない）。
+   */
+  countClaimedEver(): Promise<number>;
+
+  /**
+   * `disabled_reason` 別の枚数（#454「無効化の内訳」）。
+   *
+   * **出てきた値をそのまま数える。** 語彙が揃っていないことは既知
+   * （`DelegatedBatchDisableCardsUseCase` の冒頭の表を参照）なので、
+   * ここで正規化・翻訳はしない——未知の値を落とすと「数が合わない」
+   * 事故になる。`status !== 'disabled'` の行は対象外（`disabledReason`
+   * が null のまま残っている）。
+   */
+  disabledReasonBreakdown(): Promise<
+    readonly { readonly reason: string | null; readonly count: number }[]
+  >;
+
+  /**
+   * `transferCount` の分布（#454「持ち主が変わり続けるカード」）。
+   * 3 回以上は 1 つに束ねる——4 回も 40 回も「何度も移転している」という
+   * 運用上の意味は変わらず、列を無限に増やしても読む側の役に立たない。
+   */
+  transferCountDistribution(): Promise<{
+    readonly zero: number;
+    readonly one: number;
+    readonly two: number;
+    readonly threeOrMore: number;
+  }>;
 }
 
 /** カードに起きたことの記録（`nfc_card_events`）。 */
@@ -406,6 +444,29 @@ export interface CardTapRecorder {
    * （行が無いカードは結果に含まれない。呼び出し側は 0 として扱うこと）。
    */
   totalsFor(cardIds: readonly string[]): Promise<ReadonlyMap<string, number>>;
+
+  /**
+   * 日ごとの合計（全カード横断、#454「タップの時系列」）。
+   *
+   * **タップが無かった日の行は返らない。** `nfc_card_taps` はタップが
+   * あった日しか行を持たないので、0 件の日を埋めるのは呼び出し側
+   * （UseCase）の仕事にしてある——ここは「有る行」をそのまま返すだけ。
+   *
+   * @param sinceDate UTC の日付文字列（`YYYY-MM-DD`）。これ以降の日だけ。
+   */
+  dailyTotals(
+    sinceDate: string,
+  ): Promise<readonly { readonly date: string; readonly total: number }[]>;
+
+  /**
+   * 1 回以上タップされたことがあるカードの枚数（#454「ファネル」）。
+   *
+   * **`nfc_card_taps` に現存する行からしか数えない**ので、保持期間
+   * （180 日、`NfcRetention.standard`）より前のタップは数に入らない。
+   * 呼び出し側は画面に「直近 180 日」と明記すること——「全期間」とは
+   * 書かない（`domain/services/retention-policy.ts` を参照）。
+   */
+  countDistinctWithTaps(): Promise<number>;
 }
 
 /**
@@ -423,4 +484,76 @@ export interface ExpiredTapPurger {
    * @param limit 1 回で消す上限。
    */
   purge(deadline: string, limit: number): Promise<number>;
+}
+
+/**
+ * `nfc_cards` と `nfc_card_taps` をまたぐ集計 Port（#454「解析」）。
+ *
+ * **`CardRepository` / `CardTapRecorder` に足さず、別の Port にした。**
+ * ここだけが両方のテーブルを JOIN する——理由は 2 つ。
+ *
+ * 1. **カード ID の一覧を Repository 間で受け渡す形（`totalsFor(cardIds)`
+ *    を全カードに対して呼ぶ）だと、カード枚数が増えるほど `IN (...)` の
+ *    バインド変数が増え、SQLite の上限に当たりうる。** JOIN ならカード
+ *    枚数に関係なく 1 クエリで済む。
+ * 2. `CardRepository` は `nfc_cards` だけ、`CardTapRecorder` は
+ *    `nfc_card_taps` だけを見る、という既存の境界を保ったまま、
+ *    「両方を横断する集計」という別の関心事を別の Port に切り出す
+ *    ——#436 で「`CardRepository` に `nfc_card_events` を JOIN させない」
+ *    と判断したのと同じ考え方（`domain/services/disabled-reason.ts` を
+ *    参照）だが、今回はクエリの対称性より枚数のスケールが優先された。
+ */
+export interface CardAnalyticsRepository {
+  /**
+   * バッチ単位の集計（#454「バッチ別」）。**`batch` が `null`（バッチ名
+   * 無しで発行されたカード）の行も 1 行として返す**——黙って落とすと、
+   * この一覧の合計が発行総数と合わなくなる。
+   *
+   * @param sevenDaysAgo UTC の日付文字列。「直近 7 日のタップ」の境界。
+   */
+  batchAnalytics(sevenDaysAgo: string): Promise<
+    readonly {
+      readonly batch: string | null;
+      readonly issued: number;
+      readonly claimedEver: number;
+      readonly disabled: number;
+      readonly tapsAllTime: number;
+      readonly tapsLast7d: number;
+    }[]
+  >;
+
+  /**
+   * タップ数の多いカード上位（#454「カード別ランキング」）。
+   *
+   * **`ownerUserId` を返さない。** `nfc_card_taps` が「誰が使ったか」を
+   * 持たない設計（#394）を、この画面でも崩さないため——運用者の指摘で、
+   * ランキングから所有者へ辿れると実質「この人が何回使ったか」の画面に
+   * なる。カード自体の管理は `/nfc` 側で行う。
+   */
+  rankedTaps(limit: number): Promise<
+    readonly {
+      readonly cardId: string;
+      readonly batch: string | null;
+      readonly status: CardStatus;
+      readonly total: number;
+    }[]
+  >;
+
+  /**
+   * 引き取り済み（`claimedAt is not null`）なのにタップが 1 回も無い
+   * カード（#454「死蔵の検出」）。
+   *
+   * **件数は近似ではなく正確な値。** `claimedAt` 昇順（古い順）で `limit`
+   * 件まで一覧も返す——運用者が最初に行動を起こす数字なので、近似にする
+   * 理由が無い。`ownerUserId` は返さない（`rankedTaps` と同じ理由）。
+   */
+  dormantClaimedCards(limit: number): Promise<{
+    readonly count: number;
+    readonly rows: readonly {
+      readonly cardId: string;
+      readonly batch: string | null;
+      readonly claimedAt: Date;
+      readonly status: CardStatus;
+    }[];
+  }>;
 }
