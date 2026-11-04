@@ -32,3 +32,8 @@ apps/auth-worker/src/presentation/http/ui/generated/
 apps/dashboard-worker/src/presentation/http/ui/generated/
 apps/nfc-worker/src/presentation/http/ui/generated/
 apps/admin-worker/src/presentation/http/ui/generated/
+
+# `pnpm --filter @u18/admin-worker preview:html` の生成物。架空のデータで
+# 描いた静的 HTML（ログイン無しでブラウザ確認するため）。本番には繋がらず、
+# 実行のたびに作り直すのでコミットしない。
+apps/admin-worker/preview-html/
