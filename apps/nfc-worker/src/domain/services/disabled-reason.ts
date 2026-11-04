@@ -3,7 +3,7 @@
  *
  * ## なぜ `"admin_action"` を使い回さなかったのか
  *
- * 単発の運営操作（`AdminDisableCardUseCase` / `DelegatedDisableCardUseCase`）
+ * 単発の運営操作（`DelegatedDisableCardUseCase`）
  * も、batch 一括無効化（`DelegatedBatchDisableCardsUseCase`）も、これまで
  * 同じ `"admin_action"` を書いていた。**`batch` 列はカードの配布ロット
  * （発行時に決まる）であって、無効化した操作を表すものではない** ——

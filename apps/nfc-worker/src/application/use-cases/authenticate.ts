@@ -15,44 +15,29 @@ import { outcomeErr, outcomeOk } from "../ports";
  * 呼べるのは `getSession` だけで、返るのは「このトークンの持ち主」である。
  * つまり nfc-worker が侵害されても、攻撃者が名乗れるのは
  * 自分が実際に持っているセッションの持ち主に限られる。
+ *
+ * ## `isAdmin` はもう読んでいない（#433）
+ *
+ * ここにはかつて 2 本の兄弟が居た —— `requireActor`（`isAdmin` を捨てずに
+ * 返す。サイドバーの出し分けに使った）と `requireAdminUserId`
+ * （管理者でなければ `forbidden`。カードの発行・全件一覧・他人のカードの
+ * 無効化が通していた）。**運営向けの機能は `admin.under18.dev` へ移った**
+ * ので、どちらも呼ぶ側が居なくなり、消した。
+ *
+ * **`SessionSummary.isAdmin` は契約に残っている**（外に出ている形なので
+ * 消すには別の段取りが要る）が、**この Worker はもう読まない。**
+ * 運営の操作は admin-worker からの delegated RPC
+ * （`presentation/rpc/nfc-admin-delegated.entrypoint.ts`）で入ってきて、
+ * そちらは `sessionToken` を受け取らない —— 認可は admin-worker 側で
+ * 済んでいる（#390 決定 16 ③ / 脅威モデル N-10）。
+ *
+ * **ここへ「管理者か」を見る関数を戻さないこと。** 戻した時点で、
+ * `/account/nfc` 側に運営の入口が復活する。
  */
 export async function requireUserId(
   identity: IdentityGateway,
   sessionToken: string | undefined,
 ): Promise<NfcOutcome<string>> {
-  const actor = await requireActor(identity, sessionToken);
-  return actor.ok ? outcomeOk(actor.value.userId) : actor;
-}
-
-/** 操作者。`isAdmin` は**サイドバーの出し分けに要る**（#333）。 */
-export type Actor = {
-  readonly userId: string;
-  /**
-   * **このセッションで管理者として振る舞ってよいか。**
-   *
-   * `getSession` が既に返しているので、**往復は増えない。**
-   * `requireUserId` が捨てていただけである。
-   *
-   * **これは「何を出すか」の値で、「何を叩けるか」ではない。**
-   * 管理操作の可否は `requireAdminUserId` が別に確かめる ——
-   * 画面がサイドバーを描くのに使う値と、操作を通す値を同じ 1 本に
-   * すると、**片方を緩めたときにもう片方も緩む。**
-   */
-  readonly isAdmin: boolean;
-};
-
-/**
- * 操作者を得る（#333）。
- *
- * **`requireUserId` との違いは `isAdmin` を捨てないことだけ**で、
- * `getSession` の呼び方は同じである。**2 本あるのは移行の都合ではなく、
- * 呼ぶ側が要る値だけを受け取れるようにするため** —— `isAdmin` を
- * 使わない経路に渡すと、使ってよいと読まれる。
- */
-export async function requireActor(
-  identity: IdentityGateway,
-  sessionToken: string | undefined,
-): Promise<NfcOutcome<Actor>> {
   if (sessionToken === undefined || sessionToken === "") {
     return outcomeErr({ kind: "unauthenticated" });
   }
@@ -63,39 +48,6 @@ export async function requireActor(
   // 期限切れ・失効は auth-worker 側で null に畳まれて返る。
   // 理由を問い合わせる口を作らない（理由はトークンの実在を示す）。
   if (result.value === null) return outcomeErr({ kind: "unauthenticated" });
-
-  return outcomeOk({ userId: result.value.userId, isAdmin: result.value.isAdmin });
-}
-
-/**
- * 操作者が管理者であることを確かめる（#187 / 仕様書 §14.1 決定 8）。
- *
- * ## nfc-worker は自分で判断しない
- *
- * `is_admin` は Identity D1 の列で、こちらには無い。`getSession` が返す
- * `isAdmin` を見る —— **これは auth-worker が D1 を引いて決めた値**であって、
- * 呼び出し元の申告ではない（`caller` との違いは仕様書 §14.1 決定 12）。
- *
- * ## 管理者でないことを理由に 404 を返さない
- *
- * `forbidden` を返す。ここで `not_found` に畳むと「発行エンドポイントが
- * 存在するか」を隠せるが、**隠して得るものが無い** —— 経路は仕様書にも
- * コードにも書いてあり、秘密ではない。一方で畳むと、権限を外された
- * 運営者が「壊れている」と誤解する。
- */
-export async function requireAdminUserId(
-  identity: IdentityGateway,
-  sessionToken: string | undefined,
-): Promise<NfcOutcome<string>> {
-  if (sessionToken === undefined || sessionToken === "") {
-    return outcomeErr({ kind: "unauthenticated" });
-  }
-
-  const result = await identity.getSession(sessionToken);
-  if (!result.ok) return result;
-  if (result.value === null) return outcomeErr({ kind: "unauthenticated" });
-
-  if (!result.value.isAdmin) return outcomeErr({ kind: "forbidden" });
 
   return outcomeOk(result.value.userId);
 }

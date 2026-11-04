@@ -32,9 +32,10 @@ describe("ルートの登録順", () => {
       "ALL /*",
       "GET /health",
       "GET /c/:cardId",
-      // **状態を変える操作の門番。** 下の 5 本より前に居ること自体が守り。
+      // **状態を変える操作の門番。** 下の 4 本より前に居ること自体が守り。
       "ALL /account/nfc/cards/*",
-      "POST /account/nfc/cards",
+      // **`POST /account/nfc/cards`（運営によるカード発行）は #433 で
+      // 消えた。** 発行は `admin.under18.dev/nfc` にある。
       "GET /account/nfc/cards",
       "POST /account/nfc/cards/claim",
       "PUT /account/nfc/cards/:cardId/target",
@@ -47,20 +48,8 @@ describe("ルートの登録順", () => {
       // 画面は 2 回出る（`pageSecurityHeaders` とハンドラ）。
       "GET /account/nfc",
       "GET /account/nfc",
-      // **運営向けの管理画面（#338 Step 3）。** 2 行あるのは
-      // `pageSecurityHeaders` と本体で、上の一覧と同じ形である。
-      //
-      // **順序に守りの意味は無い** —— `/account/nfc/admin` も
-      // `/account/nfc/claim` も静的なパスで、Hono は完全一致で選ぶ。
-      // 意味があるのは `ALL /account/nfc/cards/*` の門番の位置だけ。
-      "GET /account/nfc/admin",
-      "GET /account/nfc/admin",
-      // 発行の form POST（#382）。2 行あるのは上と同じ事情。
-      "POST /account/nfc/admin",
-      "POST /account/nfc/admin",
-      // 他人のカードの無効化（#382）。2 行あるのは上と同じ事情。
-      "POST /account/nfc/admin/:cardId/disable",
-      "POST /account/nfc/admin/:cardId/disable",
+      // **`/account/nfc/admin` の 3 本（一覧・発行・他人のカードの
+      // 無効化）は #433 で消えた。** `admin.under18.dev/nfc` へ移設済み。
       // 紐づけ画面（#358）。**画面より後ろに居る。** `/account/nfc` と
       // `/account/nfc/claim` は別パスなので順序に守りの意味は無いが、
       // 変わったら気づく。POST はこの Worker で唯一の form 送信。
@@ -76,7 +65,7 @@ describe("ルートの登録順", () => {
     ]);
   });
 
-  it("門番が、状態を変える 5 本より前に居る", () => {
+  it("門番が、状態を変える 4 本より前に居る", () => {
     // **上の一覧は「変わっていないこと」しか言わない。** 変えるときに
     // 何を守るべきかを、別に書いておく。
     const paths = createApp().routes.map((route) => `${route.method} ${route.path}`);

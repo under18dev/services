@@ -7,7 +7,7 @@ import type { CardStatus } from "../../domain/entities/card";
  *
  * **認可を持たない。** `DelegatedListAllCardsUseCase` と同じ理由——
  * ここへ辿り着けること自体が Service Binding で保証されている。
- * 読み取りだけなので `actorUserId` も受け取らない（`listAllCards` と
+ * 読み取りだけなので `actorUserId` も受け取らない（`delegatedListAllCards` と
  * 同じ判断。監査イベントを書かない操作は実在確認の対象にもならない）。
  */
 export class DelegatedCountCardsUseCase {

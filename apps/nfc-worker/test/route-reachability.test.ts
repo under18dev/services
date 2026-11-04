@@ -63,7 +63,6 @@ const key = (route: { readonly method: string; readonly path: string }): string 
  */
 const NOT_CALLED_FROM_ISLAND: Readonly<Record<string, string>> = {
   "GET /account/nfc/cards": "一覧はサーバーが描く。画面は RPC ではなく use-case から直接読む",
-  "POST /account/nfc/cards": "カードの発行は運営の操作（管理者のみ）。#338 Step 3",
   "POST /account/nfc/cards/claim":
     "紐づけ。**利用者が通るのは form の `POST /account/nfc/claim`**（#358）。こちらは API として残してある",
 };

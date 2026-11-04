@@ -1,7 +1,7 @@
 import { discloseCard, isConcealedForClaim } from "../../domain/services/disclosure";
 import type { CardRepository, IdentityGateway, NfcOutcome } from "../ports";
 import { outcomeOk } from "../ports";
-import { requireActor } from "./authenticate";
+import { requireUserId } from "./authenticate";
 
 export type ViewClaimInput = {
   readonly sessionToken: string | undefined;
@@ -11,8 +11,6 @@ export type ViewClaimInput = {
 export type ViewClaimOutput = {
   /** 押せる状態か。false なら画面は「利用できません」1 枚に畳む。 */
   readonly claimable: boolean;
-  /** サイドバーの出し分けに要る（#333）。**カードの状態とは無関係。** */
-  readonly isAdmin: boolean;
 };
 
 /**
@@ -47,13 +45,10 @@ export class ViewClaimUseCase {
   ) {}
 
   async execute(input: ViewClaimInput): Promise<NfcOutcome<ViewClaimOutput>> {
-    const actor = await requireActor(this.identity, input.sessionToken);
+    const actor = await requireUserId(this.identity, input.sessionToken);
     if (!actor.ok) return actor;
 
     const disclosure = discloseCard(await this.cards.findById(input.cardId));
-    return outcomeOk({
-      claimable: !isConcealedForClaim(disclosure),
-      isAdmin: actor.value.isAdmin,
-    });
+    return outcomeOk({ claimable: !isConcealedForClaim(disclosure) });
   }
 }

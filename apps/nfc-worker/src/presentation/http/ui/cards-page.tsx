@@ -137,7 +137,7 @@ const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
  * 無効化の理由の表示用ラベル（#382）。
  *
  * **生の理由コードをそのまま出していた**（`lost` / `unused` が英語の
- * ままだった）。**運営が止めたことを所有者に伝える**（`AdminDisableCardUseCase`
+ * ままだった）。**運営が止めたことを所有者に伝える**（`DelegatedDisableCardUseCase`
  * の "admin_action"）には、この値を人間に読める日本語へ訳す必要がある。
  *
  * **運営が黙って止めると問い合わせが来る。** ここで一覧に出す文言が、

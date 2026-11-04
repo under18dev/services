@@ -166,8 +166,10 @@ export interface CardRepository {
    * する。所有者判定をここで外すのは、**管理者判定を UseCase の中だけに
    * 置く**という `cards.routes.ts` の方針（判定をルートに書くと経路が
    * 増えたときに素通りする形を作る）を、Repository 層まで一貫させる
-   * ため —— 「誰のカードか」という条件自体を無くし、「管理者かどうか」
-   * の判定は `AdminDisableCardUseCase` の `requireAdminUserId` だけに置く。
+   * ため —— 「誰のカードか」という条件自体を無くす。**「管理者かどうか」の
+   * 判定はこの Worker に無い**（#433）—— 運営の無効化は admin-worker
+   * からの delegated RPC（`DelegatedDisableCardUseCase`）で入ってきて、
+   * 認可はあちらで済んでいる。
    *
    * **`issued` を条件に加えたのは #427（batch 一括無効化）から。** それ
    * 以前は `active` だけで、**未紐づけのカードを無効化する経路が 1 つも
@@ -246,7 +248,7 @@ export interface CardRepository {
   /**
    * 状態ごとの枚数（#449、admin-worker のホーム用）。
    *
-   * **`listAllCards` を数える代わりにこれを使うこと。** あちらは
+   * **`delegatedListAllCards` を数える代わりにこれを使うこと。** あちらは
    * `MAX_ADMIN_LIST`（500）で打ち切るので、それを超えた枚数での合計は
    * 不正確になる——いまの物理枚数（60 枚前後）では超えないが、
    * 「一覧を全部引いて数える」形にしないという判断そのものは件数に

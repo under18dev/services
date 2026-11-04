@@ -79,7 +79,9 @@ export const DOCS_ROUTES: readonly Route[] = [
  */
 export const CARD_API_ROUTES: readonly Route[] = [
   { method: "GET", path: "/account/nfc/cards" },
-  { method: "POST", path: "/account/nfc/cards" },
+  // **`POST /account/nfc/cards`（運営によるカード発行）は #433 で消えた。**
+  // 発行は `admin.under18.dev/nfc` にある。ここへ戻すと、セッション
+  // Cookie の `isAdmin` で通る運営の口が `/account/*` に復活する。
   { method: "POST", path: "/account/nfc/cards/claim" },
   { method: "PUT", path: "/account/nfc/cards/:cardId/target" },
   { method: "POST", path: "/account/nfc/cards/:cardId/disable" },
@@ -101,37 +103,19 @@ export const CARD_API_ROUTES: readonly Route[] = [
 export const CARD_PAGE_ROUTES: readonly Route[] = [{ method: "GET", path: "/account/nfc" }];
 
 /**
- * 運営向けのカード管理画面（#338 Step 3）。
+ * ## 運営向けの画面はこの Worker に無い（#433）
  *
- * **区分を分けてあるのは、Cookie 無しの応答が同じでも、
- * Cookie 有りの応答が違うからである。**
+ * かつてここに `CARD_ADMIN_ROUTES` があり、`GET /account/nfc/admin`
+ * （一覧）・`POST /account/nfc/admin`（発行）・
+ * `POST /account/nfc/admin/:cardId/disable`（他人のカードの無効化）の
+ * 3 本を並べていた。**`admin.under18.dev/nfc` へ移設済み**である。
  *
- * | | Cookie 無し | 一般利用者 | 管理者 |
- * | --- | --- | --- | --- |
- * | `GET /account/nfc/admin` | **302**（ログインへ） | **404** | 200 |
- *
- * **一般利用者に 403 を返さない。** 403 は「在るが権限が無い」と読めるので、
- * 管理画面の所在を教える（#331 / #333 の判断）。`cards-ui.routes.tsx` が
- * `forbidden` を 404 に翻訳している。
+ * **区分を消したことに意味がある。** あの区分は「Cookie 無しの応答は
+ * 同じでも、Cookie 有りの応答が違う」ことを言うために分けてあった ——
+ * 一般利用者には 404、管理者には 200。**いまこの Worker が
+ * `auth.under18.dev` に出しているものに、セッションの `isAdmin` で
+ * 答えが変わる経路は 1 本も無い。**
  */
-export const CARD_ADMIN_ROUTES: readonly Route[] = [
-  { method: "GET", path: "/account/nfc/admin" },
-  /**
-   * カードの発行（#382）。**この Worker で 2 本目の form POST。**
-   *
-   * Cookie 無しも一般利用者も **403**（CSRF の検証がセッションより先）。
-   * 紐づけの POST と同じ順序で、**トークンを確かめる前に D1 や Identity を
-   * 引かない。** 管理者判定（404 へ翻訳する分岐）まで届かない。
-   */
-  { method: "POST", path: "/account/nfc/admin" },
-  /**
-   * 運営が、他人のカードを無効化する（#382「他人のカードへの操作」1 本目）。
-   *
-   * Cookie 無しも一般利用者も **403**（CSRF の検証がセッションより先、
-   * 上の発行と同じ順序）。
-   */
-  { method: "POST", path: "/account/nfc/admin/:cardId/disable" },
-];
 
 /**
  * カードをタップした人が着地する紐づけ画面（#358）。
@@ -147,9 +131,10 @@ export const CARD_ADMIN_ROUTES: readonly Route[] = [
  * 順序はこれで正しい —— トークンを確かめる前に D1 や Identity を引かない。
  * **`CARD_API_ROUTES`（401）に混ぜると、下の検査がその場で落ちる。**
  *
- * **この Worker で唯一の form POST である。** 2 本目を足す人は、
- * dashboard-worker の `test/form-csrf.test.ts`（src を走査して guard を
- * 通っていない form を落とす）を先に移植すること（`http/csrf.ts`）。
+ * **#433 以降、この Worker で唯一の form POST である**（発行と
+ * 他人のカードの無効化が消えたため）。2 本目を足す人は、
+ * `test/form-csrf.test.ts`（src を走査して guard を通っていない form を
+ * 落とす）が先に効いていることを確かめること（`http/csrf.ts`）。
  *
  * **`go.under18.dev` からも届く。** そちらでは `__Host-` の Cookie が
  * 送られないので、GET はログインへ送られ、POST は CSRF で落ちる。
@@ -200,7 +185,6 @@ export const PROBE_PAGES: readonly string[] = [];
 
 export const CARD_ROUTES: readonly Route[] = [
   ...CARD_PAGE_ROUTES,
-  ...CARD_ADMIN_ROUTES,
   ...CARD_CLAIM_ROUTES,
   ...CARD_ASSET_ROUTES,
   ...CARD_API_ROUTES,

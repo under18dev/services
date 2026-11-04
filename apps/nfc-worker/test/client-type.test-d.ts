@@ -23,7 +23,6 @@ const client = hc<CardsApiType>("http://localhost/account/nfc/cards");
 
 // --- 実在するルートは引ける ---
 void client.index.$get;
-void client.index.$post;
 void client.claim.$post;
 void client[":cardId"].target.$put;
 void client[":cardId"].disable.$post;
@@ -36,3 +35,8 @@ void client.nonexistent.$get;
 
 // @ts-expect-error `target` は PUT だけ。POST は無い。
 void client[":cardId"].target.$post;
+
+// @ts-expect-error カードの発行は #433 で消えた（`admin.under18.dev/nfc` へ
+// 移設済み）。ここでエラーが出なくなったら、`/account/nfc/cards` に
+// 運営向けの口が戻っている。
+void client.index.$post;

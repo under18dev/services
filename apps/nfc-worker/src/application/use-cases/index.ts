@@ -1,4 +1,3 @@
-export * from "./admin-disable-card.use-case";
 export * from "./delegated-disable-card.use-case";
 export * from "./delegated-issue-cards.use-case";
 export * from "./delegated-list-all-cards.use-case";
@@ -7,7 +6,6 @@ export * from "./authenticate";
 export * from "./card-view";
 export * from "./claim-card.use-case";
 export * from "./disable-card.use-case";
-export * from "./list-all-cards.use-case";
 export * from "./list-cards.use-case";
 export * from "./release-card.use-case";
 export * from "./resolve-card.use-case";

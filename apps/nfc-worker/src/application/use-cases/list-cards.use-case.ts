@@ -1,6 +1,6 @@
 import type { CardRepository, CardView, IdentityGateway, NfcOutcome } from "../ports";
 import { outcomeOk } from "../ports";
-import { requireActor } from "./authenticate";
+import { requireUserId } from "./authenticate";
 import { toCardView } from "./card-view";
 
 /**
@@ -14,18 +14,19 @@ import { toCardView } from "./card-view";
  * 見えないと、紛失報告のあとで状態を確かめる手段が無くなる。
  */
 /**
- * 一覧と、**サイドバーの出し分けに要る `isAdmin`**（#333）。
+ * 一覧だけ。
  *
- * **`isAdmin` を一緒に返すのは、往復を増やさないため。** `requireActor`
- * が呼ぶ `getSession` が既に持っている値で、画面はこれ 1 本で描ける。
+ * **かつては `isAdmin` も返していた**（#333）—— サイドバーに管理の節を
+ * 出すかの判断に使っていた。**#433 で運営向けの項目が並びから消えた**ので、
+ * 画面はもう要らない（`@u18/contracts` の `account-nav.ts`）。
  *
- * **画面の都合がここに入っている**ことは承知のうえである。別に取りに
- * 行かせると、**同じ応答の中でサイドバーと本文が違うセッションを見る**
- * 窓ができる。
+ * **1 項目の object のままにしてある。** 配列に戻すと、呼ぶ側 2 本
+ * （画面と JSON API）の両方を触ることになり、**`cards` という名前が
+ * 応答の形から消える** —— `cards.routes.ts` が「`CardView` の項目だけを
+ * 返す」ことを見ているテストの読み手にとって、名前は手掛かりである。
  */
 export type ListMyCardsOutput = {
   readonly cards: readonly CardView[];
-  readonly isAdmin: boolean;
 };
 
 export class ListMyCardsUseCase {
@@ -35,10 +36,10 @@ export class ListMyCardsUseCase {
   ) {}
 
   async execute(sessionToken: string | undefined): Promise<NfcOutcome<ListMyCardsOutput>> {
-    const actor = await requireActor(this.identity, sessionToken);
+    const actor = await requireUserId(this.identity, sessionToken);
     if (!actor.ok) return actor;
 
-    const owned = await this.cards.listByOwner(actor.value.userId);
-    return outcomeOk({ cards: owned.map(toCardView), isAdmin: actor.value.isAdmin });
+    const owned = await this.cards.listByOwner(actor.value);
+    return outcomeOk({ cards: owned.map(toCardView) });
   }
 }

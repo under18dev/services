@@ -7,7 +7,6 @@ import type {
   ExpiredTapPurger,
   IdentityGateway,
 } from "../application/ports";
-import { AdminDisableCardUseCase } from "../application/use-cases/admin-disable-card.use-case";
 import { DelegatedBatchDisableCardsUseCase } from "../application/use-cases/delegated-batch-disable-cards.use-case";
 import { DelegatedCountBatchIssuedCardsUseCase } from "../application/use-cases/delegated-count-batch-issued-cards.use-case";
 import { DelegatedCountDisabledInBatchUseCase } from "../application/use-cases/delegated-count-disabled-in-batch.use-case";
@@ -22,8 +21,6 @@ import { DelegatedReleaseCardUseCase } from "../application/use-cases/delegated-
 import { DelegatedUpdateCardTargetUseCase } from "../application/use-cases/delegated-update-card-target.use-case";
 import { ClaimCardUseCase } from "../application/use-cases/claim-card.use-case";
 import { DisableCardUseCase } from "../application/use-cases/disable-card.use-case";
-import { IssueCardsUseCase } from "../application/use-cases/issue-cards.use-case";
-import { ListAllCardsUseCase } from "../application/use-cases/list-all-cards.use-case";
 import { ListMyCardsUseCase } from "../application/use-cases/list-cards.use-case";
 import { ReleaseCardUseCase } from "../application/use-cases/release-card.use-case";
 import { PurgeExpiredEventsUseCase } from "../application/use-cases/purge-expired-events.use-case";
@@ -87,7 +84,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
   // Port の配線先はここ 1 箇所に揃える（auth-worker の purger と同じ）。
   const eventPurger = overrides.eventPurger ?? new DrizzleExpiredEventPurger(db);
   // タップ回数の記録・集計（#394）。公開経路（`redirect.routes.ts`）と
-  // 運営向け一覧（`listAllCards`）の両方から使う。
+  // 運営向け一覧（`delegatedListAllCards`）の両方から使う。
   const cardTaps = overrides.cardTaps ?? new DrizzleCardTapRecorder(db);
   const tapPurger = overrides.tapPurger ?? new DrizzleExpiredTapPurger(db);
   const clock = systemClock;
@@ -98,8 +95,6 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
     useCases: {
       resolveCard: new ResolveCardUseCase(cards),
       listMyCards: new ListMyCardsUseCase(identity, cards),
-      // 運営向けの全カード一覧（#338 Step 3）。**管理者判定は UseCase の中。**
-      listAllCards: new ListAllCardsUseCase(identity, cards, cardTaps),
       updateCardTarget: new UpdateCardTargetUseCase(
         identity,
         cards,
@@ -108,10 +103,12 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
         blockedTargetOrigins(env),
       ),
       disableCard: new DisableCardUseCase(identity, cards, events, clock),
-      // 運営が他人のカードを無効化する（#382）。**管理者判定は UseCase の中。**
-      adminDisableCard: new AdminDisableCardUseCase(identity, cards, events, clock),
-      // admin-worker からの delegated RPC 専用（#382 / #390 決定 16 ③）。
+      // **運営向けはここから下の `delegated*` だけである**（#433）。
+      // admin-worker からの delegated RPC 専用（#382 / #390 決定 16 ③）で、
       // **`identity` を渡さない** —— 認可は admin-worker 側で済んでいる。
+      // `/account/nfc` 側にあった `listAllCards` / `issueCards` /
+      // `adminDisableCard`（セッション Cookie で `isAdmin` を確かめる版）は、
+      // 画面ごと消えた。**兄弟を戻すと運営の入口が 2 つになる。**
       delegatedDisableCard: new DelegatedDisableCardUseCase(cards, events, clock),
       delegatedBatchDisableCards: new DelegatedBatchDisableCardsUseCase(cards, events, clock),
       delegatedCountBatchIssuedCards: new DelegatedCountBatchIssuedCardsUseCase(cards),
@@ -140,7 +137,6 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
         blockedTargetOrigins(env),
       ),
       claimCard: new ClaimCardUseCase(identity, cards, events, clock),
-      issueCards: new IssueCardsUseCase(identity, cards, events, clock),
       releaseCard: new ReleaseCardUseCase(identity, cards, events, clock),
       viewClaim: new ViewClaimUseCase(identity, cards),
       purgeExpiredEvents: new PurgeExpiredEventsUseCase({ purger: eventPurger, clock }),
