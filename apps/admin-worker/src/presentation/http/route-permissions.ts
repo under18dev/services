@@ -26,6 +26,9 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   "GET /nfc/analytics": "NFC_READ",
   "GET /clients": "CLIENT_READ",
   "GET /users": "USER_READ",
+  // 利用者詳細（#455）。ADMIN_NAV_GROUPS には出ないが、操作ではなく
+  // 読み取りなので一覧と同じ USER_READ。
+  "GET /users/:userId": "USER_READ",
   "GET /audit": "AUDIT_READ",
 
   "POST /nfc": "NFC_WRITE",
