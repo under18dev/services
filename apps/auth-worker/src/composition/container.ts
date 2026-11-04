@@ -47,6 +47,7 @@ import { ListOAuthClientsUseCase } from "../application/use-cases/list-oauth-cli
 import { ListUsersUseCase } from "../application/use-cases/list-users.use-case";
 import { ManageUserUseCase } from "../application/use-cases/manage-user.use-case";
 import { ListAuditLogsUseCase } from "../application/use-cases/list-audit-logs.use-case";
+import { DelegatedGetUserUseCase } from "../application/use-cases/delegated-get-user.use-case";
 import { DelegatedListUsersUseCase } from "../application/use-cases/delegated-list-users.use-case";
 import { DelegatedManageUserUseCase } from "../application/use-cases/delegated-manage-user.use-case";
 import { DelegatedCountOAuthClientsUseCase } from "../application/use-cases/delegated-count-oauth-clients.use-case";
@@ -182,6 +183,7 @@ export type Container = {
     readonly disableOAuthClient: DisableOAuthClientUseCase;
     // admin-worker 専用（#390 決定 16 ③）。`IdentityAdminDelegatedRPC` だけが呼ぶ。
     readonly delegatedListUsers: DelegatedListUsersUseCase;
+    readonly delegatedGetUser: DelegatedGetUserUseCase;
     readonly delegatedManageUser: DelegatedManageUserUseCase;
     readonly delegatedListOAuthClients: DelegatedListOAuthClientsUseCase;
     readonly delegatedCountOAuthClients: DelegatedCountOAuthClientsUseCase;
@@ -519,6 +521,7 @@ export function createContainer(
       // 認可は Service Binding と admin-worker の承認リストに委ねており、
       // ここに `requireAdminSession` 相当の判定は無い。
       delegatedListUsers: new DelegatedListUsersUseCase({ users }),
+      delegatedGetUser: new DelegatedGetUserUseCase({ users }),
       delegatedManageUser: new DelegatedManageUserUseCase({ users, sessions, clock, audit }),
       delegatedListOAuthClients: new DelegatedListOAuthClientsUseCase({ clients: oauthClients }),
       delegatedCountOAuthClients: new DelegatedCountOAuthClientsUseCase({ clients: oauthClients }),

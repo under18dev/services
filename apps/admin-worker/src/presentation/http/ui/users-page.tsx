@@ -174,7 +174,16 @@ const UserRow: FC<{
   <TableRow>
     <TableCell class="whitespace-normal">
       <div class={ITEM_TITLE_CLASS}>
-        <span>{user.displayName}</span>
+        {/*
+          **行から詳細へ入る導線**（#455）。一覧には「押す前に確かめる
+          材料」が無く、停止・解除・セッションの失効をここから押すのは
+          **確かめずに押す**ことだった。名前を入口にしているのは、
+          運用者が探しているのが「この人」だからである（ID 列は文字列
+          そのものを読む・コピーする場所なので、リンクにしない）。
+        */}
+        <a href={`/users/${user.id}`} class="underline underline-offset-4">
+          {user.displayName}
+        </a>
         {user.hasAdminFlag ? <Badge variant="outline-primary">管理者</Badge> : null}
         {user.emailVerified ? null : <Badge variant="outline">メール未確認</Badge>}
       </div>

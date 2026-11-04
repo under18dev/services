@@ -160,6 +160,59 @@ describe("listUsers", () => {
   });
 });
 
+describe("getUser", () => {
+  it("userId 1 本で 1 人を返す（一覧を経由しない）", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    const result = await rpc.getUser({ actorUserId: "usr_admin", userId: "usr_taro" });
+
+    expect(result.ok, "getUser が失敗した").toBe(true);
+    if (!result.ok) return;
+    expect(result.value.id).toBe("usr_taro");
+    expect(result.value.username).toBe("taro");
+    expect(result.value.primaryEmail).toBe("taro@example.com");
+    expect(result.value.status).toBe("active");
+  });
+
+  it("存在しない userId は not_found", async () => {
+    const result = await rpc.getUser({ actorUserId: "usr_admin", userId: "usr_missing" });
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("停止中の利用者も返す（止まっている人こそ確かめたい）", async () => {
+    await seedPlainUser({
+      id: "usr_stopped",
+      username: "stopped",
+      email: "stopped@example.com",
+      status: "suspended",
+    });
+
+    const result = await rpc.getUser({ actorUserId: "usr_admin", userId: "usr_stopped" });
+
+    expect(result.ok && result.value.status).toBe("suspended");
+  });
+
+  it("読み取りなので、実在しない actorUserId でも通る（listUsers と同じ扱い）", async () => {
+    // **書く操作との非対称**（このファイルの冒頭を参照）。監査ログへ
+    // `actorUserId` を書かないので、実在を確かめる理由が無い。
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    const result = await rpc.getUser({ actorUserId: "usr_does_not_exist", userId: "usr_taro" });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("監査ログに 1 行も書かない", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    await rpc.getUser({ actorUserId: "usr_admin", userId: "usr_taro" });
+
+    const rows = await db().select().from(auditLogs).all();
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe("suspendUser / reinstateUser / revokeUserSessions", () => {
   it("停止でき、理由が監査へ残る", async () => {
     const admin: SeededUser = await seedLoggedInUser();

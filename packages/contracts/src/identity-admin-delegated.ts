@@ -90,6 +90,44 @@ export type RevokeUserSessionsDelegatedInput = z.infer<
 >;
 export type RevokeUserSessionsDelegatedResult = RpcResult<{ readonly revokedSessions: number }>;
 
+// ------------------------------------------------------------------ getUser
+
+/**
+ * 1 人だけを引く（admin-worker のユーザー詳細ページ用、#455）。
+ *
+ * **`listUsers` を引いて呼ぶ側で 1 件に絞らないこと。** あちらは既定
+ * 50 件・最大 200 件のページングで、目当ての 1 人がどのページに居るかは
+ * 分からない —— 全ページを舐める形になり、**利用者が増えるほど重くなる
+ * 一方で、画面に出すのは常に 1 行である。** 集計を `listOAuthClients` で
+ * 数えずに `countOAuthClients` を足した #449 と同じ判断で、
+ * **主キー 1 本で引ける読み取りには専用の口を置く。**
+ *
+ * **検索（`listUsers` の `query`）では代えられない。** あれが照合するのは
+ * メールアドレスか username で、**どちらも本人が変えられる**（`username`
+ * は変更できる。`UserAdminSummary.id` の JSDoc を参照）。詳細ページの
+ * 宛先は操作の宛先と同じ `userId` でなければ、**一覧で見た人と操作した人が
+ * 違う**ことが起こりうる。
+ */
+export const getUserDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  userId: z.string().min(1).max(64),
+});
+export type GetUserDelegatedInput = z.infer<typeof getUserDelegatedInputSchema>;
+
+/**
+ * **存在しない `userId` は `not_found`。**
+ *
+ * ここでの `not_found` は `requireAdminSession` が「管理機能の存在を
+ * 隠す」ために使う `not_found` とは別の意味で、文字どおり「その行が無い」
+ * である。delegated 系の入口に認可は無いので、2 つの意味が混ざる心配は
+ * ない（`IdentityAdminDelegatedRpcContract` の冒頭）。
+ *
+ * **呼ぶ側はこれを行き止まりにしないこと。** 消えた・打ち間違えた
+ * `userId` を開いたときに空白の画面を出すと、運用者は「取得に失敗した」
+ * と区別できない。
+ */
+export type GetUserDelegatedResult = RpcResult<UserAdminSummary>;
+
 // -------------------------------------------------------- listOAuthClients
 
 export const listOAuthClientsDelegatedInputSchema = z.object({
@@ -181,6 +219,11 @@ export type ListAuditLogsDelegatedResult = RpcResult<{
  */
 export interface IdentityAdminDelegatedRpcContract {
   listUsers(input: ListUsersDelegatedInput): Promise<ListUsersDelegatedResult>;
+  /**
+   * 1 人だけを引く（#455）。**読み取りなので `actorUserId` の実在確認も
+   * しない**（`listUsers` と同じ扱い。監査ログに 1 行も書かない）。
+   */
+  getUser(input: GetUserDelegatedInput): Promise<GetUserDelegatedResult>;
   suspendUser(input: SuspendUserDelegatedInput): Promise<SuspendUserDelegatedResult>;
   reinstateUser(input: ReinstateUserDelegatedInput): Promise<ReinstateUserDelegatedResult>;
   revokeUserSessions(

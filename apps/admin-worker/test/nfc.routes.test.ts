@@ -79,6 +79,8 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     listAllCards: async (): Promise<ListAllCardsDelegatedResult> =>
       rpcOk({ cards: [card()], truncated: false }),
     countCards: async () => rpcOk({ issued: 1, active: 0, disabled: 0 }),
+    // `/nfc` は所有者ごとの一覧を呼ばない（呼ぶのは `/users/:userId`）。
+    listCardsByOwner: async () => rpcOk({ cards: [] }),
     issueCards: async (input): Promise<IssueCardsDelegatedResult> => {
       calls.issueCards.push(input);
       return rpcOk({ cards: [{ cardId: "nfc_0002" }] });

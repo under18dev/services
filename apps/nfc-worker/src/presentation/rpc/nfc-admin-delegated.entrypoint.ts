@@ -5,6 +5,7 @@ import {
   countDisabledInBatchDelegatedInputSchema,
   disableCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
+  listCardsByOwnerDelegatedInputSchema,
   reinstateBatchToIssuedCardsDelegatedInputSchema,
   reinstateCardDelegatedInputSchema,
   reinstateCardToIssuedDelegatedInputSchema,
@@ -30,6 +31,8 @@ import {
   type IssueCardsDelegatedInput,
   type IssueCardsDelegatedResult,
   type ListAllCardsDelegatedResult,
+  type ListCardsByOwnerDelegatedInput,
+  type ListCardsByOwnerDelegatedResult,
   type NfcAdminDelegatedRpcContract,
   type ReinstateBatchToIssuedCardsDelegatedInput,
   type ReinstateBatchToIssuedCardsDelegatedResult,
@@ -320,6 +323,41 @@ export class NfcAdminDelegatedRPC
         disabledAt: card.disabledAt,
       })),
       truncated: result.value.truncated,
+    });
+  }
+
+  /**
+   * 1 人が持っているカード（#455）。**`listAllCards` を引いて絞らない**
+   * ——あちらは 500 枚で打ち切るので、古いカードの持ち主の行が黙って
+   * 消える（`DelegatedListCardsByOwnerUseCase` の冒頭を参照）。
+   *
+   * **タップ回数は返さない。** 契約の型（`AdminCardViewDelegated`）にも
+   * UseCase の出力（`OwnedCardView`）にも項目が無い——所有者で引いた
+   * カードに回数を添えると「この人が何回使ったか」になるため。
+   */
+  async listCardsByOwner(
+    input: ListCardsByOwnerDelegatedInput,
+  ): Promise<ListCardsByOwnerDelegatedResult> {
+    const parsed = listCardsByOwnerDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or ownerUserId is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedListCardsByOwner.execute({
+      ownerUserId: parsed.data.ownerUserId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({
+      cards: result.value.cards.map((card) => ({
+        cardId: card.cardId,
+        status: card.status as AdminCardStatusDelegated,
+        ownerUserId: card.ownerUserId,
+        targetUrl: card.targetUrl,
+        batch: card.batch,
+        issuedAt: card.issuedAt,
+        claimedAt: card.claimedAt,
+        disabledAt: card.disabledAt,
+      })),
     });
   }
 

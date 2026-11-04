@@ -63,13 +63,23 @@ export const ROOT_ROUTES: readonly Route[] = [{ method: "GET", path: "/" }];
 /** ログイン済みだが承認待ちの人を送る先（#390 決定 3）。 */
 export const PENDING_ROUTES: readonly Route[] = [{ method: "GET", path: "/pending" }];
 
-/** `ADMIN_NAV_GROUPS`（`ui/nav.ts`）に出ている 5 画面。 */
+/**
+ * `ADMIN_NAV_GROUPS`（`ui/nav.ts`）に出ている 5 画面と、そこから辿る画面。
+ *
+ * **`/users/:userId`（#455）は並びに出さない。** `ShellNavGroup` の
+ * `href` は固定の文字列で、`:userId` を埋められない——「誰の」詳細かは
+ * 一覧の行を押して初めて決まる。`check-app-catalog-routes.mjs` は
+ * 並びの href がこの一覧に在ることを見ているだけなので、**一覧に
+ * 余分な行があっても検査は通る**（逆に、ここに無い route を並びへ足すと
+ * 落ちる）。
+ */
 export const NAV_PAGE_ROUTES: readonly Route[] = [
   { method: "GET", path: "/nfc" },
   /** NFC の解析画面（#454）。 */
   { method: "GET", path: "/nfc/analytics" },
   { method: "GET", path: "/clients" },
   { method: "GET", path: "/users" },
+  { method: "GET", path: "/users/:userId" },
   { method: "GET", path: "/audit" },
 ];
 
