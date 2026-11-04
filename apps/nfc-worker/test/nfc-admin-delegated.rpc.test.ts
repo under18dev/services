@@ -467,6 +467,70 @@ describe("listAllCards", () => {
   });
 });
 
+describe("listCardsByOwner", () => {
+  it("その人のカードだけを返す", async () => {
+    const mine = await seedActiveCard("usr_taro", "https://example.com/taro");
+    const others = await seedActiveCard("usr_jiro", "https://example.com/jiro");
+    const unclaimed = await seedIssuedCard("lot-a");
+
+    const result = await rpc.listCardsByOwner({ actorUserId: ACTOR, ownerUserId: "usr_taro" });
+
+    expect(result.ok, "listCardsByOwner が失敗した").toBe(true);
+    if (!result.ok) return;
+
+    const ids = result.value.cards.map((card) => card.cardId);
+    expect(ids).toEqual([mine]);
+    expect(ids).not.toContain(others);
+    expect(ids).not.toContain(unclaimed);
+  });
+
+  it("無効化済みのカードも返す（止めたあとの確認が主な用途）", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+    await rpc.disableCard({ actorUserId: ACTOR, cardId });
+
+    const result = await rpc.listCardsByOwner({ actorUserId: ACTOR, ownerUserId: "usr_taro" });
+
+    expect(result.ok, "listCardsByOwner が失敗した").toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cards.map((card) => card.status)).toEqual(["disabled"]);
+  });
+
+  it("1 枚も持っていなければ空（カードが無いことと、取れないことを混ぜない）", async () => {
+    const result = await rpc.listCardsByOwner({ actorUserId: ACTOR, ownerUserId: "usr_nobody" });
+
+    expect(result.ok).toBe(true);
+    expect(!result.ok ? undefined : result.value.cards).toEqual([]);
+  });
+
+  it("タップ回数を返さない（#394 / #454）", async () => {
+    // **項目ごと無い。** 0 を詰める形にすると、黙って嘘の値が画面へ出る
+    // （`DelegatedListCardsByOwnerUseCase` の冒頭）。
+    await seedActiveCard("usr_taro");
+
+    const result = await rpc.listCardsByOwner({ actorUserId: ACTOR, ownerUserId: "usr_taro" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.keys(result.value.cards[0] ?? {})).not.toContain("tapCount");
+  });
+
+  it("ownerUserId が空なら invalid_input", async () => {
+    const result = await rpc.listCardsByOwner({ actorUserId: ACTOR, ownerUserId: "" });
+
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+  });
+
+  it("読み取りなので監査イベントを残さない", async () => {
+    await seedActiveCard("usr_taro");
+    const before = await db().select().from(nfcCardEvents).all();
+
+    await rpc.listCardsByOwner({ actorUserId: ACTOR, ownerUserId: "usr_taro" });
+
+    const after = await db().select().from(nfcCardEvents).all();
+    expect(after).toHaveLength(before.length);
+  });
+});
+
 describe("countCards", () => {
   it("状態ごとの枚数を返す", async () => {
     await seedIssuedCard();

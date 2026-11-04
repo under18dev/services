@@ -33,6 +33,7 @@ export function minimalNfcCards(): NfcAdminDelegatedRpcContract {
     reinstateBatchToIssuedCards: unused("reinstateBatchToIssuedCards"),
     countDisabledInBatch: unused("countDisabledInBatch"),
     listAllCards: unused("listAllCards"),
+    listCardsByOwner: unused("listCardsByOwner"),
     issueCards: unused("issueCards"),
     countCards: async () => rpcOk({ issued: 0, active: 0, disabled: 0 }),
     tapTimeseries: unused("tapTimeseries"),
@@ -48,6 +49,7 @@ export function minimalNfcCards(): NfcAdminDelegatedRpcContract {
 export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
   return {
     listUsers: unused("listUsers"),
+    getUser: unused("getUser"),
     suspendUser: unused("suspendUser"),
     reinstateUser: unused("reinstateUser"),
     revokeUserSessions: unused("revokeUserSessions"),

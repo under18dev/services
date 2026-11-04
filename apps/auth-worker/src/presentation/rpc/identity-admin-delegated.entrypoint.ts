@@ -2,6 +2,7 @@ import {
   countOAuthClientsDelegatedInputSchema,
   createOAuthClientDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
+  getUserDelegatedInputSchema,
   listAuditLogsDelegatedInputSchema,
   listOAuthClientsDelegatedInputSchema,
   listUsersDelegatedInputSchema,
@@ -17,6 +18,8 @@ import {
   type CreateOAuthClientDelegatedResult,
   type DisableOAuthClientDelegatedInput,
   type DisableOAuthClientDelegatedResult,
+  type GetUserDelegatedInput,
+  type GetUserDelegatedResult,
   type IdentityAdminDelegatedRpcContract,
   type ListAuditLogsDelegatedInput,
   type ListAuditLogsDelegatedResult,
@@ -117,6 +120,26 @@ export class IdentityAdminDelegatedRPC
       users: result.value.users.map(toUserAdminSummary),
       nextCursor: result.value.nextCursor,
     });
+  }
+
+  /**
+   * 利用者 1 人（#455）。**`listUsers` の結果から呼び出し側が絞るのでは
+   * なく、主キーで引く** —— 理由は契約の `GetUserDelegatedInput` の冒頭。
+   *
+   * 存在しない `userId` は `not_found`。ここでの `not_found` は
+   * 「管理機能を隠す」ための値ではなく、文字どおり行が無いことである。
+   */
+  async getUser(input: GetUserDelegatedInput): Promise<GetUserDelegatedResult> {
+    const parsed = getUserDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedGetUser.execute({
+      userId: parsed.data.userId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(toUserAdminSummary(result.value));
   }
 
   async suspendUser(input: SuspendUserDelegatedInput): Promise<SuspendUserDelegatedResult> {

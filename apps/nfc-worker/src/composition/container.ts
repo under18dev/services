@@ -18,6 +18,7 @@ import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-
 import { DelegatedIssueCardsUseCase } from "../application/use-cases/delegated-issue-cards.use-case";
 import { DelegatedCountCardsUseCase } from "../application/use-cases/delegated-count-cards.use-case";
 import { DelegatedListAllCardsUseCase } from "../application/use-cases/delegated-list-all-cards.use-case";
+import { DelegatedListCardsByOwnerUseCase } from "../application/use-cases/delegated-list-cards-by-owner.use-case";
 import { DelegatedReinstateBatchToIssuedCardsUseCase } from "../application/use-cases/delegated-reinstate-batch-to-issued-cards.use-case";
 import { DelegatedReinstateCardToIssuedUseCase } from "../application/use-cases/delegated-reinstate-card-to-issued.use-case";
 import { DelegatedReinstateCardUseCase } from "../application/use-cases/delegated-reinstate-card.use-case";
@@ -140,6 +141,9 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       ),
       delegatedCountDisabledInBatch: new DelegatedCountDisabledInBatchUseCase(cards),
       delegatedListAllCards: new DelegatedListAllCardsUseCase(cards, cardTaps),
+      // **`cardTaps` を渡さない。** 所有者で引いた一覧にタップ回数を
+      // 添えると「この人が何回使ったか」になる（#394 / #454 / #455）。
+      delegatedListCardsByOwner: new DelegatedListCardsByOwnerUseCase(cards),
       delegatedCountCards: new DelegatedCountCardsUseCase(cards),
       // NFC の解析画面（#454）。6 本とも読み取り専用、認可を持たない
       // ——他の delegated 読み取り専用 UseCase（`delegatedListAllCards` 等）

@@ -42,6 +42,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
 
   const rpc: IdentityAdminDelegatedRpcContract = {
     listUsers: async () => rpcOk({ users: [], nextCursor: null }),
+    getUser: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     suspendUser: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     reinstateUser: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     revokeUserSessions: async () => rpcErr(RpcErrorCode.Internal, "unused"),

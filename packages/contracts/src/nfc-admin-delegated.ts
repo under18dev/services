@@ -170,6 +170,38 @@ export type IssueCardsDelegatedResult = RpcResult<{
   readonly cards: readonly { readonly cardId: string }[];
 }>;
 
+export const listCardsByOwnerDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  /** 持ち主の userId。**カード側の `owner_user_id` と突き合わせる。** */
+  ownerUserId: z.string().min(1).max(64),
+});
+
+export type ListCardsByOwnerDelegatedInput = z.infer<typeof listCardsByOwnerDelegatedInputSchema>;
+
+/**
+ * 1 人が持っているカード（admin-worker のユーザー詳細ページ用、#455）。
+ *
+ * **`listAllCards` を引いて `ownerUserId` で絞らないこと。** あちらは
+ * `MAX_ADMIN_LIST`（500 枚）で打ち切るので、**古いカードを持っている人の
+ * 行は、黙って 1 枚も出ない。** 打ち切りの有無が「このユーザーはカードを
+ * 持っていない」と見分けられない形になる。
+ *
+ * **`truncated` を持たない。** 件数が頭打ちになるのは `owner_user_id` が
+ * 1 人ぶんだからで、全カードの一覧と違って「上限で切った」という状態が
+ * そもそも起こらない。
+ *
+ * **タップ回数（`AdminCardView.tapCount` にあたるもの）はこの型に無い**
+ * （#394 / #454 / #455）。`nfc_card_taps` は「誰が使ったか」を持たない
+ * 設計で（`packages/nfc-db/src/schema/taps.ts` の冒頭）、所有者で引いた
+ * カードに回数を添えると、**設計上持たないはずの「この人が何回使ったか」
+ * を組み立てたことになる。** 詰め忘れではなく、詰めようがない形にして
+ * ある（`OAuthClientSummary` が `client_secret_hash` を持たないのと同じ
+ * 考え方）。
+ */
+export type ListCardsByOwnerDelegatedResult = RpcResult<{
+  readonly cards: readonly AdminCardViewDelegated[];
+}>;
+
 /**
  * NFC の解析画面（#454）。読み取り専用で `actorUserId` を受け取らない
  * ——監査イベントを書かない操作は実在確認の対象にもならない
@@ -335,6 +367,11 @@ export interface NfcAdminDelegatedRpcContract {
   listAllCards(): Promise<ListAllCardsDelegatedResult>;
   /** 状態ごとの枚数。入力は無い（#449）。 */
   countCards(): Promise<CountCardsDelegatedResult>;
+  /**
+   * 1 人が持っているカード（#455）。**`listAllCards` を引いて絞らない
+   * こと**——理由は `ListCardsByOwnerDelegatedResult` の冒頭を参照。
+   */
+  listCardsByOwner(input: ListCardsByOwnerDelegatedInput): Promise<ListCardsByOwnerDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;
 
   /**

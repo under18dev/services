@@ -593,7 +593,14 @@ export const NfcPage: FC<NfcPageProps> = ({
             </TableHeader>
             <TableBody>
               {cards.map((card) => (
-                <TableRow key={card.cardId}>
+                /*
+                  **`id` を持たせる**（#455）。利用者の詳細ページ
+                  （`/users/:userId`）の「持っているカード」から
+                  `/nfc#card-<cardId>` で該当行へ飛ぶ先がこれ。
+                  **上限（500 枚）で打ち切られた先のカードには飛べない**
+                  ——その場合もページ自体は開くので、行き止まりにはならない。
+                */
+                <TableRow key={card.cardId} id={`card-${card.cardId}`}>
                   <TableCell class="font-mono text-xs">{card.cardId}</TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[card.status]}>{STATUS_LABEL[card.status]}</Badge>
