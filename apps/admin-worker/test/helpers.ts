@@ -6,6 +6,7 @@ import type {
 import { rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { ApprovalRepository } from "../src/application/ports/approval.repository";
+import { ALL_DEFINED_PERMISSIONS, effectivePermissions } from "../src/domain/permissions";
 import { createFakeIdp } from "./fake-idp";
 
 function unused(name: string): () => never {
@@ -64,14 +65,32 @@ export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
 
 export const ORIGIN = env.ADMIN_ORIGIN;
 
-/** `isApproved` / `isSuperApprover` を固定値で答える fake。D1 を立てずにガードの分岐だけを見る。 */
+/**
+ * `isApproved` / `isSuperApprover` / 権限を固定値で答える fake。
+ * D1 を立てずにガードの分岐だけを見る。
+ *
+ * **承認済みなら既定で全権限を持つ**（`ALL_DEFINED_PERMISSIONS`）。
+ * 既存の大半のテストは「承認されていれば呼べること」を見ているので、
+ * ここが最小権限（0）だと #190 を足した瞬間に無関係なテストが軒並み
+ * 403 になる。権限を絞って拒否を確かめたいテストだけ `permissionsBySub`
+ * で明示すること。
+ */
 export function fakeApprovals(
   approvedSubs: readonly string[],
   superSubs: readonly string[] = [],
+  permissionsBySub: Readonly<Record<string, bigint>> = {},
 ): ApprovalRepository {
   return {
     isApproved: async (sub) => approvedSubs.includes(sub),
     isSuperApprover: async (sub) => superSubs.includes(sub),
+    countSuperApprovers: async () => superSubs.length,
+    getEffectivePermissions: async (sub) => {
+      if (!approvedSubs.includes(sub)) return null;
+      return effectivePermissions({
+        isSuperApprover: superSubs.includes(sub),
+        permissions: permissionsBySub[sub] ?? ALL_DEFINED_PERMISSIONS,
+      });
+    },
   };
 }
 

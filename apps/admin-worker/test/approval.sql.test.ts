@@ -5,9 +5,11 @@ import {
   APPROVAL_AUDIT_EVENTS,
   approvalAuditSql,
   approvalStatusSql,
+  countSuperApproversSql,
   grantApprovalSql,
   listApprovalsSql,
   revokeApprovalSql,
+  setPermissionsSql,
   sqlLiteral,
 } from "../src/infrastructure/persistence/approval.sql";
 
@@ -120,6 +122,38 @@ describe("0002_backfill_existing_approvals_permissions.sql（#190）", () => {
   });
 });
 
+describe("countSuperApproversSql", () => {
+  it("super が居なければ 0", async () => {
+    await run(grantApprovalSql("usr_a", false));
+    const rows = await run(countSuperApproversSql());
+    expect(rows[0]?.count).toBe(0);
+  });
+
+  it("super の人数だけを数える（非 super は数えない）", async () => {
+    await run(grantApprovalSql("usr_a", false));
+    await run(grantApprovalSql("usr_b", true));
+    await run(grantApprovalSql("usr_c", true));
+    const rows = await run(countSuperApproversSql());
+    expect(rows[0]?.count).toBe(2);
+  });
+});
+
+describe("setPermissionsSql", () => {
+  it("permissions を書き換える", async () => {
+    await run(grantApprovalSql("usr_a", false));
+    const rows = await run(setPermissionsSql("usr_a", "5"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.permissions).toBe("5");
+
+    const status = await run(approvalStatusSql("usr_a"));
+    expect(status[0]?.permissions).toBe("5");
+  });
+
+  it("承認されていない sub は 0 行", async () => {
+    expect(await run(setPermissionsSql("usr_not_approved", "1"))).toHaveLength(0);
+  });
+});
+
 describe("approvalAuditSql", () => {
   it("承認・剥奪の記録を残す", async () => {
     await run(
@@ -155,5 +189,48 @@ describe("approvalAuditSql", () => {
       `select actor from admin_approval_events where sub = ${sqlLiteral("usr_bootstrap")};`,
     );
     expect(events[0]?.actor).toBe("operator-handle");
+  });
+
+  it("承認そのものの付与・剥奪では detail が null", async () => {
+    await run(
+      approvalAuditSql({
+        event: APPROVAL_AUDIT_EVENTS.granted.event,
+        sub: "usr_a",
+        actor: "github-handle",
+        reason: "manual_grant",
+      }),
+    );
+    const events = await run(
+      `select detail from admin_approval_events where sub = ${sqlLiteral("usr_a")};`,
+    );
+    expect(events[0]?.detail).toBeNull();
+  });
+
+  it("権限ビットの変更は、生の数値ではなくビットの記号名を detail に残す（#190）", () => {
+    const sql = approvalAuditSql({
+      event: APPROVAL_AUDIT_EVENTS.permissionGranted.event,
+      sub: "usr_a",
+      actor: "github-handle",
+      reason: "manual_grant",
+      detail: "NFC_WRITE",
+    });
+    expect(sql).toContain("NFC_WRITE");
+  });
+
+  it("権限ビットの変更が実際に detail 列へ記号名のまま残る", async () => {
+    await run(
+      approvalAuditSql({
+        event: APPROVAL_AUDIT_EVENTS.permissionGranted.event,
+        sub: "usr_a",
+        actor: "github-handle",
+        reason: "manual_grant",
+        detail: "NFC_WRITE",
+      }),
+    );
+    const events = await run(
+      `select event, detail from admin_approval_events where sub = ${sqlLiteral("usr_a")};`,
+    );
+    expect(events[0]?.event).toBe("ops.permission.granted");
+    expect(events[0]?.detail).toBe("NFC_WRITE");
   });
 });

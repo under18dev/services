@@ -74,6 +74,32 @@ order by created_at asc;`;
 }
 
 /**
+ * いま super approver が何人いるか（#190、締め出し防止）。
+ *
+ * `approval-guard.ts` の `checkSuperApproverChange` / `checkApprovalRevocation`
+ * に渡す値を、書き込みの**前に**確かめるために使う。
+ */
+export function countSuperApproversSql(): string {
+  return `select count(*) as count from admin_approvals where is_super_approver = 1;`;
+}
+
+/**
+ * 権限ビットを書き換える（#190）。
+ *
+ * **ここでは OR も AND NOT もしない。** 呼び出し側（CLI）が
+ * `approvalStatusSql` で現在値を読み、`permissions.ts` の BigInt 演算で
+ * 新しい値を計算してから、この文で書き戻す——SQL 側で TEXT 列に対する
+ * ビット演算はできない（`permissions` 列のコメントを参照）。読み・計算・
+ * 書きの 3 ステップがアトミックではない（2 回の `wrangler d1 execute` を
+ * 挟む）が、この CLI は低頻度の手動操作なので許容する。
+ */
+export function setPermissionsSql(sub: string, permissions: string): string {
+  return `update admin_approvals set permissions = ${sqlLiteral(permissions)}
+    where sub = ${sqlLiteral(sub)}
+returning id, permissions;`;
+}
+
+/**
  * 承認・剥奪のイベント名。
  *
  * **プロパティの形で書く。** auth-worker の `ADMIN_ROLE_AUDIT_EVENTS` の
@@ -85,17 +111,26 @@ order by created_at asc;`;
 export const APPROVAL_AUDIT_EVENTS = {
   granted: { event: "ops.approval.granted" },
   revoked: { event: "ops.approval.revoked" },
+  /** 個別の権限ビットを付与した（#190）。 */
+  permissionGranted: { event: "ops.permission.granted" },
+  /** 個別の権限ビットを剥奪した（#190）。 */
+  permissionRevoked: { event: "ops.permission.revoked" },
 } as const satisfies Record<string, { event: string }>;
 
 export type ApprovalAuditEvent =
   (typeof APPROVAL_AUDIT_EVENTS)[keyof typeof APPROVAL_AUDIT_EVENTS]["event"];
 
 /**
- * 承認・剥奪を監査ログに残す。
+ * 承認・剥奪・権限の変更を監査ログに残す。
  *
  * `admin_approval_events` へ書く。`actor` は実行した人の自由文字列
  * （GitHub のハンドル等）。承認の増減はいまのところこの CLI でしか
  * 起きないので、ブートストラップ（最初の 1 人）も含めて常に値が入る。
+ *
+ * `detail` は権限ビットの変更にだけ使う。**ビットの記号名**
+ * （例: `"NFC_WRITE"`）をそのまま文字列で残す——生の数値だけでは
+ * 後から読む人がコードを調べ直さないと意味を復元できず、
+ * 「人が読める形で残る」という #190 の受け入れ条件を満たさない。
  */
 export function approvalAuditSql(input: {
   readonly event: ApprovalAuditEvent;
@@ -103,14 +138,17 @@ export function approvalAuditSql(input: {
   /** CLI の `--actor`。u18 Identity の sub ではない自由文字列。常に要る（`requireActor`）。 */
   readonly actor: string;
   readonly reason: string;
+  /** 権限ビットの記号名。承認そのものの付与・剥奪では省略（null になる）。 */
+  readonly detail?: string;
 }): string {
-  return `insert into admin_approval_events (id, sub, event, actor, reason, created_at)
+  return `insert into admin_approval_events (id, sub, event, actor, reason, detail, created_at)
 values (
   'ade_' || lower(hex(randomblob(16))),
   ${sqlLiteral(input.sub)},
   ${sqlLiteral(input.event)},
   ${sqlLiteral(input.actor)},
   ${sqlLiteral(input.reason)},
+  ${input.detail === undefined ? "null" : sqlLiteral(input.detail)},
   ${NOW_MS}
 );`;
 }

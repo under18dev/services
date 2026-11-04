@@ -9,9 +9,16 @@
  * ここは D1 を読まない。呼び出し側が先に現在の状態（対象が super か、
  * super approver が何人いるか）を調べて渡す——このファイルは純粋な
  * 判定だけに留め、クエリの組み立てを混ぜない。
+ *
+ * **`./permissions.ts` を import しない。** CLI（`admin-approval.mjs`）は
+ * このファイルを `node:child_process` を経由せず直接 `import()` するが、
+ * Node の ESM ローダーは拡張子無しの相対 import（`./permissions`）を
+ * `.ts` へ自動解決しない——かといって `.ts` を付けると今度は tsc が
+ * `allowImportingTsExtensions` 無しでは受け付けない（実測、どちらの形も
+ * 試して確かめた）。ビット値そのものではなく `isApprovalGrantBit`
+ * （真偽値）を呼び出し側に判定させて渡すことで、この相対 import 自体を
+ * 無くした。
  */
-import { PERMISSION_BITS } from "./permissions";
-
 export type LockoutCheck = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
 /**
@@ -90,9 +97,10 @@ export function checkApprovalRevocation(input: {
 export function checkPermissionRevocation(input: {
   readonly actorSub: string;
   readonly targetSub: string;
-  readonly bit: bigint;
+  /** 剥奪しようとしているビットが `PERMISSION_BITS.APPROVAL_GRANT` か。 */
+  readonly isApprovalGrantBit: boolean;
 }): LockoutCheck {
-  if (input.actorSub === input.targetSub && input.bit === PERMISSION_BITS.APPROVAL_GRANT) {
+  if (input.actorSub === input.targetSub && input.isApprovalGrantBit) {
     return {
       ok: false,
       reason: "自分自身の APPROVAL_GRANT を自分で落とせない。他の権限管理者に頼むこと。",

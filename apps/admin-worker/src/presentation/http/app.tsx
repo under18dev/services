@@ -1,7 +1,10 @@
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
+import { routePath } from "hono/route";
 import { createContainer, type ContainerOverrides } from "../../composition/container";
+import { hasPermission } from "../../domain/permissions";
+import { requiredPermissionFor } from "./route-permissions";
 import { buildAuthorizationUrl } from "../../oidc/authorize-url";
 import {
   buildLoginStateCookie,
@@ -178,6 +181,57 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     }
 
     c.set("session", session);
+    return next();
+  });
+
+  /**
+   * 操作ごとの権限ガード（#190）。**上のガードより後、各ルートより前。**
+   *
+   * ここまで来ているのは「承認済み」（または `/pending` 自身）だけ。
+   * `/`・`/pending`・`PUBLIC_PATHS` はホームの概要や入口であって個別の
+   * 操作を行わないので、対象外のまま通す。
+   *
+   * **宣言は `route-permissions.ts` の `ROUTE_PERMISSIONS` に 1 箇所だけ**
+   * 持つ。ここでは判定しか書かない——判定を散らすと、ルートを足したのに
+   * ここを書き忘れて緩いまま通る経路ができる。
+   *
+   * **マッチしたルートの「パターン」で引く。** 生のリクエストパス
+   * （`/nfc/nfc_abc123/disable`）では対応表の `/nfc/:cardId/disable` に
+   * 当たらない。Hono が解決したパターンを得るには、`c.req.routePath`
+   * （非推奨）ではなく `hono/route` の `routePath(c, -1)` を使うこと——
+   * **ミドルウェアの中で既定の `routePath(c)` を呼ぶと、ミドルウェア自身の
+   * 登録パターン（`"/*"`）が返り、最終的に応答するハンドラのパターンは
+   * `-1`（末尾）でしか取れない**（実測、Hono 4.13）。
+   *
+   * **対応表に無いルートに実際にマッチしたら 403（既定は拒否）。**
+   * `test/route-permissions.test.ts` が「宣言の無いルートを足せない」こと
+   * を CI で見るが、万一それをすり抜けても安全側に倒す。一方、
+   * **どのルートにもマッチしていない（`routePath(c, -1)` が `"/*"`、
+   * この自分自身の登録パターンのまま）場合は、ただの 404 として素通り
+   * させる**——存在しないパスまで 403 にすると、タイプミスの URL が
+   * 「権限が無い」と誤解される。
+   */
+  app.use("*", async (c, next) => {
+    const url = new URL(c.req.url);
+    if (PUBLIC_PATHS.has(url.pathname)) return next();
+    if (url.pathname === PENDING_PATH || url.pathname === "/") return next();
+
+    const matchedPath = routePath(c, -1);
+    if (matchedPath === "/*") return next(); // どのルートにもマッチしていない。404 は下流に任せる。
+
+    const required = requiredPermissionFor(c.req.method, matchedPath);
+    if (required === undefined) {
+      // CI の二方向テストが本来ここを落とすはずの状態。すり抜けても拒否する。
+      return c.json({ error: "forbidden" }, 403);
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const effective = await container.approvals.getEffectivePermissions(session.sub);
+    if (effective === null || !hasPermission(effective, required)) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+
     return next();
   });
 
