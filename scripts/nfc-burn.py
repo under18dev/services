@@ -74,63 +74,53 @@ RC-S300 は PC/SC 2.0 準拠という報告を根拠にしているが、運用�
 
 取り方:
 
-1. `https://auth.under18.dev` に **Passkey でログインする。**
-   **メール OTP では駄目。** #337 以降、`isAdmin` は Passkey で張った
-   セッションでしか立たない（仕様書 §14.1 決定 8、RR-5）。OTP で入ると
-   403 が返る —— 401 ではないので「ログインしていない」と読まないこと。
+1. **`https://admin.under18.dev` に Passkey でログインする。** #461 で
+   発行の口が admin-worker 側へ移ったので、**`auth.under18.dev` ではなく
+   admin-worker 自身にログインしてセッションを張る。** `__Host-` 接頭辞の
+   Cookie は Domain 属性を持てない（host-exact）ので、auth.under18.dev で
+   取った Cookie は admin.under18.dev へは送られない——**別のホストで
+   ログインし直す必要がある。**
+   **メール OTP では駄目。** admin-worker の認可要求は `acr_values=passkey`
+   を必須で付ける（仕様書 §14.1 決定 8、RR-5）ので、OTP では
+   コールバックの時点で弾かれ、セッションそのものが張られない。
+   **さらに `admin_approvals` に自分の `userId` が無いと、ログインできても
+   `/pending` へ送られる**（運営に承認してもらうこと）。
 2. DevTools → Application（Firefox なら Storage）→ Cookies →
-   `https://auth.under18.dev`
+   `https://admin.under18.dev`
 3. `__Host-u18_session` の行の **Name と Value を `名前=値` の形に繋いで**
    環境変数へ入れる。**`Cookie: ` の接頭辞は要らない**（付いていても落とす）。
 
 開発環境では Cookie 名が `u18_session`（`__Host-` なし）になる
 （`packages/contracts/src/session-cookie.ts`）。`--api-origin` を
-`http://localhost:8787` などに向けるときは、そちらの名前で入れること。
+`http://localhost:8790`（admin-worker の既定の開発ポート）などに
+向けるときは、そちらの名前で入れること。
 
-## **この発行経路は #433 で消えた。いまこのスクリプトは発行できない**
+**未ログイン・未承認は JSON で返る。** admin-worker のセッションガード
+（`app.ts`）は既定では `/login` / `/pending` への 302 だが、
+`Content-Type: application/json`（または `Accept: application/json`）が
+付いた要求には **302 を返さず** `401 {"error":"unauthenticated"}` /
+`403 {"error":"not_approved"}` を返す（レビューで追加）。このスクリプトは
+常に両方のヘッダを送るので、302 を `urllib` が追って `/login` の HTML を
+受け取ることは無い——`hint_for()` がこの 2 つを扱う。
 
-叩いていたのは nfc-worker の JSON API:
+## 機械向けの発行の口（#461、以前は #433 で消えていた）
 
-    POST https://auth.under18.dev/account/nfc/cards
+以前叩いていたのは nfc-worker の JSON API（`POST
+https://auth.under18.dev/account/nfc/cards`）で、**#412 で管理画面が
+`admin.under18.dev/nfc` へ移り、#433 で `/account/nfc` 側の運営機能ごと
+消えた。** その後 #461 で、**admin-worker 自身に機械向けの JSON 発行
+エンドポイントが新設された**（`apps/admin-worker/src/presentation/http/
+nfc.routes.tsx` の `POST /nfc/cards`）——`Origin` と
+`Content-Type: application/json` の 2 枚で守る点は、消えた
+`cards.routes.ts` の門番と同じ考え方である。
 
-管理画面は **#412 で `admin.under18.dev/nfc` へ移り**（admin-worker の
-`nfc.routes.tsx`）、**#433 で `/account/nfc` 側の運営機能を消した** ——
-#390 の段取り 6（「移したら消す」）そのものである。
+**このスクリプトは #461 で 3 箇所を直してある** —— `DEFAULT_API_ORIGIN`、
+`CARDS_PATH`、そして `issue_card()` の冒頭にあった停止ガード（削除済み）。
 
-**つまり `--live-issue` は通らない。** `issue_card()` は要求を投げる前に
-`IssueError` で止まる。**機械向けの発行の口が決まるまで、このスクリプトで
-焼けるのは「偽物の cardId で手順だけ確かめる」ところまでである。**
-
-**向き先を `admin.under18.dev/nfc` へ替えるだけでは済まない。**
-あちらは HTML フォームで、
-
-- **CSRF トークンが要る。** `GET /nfc` を引いて hidden の値を拾い、Cookie と
-  一緒に送り直すことになる（admin-worker の `csrf.ts`）。
-- **`POST /nfc` は cardId を返さない。** 成功すると `303` で
-  `/nfc?issued=<枚数>` へ飛ぶだけで、**出た ID が応答に無い。**
-  一覧を引き直して差分を取ることになるが、**「発行の直後に一覧を引いて
-  どれが出たか当てる」はこのスクリプトが避けている形そのもの**である
-  （同時に誰かが発行していれば、一覧の側からは決められない）。
-
-**つまり、ここで決めるのは「スクリプトをどう直すか」ではなく
-「機械向けの発行の口をどこに置くか」である。** 選べるのは概ね 3 つ:
-
-1. **admin-worker に JSON の発行エンドポイントを足す**（`Origin` と
-   `Content-Type: application/json` の 2 枚で守る。いまの `cards.routes.ts`
-   と同じ門番）。このスクリプトは `--api-origin` の既定値を替えるだけで済む。
-2. **`POST /nfc` の応答に発行された cardId を載せる。** PRG の形を崩す。
-   クエリには載せられない（`base-path.ts` の `CLAIM_CARD_PARAM` が
-   「カード ID をログに出る場所へ置かない」として退けた形）ので、本文で返す
-   ことになり、フォーム経由の画面遷移と両立させる作りが要る。
-3. **`/account/nfc/cards` を機械用として残す。** #390 の「移したら消す」に
-   正面から反する。**残すなら理由を書いて残すこと。**
-
-**1 を薦める。** 2 は画面の都合とスクリプトの都合を 1 本の応答に混ぜる。
-3 は #390 が「同じ機能が 2 箇所にある期間が長いほど、片方だけ直される」と
-書いて避けた形そのものである。
-
-**1 を入れるときにこのスクリプトが直すのは 3 箇所** —— `DEFAULT_API_ORIGIN`、
-`CARDS_PATH`、そして `issue_card()` の冒頭にある停止ガードである。
+**`admin.under18.dev/nfc`（HTML フォーム）を直接叩く形では済まなかった
+理由**は変わっていない——あちらは CSRF トークンが要り、応答が `303`
+リダイレクトで `cardId` を返さない。`POST /nfc/cards` はその両方を
+避けて作られている。
 
 ## 前提にしていること（タグ側）
 
@@ -168,22 +158,11 @@ from nfc_ndef import decode_ndef_tlv, encode_ndef_tlv, to_pages  # noqa: E402
 #: セッション Cookie を受け取る環境変数。**値は絶対にここへ書かない。**
 SESSION_ENV = "U18_SESSION_COOKIE"
 
-#: 発行 API。**#433 で消えた**（docstring の「この発行経路は…」を参照）。
-#: 値を残してあるのは、代わりの口が決まったときに**どこを書き換えれば
-#: よいかを 1 箇所にまとめておく**ため。
-DEFAULT_API_ORIGIN = "https://auth.under18.dev"
-CARDS_PATH = "/account/nfc/cards"
-
-#: `issue_card()` が投げる前に止める理由。**404 を見せない** —— 404 は
-#: 「URL を間違えた」と読めるので、運用者が綴りを疑って時間を使う。
-ISSUE_ENDPOINT_GONE = (
-    "カードの発行 API は #433 で消えました"
-    f"（{DEFAULT_API_ORIGIN}{CARDS_PATH}）。"
-    " 発行は admin.under18.dev/nfc の画面にありますが、"
-    "あちらは HTML フォームで cardId を応答に返しません。"
-    " 機械向けの口をどこに置くかは未決です —— このファイルの docstring"
-    "「この発行経路は…」に選択肢と引き換えが書いてあります。"
-)
+#: 発行 API（#461、admin-worker の機械向け JSON エンドポイント）。
+#: **`auth.under18.dev` ではなく `admin.under18.dev`。** セッション
+#: Cookie もこちらのホストで取り直すこと（docstring の「取り方」を参照）。
+DEFAULT_API_ORIGIN = "https://admin.under18.dev"
+CARDS_PATH = "/nfc/cards"
 
 #: タグへ焼く URL のホスト。`wrangler.jsonc` の `SHORT_URL_ORIGIN`（production）。
 DEFAULT_SHORT_URL_ORIGIN = "https://go.under18.dev"
@@ -254,13 +233,31 @@ def origin_of(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def hint_for(status: int) -> str:
+def hint_for(status: int, body: str = "") -> str:
+    """状態コードから考えられる原因を 1〜数行で返す。
+
+    **`body` で 403 を 2 通りに分ける。** `POST /nfc/cards` が返す 403 には
+    2 つの理由がある——Origin / Content-Type の門番（`origin.ts`）と、
+    セッションガード（`app.ts`）が未承認を JSON で返す `not_approved`
+    （レビューで追加）。どちらも同じ 403 だが、運用者が直すものが違う。
+    """
     if status == 401:
+        if '"error":"unauthenticated"' in body:
+            return (
+                f"    → ログインしていません。{SESSION_ENV} が空か、"
+                "セッションの期限が切れています。"
+                "admin.under18.dev で Passkey ログインし直し、"
+                "そちらのホストで Cookie を取り直してください。"
+            )
         return f"    → {SESSION_ENV} のセッションが切れているか、Cookie の名前が違います。"
     if status == 403:
+        if '"error":"not_approved"' in body:
+            return (
+                "    → ログインはできていますが、admin_approvals に"
+                "まだ登録されていません。運営に承認してもらってください。"
+            )
         return (
-            "    → 3 つのどれか。\n"
-            "       ・管理者ではない（Passkey で入り直す。メール OTP では isAdmin が立たない）\n"
+            "    → 2 つのどちらか。\n"
             "       ・Origin が送れていない\n"
             "       ・Content-Type が application/json になっていない"
         )
@@ -275,10 +272,6 @@ def issue_card(api_origin: str, cookie: str, batch: str | None) -> str:
     生まれる。この関数が呼ばれるのは、**タグが読み取り機に載っていることを
     確かめたあと**だけ。
     """
-    # **投げる前に止める**（#433）。理由は `ISSUE_ENDPOINT_GONE`。
-    # 代わりの口が決まったら、この 1 行と上の 2 つの定数を直すこと。
-    raise IssueError(ISSUE_ENDPOINT_GONE)
-
     url = urllib.parse.urljoin(api_origin, CARDS_PATH)
     payload = {"count": 1} if batch is None else {"count": 1, "batch": batch}
     body = json.dumps(payload).encode("utf-8")
@@ -309,7 +302,7 @@ def issue_card(api_origin: str, cookie: str, batch: str | None) -> str:
         # （`bodyFor()`）、秘密は入らない。
         detail = error.read().decode("utf-8", "replace")
         raise IssueError(
-            f"{error.code} {error.reason}\n    応答: {detail}\n{hint_for(error.code)}"
+            f"{error.code} {error.reason}\n    応答: {detail}\n{hint_for(error.code, detail)}"
         ) from error
     except urllib.error.URLError as error:
         raise IssueError(f"{url} へ届きません: {error.reason}") from error

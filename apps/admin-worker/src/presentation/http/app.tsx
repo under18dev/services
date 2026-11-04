@@ -18,6 +18,7 @@ import { sanitizeReturnTo } from "../../oidc/return-to";
 import { createSessionToken, verifySessionToken } from "../../oidc/session";
 import { exchangeAuthorizationCode } from "../../oidc/token-exchange";
 import { registerAuditRoutes } from "./audit.routes";
+import { wantsJsonResponse } from "./origin";
 import { registerClientsRoutes } from "./clients.routes";
 import { registerNfcAnalyticsRoutes } from "./nfc-analytics.routes";
 import { registerNfcRoutes } from "./nfc.routes";
@@ -137,6 +138,14 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
    * `/pending` 自身はこのガードの対象外にしてある——未承認の人を
    * `/pending` へ送った**その応答自体**がガードを通ると、
    * 「未承認なら `/pending` へ」のループになる。
+   *
+   * ## JSON を期待している呼び出しには 302 を返さない（#461 レビュー）
+   *
+   * `POST /nfc/cards`（`scripts/nfc-burn.py` のような機械向け JSON API）
+   * もこのガードの対象で、302 のままだと機械は `/login` / `/pending` の
+   * HTML を 200 として受け取ってしまう。`wantsJsonResponse` が真なら
+   * `401 { error: "unauthenticated" }` / `403 { error: "not_approved" }`
+   * を返す（`origin.ts` の JSDoc を参照）。
    */
   app.use("*", async (c, next) => {
     const url = new URL(c.req.url);
@@ -151,13 +160,21 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
         : await verifySessionToken(new TextEncoder().encode(env.SESSION_SECRET), token);
 
     if (session === null) {
+      // **JSON を期待している呼び出しには 302 を返さない**（#461 レビュー）。
+      // 機械が `/login` の HTML を 200 として受け取り、「何が起きたか
+      // 分からない」失敗になることを避ける——`wantsJsonResponse` の JSDoc
+      // を参照。
+      if (wantsJsonResponse(c)) return c.json({ error: "unauthenticated" }, 401);
       const returnTo = sanitizeReturnTo(`${url.pathname}${url.search}`);
       return c.redirect(`/login?${RETURN_TO_QUERY}=${encodeURIComponent(returnTo)}`, 302);
     }
 
     if (url.pathname !== PENDING_PATH) {
       const approved = await container.approvals.isApproved(session.sub);
-      if (!approved) return c.redirect(PENDING_PATH, 302);
+      if (!approved) {
+        if (wantsJsonResponse(c)) return c.json({ error: "not_approved" }, 403);
+        return c.redirect(PENDING_PATH, 302);
+      }
     }
 
     c.set("session", session);

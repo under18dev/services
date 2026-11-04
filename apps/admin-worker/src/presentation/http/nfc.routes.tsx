@@ -1,6 +1,8 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
+import type { RpcErrorCode } from "@u18/contracts";
 import type { Context, Hono } from "hono";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
+import { isAllowedOrigin, isJsonRequest } from "./origin";
 import { csrfRejected, serviceUnavailable } from "./ui/message-page";
 import { cardTapUrl } from "./nfc-tap-url";
 import { NfcPage } from "./ui/nfc-page";
@@ -50,6 +52,25 @@ const TARGET_URL_REASON_LABEL: Readonly<Record<string, string>> = {
   private_host: "このホスト名は設定できません（内部向けのアドレスです）。",
   blocked_host: "このホスト名は設定できません。",
 };
+
+/** `c.req.json()` の戻り値を安全に触るための絞り込み。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * `POST /nfc/cards`（#461）の失敗を HTTP ステータスへ訳す。
+ *
+ * **`invalid_input` は 400。** 枚数が範囲外・`actorUserId` の形が
+ * 想定と違う、のどちらもここに畳まれる——`scripts/nfc-burn.py` は
+ * 応答本文（`{"error": "..."}`）をそのまま表示するので、コード名が
+ * 読めれば足りる。
+ */
+function statusForIssueFailure(code: RpcErrorCode): 400 | 403 | 503 {
+  if (code === "invalid_input") return 400;
+  if (code === "forbidden" || code === "unauthenticated") return 403;
+  return 503;
+}
 
 function issuedCountFromQuery(raw: string | undefined): number | null {
   if (raw === undefined) return null;
@@ -133,6 +154,53 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     c.header("Cache-Control", "no-store");
     return c.redirect(`/nfc?${ISSUED_COUNT_PARAM}=${result.value.cards.length}`, 303);
+  });
+
+  /**
+   * 機械向けの発行 API（#461、`scripts/nfc-burn.py` の退路）。
+   *
+   * **上の `POST /nfc` とは別の経路である。** あちらは HTML form を前提に
+   * CSRF トークン（double-submit）で守り、PRG で `/nfc` へ戻るだけで
+   * 発行した `cardId` を応答に載せない——`nfc-burn.py` のような機械は
+   * 「タグが目の前にある 1 枚を発行して、その ID をその場で受け取る」
+   * ことが要るので、どちらも満たせない（この関数の JSDoc と issue #461
+   * を参照）。
+   *
+   * **CSRF トークンではなく Origin + Content-Type の 2 枚で守る。**
+   * nfc-worker の `cards.routes.ts`（`/account/nfc/cards`、#433 で消えた
+   * 発行経路）と同じ考え方——この JSON API には対応する HTML form が
+   * 無いので、double-submit トークンを運ぶ場所が無い。
+   *
+   * **`pageSecurityHeaders` を付けない。** あれは HTML ページの CSP 等
+   * ヘッダで、JSON 応答には意味を持たない（nfc-worker の JSON API も
+   * 付けていない）。
+   *
+   * **セッション・承認の確認は `app.ts` の既存ガードに任せる。** この
+   * ルートも「承認済みの管理者」だけが到達する非公開経路の 1 つで、
+   * 専用の確認は持たない（issue #461 の指示どおり）。
+   */
+  app.post("/nfc/cards", async (c) => {
+    if (!isAllowedOrigin(c) || !isJsonRequest(c)) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const count = isRecord(body) && typeof body.count === "number" ? body.count : NaN;
+    const batch =
+      isRecord(body) && typeof body.batch === "string" && body.batch.trim() !== ""
+        ? body.batch
+        : null;
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const result = await container.nfcCards.issueCards({ actorUserId: session.sub, count, batch });
+
+    if (!result.ok) {
+      return c.json({ error: result.error.code }, statusForIssueFailure(result.error.code));
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.json({ cards: result.value.cards }, 201);
   });
 
   app.post("/nfc/:cardId/disable", pageSecurityHeaders, async (c) => {
