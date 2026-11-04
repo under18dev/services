@@ -40,6 +40,13 @@ export const oauthClients = sqliteTable(
      * そもそも無い。
      */
     ownerUserId: text("owner_user_id").references(() => users.id),
+    /**
+     * 利用者が開けるアプリ本体の URL（#457）。**nullable。** `oauth_redirect_uris`
+     * はコールバックの宛先であって人が開くページではないので、こことは別に持つ。
+     * `owner_user_id` と同じ理由で既存行には無く、推測で埋めない——無いクライアントは
+     * ダッシュボードの一覧でリンクにしない（押しても何も無いリンクを置かない、#306）。
+     */
+    appUrl: text("app_url"),
     /** 失効させたクライアントは即座に認可を拒否する。 */
     disabledAt: timestampMs("disabled_at"),
     createdAt: createdAt(),

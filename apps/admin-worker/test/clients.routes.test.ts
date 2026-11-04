@@ -9,6 +9,8 @@ import type {
   IdentityAdminDelegatedRpcContract,
   ListOAuthClientsDelegatedResult,
   OAuthClientSummary,
+  SetOAuthClientAppUrlDelegatedInput,
+  SetOAuthClientAppUrlDelegatedResult,
   SetOAuthClientOwnerDelegatedInput,
   SetOAuthClientOwnerDelegatedResult,
 } from "@u18/contracts";
@@ -39,6 +41,7 @@ function client(overrides: Partial<OAuthClientSummary> = {}): OAuthClientSummary
     createdAt: "2026-10-01T00:00:00.000Z",
     disabledAt: null,
     ownerUserId: null,
+    appUrl: null,
     ...overrides,
   };
 }
@@ -49,12 +52,14 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     createOAuthClient: CreateOAuthClientDelegatedInput[];
     disableOAuthClient: DisableOAuthClientDelegatedInput[];
     setOAuthClientOwner: SetOAuthClientOwnerDelegatedInput[];
+    setOAuthClientAppUrl: SetOAuthClientAppUrlDelegatedInput[];
   };
 } {
   const calls = {
     createOAuthClient: [] as CreateOAuthClientDelegatedInput[],
     disableOAuthClient: [] as DisableOAuthClientDelegatedInput[],
     setOAuthClientOwner: [] as SetOAuthClientOwnerDelegatedInput[],
+    setOAuthClientAppUrl: [] as SetOAuthClientAppUrlDelegatedInput[],
   };
 
   const rpc: IdentityAdminDelegatedRpcContract = {
@@ -78,6 +83,10 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     },
     setOAuthClientOwner: async (input): Promise<SetOAuthClientOwnerDelegatedResult> => {
       calls.setOAuthClientOwner.push(input);
+      return rpcOk(null);
+    },
+    setOAuthClientAppUrl: async (input): Promise<SetOAuthClientAppUrlDelegatedResult> => {
+      calls.setOAuthClientAppUrl.push(input);
       return rpcOk(null);
     },
     listAuditLogs: async () => rpcOk({ entries: [], nextCursor: null }),
@@ -716,6 +725,161 @@ describe("POST /clients/owner", () => {
     const html = await response.text();
     expect(html).not.toContain("does not exist");
     expect(html).toContain("見つかりません");
+  });
+});
+
+describe("GET /clients（表示用 URL の表示）", () => {
+  it("URL があれば出し、無ければ — を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listOAuthClients: async () =>
+        rpcOk([
+          client({ clientId: "app_with_url", appUrl: "https://app.example/" }),
+          client({ clientId: "app_without_url", appUrl: null }),
+        ]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("表示用 URL: https://app.example/");
+    expect(html).toContain("表示用 URL: —");
+  });
+});
+
+describe("POST /clients/app-url", () => {
+  it("CSRF トークンが無ければ 403 で、setOAuthClientAppUrl を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app-url`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: "app_0001", app_url: "https://app.example/" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.setOAuthClientAppUrl).toHaveLength(0);
+  });
+
+  it("CSRF が通れば setOAuthClientAppUrl を actorUserId 付きで呼ぶ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app-url`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          app_url: "https://app.example/",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.setOAuthClientAppUrl).toEqual([
+      { actorUserId: SUB, clientId: "app_0001", appUrl: "https://app.example/" },
+    ]);
+    const html = await response.text();
+    expect(html).toContain("表示用 URL を変更しました。");
+  });
+
+  it("空欄で送ると null（外す）として渡す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    await app.fetch(
+      new Request(`${ORIGIN}/clients/app-url`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", app_url: "", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(calls.setOAuthClientAppUrl).toEqual([
+      { actorUserId: SUB, clientId: "app_0001", appUrl: null },
+    ]);
+  });
+
+  it("不正な URL（invalid_input）は言い直す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      setOAuthClientAppUrl: async () =>
+        rpcErr(RpcErrorCode.InvalidInput, "appUrl is not a usable https URL"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app-url`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          app_url: "http://app.example/",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("usable https URL");
+    expect(html).toContain("https で始まる");
   });
 });
 

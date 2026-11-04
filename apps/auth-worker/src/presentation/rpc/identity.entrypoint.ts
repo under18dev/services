@@ -219,10 +219,11 @@ export class IdentityRPC extends WorkerEntrypoint<Env> implements IdentityRpcCon
     if (result.value === null) return rpcErr("unauthenticated", "session is not valid");
 
     return rpcOk(
-      result.value.map(({ grant, clientId, clientName, logoUrl }) => ({
+      result.value.map(({ grant, clientId, clientName, logoUrl, appUrl }) => ({
         clientId,
         clientName,
         logoUrl,
+        appUrl,
         // Domain は `readonly string[]` を返す。DTO は構造化クローンで
         // 運ばれるので、ここで配列として素直に渡せばよい。
         scopes: [...grant.scopes],

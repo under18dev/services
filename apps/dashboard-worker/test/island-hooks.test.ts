@@ -70,6 +70,7 @@ const GRANT: GrantListItem = {
   clientId: "rp-1",
   clientName: "Example RP",
   logoUrl: null,
+  appUrl: null,
   scopes: ["openid"],
   grantedAt: "2026-10-24T00:00:00.000Z",
 };

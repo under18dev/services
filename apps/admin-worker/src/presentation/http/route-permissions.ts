@@ -47,6 +47,8 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   // #441。main に先に入ったので最終合わせを待たずここで足す
   // （#454/#455 等、まだ並行中のものは最後にまとめて合わせる）。
   "POST /clients/owner": "CLIENT_WRITE",
+  // #457。owner と同じ形（クライアントの属性を変える書き込み）。
+  "POST /clients/app-url": "CLIENT_WRITE",
 
   // 検索は読み取り。一覧の絞り込みでしかなく、状態を変えない。
   "POST /users/search": "USER_READ",

@@ -48,6 +48,7 @@ export async function seedClient(options: {
   readonly redirectUris?: readonly string[];
   readonly allowedScopes?: string;
   readonly disabledAt?: Date | null;
+  readonly appUrl?: string | null;
 }): Promise<SeededClient> {
   const id = newClientId();
   const redirectUris = options.redirectUris ?? [REDIRECT_URI];
@@ -64,6 +65,7 @@ export async function seedClient(options: {
       allowedScopes: options.allowedScopes ?? "openid profile email",
       isFirstParty: options.isFirstParty,
       logoUrl: null,
+      appUrl: options.appUrl ?? null,
       disabledAt: options.disabledAt ?? null,
     })
     .run();

@@ -64,6 +64,7 @@ export class DrizzleOAuthGrantRepository implements OAuthGrantRepository {
       clientId: client.clientId,
       clientName: client.name,
       logoUrl: client.logoUrl,
+      appUrl: client.appUrl,
     }));
   }
 

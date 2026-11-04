@@ -358,6 +358,7 @@ describe("利用者が決められない文字列をそのまま埋め込まな�
       clientId: "cli_1",
       clientName: XSS,
       logoUrl: "https://evil.example/pixel.png",
+      appUrl: null,
       scopes: ["openid"],
       grantedAt: "2026-10-24T00:00:00.000Z",
     };
@@ -378,6 +379,7 @@ describe("連携アプリのロゴを読み込まない", () => {
       clientId: "cli_1",
       clientName: "Example App",
       logoUrl: "https://evil.example/pixel.png",
+      appUrl: null,
       scopes: ["openid"],
       grantedAt: "2026-10-24T00:00:00.000Z",
     };
@@ -614,6 +616,7 @@ describe("実装側の語を画面に出さない", () => {
       clientId: "cli_1",
       clientName: "Example App",
       logoUrl: null,
+      appUrl: null,
       scopes: ["profile", "wallet:write"],
       grantedAt: "2026-10-24T00:00:00.000Z",
     };
@@ -656,8 +659,15 @@ describe("アプリのカタログ（#308）", () => {
    * ので、`/account/apps` を引くだけでは「0 件」も「連携済み」も踏めない。
    * `AppsPage` に直接 props を渡して、カタログが変わったときの形を見る。
    */
-  async function renderApps(view: AppCatalogView): Promise<string> {
-    const probe = new Hono().get("/", (c) => c.html(AppsPage({ view }) as never));
+  /**
+   * **カタログの部分だけを見るテストなので `grants` は既定で `null`。**
+   * 連携したアプリ（主役、#457）の表示は `apps-page.test.ts` が別に見る。
+   */
+  async function renderApps(
+    view: AppCatalogView,
+    grants: readonly GrantListItem[] | null = null,
+  ): Promise<string> {
+    const probe = new Hono().get("/", (c) => c.html(AppsPage({ view, grants }) as never));
     return await (await probe.request("/")).text();
   }
 
@@ -666,6 +676,7 @@ describe("アプリのカタログ（#308）", () => {
     clientId: "u18-example-app",
     clientName: "Example App",
     logoUrl: null,
+    appUrl: null,
     scopes: ["openid"],
     grantedAt: "2026-10-24T00:00:00.000Z",
   };
@@ -917,4 +928,109 @@ describe("アプリのカタログ（#308）", () => {
   // `PAGES` 全体を見る検査を足しており（上の「CSP が許していないものを
   // 画面が使っていない」）、`APPS_PATH` はそこに入っている。こちらにも
   // 書くと、同じことを 2 箇所で見て片方だけ古くなる。
+});
+
+/**
+ * 連携したアプリ（`/account/apps` の主役、#457）。
+ *
+ * 上の「アプリのカタログ（#308）」は副次的な内容（カタログ）を見ている。
+ * ここで見るのは #457 で主役になった `listGrants` の結果——`appUrl` を
+ * 持つかどうかでリンクにするかが変わること、0 件と「取れなかった」が
+ * 別の見た目になること、取り消しの導線を作り直していないことである。
+ */
+describe("連携したアプリ（#457）", () => {
+  const CONNECTED_WITH_URL: GrantListItem = {
+    clientId: "u18-with-url",
+    clientName: "URL ありのアプリ",
+    logoUrl: null,
+    appUrl: "https://app.example/",
+    scopes: ["openid"],
+    grantedAt: "2026-10-24T00:00:00.000Z",
+  };
+
+  const CONNECTED_WITHOUT_URL: GrantListItem = {
+    clientId: "u18-without-url",
+    clientName: "URL なしのアプリ",
+    logoUrl: null,
+    appUrl: null,
+    scopes: ["openid"],
+    grantedAt: "2026-10-24T00:00:00.000Z",
+  };
+
+  it("app_url があればリンクにし、無ければ名前だけ出す（押しても何も無いリンクを置かない、#306）", async () => {
+    const html = await (
+      await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcOk([CONNECTED_WITH_URL, CONNECTED_WITHOUT_URL]),
+      })
+    ).text();
+
+    expect(html).toContain(`href="${CONNECTED_WITH_URL.appUrl}"`);
+    expect(html).toContain(CONNECTED_WITH_URL.clientName);
+    expect(html).toContain(CONNECTED_WITHOUT_URL.clientName);
+    // URL の無いほうは、名前が `<a href>` の中に現れない。
+    expect(html).not.toMatch(new RegExp(`<a[^>]*>\\s*${CONNECTED_WITHOUT_URL.clientName}\\s*</a>`));
+  });
+
+  it("app_url は redirect_uri から導出しない。渡された値をそのまま使う", async () => {
+    // `oauth_redirect_uris`（コールバック宛先）はこの画面に一切現れない
+    // ——`listGrants` が返すのは `appUrl` フィールドだけで、`GrantListItem`
+    // に redirect_uri は無い。
+    const html = await (
+      await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcOk([CONNECTED_WITH_URL]),
+      })
+    ).text();
+
+    expect(html).toContain("https://app.example/");
+  });
+
+  it("0 件なら「まだ連携したアプリはありません」。カタログへの導線を添える（行き止まりにしない）", async () => {
+    const html = await (
+      await withCookie(APPS_PATH, { ...FULL_IDENTITY, listGrants: async () => rpcOk([]) })
+    ).text();
+
+    expect(html).toContain("まだ連携したアプリはありません");
+    expect(html).toContain("u18 Identity で使えるアプリ");
+  });
+
+  it("listGrants が取れなければ「0 件」と区別する", async () => {
+    const html = await (
+      await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcErr("internal", "boom"),
+      })
+    ).text();
+
+    expect(html).not.toContain("まだ連携したアプリはありません");
+    expect(html).toContain("いま連携したアプリを確認できません");
+    // **カタログは `listGrants` に依存しない。** 連携アプリの取得が
+    // 失敗しても、こちらは出す（行き止まりにしない）。
+    for (const entry of APP_CATALOG) expect(html).toContain(entry.name);
+  });
+
+  it("取り消しをこの画面に作り直さない。「連携アプリ」への導線だけを出す", async () => {
+    const html = await (
+      await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcOk([CONNECTED_WITH_URL]),
+      })
+    ).text();
+
+    // 取り消しフォーム（`revokeGrant` 相当）がここには無い。
+    expect(html).not.toContain("連携を解除");
+    expect(html).toContain(`href="${GRANTS_PATH}"`);
+  });
+
+  it("連携したアプリの一覧には内部 ID（cli_*）が出ない", async () => {
+    const html = await (
+      await withCookie(APPS_PATH, {
+        ...FULL_IDENTITY,
+        listGrants: async () => rpcOk([CONNECTED_WITH_URL]),
+      })
+    ).text();
+
+    expect(html).not.toContain("cli_");
+  });
 });

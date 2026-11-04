@@ -209,6 +209,15 @@ export const AUDIT_EVENTS = [
    * （`card.reinstated`）と同じ判断で、使い回す先が無いので新設する。
    */
   "oauth.client.owner_changed",
+  /**
+   * 管理者がクライアントの表示用 URL（`app_url`）を設定・変更した（#457）。
+   *
+   * **`owner_changed` と違って `security` 区分にしない。** 持ち主の変更は
+   * 「誰の責任か」という支配権そのものだが、`app_url` は利用者の画面に
+   * 出す表示用の付随情報でしかなく、認可やアクセス制御には効かない
+   * （`domain/services/app-url.ts` の検証も見た目のための関門である）。
+   */
+  "oauth.client.app_url_changed",
   /** 認可リクエストの受理・拒否。 */
   "oauth.authorize.decided",
   /** 認可コードの発行。 */
@@ -420,6 +429,12 @@ export const AUDIT_EVENT_RETENTION = {
   "oauth.token.issued": { sink: "d1", retention: "standard" },
   "oauth.token.revoked": { sink: "d1", retention: "standard" },
   "oauth.userinfo": { sink: "d1", retention: "standard" },
+  /**
+   * 表示用 URL（`app_url`）の設定・変更（#457）。`owner_changed` と違って
+   * `security` にしない——認可にもアクセス制御にも効かない、画面に出す
+   * だけの付随情報だからである。
+   */
+  "oauth.client.app_url_changed": { sink: "d1", retention: "standard" },
   /** 15 分おきに 1 行。掃除自身の記録を 2 年持つ理由が無い。 */
   "retention.sweep": { sink: "d1", retention: "standard" },
   // --- audit_logs に書かない（#381） ---

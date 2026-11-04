@@ -107,4 +107,14 @@ export interface OAuthClientRepository {
    * auth-worker が信じない）。
    */
   setOwner(clientId: string, ownerUserId: string | null): Promise<boolean>;
+
+  /**
+   * 利用者が開けるアプリ本体の URL を設定・変更する（#457）。**`null` で外せる。**
+   *
+   * `setOwner` と同じ形——一方向の遷移ではないので冪等性の WHERE 句は要らない。
+   * URL の形式検証（`https:` のみ・資格情報を含まない）はここでは行わない——
+   * 呼び出し側（`DelegatedSetOAuthClientAppUrlUseCase`）が
+   * `domain/services/app-url.ts` で確かめてから渡す。
+   */
+  setAppUrl(clientId: string, appUrl: string | null): Promise<boolean>;
 }

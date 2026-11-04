@@ -89,6 +89,7 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
       isFirstParty: input.isFirstParty,
       logoUrl: input.logoUrl,
       ownerUserId: null,
+      appUrl: null,
       disabledAt: null,
       redirectUris: [...new Set(input.redirectUris)],
       createdAt: new Date(),
@@ -111,6 +112,13 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
     const props = this.store.get(clientId);
     if (props === undefined) return false;
     this.store.set(clientId, { ...props, ownerUserId });
+    return true;
+  }
+
+  async setAppUrl(clientId: string, appUrl: string | null): Promise<boolean> {
+    const props = this.store.get(clientId);
+    if (props === undefined) return false;
+    this.store.set(clientId, { ...props, appUrl });
     return true;
   }
 }
@@ -236,6 +244,7 @@ export class InMemoryOAuthGrantRepository implements OAuthGrantRepository {
         clientId: row.clientId,
         clientName: `client ${row.clientId}`,
         logoUrl: null,
+        appUrl: null,
       }));
   }
 

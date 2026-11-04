@@ -490,6 +490,134 @@ describe("setOAuthClientOwner", () => {
   });
 });
 
+describe("setOAuthClientAppUrl", () => {
+  it("表示用 URL を設定でき、一覧にも反映される", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+
+    const result = await rpc.setOAuthClientAppUrl({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      appUrl: "https://app.example/",
+    });
+
+    expect(result.ok).toBe(true);
+    const list = await rpc.listOAuthClients({ actorUserId: admin.userId });
+    const updated = list.ok
+      ? list.value.find((c) => c.clientId === created.value.client.clientId)
+      : undefined;
+    expect(updated?.appUrl).toBe("https://app.example/");
+  });
+
+  it("null を渡すと外せる", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+    await rpc.setOAuthClientAppUrl({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      appUrl: "https://app.example/",
+    });
+
+    const result = await rpc.setOAuthClientAppUrl({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      appUrl: null,
+    });
+
+    expect(result.ok).toBe(true);
+    const list = await rpc.listOAuthClients({ actorUserId: admin.userId });
+    const updated = list.ok
+      ? list.value.find((c) => c.clientId === created.value.client.clientId)
+      : undefined;
+    expect(updated?.appUrl).toBeNull();
+  });
+
+  it.each([
+    ["平文 HTTP", "http://app.example/"],
+    ["data: スキーム", "data:text/html,hi"],
+    ["資格情報付き", "https://user:pass@app.example/"],
+    ["絶対 URI でない", "/app"],
+  ])("不正な appUrl（%s）は invalid_input で弾く（行は変わらない）", async (_label, appUrl) => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+
+    const result = await rpc.setOAuthClientAppUrl({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      appUrl,
+    });
+
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+    const row = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, created.value.client.clientId))
+      .get();
+    expect(row?.appUrl).toBeNull();
+  });
+
+  it("未登録の client_id は not_found", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    const result = await rpc.setOAuthClientAppUrl({
+      actorUserId: admin.userId,
+      clientId: "u18-never-existed",
+      appUrl: "https://app.example/",
+    });
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("監査に前後の値が残り、standard 区分である", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const created = await rpc.createOAuthClient({
+      actorUserId: admin.userId,
+      name: "x",
+      clientType: "public",
+      redirectUris: ["https://app.example/cb"],
+    });
+    if (!created.ok) throw new Error("登録に失敗した");
+
+    await rpc.setOAuthClientAppUrl({
+      actorUserId: admin.userId,
+      clientId: created.value.client.clientId,
+      appUrl: "https://app.example/",
+    });
+
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "oauth.client.app_url_changed"))
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: "success", userId: admin.userId });
+    const metadata = rows[0]?.metadata as Record<string, unknown>;
+    expect(metadata).toMatchObject({
+      clientId: created.value.client.clientId,
+      previousAppUrl: null,
+      newAppUrl: "https://app.example/",
+    });
+  });
+});
+
 describe("IdentityAdminRpcContract（dashboard 向け）は影響を受けない", () => {
   it("sessionToken 必須のままである（delegated 契約が型で混ざっていない）", async () => {
     const { IdentityAdminRPC } = await import("../src/presentation/rpc/identity-admin.entrypoint");
