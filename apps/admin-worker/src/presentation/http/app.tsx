@@ -385,10 +385,36 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
    *
    * ここへ来る時点で、上のガードが承認済みであることを確かめている。
    */
-  app.get("/", pageSecurityHeaders, (c) => {
+  app.get("/", pageSecurityHeaders, async (c) => {
     const session = c.get("session");
+    const container = c.get("container");
+
+    // **塊ごとに独立して取る。** 1 つの RPC が失敗しても、他の塊と
+    // 「サインイン情報」は出す——`Promise.allSettled` を使う。
+    // `RpcResult` の `ok: false` は値として返るのでここでは reject しないが、
+    // Service Binding 自体の失敗や例外は reject になる——`Promise.all` の
+    // ままだと、その 1 件でホーム全体が 500 になる（運用者の指示「ホームを
+    // 行き止まりにしない」に反する）。reject した塊は「いま取れません」
+    // （`null`）に落とすだけで、残りは出す。
+    const [nfc, clients, audit] = await Promise.allSettled([
+      container.nfcCards.countCards(),
+      container.identityAdmin.countOAuthClients({ actorUserId: session.sub }),
+      container.identityAdmin.listAuditLogs({ actorUserId: session.sub, limit: 5 }),
+    ]);
+
     c.header("Cache-Control", "no-store");
-    return c.html(<HomePage sub={session.sub} />);
+    return c.html(
+      <HomePage
+        sub={session.sub}
+        nfcCounts={nfc.status === "fulfilled" && nfc.value.ok ? nfc.value.value : null}
+        clientCount={
+          clients.status === "fulfilled" && clients.value.ok ? clients.value.value : null
+        }
+        recentAuditEntries={
+          audit.status === "fulfilled" && audit.value.ok ? audit.value.value.entries : null
+        }
+      />,
+    );
   });
 
   // NFC カードの管理（#382 / #390 決定 16 ③）。上のガードが既にセッション・

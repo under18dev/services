@@ -98,6 +98,19 @@ export const listOAuthClientsDelegatedInputSchema = z.object({
 export type ListOAuthClientsDelegatedInput = z.infer<typeof listOAuthClientsDelegatedInputSchema>;
 export type ListOAuthClientsDelegatedResult = RpcResult<readonly OAuthClientSummary[]>;
 
+// ------------------------------------------------------- countOAuthClients
+
+/**
+ * 登録数（admin-worker のホーム用、#449）。**`listOAuthClients` を呼んで
+ * 数えないこと。** 集計は auth-worker 側の `count(*)` 1 本で行う
+ * （`OAuthClientRepository.count()` の冒頭を参照）。
+ */
+export const countOAuthClientsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+});
+export type CountOAuthClientsDelegatedInput = z.infer<typeof countOAuthClientsDelegatedInputSchema>;
+export type CountOAuthClientsDelegatedResult = RpcResult<number>;
+
 // ------------------------------------------------------- createOAuthClient
 
 export const createOAuthClientDelegatedInputSchema = z.object({
@@ -161,6 +174,9 @@ export interface IdentityAdminDelegatedRpcContract {
     input: RevokeUserSessionsDelegatedInput,
   ): Promise<RevokeUserSessionsDelegatedResult>;
   listOAuthClients(input: ListOAuthClientsDelegatedInput): Promise<ListOAuthClientsDelegatedResult>;
+  countOAuthClients(
+    input: CountOAuthClientsDelegatedInput,
+  ): Promise<CountOAuthClientsDelegatedResult>;
   createOAuthClient(
     input: CreateOAuthClientDelegatedInput,
   ): Promise<CreateOAuthClientDelegatedResult>;

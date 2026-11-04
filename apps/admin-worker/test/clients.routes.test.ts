@@ -58,6 +58,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     reinstateUser: async () => rpcOk({}),
     revokeUserSessions: async () => rpcOk({ revokedSessions: 0 }),
     listOAuthClients: async (): Promise<ListOAuthClientsDelegatedResult> => rpcOk([client()]),
+    countOAuthClients: async () => rpcOk(1),
     createOAuthClient: async (input): Promise<CreateOAuthClientDelegatedResult> => {
       calls.createOAuthClient.push(input);
       return rpcOk({

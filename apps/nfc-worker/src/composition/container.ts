@@ -13,6 +13,7 @@ import { DelegatedCountBatchIssuedCardsUseCase } from "../application/use-cases/
 import { DelegatedCountDisabledInBatchUseCase } from "../application/use-cases/delegated-count-disabled-in-batch.use-case";
 import { DelegatedDisableCardUseCase } from "../application/use-cases/delegated-disable-card.use-case";
 import { DelegatedIssueCardsUseCase } from "../application/use-cases/delegated-issue-cards.use-case";
+import { DelegatedCountCardsUseCase } from "../application/use-cases/delegated-count-cards.use-case";
 import { DelegatedListAllCardsUseCase } from "../application/use-cases/delegated-list-all-cards.use-case";
 import { DelegatedReinstateBatchToIssuedCardsUseCase } from "../application/use-cases/delegated-reinstate-batch-to-issued-cards.use-case";
 import { DelegatedReinstateCardToIssuedUseCase } from "../application/use-cases/delegated-reinstate-card-to-issued.use-case";
@@ -130,6 +131,7 @@ export function createContainer(env: Env, overrides: ContainerOverrides = {}) {
       ),
       delegatedCountDisabledInBatch: new DelegatedCountDisabledInBatchUseCase(cards),
       delegatedListAllCards: new DelegatedListAllCardsUseCase(cards, cardTaps),
+      delegatedCountCards: new DelegatedCountCardsUseCase(cards),
       delegatedIssueCards: new DelegatedIssueCardsUseCase(cards, events, clock),
       delegatedUpdateCardTarget: new DelegatedUpdateCardTargetUseCase(
         cards,

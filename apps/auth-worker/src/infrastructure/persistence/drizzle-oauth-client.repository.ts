@@ -1,5 +1,5 @@
 import { type IdentityDatabase, oauthClients, oauthRedirectUris } from "@u18/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { ConstantTimeComparator, TokenHasher } from "../../application/ports/crypto.port";
 import type {
   CreateOAuthClientInput,
@@ -88,6 +88,19 @@ export class DrizzleOAuthClientRepository implements OAuthClientRepository {
     }
 
     return [...clients.values()].map((client) => toDomain(client, uris.get(client.id) ?? []));
+  }
+
+  /**
+   * 登録済みのクライアント数（#449）。**`count(*)` 1 本。** `listAll` の
+   * ような join・`Map` での畳み込みは要らない——集計だけが欲しい
+   * 呼び出し側に、全件読み込みの負荷を持ち込まない。
+   */
+  async count(): Promise<number> {
+    const row = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(oauthClients)
+      .get();
+    return row?.count ?? 0;
   }
 
   async verifySecret(clientId: string, presentedSecret: string): Promise<boolean> {
