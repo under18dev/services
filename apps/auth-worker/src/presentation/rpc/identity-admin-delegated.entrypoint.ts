@@ -10,6 +10,7 @@ import {
   revokeUserSessionsDelegatedInputSchema,
   rpcErr,
   rpcOk,
+  setOAuthClientAppUrlDelegatedInputSchema,
   setOAuthClientOwnerDelegatedInputSchema,
   suspendUserDelegatedInputSchema,
   type CountOAuthClientsDelegatedInput,
@@ -31,6 +32,8 @@ import {
   type ReinstateUserDelegatedResult,
   type RevokeUserSessionsDelegatedInput,
   type RevokeUserSessionsDelegatedResult,
+  type SetOAuthClientAppUrlDelegatedInput,
+  type SetOAuthClientAppUrlDelegatedResult,
   type SetOAuthClientOwnerDelegatedInput,
   type SetOAuthClientOwnerDelegatedResult,
   type SuspendUserDelegatedInput,
@@ -263,6 +266,23 @@ export class IdentityAdminDelegatedRPC
       actorUserId: parsed.data.actorUserId,
       clientId: parsed.data.clientId,
       ownerUserId: parsed.data.ownerUserId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(null);
+  }
+
+  async setOAuthClientAppUrl(
+    input: SetOAuthClientAppUrlDelegatedInput,
+  ): Promise<SetOAuthClientAppUrlDelegatedResult> {
+    const parsed = setOAuthClientAppUrlDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedSetOAuthClientAppUrl.execute({
+      actorUserId: parsed.data.actorUserId,
+      clientId: parsed.data.clientId,
+      appUrl: parsed.data.appUrl,
     });
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 

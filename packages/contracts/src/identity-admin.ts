@@ -107,6 +107,13 @@ export type OAuthClientSummary = {
    * 無いので、画面は `—` で出すこと（`batch` と同じ扱い）。
    */
   readonly ownerUserId: string | null;
+  /**
+   * 利用者が開けるアプリ本体の URL（#457）。**`null` は「不明」。**
+   * `redirectUris` はコールバックの宛先であって人が開くページではない
+   * ので、`/account/apps` のリンクにはこちらを使う。無ければリンクに
+   * しない（押しても何も無いリンクを置かない、#306）。
+   */
+  readonly appUrl: string | null;
 };
 
 /**

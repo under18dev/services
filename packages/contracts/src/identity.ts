@@ -235,6 +235,13 @@ export type GrantListItem = {
   readonly scopes: readonly string[];
   /** ISO 8601 (UTC) */
   readonly grantedAt: string;
+  /**
+   * 利用者が開けるアプリ本体の URL（#457）。**`null` は「不明」。**
+   * 無ければ `/account/apps` でリンクにしない（押しても何も無いリンクを
+   * 置かない、#306）。`oauth_redirect_uris`（コールバック宛先）から
+   * 導出した値ではない——運用者が `oauth_clients.app_url` に入れた値だけ。
+   */
+  readonly appUrl: string | null;
 };
 
 export type ListGrantsResult = RpcResult<readonly GrantListItem[]>;

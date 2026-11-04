@@ -119,6 +119,19 @@ describe("listGrants", () => {
     expect(result.value[0]?.grantedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("app_url を運ぶ。無ければ null（#457）", async () => {
+    await db()
+      .update(oauthClients)
+      .set({ appUrl: "https://app.example/" })
+      .where(eq(oauthClients.id, firstParty.id))
+      .run();
+    await completeCodeFlow();
+
+    const result = await rpc.listGrants({ sessionToken: user.sessionToken });
+
+    expect(result.ok && result.value[0]?.appUrl).toBe("https://app.example/");
+  });
+
   it("内部 ID を外へ出さない", async () => {
     // `oauth_clients.id`（`cli_...`）がダッシュボードの HTML に載ると、
     // 以後それを受け付ける API を消せなくなる。

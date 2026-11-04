@@ -69,6 +69,14 @@ function setOwnerFailureMessage(code: string): string {
   return "いま持ち主を変更できません。しばらく待ってからもう一度お試しください。";
 }
 
+/** 表示用 URL の変更が通らなかった理由（#457）。 */
+function setAppUrlFailureMessage(code: string): string {
+  if (code === "invalid_input")
+    return "https で始まる、資格情報を含まない URL を入力してください。";
+  if (code === "not_found") return "そのクライアントが見つかりません。";
+  return "いま URL を変更できません。しばらく待ってからもう一度お試しください。";
+}
+
 export function registerClientsRoutes(app: Hono<AppBindings>): void {
   app.get("/clients", pageSecurityHeaders, (c) => renderClientsPage(c, {}));
 
@@ -185,6 +193,36 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
     }
 
     return renderClientsPage(c, { notice: "持ち主を変更しました。" });
+  });
+
+  /**
+   * 表示用 URL（`app_url`）の設定・変更・解除（#457）。`/clients/owner` と
+   * 同じ形——空欄は「外す」であって「変更なし」ではない。
+   */
+  app.post("/clients/app-url", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, "/clients");
+    }
+
+    const session = c.get("session");
+    const clientId = (form.get("client_id")?.toString() ?? "").trim();
+    const appUrl = (form.get("app_url")?.toString() ?? "").trim();
+
+    const container = c.get("container");
+    const result = await container.identityAdmin.setOAuthClientAppUrl({
+      actorUserId: session.sub,
+      clientId,
+      appUrl: appUrl === "" ? null : appUrl,
+    });
+
+    if (!result.ok) {
+      return renderClientsPage(c, { error: setAppUrlFailureMessage(result.error.code) });
+    }
+
+    return renderClientsPage(c, { notice: "表示用 URL を変更しました。" });
   });
 }
 

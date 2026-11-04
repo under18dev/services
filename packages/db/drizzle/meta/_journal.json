@@ -64,6 +64,13 @@
       "when": 1793451646082,
       "tag": "0008_sticky_pretty_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793806684587,
+      "tag": "0009_pink_colonel_america",
+      "breakpoints": true
     }
   ]
 }

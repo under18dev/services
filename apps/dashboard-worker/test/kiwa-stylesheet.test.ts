@@ -102,6 +102,7 @@ const GRANTS: GrantListItem[] = [
     clientId: "u18-third-party",
     clientName: "テストアプリ",
     logoUrl: null,
+    appUrl: null,
     // **scope の箇条書きはここでしか出ない。**
     scopes: ["openid", "profile", "email"],
     grantedAt: "2026-10-29T00:00:00.000Z",
@@ -110,6 +111,7 @@ const GRANTS: GrantListItem[] = [
     clientId: "u18-second",
     clientName: "もう 1 つのアプリ",
     logoUrl: null,
+    appUrl: null,
     scopes: ["openid"],
     grantedAt: "2026-10-28T00:00:00.000Z",
   },

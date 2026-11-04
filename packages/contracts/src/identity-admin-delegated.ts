@@ -193,6 +193,19 @@ export type SetOAuthClientOwnerDelegatedInput = z.infer<
 >;
 export type SetOAuthClientOwnerDelegatedResult = RpcResult<null>;
 
+// ---------------------------------------------------- setOAuthClientAppUrl
+
+export const setOAuthClientAppUrlDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  clientId: z.string().min(1).max(255),
+  /** `null` で外す。形式（`https:` のみ・資格情報を含まない）は auth-worker 側で確かめる。 */
+  appUrl: z.string().min(1).max(2048).nullable(),
+});
+export type SetOAuthClientAppUrlDelegatedInput = z.infer<
+  typeof setOAuthClientAppUrlDelegatedInputSchema
+>;
+export type SetOAuthClientAppUrlDelegatedResult = RpcResult<null>;
+
 // ---------------------------------------------------------- listAuditLogs
 
 export const listAuditLogsDelegatedInputSchema = z.object({
@@ -242,5 +255,8 @@ export interface IdentityAdminDelegatedRpcContract {
   setOAuthClientOwner(
     input: SetOAuthClientOwnerDelegatedInput,
   ): Promise<SetOAuthClientOwnerDelegatedResult>;
+  setOAuthClientAppUrl(
+    input: SetOAuthClientAppUrlDelegatedInput,
+  ): Promise<SetOAuthClientAppUrlDelegatedResult>;
   listAuditLogs(input: ListAuditLogsDelegatedInput): Promise<ListAuditLogsDelegatedResult>;
 }

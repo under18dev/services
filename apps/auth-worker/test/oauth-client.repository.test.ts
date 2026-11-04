@@ -275,6 +275,30 @@ describe("DrizzleOAuthClientRepository", () => {
     expect((await repo.findByClientId("u18-dashboard-test"))?.ownerUserId).toBeNull();
   });
 
+  it("表示用 URL（app_url）を設定・変更・解除できる（#457）", async () => {
+    await repo.create(await aClientInput());
+
+    expect(await repo.setAppUrl("u18-dashboard-test", "https://app.example/")).toBe(true);
+    expect((await repo.findByClientId("u18-dashboard-test"))?.appUrl).toBe("https://app.example/");
+
+    // setOwner と同じく、何度でも変えられる（冪等性のための WHERE 句が無い）。
+    expect(await repo.setAppUrl("u18-dashboard-test", "https://app2.example/")).toBe(true);
+    expect((await repo.findByClientId("u18-dashboard-test"))?.appUrl).toBe("https://app2.example/");
+
+    expect(await repo.setAppUrl("u18-dashboard-test", null)).toBe(true);
+    expect((await repo.findByClientId("u18-dashboard-test"))?.appUrl).toBeNull();
+  });
+
+  it("未登録の client_id への app_url 設定は false を返す", async () => {
+    expect(await repo.setAppUrl("nope", "https://app.example/")).toBe(false);
+  });
+
+  it("新規登録のクライアントは app_url を持たない（既定は null）", async () => {
+    await repo.create(await aClientInput());
+
+    expect((await repo.findByClientId("u18-dashboard-test"))?.appUrl).toBeNull();
+  });
+
   it("クライアントを削除すると Redirect URI も消える", async () => {
     await repo.create(await aClientInput());
 

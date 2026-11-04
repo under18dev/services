@@ -142,6 +142,35 @@ describe("DrizzleOAuthGrantRepository", () => {
 
     expect((await repository().find(userId, client.id))?.covers(["openid"])).toBe(false);
   });
+
+  it("listByUser はクライアントの app_url を運ぶ（#457）", async () => {
+    const withUrl = await seedClient({
+      clientId: "repo-test-client-with-url",
+      clientType: "public",
+      isFirstParty: false,
+      appUrl: "https://app.example/",
+    });
+    await repository().record({
+      id: newGrantId(),
+      userId,
+      clientId: client.id,
+      grantedScopes: "openid",
+      at: new Date(),
+    });
+    await repository().record({
+      id: newGrantId(),
+      userId,
+      clientId: withUrl.id,
+      grantedScopes: "openid",
+      at: new Date(),
+    });
+
+    const all = await repository().listByUser(userId);
+    const byClientId = new Map(all.map((g) => [g.clientId, g]));
+    // `appUrl` が無いクライアントは null のまま（推測で埋めない）。
+    expect(byClientId.get(client.clientId)?.appUrl).toBeNull();
+    expect(byClientId.get(withUrl.clientId)?.appUrl).toBe("https://app.example/");
+  });
 });
 
 describe("DrizzleOAuthTokenRepository", () => {

@@ -27,6 +27,8 @@ export type UserGrantSummary = {
   readonly clientId: string;
   readonly clientName: string;
   readonly logoUrl: string | null;
+  /** 利用者が開けるアプリ本体の URL（#457）。`null` は「不明」。 */
+  readonly appUrl: string | null;
 };
 
 /**

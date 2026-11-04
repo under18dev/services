@@ -18,6 +18,7 @@ function aClientProps(overrides: Partial<OAuthClientProps> = {}): OAuthClientPro
     isFirstParty: true,
     logoUrl: null,
     ownerUserId: null,
+    appUrl: null,
     disabledAt: null,
     redirectUris: ["https://app.example/cb"],
     createdAt: new Date("2026-10-24T00:00:00.000Z"),

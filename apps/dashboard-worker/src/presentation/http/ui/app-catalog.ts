@@ -40,6 +40,23 @@
  *
  * **0 件になっても構わない。** 画面は「まだありません」を出す。
  * 枠だけ先に埋めるより、空であることが読めるほうがよい。
+ *
+ * ## `oauth_clients.app_url`（#457）とは別物で、検査の対象にも入らない
+ *
+ * `/account/apps` の主役は #457 で「自分が連携したアプリ」
+ * （`listGrants` が返す `GrantListItem.appUrl`）へ移ったが、**その値は
+ * このファイルに現れない。** 運用者が `oauth_clients.app_url` へ入れた
+ * 任意の https URL で、ここの `APP_CATALOG`（手書きの固定配列）とは
+ * 出どころが違う。
+ *
+ * `scripts/check-app-catalog-routes.mjs` はこのファイルのソーステキストを
+ * 正規表現で読んで `url:` フィールドを集めるだけ（`readCatalogUrls`）で、
+ * `app_url` は D1 の行にしかない実行時の値なので、**この検査の対象には
+ * 原理的に入らない。** `app_url` の形式（`https:` のみ・資格情報を含まない）
+ * は書き込み側（`domain/services/app-url.ts`）が確かめる——
+ * 「本番で実際に答えるホストか」まではここでは確かめない（運用者が
+ * 入力した任意の外部 URL なので、`/` 始まりの自社ルートと違って
+ * `wrangler.jsonc` の routes と突き合わせる前提が無い）。
  */
 
 import type { GrantListItem } from "@u18/contracts";

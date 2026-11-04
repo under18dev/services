@@ -145,28 +145,29 @@ export const accountUiRoutes = new Hono<AppBindings>()
   })
 
   /**
-   * u18 Identity で使えるアプリのカタログ（#308）。
+   * 連携したアプリ（`/account/apps`、#308 / #457）。
    *
-   * **カタログ自体はコードにある**（`app-catalog.ts`。D1 から引かない理由は
-   * あちらの冒頭）。それでも `listGrants` を呼ぶのは、**「連携済み」バッジを
-   * 出すため**である。カタログと実態を結びつけているのがこの 1 本の RPC で、
-   * これが無いと「どこへ行けるか」は出せても「もう繋いだのか」は出せない。
+   * **`listGrants` の役目が 2 つに増えた（#457）。** もとは「連携済み」
+   * バッジを出すためだけに呼んでいたが、いまは**主役である連携アプリの
+   * 一覧そのもの**（`clientName` / `appUrl`）もここから来る。カタログ
+   * （`app-catalog.ts`。D1 から引かない理由はあちらの冒頭）は
+   * `listGrants` に依存しない副次的な内容として残す。
    *
-   * **ログインを要求する。** 中身は全利用者に同じだが、バッジが自分の
-   * `oauth_grants` を映すので、Cookie が無い状態で出すと「誰のバッジでも
-   * ない一覧」になる。他の画面と同じ 401 に揃えるほうが、入口の扱いが
-   * 1 つで済む。
+   * **ログインを要求する。** 中身が自分の `oauth_grants` を映すので、
+   * Cookie が無い状態で出すと「誰の一覧でもない」ことになる。他の画面と
+   * 同じ 401 に揃えるほうが、入口の扱いが 1 つで済む。
    *
    * ## `listGrants` が落ちても 503 にしない
    *
    * **この Worker で唯一、RPC が失敗しても出せる中身がある画面である。**
    * 他の 5 枚は一覧そのものが RPC の戻り値なので、取れなければ出すものが
-   * 無い。こちらは本体がコードの中にあり、RPC はバッジという付加情報を
-   * 足すためだけに呼んでいる。**付加情報の失敗で本体を道連れにしない。**
+   * 無い。こちらは**カタログがコードの中にある**ので、連携アプリの取得が
+   * 失敗してもそちらだけは出せる——付加的に失敗した側で本体を道連れに
+   * しない（#457 でも維持する、`apps-page.tsx` の「行き止まりにしない」）。
    *
-   * 代わりに `grantsKnown: false` を画面へ渡し、「いま確認できない」と
-   * 言わせる（`apps-page.tsx`）。**黙ってバッジを消さない** —— 連携して
-   * いるのにしていないように見える。
+   * 代わりに `null` を画面へ渡し、「いま確認できない」と言わせる
+   * （`apps-page.tsx`）。**黙って「0 件」と同じ見た目にしない** ——
+   * 連携しているのにしていないように見える。
    *
    * **`unauthenticated` だけは 401 へ回す。** セッションが死んでいるなら、
    * サイドバーの行き先が全部 401 になる画面を出しても押すたびに戻される
@@ -180,9 +181,8 @@ export const accountUiRoutes = new Hono<AppBindings>()
     if (!grants.ok && grants.failure.kind === "unauthenticated") return renderFailure(c, grants);
 
     // `null` は「取れなかった」。**「連携が 0 件」と同じ値にしないこと。**
-    return c.html(
-      <AppsPage view={buildAppCatalog(APP_CATALOG, grants.ok ? grants.value : null)} />,
-    );
+    const grantList = grants.ok ? grants.value : null;
+    return c.html(<AppsPage view={buildAppCatalog(APP_CATALOG, grantList)} grants={grantList} />);
   })
 
   /**

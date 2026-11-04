@@ -1,3 +1,4 @@
+import type { GrantListItem } from "@u18/contracts";
 import {
   Alert,
   AlertDescription,
@@ -20,66 +21,134 @@ import { AccountShell } from "./account-shell";
 import { GRANTS_PATH } from "./asset-paths";
 
 /**
- * u18 Identity で使えるアプリ（`/account/apps`、#308）。
+ * 連携したアプリ（`/account/apps`、#308 / #457）。
  *
- * **Kiwa UI の見本として最初に組んだ画面である**（#332 の P0）。残り 5 枚は
- * P1 でこの形に揃え、いまは 6 枚とも Kiwa である。**前例として残っている
- * のはここ** —— 一覧の区切り（`Separator` を 1 件目の前に置かない）、
- * 0 件の出し方、バッジの既定、`data-slot` を目印にする書き方。
+ * ## 主役が変わった（#457）
  *
- * ## `/account/grants` との違いを画面でも言う
+ * **もともとはカタログ（運用側が載せたアプリの案内）が主役だった。**
+ * 運用者の要望（「連携した OAuth App の URL を一覧したい」）を受けて、
+ * **自分が連携したアプリ（`listGrants`）とその `app_url` を主役にし、
+ * カタログは下に残す**（実装者判断。カタログは引き続き有用——
+ * 連携していない u18 公式アプリを知る唯一の場所）。主役が変わった
+ * ことは `heading` / `lead` の文で言い切る——画面と文が食い違う事故を
+ * このリポジトリで何度も踏んでいる。
  *
- * 名前が似ているので、**どちらを見ているのか画面から読めないと混ざる。**
- * こちらは運用側が載せたアプリの案内、あちらは自分が同意した RP の一覧。
- * 下の `lead` と、末尾の `/account/grants` への導線がその区別を担っている。
+ * ## `/account/grants` との違い
  *
- * **「繋がっているアプリ全部」とは言わない。** 載せるかどうかは運用の
- * 判断なので（`app-catalog.ts`）、全件だと言うと嘘になる。
+ * **こちらは「どこへ行けるか」、あちらは「何を許可したか」。** scope の
+ * 確認や取り消しはこの画面に作り直さない——`GRANTS_PATH` への導線に
+ * 任せる（#457 の明示的な指示。同じ操作の入口を 2 つ持つと片方だけ
+ * 直る）。
+ *
+ * ## `app_url` の無いアプリはリンクにしない
+ *
+ * **押しても何も無いリンクを置かない**（#306）。`oauth_redirect_uris`
+ * （コールバック宛先）から黙って導出もしない——コールバック専用の
+ * ホスト（`/callback` しか無いなど）はリンク先として意味を持たない。
+ * 名前だけを出す。
+ *
+ * ## 連携済みアプリと、取得できないことは別に扱う
+ *
+ * `grants` が `null`（`listGrants` が落ちた）と `[]`（連携 0 件）を
+ * 同じ見た目にしない。前者は「いま確認できません」、後者は
+ * 「まだ連携したアプリはありません」——**カタログは `listGrants` に
+ * 依存しない**ので、連携アプリの取得が失敗してもカタログは出す
+ * （行き止まりにしない）。
  *
  * ## JS を 1 行も要求しない
  *
  * 読むだけの画面なので `KiwaShell` に `scripts` の口すら無い。
- * Kiwa UI は SSR が既定で、ここで使っている primitives はどれも
- * クライアント JS を持たない。
  *
  * ## インラインの `style` を書かない
  *
  * **本番の CSP は `style-src 'self'` で `'unsafe-inline'` を含まない**
- * （`@u18/web-ui` の `page-headers.ts`）。`style="..."` はブラウザに
- * 破棄されるので、**ローカルでは効いて本番でだけ崩れる**（ホームが
- * これで本番の枠線を密着させた —— #320）。Tailwind のクラスで書く。
+ * （`@u18/web-ui` の `page-headers.ts`）。Tailwind のクラスで書く。
  *
- * **クラスを書いても同じ失敗は起こりうる。** `theme.css` に無いトークンを
- * 使うと（`bg-success-soft` など）Tailwind はそのユーティリティを生成
- * しないので、**class は HTML に出るのに CSS が無い。** 見え方は #320 と
- * 同じである。
+ * ## `clientName` / `appUrl` は第三者が決めた文字列である
  *
- * ## 載っている文字列は運用者が書いたものである
- *
- * `grants-page.tsx` の `clientName` と違い、カタログの `name` と
- * `description` は**このリポジトリの中にある**（`app-catalog.ts`）ので、
- * 第三者が決めた文字列ではない。それでもエスケープは hono/jsx に任せ、
- * `raw()` は使わない —— 由来で例外を作ると、カタログを D1 から引くように
- * 変えたときに**ここだけ安全でなくなる。**
+ * `grants-page.tsx` と同じ注意——登録したアプリの作者が自由に付けられる
+ * ので、エスケープは hono/jsx に任せ `raw()` は使わない。
  */
 
 export type AppsPageProps = {
   readonly view: AppCatalogView;
+  /** 自分が連携したアプリ（#457）。`null` は「取れなかった」——「0 件」とは別。 */
+  readonly grants: readonly GrantListItem[] | null;
 };
 
-export const AppsPage: FC<AppsPageProps> = ({ view }) => (
+const ConnectedAppRow: FC<{ readonly grant: GrantListItem; readonly isFirst: boolean }> = ({
+  grant,
+  isFirst,
+}) => (
+  <li>
+    {/* 区切りは 1 件目の前に置かない（他の一覧と同じ理由）。 */}
+    {!isFirst && <Separator class="my-3" />}
+    <div class="flex flex-col gap-1">
+      <div class="flex flex-wrap items-center gap-2 font-medium">
+        {grant.appUrl === null ? (
+          <span>{grant.clientName}</span>
+        ) : (
+          <a
+            href={grant.appUrl}
+            class="underline-offset-4 hover:underline"
+            // app_url は常に別ホストの https URL（`validateAppUrl`）。
+            rel="noopener noreferrer"
+          >
+            {grant.clientName}
+          </a>
+        )}
+      </div>
+      {grant.appUrl !== null && (
+        <p class="font-mono text-xs break-all text-foreground-soft">{grant.appUrl}</p>
+      )}
+    </div>
+  </li>
+);
+
+export const AppsPage: FC<AppsPageProps> = ({ view, grants }) => (
   <AccountShell
     title="アプリ"
-    heading="u18 Identity で使えるアプリ"
-    lead="u18 Identity のアカウントでそのまま使えるアプリの一覧です。あなたがアクセスを許可したアプリは「連携アプリ」で確認できます。"
+    heading="連携したアプリ"
+    lead="あなたが連携したアプリと、その行き先をまとめています。許可した権限の確認や連携の取り消しは「連携アプリ」で行えます。"
     current="apps"
   >
+    <Card>
+      <CardHeader>
+        <CardTitle>連携したアプリ</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {grants === null ? (
+          // **「取れなかった」を「0 件」と同じ見た目にしない。**
+          <Alert>
+            <AlertDescription>
+              いま連携したアプリを確認できません。しばらく待ってからもう一度お試しください。
+            </AlertDescription>
+          </Alert>
+        ) : grants.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>まだ連携したアプリはありません。</EmptyTitle>
+              <EmptyDescription>
+                下の「u18 Identity で使えるアプリ」から試してみてください。
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <ul class="flex flex-col">
+            {grants.map((grant, index) => (
+              <ConnectedAppRow key={grant.clientId} grant={grant} isFirst={index === 0} />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+
+    <p class="text-sm font-medium text-foreground-muted">u18 Identity で使えるアプリ</p>
+
     {/*
-      **`listGrants` が落ちても一覧は出す。** バッジは付加情報で、
-      本体を道連れにする理由が無い（この画面はダッシュボードで唯一
-      「RPC が失敗しても出せる中身がある」画面である）。
-      ただし**黙って消さない** —— 連携しているのにしていないように
-      見えるので、確認できていないことを言う。
+      **カタログは `listGrants` に依存しない。** 連携アプリの取得が
+      失敗しても、ここだけは出せる——この画面で唯一「RPC が失敗しても
+      出せる中身がある」部分である（#457 より前からの設計、#306）。
     */}
     {!view.grantsKnown && (
       <Alert>
@@ -91,10 +160,6 @@ export const AppsPage: FC<AppsPageProps> = ({ view }) => (
     )}
 
     {view.groups.length === 0 ? (
-      /*
-        **枠だけ作って埋まっているように見せない。** いま載せられる
-        アプリが無いことは、それ自体が伝えたい状態である（#306）。
-      */
       <Empty>
         <EmptyHeader>
           <EmptyTitle>まだありません。</EmptyTitle>
@@ -117,45 +182,19 @@ export const AppsPage: FC<AppsPageProps> = ({ view }) => (
 
                 return (
                   <li key={item.id}>
-                    {/*
-                      **区切りは 1 件目の前に置かない。** 先頭に出すと
-                      `CardHeader` との間に線が 2 本並ぶ。件数で分岐
-                      させずに済むよう、間に入る側だけが描く。
-                    */}
                     {index > 0 && <Separator class="my-3" />}
                     <div class="flex flex-col gap-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <a
                           href={item.url}
                           class="font-medium underline-offset-4 hover:underline"
-                          {...(external
-                            ? // 別ホストへ出すリンクには必ず付ける。`noopener` は
-                              // 遷移先から `window.opener` でこの画面を触らせない
-                              // ため、`noreferrer` は「どの画面から来たか」を
-                              // 相手のサーバーへ渡さないため。
-                              { rel: "noopener noreferrer" }
-                            : {})}
+                          {...(external ? { rel: "noopener noreferrer" } : {})}
                         >
                           {item.name}
                         </a>
-                        {/*
-                          **`connected` が true のときだけ出す。** false は
-                          「まだ同意していない」、null は「言えない」
-                          （RP でない / `listGrants` が取れなかった）。
-                          どちらも何も出さない —— 「未連携」と書くと嘘になる。
-                        */}
                         {item.connected === true && <Badge>連携済み</Badge>}
                       </div>
                       <p class="text-sm/relaxed text-foreground-muted">{item.description}</p>
-                      {/*
-                        **URL を文字列で出すのは u18 を出ていくリンクだけ。**
-                        押す前にどこへ行くのか分かる必要があるのはそちらで、
-                        同一オリジンの行き先はダッシュボードの中に留まる
-                        （`href` には同じ値が入っているので、確かめたい人は
-                        読める）。内部にも出すと、`/account/nfc` のような
-                        パスと `https://...` の全体 URL が同じ見た目で
-                        並び、**どれが外部なのかが読めなくなる。**
-                      */}
                       {external && (
                         <p class="font-mono text-xs break-all text-foreground-soft">{item.url}</p>
                       )}
@@ -171,10 +210,9 @@ export const AppsPage: FC<AppsPageProps> = ({ view }) => (
 
     <Card>
       <CardHeader>
-        <CardTitle>連携アプリとの違い</CardTitle>
+        <CardTitle>権限の確認・取り消し</CardTitle>
         <CardDescription>
-          この一覧は、u18 Identity で使えるアプリとして掲載しているものの案内です。
-          あなたが実際にアクセスを許可したアプリと、その権限の取り消しは
+          許可した権限の確認や、連携の取り消しは
           <a href={GRANTS_PATH} class="text-foreground underline underline-offset-4">
             連携アプリ
           </a>
