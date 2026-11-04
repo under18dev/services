@@ -460,7 +460,7 @@ export const CONTRACT_VERSION = "1.5.0" as const;
 
 直近の更新は #308 の OAuth クライアント管理（1.4.0 → 1.5.0）。`listOAuthClients` / `createOAuthClient` / `disableOAuthClient` を、**`IdentityRpcContract` ではなく新しい `IdentityAdminRpcContract` に**足した（auth-worker 側の Entrypoint も `IdentityAdminRPC` として別クラス）。**Service Binding はメソッド単位で絞れない**ので、同じ Entrypoint に置くと `IdentityRPC` を束縛している nfc-worker からも呼べることになる —— あちらは運営＝管理者のセッションを扱う Worker である（#187）。誰がどの Entrypoint を束縛してよいかは `scripts/check-service-bindings.mjs` が静的に検査する。**束縛先の Entrypoint が無いと workerd は起動に失敗する**ので、デプロイ順は従来以上に auth-worker 先行である。**メソッドの追加であると同時に、緩和策の置き換えでもある** —— 登録を叩ける場所が「運用者の手元」から「管理者のセッション」へ広がった（脅威モデル RR-21）。契約で表現できたのは「`client_secret_hash` を DTO に置かない」「平文は登録の応答にしか置かない」までで、**認可の判定は契約では書けない**ので auth-worker の UseCase の中にある。
 
-その前は #187 の `isAdmin` 追加（1.3.0 → 1.4.0）。`SessionSummary` と `UserProfile` の**両方**に置いてあるのは消費者が違うため —— nfc-worker は発行の可否に 1 ビットだけ要り、`getUserProfile` を呼ばせるとメールアドレスまで渡る。
+その前は #187 の `isAdmin` 追加（1.3.0 → 1.4.0）。`SessionSummary` と `UserProfile` の**両方**に置いてあるのは消費者が違うため —— 当時の nfc-worker は発行の可否に 1 ビットだけ要り、`getUserProfile` を呼ばせるとメールアドレスまで渡る。**#433 で nfc-worker 側のこの経路ごと消え、`SessionSummary.isAdmin` はいまどの Worker からも読まれていない**（契約には残っている。`authenticate.ts` の冒頭を参照）——フィールドを削ると、`CONTRACT_VERSION` を上げずに済む MINOR 変更かどうかの判断が別途要るため、使われなくなった後も契約には残してある。
 
 その前は #11 / #75 の `updateProfile` / `listPasskeys` / `deletePasskey` 追加（1.2.0 → 1.3.0）。あわせて `RpcErrorCode` に `reauthentication_required` と `conflict` を足した —— **呼び出し元の見せ方が変わるものを `forbidden` や `internal` へ畳むと、UI が「失敗しました」としか言えなくなる。**
 

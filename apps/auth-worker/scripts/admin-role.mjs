@@ -7,11 +7,22 @@
  * 本番の運用手順はすべて `wrangler` による DB 直接操作で、その権限は
  * Cloudflare アカウントが持つ（docs/runbook.md §8.4 運用課題 1）。
  *
- * **ただし「到達できる管理操作は 1 つも無い」は誤りである。** ここには
- * 長らくそう書いてあったが、**nfc-worker のカード発行は `getSession` が
- * 返す `isAdmin` だけで可否を決めている**（#187）。この旗を立てた時点で
- * 到達できる。grant を打つ前に、その人にカードを発行させてよいかを
- * 確かめること。
+ * **「この旗だけで到達できる管理操作は 1 つも無い」が #433 以降の実態
+ * である。** ここには長らく、根拠として「nfc-worker のカード発行は
+ * `getSession` が返す `isAdmin` だけで可否を決めている（#187）」と
+ * 書いてあったが、**その経路は #433 で消えた。** `users.is_admin` を
+ * 読む経路（`requireAdminSession` / `IdentityAdminRPC`）はいまも
+ * 存在するが、**その Entrypoint をいま束縛している Worker は 1 つも
+ * 無い**（`scripts/check-service-bindings.mjs` の
+ * `ALLOWED_ENTRYPOINT_CONSUMERS` が空集合で固定している）。
+ *
+ * **運営向けの画面・操作は `admin.under18.dev`（admin-worker）にあるが、
+ * そちらは `users.is_admin` を一切見ない**——admin-worker 専用の
+ * 承認リスト（`admin_approvals`）だけで「使ってよいか」を決める設計
+ * （#390 決定 16 ③）。**この CLI で grant しても、admin-worker の
+ * 画面には入れない。** 誰を admin-worker の承認リストに入れるかは
+ * `apps/admin-worker/scripts/admin-approval.mjs` の役目で、別の仕組み
+ * である。
  *
  * この旗と CLI の意味は、守る順序が逆であることにある。
  * ロールの概念が無いままでも「管理者」と名付けたアカウントは作れてしまい、

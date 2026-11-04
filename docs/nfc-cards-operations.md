@@ -239,12 +239,14 @@ POST https://auth.under18.dev/account/nfc/cards/<cardId>/disable
 **いま手で発行するなら `admin.under18.dev/nfc` の画面である。** 枚数と
 ロット名を入れて送ると、`303` で `/nfc?issued=<枚数>` に戻る。
 
-**機械向けの口はいま無い。** `scripts/nfc-burn.py` が叩いていたのが上の
-JSON API で、**あちらは発行と書き込みが繋がっているスクリプトなので、
-この口が無いと動かない。** 代わりをどこに置くかは未決である ——
-選択肢と、それぞれの引き換えは `scripts/nfc-burn.py` の docstring
-（「この発行経路は…」の節）にそのまま残してある。**1（admin-worker に
-JSON の発行エンドポイントを足す）が薦められている。**
+**機械向けの口はいま `admin.under18.dev` 側にある（#461）。**
+`scripts/nfc-burn.py` が叩いていたのは上の（いまは無い）JSON API で、
+**あちらは発行と書き込みが繋がっているスクリプトなので、口が無いと
+動かなかった。** #433 のあとしばらく未決だったが、#461 で
+`POST /nfc/cards`（`apps/admin-worker/src/presentation/http/
+nfc.routes.tsx`）が新設され、`nfc-burn.py` はそちらを叩くように直って
+いる。詳しくは `scripts/nfc-burn.py` の docstring（「機械向けの発行の口」
+の節）を参照。
 
 **`admin.under18.dev/nfc` をスクリプトの向き先に替えるだけでは済まない。**
 あちらは HTML フォームで、

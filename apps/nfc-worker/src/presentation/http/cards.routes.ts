@@ -134,14 +134,16 @@ function createCardsApi() {
        * 発行は `admin.under18.dev/nfc`（admin-worker → nfc-worker の
        * `NfcAdminDelegatedRPC`）にあるので、両方に置くと入口が 2 つになる。
        *
-       * **機械向けの発行の口は、いまどこにも無い。**
-       * `scripts/nfc-burn.py` がここを叩いていた（あのファイルの
-       * docstring が「段取り 5 / 6 で消える」と予告している）。あちらが
-       * 挙げている 3 つの選択肢のうち **1（admin-worker に JSON の発行
-       * エンドポイントを足す）** が薦められており、**それはこの PR の
-       * 範囲外である** —— admin-worker には触らない。
+       * **機械向けの発行の口は、いまは admin-worker 側にある（#461）。**
+       * `scripts/nfc-burn.py` がかつてここ（`POST /account/nfc/cards`）を
+       * 叩いていたが、#433 でここが消えたあと、#461 で
+       * `POST /nfc/cards`（`apps/admin-worker/src/presentation/http/
+       * nfc.routes.tsx`）が新設され、`nfc-burn.py` はそちらを叩くように
+       * 直っている。
        *
-       * **ここへ戻さないこと。** 戻すと #433 が消したものがそのまま戻る。
+       * **ここへは戻さないこと。** 機械向けの発行は admin-worker 側に
+       * 置く、という決定は #461 で確定している——ここへ戻すと、
+       * admin-worker 側と合わせて入口が 2 つになる。
        */
 
       /** 自分のカード一覧。 */
