@@ -58,7 +58,6 @@ import { formatDateTime } from "./format";
  */
 
 export type AdminUsersPageProps = {
-  readonly isAdmin: boolean;
   /**
    * いま開いている管理者の `userId`。**自分の行に停止を出さないため。**
    *
@@ -215,7 +214,6 @@ const UserRow: FC<{
 );
 
 export const AdminUsersPage: FC<AdminUsersPageProps> = ({
-  isAdmin,
   actorUserId,
   csrfToken,
   users,
@@ -224,13 +222,7 @@ export const AdminUsersPage: FC<AdminUsersPageProps> = ({
   error,
   notice,
 }) => (
-  <AccountShell
-    isAdmin={isAdmin}
-    title="利用者"
-    heading="利用者"
-    lead="u18 に登録されている利用者を探します。"
-    current="users"
-  >
+  <AccountShell title="利用者" heading="利用者" lead="u18 に登録されている利用者を探します。">
     {error === undefined ? null : (
       <Card>
         <CardContent>

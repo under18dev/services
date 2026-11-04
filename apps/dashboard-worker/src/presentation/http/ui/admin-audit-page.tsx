@@ -48,7 +48,6 @@ import { formatDateTime } from "./format";
  */
 
 export type AdminAuditPageProps = {
-  readonly isAdmin: boolean;
   readonly csrfToken: string;
   readonly entries: readonly AuditLogEntryAdmin[];
   readonly nextCursor: string | null;
@@ -106,7 +105,6 @@ const EntryRow: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry }) => (
 );
 
 export const AdminAuditPage: FC<AdminAuditPageProps> = ({
-  isAdmin,
   csrfToken,
   entries,
   nextCursor,
@@ -116,11 +114,9 @@ export const AdminAuditPage: FC<AdminAuditPageProps> = ({
   error,
 }) => (
   <AccountShell
-    isAdmin={isAdmin}
     title="監査ログ"
     heading="監査ログ"
     lead="u18 で記録されている操作の履歴を調べます。"
-    current="auditLogs"
   >
     {error === undefined ? null : (
       <Card>

@@ -40,38 +40,13 @@
  * dashboard 側のテストは何も言わない（#211 / #327 の家系）。
  */
 
-export type AccountNavKey =
-  | "profile"
-  | "passkeys"
-  | "sessions"
-  | "grants"
-  | "apps"
-  | "nfc"
-  | "clients"
-  | "users"
-  /**
-   * 運営向けのカード管理（#338 Step 3）。
-   *
-   * **`"nfc"` と別のキーにする** —— 同じにすると、利用者向けの
-   * カード画面を開いたときに管理の項目まで選択状態になる。
-   */
-  | "nfc-admin"
-  | "auditLogs";
+export type AccountNavKey = "profile" | "passkeys" | "sessions" | "grants" | "apps" | "nfc";
 
 export type AccountNavItem = {
   readonly key: AccountNavKey;
   /** 絶対パス。**Worker をまたぐので接頭辞から組み立てない。** */
   readonly href: string;
   readonly label: string;
-  /**
-   * 管理者にだけ出す項目か（#333）。
-   *
-   * **ここに書くのは「誰に出すか」だけで、「誰が叩けるか」ではない。**
-   * サイドバーから消えても URL は叩けるので、**画面側が自分で
-   * `isAdmin` を見て `not_found` を返すこと。** 片方だけだと、
-   * #306 と向きが逆の同じ嘘になる（出るのに叩けない / 出ないのに叩ける）。
-   */
-  readonly adminOnly?: boolean;
 };
 
 export type AccountNavGroup = {
@@ -87,21 +62,25 @@ export type AccountNavGroup = {
  *
  * **押しても何も無いリンクを置かない** —— パスキーの登録ボタンが
  * 「API はあるのに入口が無い」まま残っていた #306 と、向きは逆だが
- * 同じ種類の嘘になる。「管理」の節は #373 で RPC が入り、#333 で画面が
- * 入ったので置いた。**節の名前は「開発」ではない** —— OAuth クライアント
- * だけを想定していたときはそう呼んでいたが、NFC カードの管理
- * （`/account/nfc/admin`）が同じ節に入るので合わなくなった。
+ * 同じ種類の嘘になる。**画面が入る PR で、その PR がここへ足すこと。**
  *
- * ## 管理者向けの項目も、ここに足す（#333）
+ * ## 「管理」の節はもう無い（#433）
  *
- * **別の配列を作らない。** `adminOnly: true` を付けて同じ並びに置き、
- * 出し分けは `accountNavFor()` が行う。分けると
- * `check-app-catalog-routes.mjs` の走査から外れ、**行き先が実在する
- * ことを誰も見なくなる。**
+ * かつてここには `adminOnly: true` を付けた 4 項目（利用者・OAuth
+ * クライアント・カードの管理・監査ログ）が並ぶ「管理」の節があり、
+ * `accountNavFor(isAdmin)` が非管理者には節ごと畳んでいた。
+ * **運営向けの画面は `admin.under18.dev`（admin-worker）へ移した**ので、
+ * ここに残すと**移した先と移す前の 2 つの入口**が並ぶ。
  *
- * 上の規則は管理者向けにも同じく当てはまる —— **画面が入る PR で、
- * その PR がここへ足すこと。** 最初の 1 つは `clients`（#333）で、
- * 画面（`/account/admin/clients`）と同じ PR で入った。
+ * **`adminOnly` と `accountNavFor()` も一緒に消した。** 0 件の
+ * フィルタだけが残ると、次に管理の画面を足す人が「ここへ足せばよい」と
+ * 読む —— 入口を 2 つに戻すのがいちばん簡単な道になってしまう。
+ * **`/account/*` は利用者向けだけ**という不変条件を、型（`AccountNavKey`）
+ * で言い切るほうを採った。
+ *
+ * **admin 側の並びは `apps/admin-worker/src/presentation/http/ui/nav.ts`
+ * の `ADMIN_NAV_GROUPS`** にある。別の共用体・別のオリジンで、同じ
+ * `check-app-catalog-routes.mjs` に通している。
  */
 export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
   {
@@ -136,103 +115,7 @@ export const ACCOUNT_NAV_GROUPS: readonly AccountNavGroup[] = [
       { key: "nfc", href: "/account/nfc", label: "NFC カード" },
     ],
   },
-  {
-    /**
-     * **管理者にだけ出る節**（#333）。
-     *
-     * **「アカウント」「サービス」と分ける。** あの 2 つは「自分のもの」を
-     * 扱う場所で、ここは **u18 そのものの設定**を扱う。同じ並びに混ぜると、
-     * 管理者には「自分の連携アプリ」と「u18 に登録されたクライアント」が
-     * 隣り合って見え、**取り消すつもりで失効させる**ことが起こりうる。
-     *
-     * 節ごと `adminOnly` なので、非管理者には**見出しごと消える**
-     * （`accountNavFor`）。見出しだけ残すと、隠している意味が無くなる。
-     *
-     * **NFC カードの管理（`/account/nfc/admin`）も同じ節に入る**
-     * （持ち主は nfc-worker）。グループ名が 1 文字でも違うと
-     * **管理の節が 2 つ並ぶ**ので、ここの文字列は動かさないこと。
-     */
-    label: "管理",
-    items: [
-      {
-        /**
-         * **利用者の管理を先に置く**（#375）。運用の問い合わせはまず
-         * 「この人」から始まるので、管理の節で最初に目に入るべきものが
-         * これになる。OAuth クライアントは頻度が低い。
-         */
-        key: "users",
-        href: "/account/admin/users",
-        label: "利用者",
-        adminOnly: true,
-      },
-      {
-        key: "clients",
-        href: "/account/admin/clients",
-        label: "OAuth クライアント",
-        adminOnly: true,
-      },
-      /**
-       * **この 1 行だけ持ち主が違う**（#338 Step 3）。`/account/nfc/*` に
-       * 答えるのは nfc-worker で、上の「サービス」の `"nfc"` と同じ事情。
-       *
-       * **ラベルを「NFC カード」と重ねない。** あちらは**自分の**カード、
-       * こちらは**全員の**カードで、用事が違う。同じ語を 2 回出すと、
-       * どちらを押せばよいか画面から読めない。
-       *
-       * **`adminOnly` はサイドバーの話でしかない。** この URL は誰でも
-       * 叩けるので、**画面側が `isAdmin` を見て 404 を返している**
-       * （`cards-ui.routes.tsx`）。片方だけだと嘘になる。
-       */
-      {
-        key: "nfc-admin",
-        href: "/account/nfc/admin",
-        label: "カードの管理",
-        adminOnly: true,
-      },
-      {
-        key: "auditLogs",
-        href: "/account/admin/audit",
-        label: "監査ログ",
-        adminOnly: true,
-      },
-    ],
-  },
 ];
-
-/**
- * このセッションに出す並び（#333）。
- *
- * **`adminOnly` の項目を落とし、それで空になったグループも落とす。**
- * 見出しだけが残ると、**管理者にだけ中身がある節が、非管理者には
- * 空の見出しとして見える** —— 存在を隠す意味が無くなる。
- *
- * ## なぜ呼ぶ側に書かせないのか
- *
- * dashboard-worker と nfc-worker が**それぞれ** `isAdmin ? ... : ...` と
- * 書くと、**片方だけ条件を間違えた状態**が作れる。どちらの画面も落ちず、
- * 気づくのは「NFC の画面では管理の節が出ないのですが」と言われたとき
- * である。**このファイルの冒頭が並びを contracts に置いた理由が、
- * そのまま出し分けにも当てはまる。**
- *
- * **`isAdmin` の値そのものは呼ぶ側が持つ。** あれはセッションごとに
- * 変わる値で、Worker 間の取り決めではない。両方の Worker が
- * `getSession`（`SessionSummary.isAdmin`）から取れる。
- *
- * ## `check-app-catalog-routes.mjs` はフィルタ前を見る
- *
- * あの検査は `ACCOUNT_NAV_GROUPS` の**ソースを正規表現で読む**
- * （`scripts/lib/app-catalog-routes.mjs` の `readNavHrefs`）ので、
- * `adminOnly` を付けても走査から外れない。**行き先が実在することは
- * `isAdmin` と無関係に要る。**
- */
-export function accountNavFor(isAdmin: boolean): readonly AccountNavGroup[] {
-  if (isAdmin) return ACCOUNT_NAV_GROUPS;
-
-  return ACCOUNT_NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => item.adminOnly !== true),
-  })).filter((group) => group.items.length > 0);
-}
 
 /** ダッシュボードのホーム。サイドバーのブランドが指す先。 */
 export const ACCOUNT_HOME_PATH = "/account";

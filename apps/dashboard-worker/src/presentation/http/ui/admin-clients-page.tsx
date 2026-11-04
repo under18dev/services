@@ -57,7 +57,6 @@ export type CreatedClient = {
 };
 
 export type AdminClientsPageProps = {
-  readonly isAdmin: boolean;
   readonly csrfToken: string;
   readonly clients: readonly OAuthClientSummary[];
   /** 直前の登録。**この応答にしか無い** `client_secret` を持つ。 */
@@ -175,7 +174,6 @@ const ClientRow: FC<{ readonly client: OAuthClientSummary; readonly csrfToken: s
 );
 
 export const AdminClientsPage: FC<AdminClientsPageProps> = ({
-  isAdmin,
   csrfToken,
   clients,
   created,
@@ -183,11 +181,9 @@ export const AdminClientsPage: FC<AdminClientsPageProps> = ({
   notice,
 }) => (
   <AccountShell
-    isAdmin={isAdmin}
     title="OAuth クライアント"
     heading="OAuth クライアント"
     lead="u18 でログインできるアプリの登録と失効を行います。"
-    current="clients"
   >
     {error === undefined ? null : (
       <Card>
@@ -294,7 +290,7 @@ export const AdminClientsPage: FC<AdminClientsPageProps> = ({
  * 揃える。
  */
 export const AdminNotFoundPage: FC = () => (
-  <AccountShell title="ページが見つかりません" heading="ページが見つかりません" isAdmin={false}>
+  <AccountShell title="ページが見つかりません" heading="ページが見つかりません">
     <Card>
       <CardHeader>
         <CardTitle>お探しのページはありません。</CardTitle>

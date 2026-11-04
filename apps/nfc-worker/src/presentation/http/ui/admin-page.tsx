@@ -1,4 +1,4 @@
-import { ACCOUNT_HOME_PATH, accountNavFor } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
 import {
   Alert,
   AlertDescription,
@@ -190,14 +190,10 @@ export type AdminPageProps = {
 export const AdminPage: FC<AdminPageProps> = ({ list, tapUrls, csrfToken, issuedCount, error }) => (
   <KiwaShell
     title="カードの管理"
-    // **この画面に辿り着けるのは管理者だけ**（非管理者には 404）。
-    // それでも `accountNavFor` を通すのは、**並びの作り方を 1 本に
-    // 保つ**ため —— 直に渡すと、`adminOnly` の畳み方が画面ごとに
-    // 分かれる余地ができる。
-    nav={accountNavFor(true)}
+    nav={ACCOUNT_NAV_GROUPS}
     brandHref={ACCOUNT_HOME_PATH}
     stylesheet={KIWA_STYLESHEET_PATH}
-    current="nfc-admin"
+    current="nfc"
     heading="カードの管理"
     lead="発行したカードの一覧と、タグに焼く URL を確認できます。"
   >

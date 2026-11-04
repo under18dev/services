@@ -92,8 +92,7 @@ export const accountUiRoutes = new Hono<AppBindings>()
     if (token === undefined) return signInRequired(c);
 
     const identity = c.get("identity");
-    const [flags, profile, passkeys, sessions, grants] = await Promise.all([
-      navFlags(c, token),
+    const [profile, passkeys, sessions, grants] = await Promise.all([
       identity.getProfile(token),
       identity.listPasskeys(token),
       identity.listSessions(token),
@@ -109,7 +108,6 @@ export const accountUiRoutes = new Hono<AppBindings>()
 
     return c.html(
       <HomePage
-        isAdmin={flags.isAdmin}
         displayName={profile.value.displayName}
         passkeyCount={passkeys.value.length}
         sessionCount={sessions.value.length}
@@ -122,53 +120,41 @@ export const accountUiRoutes = new Hono<AppBindings>()
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
-    const [flags, profile] = await Promise.all([
-      navFlags(c, token),
-      c.get("identity").getProfile(token),
-    ]);
+    const profile = await c.get("identity").getProfile(token);
     if (!profile.ok) return renderFailure(c, profile);
     if (profile.value === null) return signInRequired(c);
 
-    return c.html(<ProfilePage profile={profile.value} isAdmin={flags.isAdmin} />);
+    return c.html(<ProfilePage profile={profile.value} />);
   })
 
   .get(PASSKEYS_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
-    const [flags, passkeys] = await Promise.all([
-      navFlags(c, token),
-      c.get("identity").listPasskeys(token),
-    ]);
+    const passkeys = await c.get("identity").listPasskeys(token);
     if (!passkeys.ok) return renderFailure(c, passkeys);
 
-    return c.html(<PasskeysPage passkeys={passkeys.value} isAdmin={flags.isAdmin} />);
+    return c.html(<PasskeysPage passkeys={passkeys.value} />);
   })
 
   .get(SESSIONS_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
-    const [flags, sessions] = await Promise.all([
-      navFlags(c, token),
-      c.get("identity").listSessions(token),
-    ]);
+    const sessions = await c.get("identity").listSessions(token);
     if (!sessions.ok) return renderFailure(c, sessions);
 
-    return c.html(<SessionsPage sessions={sessions.value} isAdmin={flags.isAdmin} />);
+    return c.html(<SessionsPage sessions={sessions.value} />);
   })
 
   .get(GRANTS_ROUTE, pageSecurityHeaders, async (c) => {
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
-    const [flags, grants] = await Promise.all([
-      navFlags(c, token),
-      c.get("identity").listGrants(token),
-    ]);
+    const grants = await c.get("identity").listGrants(token);
     if (!grants.ok) return renderFailure(c, grants);
 
-    return c.html(<GrantsPage grants={grants.value} isAdmin={flags.isAdmin} />);
+    return c.html(<GrantsPage grants={grants.value} />);
   })
 
   /**
@@ -203,18 +189,12 @@ export const accountUiRoutes = new Hono<AppBindings>()
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
-    const [flags, grants] = await Promise.all([
-      navFlags(c, token),
-      c.get("identity").listGrants(token),
-    ]);
+    const grants = await c.get("identity").listGrants(token);
     if (!grants.ok && grants.failure.kind === "unauthenticated") return renderFailure(c, grants);
 
     // `null` は「取れなかった」。**「連携が 0 件」と同じ値にしないこと。**
     return c.html(
-      <AppsPage
-        view={buildAppCatalog(APP_CATALOG, grants.ok ? grants.value : null)}
-        isAdmin={flags.isAdmin}
-      />,
+      <AppsPage view={buildAppCatalog(APP_CATALOG, grants.ok ? grants.value : null)} />,
     );
   })
 
@@ -380,19 +360,10 @@ export const accountUiRoutes = new Hono<AppBindings>()
     const token = getCookie(c, sessionCookieName(c.env.ENVIRONMENT));
     if (token === undefined) return signInRequired(c);
 
-    const [flags, clients] = await Promise.all([
-      navFlags(c, token),
-      c.get("identityAdmin").listOAuthClients(token),
-    ]);
+    const clients = await c.get("identityAdmin").listOAuthClients(token);
     if (!clients.ok) return renderAdminFailure(c, clients);
 
-    return c.html(
-      <AdminClientsPage
-        isAdmin={flags.isAdmin}
-        csrfToken={ensureCsrfToken(c)}
-        clients={clients.value}
-      />,
-    );
+    return c.html(<AdminClientsPage csrfToken={ensureCsrfToken(c)} clients={clients.value} />);
   })
 
   /**
@@ -541,44 +512,6 @@ export const accountUiRoutes = new Hono<AppBindings>()
  * 画面では利用者にできることが無いので「一時的に表示できません」に畳む。
  */
 /**
- * サイドバーの出し分けに要る値（#333）。
- *
- * **1 リクエストに 1 回だけ決める。** 画面ごとに取りに行くと、同じ応答の
- * 中でサイドバーと本文が違う判断を持ちうる。
- *
- * ## `getProfile` ではなく `getSession` から取る
- *
- * `UserProfile` にも `isAdmin` はあり、**同じ判定である**ことが
- * `identity.ts` に書いてある。それでもこちらを使うのは、
- * **6 枚のうち 4 枚が `getProfile` を呼んでいない**ためで、
- * 画面によって出どころが変わる形を作りたくない。
- * `SessionSummary` はメールアドレスも username も持たないので、
- * サイドバーの出し分けに要る最小でもある。
- *
- * ## 取れなければ「管理者ではない」に倒す
- *
- * RPC が落ちたときに**管理の節を出す**側へ倒すと、落ちている間だけ
- * 非管理者に管理の節が見える。**逆に倒すと、落ちている間だけ管理者の
- * サイドバーから管理の節が消える** —— どちらも実害は小さいが、
- * **見えてはいけないものが見える**ほうが悪い。
- *
- * **画面そのものは道連れにしない。** ここが失敗しても一覧は出せるので、
- * `renderFailure` へは回さない（`/account/apps` が `listGrants` の失敗で
- * 本体を落とさないのと同じ判断）。
- *
- * **これはサイドバーの話だけである。** `/account/admin` 配下が叩けるかは
- * **画面側が自分で確かめること** —— ここを通らない経路から来ても
- * 守られていなければならない。
- */
-async function navFlags(
-  c: Context<AppBindings>,
-  token: string,
-): Promise<{ readonly isAdmin: boolean }> {
-  const session = await c.get("identity").getSession(token);
-  return { isAdmin: session.ok && session.value !== null && session.value.isAdmin };
-}
-
-/**
  * ログインが必要なときの応答。**1 箇所に置く。**
  *
  * 画面ごとに `<SignInRequiredPage />` を書くと、**次に足した画面だけ
@@ -633,15 +566,11 @@ async function renderAdminPage(
   token: string,
   extra: { created?: CreatedClient; error?: string; notice?: string },
 ): Promise<Response> {
-  const [flags, clients] = await Promise.all([
-    navFlags(c, token),
-    c.get("identityAdmin").listOAuthClients(token),
-  ]);
+  const clients = await c.get("identityAdmin").listOAuthClients(token);
   if (!clients.ok) return renderAdminFailure(c, clients);
 
   return c.html(
     <AdminClientsPage
-      isAdmin={flags.isAdmin}
       csrfToken={ensureCsrfToken(c)}
       clients={clients.value}
       {...(extra.created === undefined ? {} : { created: extra.created })}
@@ -715,20 +644,16 @@ async function renderAdminAudit(
     error?: string;
   },
 ): Promise<Response> {
-  const [flags, page] = await Promise.all([
-    navFlags(c, token),
-    c.get("identityAdmin").listAuditLogs(token, {
-      ...(options.event === undefined ? {} : { event: options.event }),
-      ...(options.userId === undefined ? {} : { userId: options.userId }),
-      ...(options.outcome === undefined ? {} : { outcome: options.outcome }),
-      ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-    }),
-  ]);
+  const page = await c.get("identityAdmin").listAuditLogs(token, {
+    ...(options.event === undefined ? {} : { event: options.event }),
+    ...(options.userId === undefined ? {} : { userId: options.userId }),
+    ...(options.outcome === undefined ? {} : { outcome: options.outcome }),
+    ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+  });
   if (!page.ok) return renderAdminFailure(c, page);
 
   return c.html(
     <AdminAuditPage
-      isAdmin={flags.isAdmin}
       csrfToken={ensureCsrfToken(c)}
       entries={page.value.entries}
       nextCursor={page.value.nextCursor}
@@ -751,8 +676,7 @@ async function renderAdminUsers(
   token: string,
   options: { query?: string; cursor?: string; error?: string; notice?: string },
 ): Promise<Response> {
-  const [flags, profile, page] = await Promise.all([
-    navFlags(c, token),
+  const [profile, page] = await Promise.all([
     // **自分の `userId` が要る。** 自分の行に停止を出さないため
     // （守っているのは auth-worker。ここは押せるのに断られる形を避ける）。
     c.get("identity").getProfile(token),
@@ -765,7 +689,6 @@ async function renderAdminUsers(
 
   return c.html(
     <AdminUsersPage
-      isAdmin={flags.isAdmin}
       actorUserId={profile.ok && profile.value !== null ? profile.value.id : ""}
       csrfToken={ensureCsrfToken(c)}
       users={page.value.users}
