@@ -282,6 +282,13 @@ export const NfcPage: FC<NfcPageProps> = ({
     lead="発行したカードの一覧と、タグに焼く URL を確認できます。他人のカードも無効化・遷移先の書き換えができます。"
     maxWidth="max-w-6xl"
   >
+    <p class={ITEM_META_CLASS}>
+      <a href="/nfc/analytics" class="underline underline-offset-4">
+        解析を見る
+      </a>
+      （タップの時系列・バッチ別の集計・死蔵の検出など）
+    </p>
+
     <Alert>
       <AlertDescription>
         <strong>

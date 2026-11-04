@@ -119,6 +119,16 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
       calls.reinstateBatchToIssuedCards.push(input);
       return rpcOk({ cardIds: [] });
     },
+    // 解析画面（#454）用。この test ファイルは `/nfc` だけを見るので、
+    // ここでは呼ばれない前提の最小スタブ。
+    tapTimeseries: async () =>
+      rpcOk({ dailyTotals: [], totalTaps: 0, dailyAverage: 0, maxDay: null, retentionDays: 180 }),
+    usageFunnel: async () =>
+      rpcOk({ issued: 0, claimedEver: 0, tappedEver: 0, retentionDays: 180 }),
+    batchAnalytics: async () => rpcOk({ rows: [] }),
+    cardUsageRanking: async () => rpcOk({ ranking: [], dormant: { count: 0, rows: [] } }),
+    disabledReasonBreakdown: async () => rpcOk({ rows: [] }),
+    transferCountDistribution: async () => rpcOk({ zero: 0, one: 0, two: 0, threeOrMore: 0 }),
     ...overrides,
   };
 

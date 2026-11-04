@@ -20,6 +20,7 @@ import { exchangeAuthorizationCode } from "../../oidc/token-exchange";
 import { registerAuditRoutes } from "./audit.routes";
 import { wantsJsonResponse } from "./origin";
 import { registerClientsRoutes } from "./clients.routes";
+import { registerNfcAnalyticsRoutes } from "./nfc-analytics.routes";
 import { registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
 import { KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
@@ -437,6 +438,8 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   // NFC カードの管理（#382 / #390 決定 16 ③）。上のガードが既にセッション・
   // 承認済みであることを確かめている。
   registerNfcRoutes(app);
+  // NFC の解析画面（#454）。同上。
+  registerNfcAnalyticsRoutes(app);
   // 利用者の管理・監査ログの閲覧（#375 / #382 / #390 決定 16 ③）。同上。
   registerUsersRoutes(app);
   registerAuditRoutes(app);
