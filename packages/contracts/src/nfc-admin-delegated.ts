@@ -180,30 +180,39 @@ export const tapTimeseriesDelegatedInputSchema = z.object({
 });
 
 export type TapTimeseriesDelegatedInput = z.infer<typeof tapTimeseriesDelegatedInputSchema>;
-export type TapTimeseriesDelegatedResult = RpcResult<{
+
+/**
+ * 解析画面（#454）の 6 区画ぶんの値型。**`RpcResult` で包む前の生の形**
+ * ——admin-worker 側が `Promise.allSettled` で成功値だけ取り出したあと、
+ * 画面の props にそのまま渡す（`AuditLogEntryAdmin` と同じ扱い方）。
+ */
+export type TapTimeseriesAnalytics = {
   readonly dailyTotals: readonly { readonly date: string; readonly total: number }[];
   readonly totalTaps: number;
   readonly dailyAverage: number;
   readonly maxDay: { readonly date: string; readonly total: number } | null;
   readonly retentionDays: number;
-}>;
+};
+export type TapTimeseriesDelegatedResult = RpcResult<TapTimeseriesAnalytics>;
 
-export type UsageFunnelDelegatedResult = RpcResult<{
+export type UsageFunnelAnalytics = {
   readonly issued: number;
   readonly claimedEver: number;
   readonly tappedEver: number;
   readonly retentionDays: number;
-}>;
+};
+export type UsageFunnelDelegatedResult = RpcResult<UsageFunnelAnalytics>;
 
+export type BatchAnalyticsRow = {
+  readonly batch: string | null;
+  readonly issued: number;
+  readonly claimedEver: number;
+  readonly disabled: number;
+  readonly tapsAllTime: number;
+  readonly tapsLast7d: number;
+};
 export type BatchAnalyticsDelegatedResult = RpcResult<{
-  readonly rows: readonly {
-    readonly batch: string | null;
-    readonly issued: number;
-    readonly claimedEver: number;
-    readonly disabled: number;
-    readonly tapsAllTime: number;
-    readonly tapsLast7d: number;
-  }[];
+  readonly rows: readonly BatchAnalyticsRow[];
 }>;
 
 export const cardUsageRankingDelegatedInputSchema = z.object({
@@ -211,34 +220,38 @@ export const cardUsageRankingDelegatedInputSchema = z.object({
 });
 
 export type CardUsageRankingDelegatedInput = z.infer<typeof cardUsageRankingDelegatedInputSchema>;
-export type CardUsageRankingDelegatedResult = RpcResult<{
-  readonly ranking: readonly {
-    readonly cardId: string;
-    readonly batch: string | null;
-    readonly status: AdminCardStatusDelegated;
-    readonly total: number;
-  }[];
-  readonly dormant: {
-    readonly count: number;
-    readonly rows: readonly {
-      readonly cardId: string;
-      readonly batch: string | null;
-      readonly claimedAt: string;
-      readonly status: AdminCardStatusDelegated;
-    }[];
-  };
-}>;
 
-export type DisabledReasonBreakdownDelegatedResult = RpcResult<{
+export type CardUsageRankingRow = {
+  readonly cardId: string;
+  readonly batch: string | null;
+  readonly status: AdminCardStatusDelegated;
+  readonly total: number;
+};
+export type DormantCardRow = {
+  readonly cardId: string;
+  readonly batch: string | null;
+  readonly claimedAt: string;
+  readonly status: AdminCardStatusDelegated;
+};
+export type CardUsageRankingAnalytics = {
+  readonly ranking: readonly CardUsageRankingRow[];
+  readonly dormant: { readonly count: number; readonly rows: readonly DormantCardRow[] };
+};
+export type CardUsageRankingDelegatedResult = RpcResult<CardUsageRankingAnalytics>;
+
+export type DisabledReasonBreakdownAnalytics = {
   readonly rows: readonly { readonly reason: string | null; readonly count: number }[];
-}>;
+};
+export type DisabledReasonBreakdownDelegatedResult = RpcResult<DisabledReasonBreakdownAnalytics>;
 
-export type TransferCountDistributionDelegatedResult = RpcResult<{
+export type TransferCountDistributionAnalytics = {
   readonly zero: number;
   readonly one: number;
   readonly two: number;
   readonly threeOrMore: number;
-}>;
+};
+export type TransferCountDistributionDelegatedResult =
+  RpcResult<TransferCountDistributionAnalytics>;
 
 /**
  * `NfcAdminDelegatedRPC` の契約。

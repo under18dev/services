@@ -63,9 +63,11 @@ export const ROOT_ROUTES: readonly Route[] = [{ method: "GET", path: "/" }];
 /** ログイン済みだが承認待ちの人を送る先（#390 決定 3）。 */
 export const PENDING_ROUTES: readonly Route[] = [{ method: "GET", path: "/pending" }];
 
-/** `ADMIN_NAV_GROUPS`（`ui/nav.ts`）に出ている 4 画面。 */
+/** `ADMIN_NAV_GROUPS`（`ui/nav.ts`）に出ている 5 画面。 */
 export const NAV_PAGE_ROUTES: readonly Route[] = [
   { method: "GET", path: "/nfc" },
+  /** NFC の解析画面（#454）。 */
+  { method: "GET", path: "/nfc/analytics" },
   { method: "GET", path: "/clients" },
   { method: "GET", path: "/users" },
   { method: "GET", path: "/audit" },

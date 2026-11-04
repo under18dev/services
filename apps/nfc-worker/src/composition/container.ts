@@ -8,7 +8,6 @@ import type {
   ExpiredTapPurger,
   IdentityGateway,
 } from "../application/ports";
-import { AdminDisableCardUseCase } from "../application/use-cases/admin-disable-card.use-case";
 import { DelegatedBatchAnalyticsUseCase } from "../application/use-cases/delegated-batch-analytics.use-case";
 import { DelegatedBatchDisableCardsUseCase } from "../application/use-cases/delegated-batch-disable-cards.use-case";
 import { DelegatedCardUsageRankingUseCase } from "../application/use-cases/delegated-card-usage-ranking.use-case";
