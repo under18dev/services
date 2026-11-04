@@ -9,7 +9,17 @@
  * 出し、CLI とテストの両方が同じ文字列を使う形にする
  * （`apps/auth-worker/src/infrastructure/persistence/admin-role.sql.ts`
  * と同じ方針）。
+ *
+ * **`ApprovalAuditEvent` は型だけ import する。** CLI（`admin-approval.mjs`）
+ * はこのファイルを Node から直接 `import()` するが、Node の ESM ローダーは
+ * 拡張子無しの相対 import（`../../domain/approval-audit-events`）を `.ts` へ
+ * 自動解決しない。型だけの import は型ストリップで消え、実行時に解決を
+ * 試みないのでこの問題を起こさない——値（`APPROVAL_AUDIT_EVENTS`）は
+ * ここから再輸出せず、CLI は `domain/approval-audit-events.ts` を直接
+ * `loadDomain()` で読む（`approval-guard.ts` が同じ理由で
+ * `./permissions` の import 自体を無くしたのと同じ考え方）。
  */
+import type { ApprovalAuditEvent } from "../../domain/approval-audit-events";
 
 /**
  * SQL リテラルへ落とす。
@@ -61,41 +71,57 @@ export function revokeApprovalSql(sub: string): string {
 /** 1 件の状態を見るための SELECT。判定には使わない（CLI が人に見せるためだけ）。 */
 export function approvalStatusSql(sub: string): string {
   const subLiteral = sqlLiteral(sub);
-  return `select id, sub, is_super_approver, approved_by_sub, created_at
+  return `select id, sub, is_super_approver, permissions, approved_by_sub, created_at
     from admin_approvals
    where sub = ${subLiteral};`;
 }
 
 /** 承認済み全員。「誰が使ってよいか」を一覧する。 */
 export function listApprovalsSql(): string {
-  return `select id, sub, is_super_approver, approved_by_sub, created_at
+  return `select id, sub, is_super_approver, permissions, approved_by_sub, created_at
     from admin_approvals
 order by created_at asc;`;
 }
 
 /**
- * 承認・剥奪のイベント名。
+ * いま super approver が何人いるか（#190、締め出し防止）。
  *
- * **プロパティの形で書く。** auth-worker の `ADMIN_ROLE_AUDIT_EVENTS` の
- * コメントにある理由——登録簿の走査が拾うのはこの形で、型の union だけに
- * すると「宣言はあるが検査の視野に入らない」ができる。admin-worker の
- * 監査イベントの登録簿はまだ無いので、いまは**この定数自体が登録簿**で
- * あり、将来そちらを作るときはここから移す。
+ * `approval-guard.ts` の `checkSuperApproverChange` / `checkApprovalRevocation`
+ * に渡す値を、書き込みの**前に**確かめるために使う。
  */
-export const APPROVAL_AUDIT_EVENTS = {
-  granted: { event: "ops.approval.granted" },
-  revoked: { event: "ops.approval.revoked" },
-} as const satisfies Record<string, { event: string }>;
-
-export type ApprovalAuditEvent =
-  (typeof APPROVAL_AUDIT_EVENTS)[keyof typeof APPROVAL_AUDIT_EVENTS]["event"];
+export function countSuperApproversSql(): string {
+  return `select count(*) as count from admin_approvals where is_super_approver = 1;`;
+}
 
 /**
- * 承認・剥奪を監査ログに残す。
+ * 権限ビットを書き換える（#190）。
+ *
+ * **ここでは OR も AND NOT もしない。** 呼び出し側（CLI）が
+ * `approvalStatusSql` で現在値を読み、`permissions.ts` の BigInt 演算で
+ * 新しい値を計算してから、この文で書き戻す——SQL 側で TEXT 列に対する
+ * ビット演算はできない（`permissions` 列のコメントを参照）。読み・計算・
+ * 書きの 3 ステップがアトミックではない（2 回の `wrangler d1 execute` を
+ * 挟む）が、この CLI は低頻度の手動操作なので許容する。
+ */
+export function setPermissionsSql(sub: string, permissions: string): string {
+  return `update admin_approvals set permissions = ${sqlLiteral(permissions)}
+    where sub = ${sqlLiteral(sub)}
+returning id, permissions;`;
+}
+
+export type { ApprovalAuditEvent };
+
+/**
+ * 承認・剥奪・権限の変更を監査ログに残す。
  *
  * `admin_approval_events` へ書く。`actor` は実行した人の自由文字列
  * （GitHub のハンドル等）。承認の増減はいまのところこの CLI でしか
  * 起きないので、ブートストラップ（最初の 1 人）も含めて常に値が入る。
+ *
+ * `detail` は権限ビットの変更にだけ使う。**ビットの記号名**
+ * （例: `"NFC_WRITE"`）をそのまま文字列で残す——生の数値だけでは
+ * 後から読む人がコードを調べ直さないと意味を復元できず、
+ * 「人が読める形で残る」という #190 の受け入れ条件を満たさない。
  */
 export function approvalAuditSql(input: {
   readonly event: ApprovalAuditEvent;
@@ -103,14 +129,17 @@ export function approvalAuditSql(input: {
   /** CLI の `--actor`。u18 Identity の sub ではない自由文字列。常に要る（`requireActor`）。 */
   readonly actor: string;
   readonly reason: string;
+  /** 権限ビットの記号名。承認そのものの付与・剥奪では省略（null になる）。 */
+  readonly detail?: string;
 }): string {
-  return `insert into admin_approval_events (id, sub, event, actor, reason, created_at)
+  return `insert into admin_approval_events (id, sub, event, actor, reason, detail, created_at)
 values (
   'ade_' || lower(hex(randomblob(16))),
   ${sqlLiteral(input.sub)},
   ${sqlLiteral(input.event)},
   ${sqlLiteral(input.actor)},
   ${sqlLiteral(input.reason)},
+  ${input.detail === undefined ? "null" : sqlLiteral(input.detail)},
   ${NOW_MS}
 );`;
 }

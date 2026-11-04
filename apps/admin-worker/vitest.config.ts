@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { exportJWK, generateKeyPair } from "jose";
@@ -32,6 +33,24 @@ const migrations = await readD1Migrations(
 );
 
 /**
+ * 0002 の中身をテストへ渡す（#190）。
+ *
+ * テスト本体は workerd の中で動くので `node:fs` を使えない
+ * （`test/route-inventory.ts` 系のコメントと同じ理由）。`setup.ts` が
+ * 全マイグレーションを先に適用してしまうので、「移行が入る前の行」を
+ * 再現するには、**実際のファイルの中身**を既存行へもう一度流す形でしか
+ * 確かめられない——コピーした SQL ではなく、本番が実行するのと同じ
+ * ファイルを読む。
+ */
+const permissionsBackfillSql = readFileSync(
+  join(
+    import.meta.dirname,
+    "../../packages/admin-db/drizzle/0002_backfill_existing_approvals_permissions.sql",
+  ),
+  "utf8",
+);
+
+/**
  * `u18-auth` スタブの `.well-known/*` に使う、本物と同じ形の鍵・応答。
  * Node 側（vitest.config.ts は Node で評価される）で 1 度だけ作り、
  * workerd 側のスタブスクリプトへは**静的な JSON として**埋め込む——
@@ -57,6 +76,7 @@ export default defineConfig({
         d1Databases: ["ADMIN_DB"],
         bindings: {
           TEST_MIGRATIONS: migrations,
+          TEST_PERMISSIONS_BACKFILL_SQL: permissionsBackfillSql,
           SESSION_SECRET: "test-session-secret-at-least-32-bytes!!",
           OIDC_CLIENT_SECRET: "test-client-secret",
           // `test/auth-origin.test.ts` だけが読む。`u18-auth` スタブが

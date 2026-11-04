@@ -22,6 +22,7 @@ export const ADMIN_NAV_GROUPS: readonly ShellNavGroup[] = [
       { key: "clients", href: "/clients", label: "OAuth クライアント" },
       { key: "users", href: "/users", label: "利用者" },
       { key: "auditLogs", href: "/audit", label: "監査ログ" },
+      { key: "approvals", href: "/approvals", label: "承認者・権限" },
     ],
   },
 ];

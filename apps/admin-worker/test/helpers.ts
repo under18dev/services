@@ -6,6 +6,7 @@ import type {
 import { rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { ApprovalRepository } from "../src/application/ports/approval.repository";
+import { ALL_DEFINED_PERMISSIONS, effectivePermissions } from "../src/domain/permissions";
 import { createFakeIdp } from "./fake-idp";
 
 function unused(name: string): () => never {
@@ -64,14 +65,87 @@ export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
 
 export const ORIGIN = env.ADMIN_ORIGIN;
 
-/** `isApproved` / `isSuperApprover` を固定値で答える fake。D1 を立てずにガードの分岐だけを見る。 */
+type FakeApprovalRow = {
+  isSuperApprover: boolean;
+  permissions: bigint;
+  approvedBySub: string | null;
+  createdAt: Date;
+};
+
+export type FakeAuditEvent = {
+  readonly event: string;
+  readonly sub: string;
+  readonly actor: string;
+  readonly reason: string;
+  readonly detail?: string;
+};
+
+/**
+ * `ApprovalRepository` の、D1 を立てない in-memory 実装。
+ *
+ * **承認済みなら既定で全権限を持つ**（`ALL_DEFINED_PERMISSIONS`）。
+ * 既存の大半のテストは「承認されていれば呼べること」を見ているので、
+ * ここが最小権限（0）だと #190 を足した瞬間に無関係なテストが軒並み
+ * 403 になる。権限を絞って拒否を確かめたいテストだけ `permissionsBySub`
+ * で明示すること。
+ *
+ * **書き込み（`grant` / `revoke` / `setPermissions`）は実際に状態を変える。**
+ * `/approvals` 画面のテストが「書いてから読み直す」を確かめられるように
+ * するため——固定値を返すだけだと、画面が実際に書き込んでいるかを
+ * 確かめられない。`events` に監査イベントを溜めるので、テストから
+ * `fake.events` で検証できる。
+ */
 export function fakeApprovals(
   approvedSubs: readonly string[],
   superSubs: readonly string[] = [],
-): ApprovalRepository {
+  permissionsBySub: Readonly<Record<string, bigint>> = {},
+): ApprovalRepository & { readonly events: FakeAuditEvent[] } {
+  const rows = new Map<string, FakeApprovalRow>();
+  for (const sub of approvedSubs) {
+    rows.set(sub, {
+      isSuperApprover: superSubs.includes(sub),
+      permissions: permissionsBySub[sub] ?? ALL_DEFINED_PERMISSIONS,
+      approvedBySub: null,
+      createdAt: new Date(0),
+    });
+  }
+  const events: FakeAuditEvent[] = [];
+
   return {
-    isApproved: async (sub) => approvedSubs.includes(sub),
-    isSuperApprover: async (sub) => superSubs.includes(sub),
+    events,
+    isApproved: async (sub) => rows.has(sub),
+    isSuperApprover: async (sub) => rows.get(sub)?.isSuperApprover ?? false,
+    countSuperApprovers: async () => [...rows.values()].filter((row) => row.isSuperApprover).length,
+    getEffectivePermissions: async (sub) => {
+      const row = rows.get(sub);
+      if (row === undefined) return null;
+      return effectivePermissions(row);
+    },
+    listAll: async () => [...rows.entries()].map(([sub, row]) => ({ sub, ...row })),
+    getBySub: async (sub) => {
+      const row = rows.get(sub);
+      return row === undefined ? null : { sub, ...row };
+    },
+    grant: async (sub, isSuperApprover, approvedBySub) => {
+      const existing = rows.get(sub);
+      rows.set(sub, {
+        isSuperApprover,
+        permissions: existing?.permissions ?? 0n,
+        approvedBySub: existing?.approvedBySub ?? approvedBySub,
+        createdAt: existing?.createdAt ?? new Date(),
+      });
+      return { isSuperApprover };
+    },
+    revoke: async (sub) => rows.delete(sub),
+    setPermissions: async (sub, permissions) => {
+      const existing = rows.get(sub);
+      if (existing === undefined) return false;
+      rows.set(sub, { ...existing, permissions });
+      return true;
+    },
+    recordAuditEvent: async (input) => {
+      events.push(input);
+    },
   };
 }
 
