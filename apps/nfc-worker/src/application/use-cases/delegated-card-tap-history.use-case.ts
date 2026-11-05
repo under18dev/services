@@ -105,12 +105,15 @@ export class DelegatedCardTapHistoryUseCase {
     }
 
     const lastTappedAt = summary?.lastTappedAt ?? null;
+    // **「今日の何時か」を混ぜない。** `now.getTime()` をそのまま使うと、
+    // UTC で正午を過ぎた時刻に実行しただけで「今日タップされた」が
+    // 1 日前に化ける（端数を四捨五入する形だと、半日を過ぎた瞬間に
+    // 繰り上がる）。`isoDateUtc(now)` で「今日の日付」まで丸めてから
+    // 日付どうしの差を取れば、時刻に関係なく整数日になる。
     const daysSinceLastTap =
       lastTappedAt === null
         ? null
-        : Math.round(
-            (now.getTime() - new Date(`${lastTappedAt}T00:00:00Z`).getTime()) / MS_PER_DAY,
-          );
+        : (Date.parse(isoDateUtc(now)) - Date.parse(`${lastTappedAt}T00:00:00Z`)) / MS_PER_DAY;
 
     return outcomeOk({
       dailyTotals,
