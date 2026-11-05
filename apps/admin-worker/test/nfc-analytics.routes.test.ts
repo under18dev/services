@@ -115,6 +115,52 @@ describe("GET /nfc/analytics", () => {
     expect(html).not.toMatch(/<a[^>]*>\s*（バッチ名なし）\s*<\/a>/);
   });
 
+  /**
+   * **既知の理由コードは日本語で、知らない値はコードのまま**（#496）。
+   * 「不明」とは書かない——値が無いのか、知らない値が入っているのかを
+   * 運用者が区別できなくなるため（#471 の `UserRef` と同じ理由）。
+   */
+  it("既知の理由コードは日本語ラベルで、対応表に無い値は生のコードのまま出す。「不明」とは書かない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const app = createApp({
+      approvals: fakeApprovals([SUB]),
+      nfcCards: {
+        ...fullNfcCards(),
+        disabledReasonBreakdown: async () =>
+          rpcOk({
+            rows: [
+              { reason: "lost", count: 3 },
+              { reason: "admin_batch", count: 1 },
+              // ランブック §12.4(5) が今も使う運用値（コードは書かないが既知）。
+              { reason: "ops", count: 1 },
+              // 対応表に無い、実在が確認できていない値。
+              { reason: "abuse", count: 1 },
+              { reason: null, count: 2 },
+            ],
+          }),
+      },
+    });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/analytics`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("紛失のため");
+    expect(html).toContain("（lost）");
+    expect(html).toContain("運営の一括無効化");
+    expect(html).toContain("（admin_batch）");
+    expect(html).toContain("孤立カードへの運用対応");
+    expect(html).toContain("（ops）");
+    // 対応表に無い値は生のコードのまま——「不明」にしない。
+    expect(html).toContain("<code");
+    expect(html).toContain(">abuse</code>");
+    expect(html).not.toContain("不明");
+    expect(html).toContain("（なし）");
+  });
+
   it("days 未指定は 30 を既定にし、見出し・ハイライトに使い回す", async () => {
     const sessionCookie = await loginAsApproved();
     const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: fullNfcCards() });
