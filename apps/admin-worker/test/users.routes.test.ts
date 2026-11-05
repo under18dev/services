@@ -553,6 +553,27 @@ describe("GET /users/:userId", () => {
     expect(html).toContain("誰が使ったかを記録しない設計のため出していません");
   });
 
+  it("カード ID 自体がカード詳細へのリンクで、コピーボタンも持つ（#488）", async () => {
+    const response = await openDetail(fakeIdentityAdmin().rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    // **#490 で直ったリンク先**（一覧内アンカーではなくカード詳細）。
+    // `/nfc#card-` へ巻き戻っていないことも合わせて見る。
+    expect(html).toContain('href="/nfc/nfc_0001"');
+    expect(html).not.toContain("/nfc#card-");
+    expect(html).toContain('data-copy="nfc_0001"');
+    // 旧・別列の「カードの詳細へ」リンクは消えている（ID 自体がリンクに
+    // なったので重複する導線を残さない）。
+    expect(html).not.toContain("カードの詳細へ");
+  });
+
+  it("利用者 ID にコピーボタンを持つ（#488）", async () => {
+    const response = await openDetail(fakeIdentityAdmin().rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    expect(html).toContain('data-copy="usr_taro"');
+  });
+
   it("存在しない userId は 404 で、一覧へ戻る導線を持つ", async () => {
     const identity = fakeIdentityAdmin({
       getUser: async () => rpcErr(RpcErrorCode.NotFound, "no such user"),
