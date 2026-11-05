@@ -4,9 +4,11 @@ import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
   AdminCardViewDelegated,
   BatchDisableCardsDelegatedInput,
+  CardTapHistoryDelegatedInput,
   CountBatchIssuedCardsDelegatedInput,
   CountDisabledInBatchDelegatedInput,
   DisableCardDelegatedInput,
+  GetCardDelegatedInput,
   IdentityAdminDelegatedRpcContract,
   IssueCardsDelegatedInput,
   IssueCardsDelegatedResult,
@@ -68,6 +70,8 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     batchDisableCards: BatchDisableCardsDelegatedInput[];
     countDisabledInBatch: CountDisabledInBatchDelegatedInput[];
     reinstateBatchToIssuedCards: ReinstateBatchToIssuedCardsDelegatedInput[];
+    getCard: GetCardDelegatedInput[];
+    cardTapHistory: CardTapHistoryDelegatedInput[];
   };
 } {
   const calls = {
@@ -81,6 +85,8 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     batchDisableCards: [] as BatchDisableCardsDelegatedInput[],
     countDisabledInBatch: [] as CountDisabledInBatchDelegatedInput[],
     reinstateBatchToIssuedCards: [] as ReinstateBatchToIssuedCardsDelegatedInput[],
+    getCard: [] as GetCardDelegatedInput[],
+    cardTapHistory: [] as CardTapHistoryDelegatedInput[],
   };
 
   const rpc: NfcAdminDelegatedRpcContract = {
@@ -128,6 +134,36 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     reinstateBatchToIssuedCards: async (input) => {
       calls.reinstateBatchToIssuedCards.push(input);
       return rpcOk({ cardIds: [] });
+    },
+    // カード詳細（#472）用。
+    getCard: async (input) => {
+      calls.getCard.push(input);
+      return rpcOk({
+        cardId: input.cardId,
+        status: "issued",
+        ownerUserId: null,
+        targetUrl: null,
+        batch: null,
+        issuedAt: "2026-10-01T00:00:00.000Z",
+        claimedAt: null,
+        transferCount: 0,
+        disabledAt: null,
+        disabledReason: null,
+        tapCount: 0,
+        lastTappedAt: null,
+      });
+    },
+    cardTapHistory: async (input) => {
+      calls.cardTapHistory.push(input);
+      return rpcOk({
+        dailyTotals: [],
+        totalTaps: 0,
+        retentionDays: 180,
+        lastTappedAt: null,
+        daysSinceLastTap: null,
+        last7d: { total: 0, previousTotal: 0 },
+        last30d: { total: 0, previousTotal: 0 },
+      });
     },
     // 解析画面（#454）用。この test ファイルは `/nfc` だけを見るので、
     // ここでは呼ばれない前提の最小スタブ。
@@ -384,6 +420,201 @@ describe("GET /nfc", () => {
 
     const html = await response.text();
     expect(html).toContain("3 枚発行しました");
+  });
+});
+
+describe("GET /nfc/:cardId（カード詳細、#472）", () => {
+  it("カードの概要とタップの集計を描く", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      getCard: async (input) => {
+        calls.getCard.push(input);
+        return rpcOk({
+          cardId: "nfc_active",
+          status: "active",
+          ownerUserId: "usr_taro",
+          targetUrl: "https://example.com/taro",
+          batch: "bunkasai-2026",
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: "2026-10-02T00:00:00.000Z",
+          transferCount: 1,
+          disabledAt: null,
+          disabledReason: null,
+          tapCount: 5,
+          lastTappedAt: "2026-10-20",
+        });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain("nfc_active");
+    expect(html).toContain("bunkasai-2026");
+    // **所有者は userId の先頭だけ**（#471 が入るまでの仮実装）。
+    expect(html).toContain("usr_taro".slice(0, 8));
+    // actorUserId は session.sub から、cardId は URL パラメータから。
+    expect(calls.getCard).toEqual([{ actorUserId: SUB, cardId: "nfc_active" }]);
+  });
+
+  it("disabled なら理由と日時を上に出す。理由が空なら「記録されていません」", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async (input) =>
+        rpcOk({
+          cardId: input.cardId,
+          status: "disabled",
+          ownerUserId: "usr_taro",
+          targetUrl: null,
+          batch: null,
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: "2026-10-02T00:00:00.000Z",
+          transferCount: 0,
+          disabledAt: "2026-10-05T00:00:00.000Z",
+          disabledReason: null,
+          tapCount: 0,
+          lastTappedAt: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_disabled`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("理由が記録されていません");
+  });
+
+  it("引き取り済みでタップ 0 件なら、死蔵をはっきり出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async (input) =>
+        rpcOk({
+          cardId: input.cardId,
+          status: "active",
+          ownerUserId: "usr_taro",
+          targetUrl: "https://example.com/taro",
+          batch: null,
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: "2026-10-02T00:00:00.000Z",
+          transferCount: 0,
+          disabledAt: null,
+          disabledReason: null,
+          tapCount: 0,
+          lastTappedAt: null,
+        }),
+      cardTapHistory: async () =>
+        rpcOk({
+          dailyTotals: [],
+          totalTaps: 0,
+          retentionDays: 180,
+          lastTappedAt: null,
+          daysSinceLastTap: null,
+          last7d: { total: 0, previousTotal: 0 },
+          last30d: { total: 0, previousTotal: 0 },
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_dormant`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("引き取り済みですが、1 回もタップされていません");
+  });
+
+  it("?days= を 30/90/180 の 3 択へ丸めて cardTapHistory を呼ぶ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active?days=not-a-number`, {
+        headers: { Cookie: sessionCookie },
+      }),
+      env,
+      executionContext(),
+    );
+    await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active?days=90`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(calls.cardTapHistory.map((input) => input.days)).toEqual([30, 90]);
+  });
+
+  it("見つからなければ 404 で、一覧へ戻る導線を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async () => rpcErr(RpcErrorCode.NotFound, "not_found"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_missing`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(404);
+    const html = await response.text();
+    expect(html).toContain("そのカードは見つかりません");
+    expect(html).toContain('href="/nfc"');
+  });
+
+  it("取得に失敗したら 503", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async () => rpcErr(RpcErrorCode.Internal, "boom"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(503);
+  });
+
+  /**
+   * **登録順の罠を直接確かめる**（issue #472 の指示）。`/nfc/:cardId` を
+   * `/nfc/analytics` より先に登録すると、`:cardId` に `"analytics"` が
+   * 吸われて解析画面が「カードが見つかりません」になる
+   * （`app.tsx` の登録順コメントを参照）。
+   */
+  it("GET /nfc/analytics は /nfc/:cardId に吸われない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/analytics`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("NFC 解析");
+    expect(html).not.toContain("そのカードは見つかりません");
+    // 吸われていれば getCard({ cardId: "analytics" }) が呼ばれているはず。
+    expect(calls.getCard).toHaveLength(0);
   });
 });
 
@@ -789,6 +1020,74 @@ describe("POST /nfc/:cardId/disable", () => {
 
     expect(response.status).toBe(400);
     const html = await response.text();
+    expect(html).toContain("そのカードは見つかりませんでした。");
+  });
+
+  it("from=detail なら、成功後に詳細（/nfc/<cardId>）へ戻す（#472）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ csrf_token: csrfToken, from: "detail" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/nfc/nfc_active");
+    expect(calls.disableCard).toEqual([{ actorUserId: SUB, cardId: "nfc_active" }]);
+  });
+
+  it("from=detail なら、失敗後も詳細を描き直す（一覧には戻さない）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      disableCard: async () => rpcErr(RpcErrorCode.NotFound, "not_found"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ csrf_token: csrfToken, from: "detail" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    // 詳細の画面（カード ID そのものを見出しに出す）に戻っていること。
+    expect(html).toContain("nfc_active");
     expect(html).toContain("そのカードは見つかりませんでした。");
   });
 });

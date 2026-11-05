@@ -25,7 +25,7 @@ import { registerAuditRoutes } from "./audit.routes";
 import { wantsJsonResponse } from "./origin";
 import { registerClientsRoutes } from "./clients.routes";
 import { registerNfcAnalyticsRoutes } from "./nfc-analytics.routes";
-import { registerNfcRoutes } from "./nfc.routes";
+import { registerNfcCardDetailRoutes, registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
 import { KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
 import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
@@ -507,6 +507,11 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   registerNfcRoutes(app);
   // NFC の解析画面（#454）。同上。
   registerNfcAnalyticsRoutes(app);
+  // カード 1 枚の詳細（#472）。**`registerNfcAnalyticsRoutes` より後に
+  // 登録すること。** 先に登録すると、`/nfc/:cardId` が `/nfc/analytics` を
+  // 吸ってしまい、解析画面が「カードが見つかりません」になる——Hono は
+  // 登録順に照合する（`users.routes.tsx:310` 付近の同じ罠を参照）。
+  registerNfcCardDetailRoutes(app);
   // 利用者の管理・監査ログの閲覧（#375 / #382 / #390 決定 16 ③）。同上。
   registerUsersRoutes(app);
   registerAuditRoutes(app);

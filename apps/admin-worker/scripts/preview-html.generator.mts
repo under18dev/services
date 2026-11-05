@@ -1,10 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
+  AdminCardDetailDelegated,
   AdminCardStatusDelegated,
   AdminCardViewDelegated,
   AuditLogEntryAdmin,
   BatchAnalyticsRow,
+  CardTapHistoryDelegatedInput,
+  GetCardDelegatedInput,
   GetUserDelegatedInput,
   IdentityAdminDelegatedRpcContract,
   ListAuditLogsDelegatedInput,
@@ -163,6 +166,11 @@ for (let i = 0; i < 8; i += 1) {
   pushCard("disabled", owner, BATCHES[i % BATCHES.length]!, 90 + i, 85 + i, 10 + i);
 }
 
+/** `/nfc/:cardId` のプレビュー対象（#472）。無効化・理由未記録のデモ。 */
+const DETAIL_CARD_ID = CARDS[CARDS.length - 1]!.cardId;
+/** 引き取り済みでタップ 0 件（死蔵）のデモ。`cardDetailFor` の判定と対にしてある。 */
+const DORMANT_CARD_ID = CARDS[21]!.cardId;
+
 const DISABLED_REASON_ROWS: readonly { readonly reason: string | null; readonly count: number }[] =
   [
     { reason: "lost", count: 3 },
@@ -170,6 +178,46 @@ const DISABLED_REASON_ROWS: readonly { readonly reason: string | null; readonly 
     { reason: "admin_action", count: 2 },
     { reason: "admin_batch", count: 1 },
   ];
+
+/**
+ * カード詳細（#472）の 1 枚ぶん。`CARDS` には `transferCount` /
+ * `disabledReason` / `tapCount` / `lastTappedAt` が無い（一覧用の型に
+ * 無いので）——ここで決定的に作る。1 枚だけ「理由が記録されていません」
+ * （運用者からの指摘で足した表示）を再現する。
+ */
+const DISABLED_REASON_CYCLE: readonly (string | null)[] = [
+  "lost",
+  "unused",
+  "admin_action",
+  "admin_batch",
+  null,
+];
+
+function cardDetailFor(card: AdminCardViewDelegated): AdminCardDetailDelegated {
+  const index = CARDS.indexOf(card);
+  // 7 の倍数の active カードは、引き取り済みでタップ 0 件の「死蔵」の見た目を
+  // 再現する（issue #472 の「死蔵の 1 枚ごとの顔」）。
+  const tapCount = card.status === "active" && index % 7 !== 0 ? 3 + (index % 40) : 0;
+  const lastTappedAt = tapCount > 0 ? isoDaysAgo(index % 10).slice(0, 10) : null;
+
+  return {
+    cardId: card.cardId,
+    status: card.status,
+    ownerUserId: card.ownerUserId,
+    targetUrl: card.targetUrl,
+    batch: card.batch,
+    issuedAt: card.issuedAt,
+    claimedAt: card.claimedAt,
+    transferCount: card.status === "active" ? index % 3 : 0,
+    disabledAt: card.disabledAt,
+    disabledReason:
+      card.status === "disabled"
+        ? (DISABLED_REASON_CYCLE[index % DISABLED_REASON_CYCLE.length] ?? null)
+        : null,
+    tapCount,
+    lastTappedAt,
+  };
+}
 
 // --------------------------------------------------------------------- 監査ログ
 //
@@ -391,6 +439,37 @@ const nfcCards: NfcAdminDelegatedRpcContract = {
     return rpcOk({ ranking, dormant: { count: dormantRows.length, rows: dormantRows } });
   },
   disabledReasonBreakdown: async () => rpcOk({ rows: DISABLED_REASON_ROWS }),
+  getCard: async (input: GetCardDelegatedInput) => {
+    const card = CARDS.find((c) => c.cardId === input.cardId);
+    if (card === undefined) return rpcErr(RpcErrorCode.NotFound, "not_found");
+    return rpcOk(cardDetailFor(card));
+  },
+  cardTapHistory: async (input: CardTapHistoryDelegatedInput) => {
+    const card = CARDS.find((c) => c.cardId === input.cardId);
+    if (card === undefined) return rpcErr(RpcErrorCode.NotFound, "not_found");
+
+    const detail = cardDetailFor(card);
+    const dailyTotals = Array.from({ length: input.days }, (_, i) => {
+      const date = isoDaysAgo(input.days - 1 - i).slice(0, 10);
+      const total = detail.tapCount > 0 && i % 4 === 0 ? 1 : 0;
+      return { date, total };
+    });
+    const totalTaps = dailyTotals.reduce((sum, day) => sum + day.total, 0);
+    const daysSinceLastTap =
+      detail.lastTappedAt === null
+        ? null
+        : Math.round((NOW - Date.parse(`${detail.lastTappedAt}T00:00:00Z`)) / DAY_MS);
+
+    return rpcOk({
+      dailyTotals,
+      totalTaps,
+      retentionDays: 180,
+      lastTappedAt: detail.lastTappedAt,
+      daysSinceLastTap,
+      last7d: { total: Math.min(totalTaps, 2), previousTotal: Math.min(totalTaps, 1) },
+      last30d: { total: Math.min(totalTaps, 6), previousTotal: Math.min(totalTaps, 4) },
+    });
+  },
   transferCountDistribution: async () => {
     const total = EVER_CLAIMED.length;
     const zero = Math.round(total * 0.65);
@@ -591,6 +670,18 @@ async function main(): Promise<void> {
   await addPage("home", "ホーム（/）", "/", sessionCookie);
   await addPage("nfc", "NFC カード（/nfc）", "/nfc", sessionCookie);
   await addPage("nfc-analytics", "NFC 解析（/nfc/analytics）", "/nfc/analytics", sessionCookie);
+  await addPage(
+    "nfc-card-detail",
+    `カード詳細（/nfc/${DETAIL_CARD_ID}、#472・無効化＋理由未記録のデモ）`,
+    `/nfc/${DETAIL_CARD_ID}`,
+    sessionCookie,
+  );
+  await addPage(
+    "nfc-card-detail-dormant",
+    `カード詳細（/nfc/${DORMANT_CARD_ID}、#472・死蔵のデモ）`,
+    `/nfc/${DORMANT_CARD_ID}`,
+    sessionCookie,
+  );
   await addPage("users", "利用者一覧（/users）", "/users", sessionCookie);
   await addPage(
     "users-detail",

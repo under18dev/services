@@ -103,6 +103,8 @@ function fakeNfcCards(overrides: Partial<NfcAdminDelegatedRpcContract> = {}): {
     listAllCards: unused("listAllCards"),
     countCards: unused("countCards"),
     issueCards: unused("issueCards"),
+    getCard: unused("getCard"),
+    cardTapHistory: unused("cardTapHistory"),
     tapTimeseries: unused("tapTimeseries"),
     usageFunnel: unused("usageFunnel"),
     batchAnalytics: unused("batchAnalytics"),

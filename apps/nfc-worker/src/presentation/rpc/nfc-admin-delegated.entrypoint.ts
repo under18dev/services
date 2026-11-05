@@ -1,9 +1,11 @@
 import {
   batchDisableCardsDelegatedInputSchema,
+  cardTapHistoryDelegatedInputSchema,
   cardUsageRankingDelegatedInputSchema,
   countBatchIssuedCardsDelegatedInputSchema,
   countDisabledInBatchDelegatedInputSchema,
   disableCardDelegatedInputSchema,
+  getCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
   listCardsByOwnerDelegatedInputSchema,
   reinstateBatchToIssuedCardsDelegatedInputSchema,
@@ -18,6 +20,8 @@ import {
   type BatchAnalyticsDelegatedResult,
   type BatchDisableCardsDelegatedInput,
   type BatchDisableCardsDelegatedResult,
+  type CardTapHistoryDelegatedInput,
+  type CardTapHistoryDelegatedResult,
   type CardUsageRankingDelegatedInput,
   type CardUsageRankingDelegatedResult,
   type CountBatchIssuedCardsDelegatedInput,
@@ -28,6 +32,8 @@ import {
   type DisabledReasonBreakdownDelegatedResult,
   type DisableCardDelegatedInput,
   type DisableCardDelegatedResult,
+  type GetCardDelegatedInput,
+  type GetCardDelegatedResult,
   type IssueCardsDelegatedInput,
   type IssueCardsDelegatedResult,
   type ListAllCardsDelegatedResult,
@@ -394,6 +400,56 @@ export class NfcAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
 
     return rpcOk({ cards: result.value.map((card) => ({ cardId: card.cardId })) });
+  }
+
+  /**
+   * カード 1 枚の詳細（#472）。**`listAllCards` を引いて絞らない**——
+   * 理由は `DelegatedGetCardUseCase` の冒頭を参照。
+   */
+  async getCard(input: GetCardDelegatedInput): Promise<GetCardDelegatedResult> {
+    const parsed = getCardDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId or cardId is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedGetCard.execute({
+      cardId: parsed.data.cardId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk({
+      cardId: result.value.cardId,
+      status: result.value.status as AdminCardStatusDelegated,
+      ownerUserId: result.value.ownerUserId,
+      targetUrl: result.value.targetUrl,
+      batch: result.value.batch,
+      issuedAt: result.value.issuedAt,
+      claimedAt: result.value.claimedAt,
+      transferCount: result.value.transferCount,
+      disabledAt: result.value.disabledAt,
+      disabledReason: result.value.disabledReason,
+      tapCount: result.value.tapCount,
+      lastTappedAt: result.value.lastTappedAt,
+    });
+  }
+
+  /**
+   * カード 1 枚のタップ履歴（#472）。**時間帯別・生ログは持たない**——
+   * 理由は `DelegatedCardTapHistoryUseCase` の冒頭を参照。
+   */
+  async cardTapHistory(
+    input: CardTapHistoryDelegatedInput,
+  ): Promise<CardTapHistoryDelegatedResult> {
+    const parsed = cardTapHistoryDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "actorUserId, cardId or days is malformed");
+
+    const container = createContainer(this.env);
+    const result = await container.useCases.delegatedCardTapHistory.execute({
+      cardId: parsed.data.cardId,
+      days: parsed.data.days,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
+
+    return rpcOk(result.value);
   }
 
   /**
