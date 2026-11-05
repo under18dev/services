@@ -258,7 +258,24 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     return next();
   });
 
-  app.get("/health", (c) => c.json({ status: "ok", service: "u18-admin" }));
+  /**
+   * **`assets` を載せる（#479）。** ハッシュ付きアセットは `/audit`
+   * `/clients` `/nfc/analytics`（ログイン後）しか参照しないので、
+   * `scripts/smoke-asset-probe.sh` が未認証で引く `PROBE_PAGES`
+   * （`/callback`）からは配信ルートの崩れに気づけない
+   * （`EXTERNALLY_UNVERIFIABLE_ASSETS` の JSDoc を参照）。
+   *
+   * **`asset-paths.ts` の定数をそのまま並べる。** ページ側の `<link>` /
+   * `<script src>` と同じ値を直接 import するので、ここだけが古い文字列を
+   * 書き写して片方だけ更新される、ということが起きない。
+   *
+   * `/health` は未認証・`PUBLIC_PATHS` に既にある——ここに載せても
+   * 新しく公開することにはならない（内容ハッシュ入りの配信パスは、
+   * CSS のほうは既に誰でも HTML から読める）。
+   */
+  app.get("/health", (c) =>
+    c.json({ status: "ok", service: "u18-admin", assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH] }),
+  );
 
   /**
    * Kiwa UI のスタイルシート（#447）。
