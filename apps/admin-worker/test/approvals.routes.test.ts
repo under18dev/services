@@ -1,8 +1,16 @@
+import { rpcOk } from "@u18/contracts";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import { PERMISSION_BITS } from "../src/domain/permissions";
-import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
+import {
+  ORIGIN,
+  cookieHeaderFrom,
+  executionContext,
+  fakeApprovals,
+  loginAs,
+  minimalIdentityAdmin,
+} from "./helpers";
 
 /**
  * 承認者・権限の管理画面（`/approvals`、#190）。
@@ -72,6 +80,42 @@ describe("GET /approvals", () => {
     const html = await response.text();
     expect(html).toContain(SUB);
     expect(html).toContain("usr_other");
+  });
+
+  it("sub と承認者を名前で出す（#482）", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    // `approvedBySub` は `fakeApprovals` の既定で null。`grant` を呼び直すと
+    // 既存の null を埋められる（`helpers.ts` の `grant` を参照）。
+    await approvals.grant("usr_other", false, SUB);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const identityAdmin = {
+      ...minimalIdentityAdmin(),
+      getUsersByIds: async () =>
+        rpcOk([
+          { id: SUB, username: "admin", displayName: "管理者", status: "active" as const },
+          {
+            id: "usr_other",
+            username: "other",
+            displayName: "別の承認者",
+            status: "active" as const,
+          },
+        ]),
+    };
+    const app = createApp({ approvals, identityAdmin });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("管理者 (@admin)");
+    expect(html).toContain("別の承認者 (@other)");
+    expect(html).toContain('href="/users/usr_other"');
+    // **承認者も名前になる。** `approvedBySub` は SUB（自分）なので、
+    // 承認者の節にも「管理者 (@admin)」が出る。
+    expect(html).toContain("承認者: ");
   });
 });
 

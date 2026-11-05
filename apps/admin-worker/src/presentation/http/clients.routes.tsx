@@ -353,10 +353,21 @@ async function renderClientsPage(
     return serviceUnavailable(c);
   }
 
+  // **一覧ぶんをまとめて 1 回で解決する**（#482）。詳細（#473）は
+  // 1 件だけなので `resolveUserRefs` を 1 件で呼んでいるが、ここは
+  // 行数ぶんの `ownerUserId` を渡しても呼び出し自体は 1 回のまま
+  // （`user-refs.ts` の上限・チャンク分割を参照）。
+  const ownerRefs = await resolveUserRefs(
+    container.identityAdmin,
+    session.sub,
+    result.value.map((client) => client.ownerUserId),
+  );
+
   c.header("Cache-Control", "no-store");
   return c.html(
     <ClientsPage
       clients={result.value}
+      ownerRefs={ownerRefs}
       csrfToken={ensureCsrfToken(c)}
       {...(extra.created === undefined ? {} : { created: extra.created })}
       {...(extra.error === undefined ? {} : { error: extra.error })}
@@ -406,11 +417,24 @@ async function renderClientDetailPage(
     fetchClientAudit(container, session.sub),
   ]);
 
+  // **監査ログの「操作した管理者」も名前で出す**（#482）。`auditEntries`
+  // が分かってからでないと誰を引けばよいか分からないので、ここだけは
+  // 上の 2 つのあとに呼ぶ——`resolveUserRefs` は落ちても空の `Map` を
+  // 返すだけなので、`auditEntries` が `null`（取得に失敗）のときに
+  // 巻き込まれて壊れることはない。`sub` がキーなので、持ち主と実行者が
+  // 同じ人でも 1 つの `Map` にまとめて問題ない。
+  const auditActorRefs = await resolveUserRefs(
+    container.identityAdmin,
+    session.sub,
+    auditEntries === null ? [] : auditEntries.map((entry) => entry.userId),
+  );
+  const userRefs = new Map([...ownerRefs, ...auditActorRefs]);
+
   c.header("Cache-Control", "no-store");
   return c.html(
     <ClientDetailPage
       client={client}
-      ownerRefs={ownerRefs}
+      userRefs={userRefs}
       auditEntries={auditEntries}
       csrfToken={ensureCsrfToken(c)}
       {...(extra.error === undefined ? {} : { error: extra.error })}

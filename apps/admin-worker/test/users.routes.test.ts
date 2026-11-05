@@ -545,6 +545,35 @@ describe("GET /users/:userId", () => {
     expect(nfc.calls.listCardsByOwner).toEqual([{ actorUserId: SUB, ownerUserId: "usr_taro" }]);
   });
 
+  it("監査ログの実行者（metadata.actorUserId）を名前で出す（#482）", async () => {
+    // **`entry.userId` ではない。** このクエリは `userId` で絞り込んで
+    // いるので、`entry.userId` は常にこの利用者自身（対象）になる——
+    // 実行者は `metadata.actorUserId`（`DelegatedManageUserUseCase` の
+    // JSDoc を参照）。
+    const identity = fakeIdentityAdmin({
+      listAuditLogs: async () =>
+        rpcOk({
+          entries: [
+            auditEntry({
+              event: "ops.user.suspended",
+              metadata: { reason: "compromise", revokedSessions: 2, actorUserId: "usr_admin" },
+            }),
+          ],
+          nextCursor: null,
+        }),
+      getUsersByIds: async () =>
+        rpcOk([{ id: "usr_admin", username: "admin", displayName: "管理者", status: "active" }]),
+    });
+
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    expect(html).toContain("管理者 (@admin)");
+    expect(html).toContain('href="/users/usr_admin"');
+    // **対象（この利用者自身）の生の ID は「実行者」列に出ない。**
+    expect(html).not.toContain("usr_taro (@");
+  });
+
   it("タップ回数を出さない（#394 / #454）", async () => {
     const response = await openDetail(fakeIdentityAdmin().rpc, fakeNfcCards().rpc);
 

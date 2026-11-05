@@ -1,4 +1,4 @@
-import type { AuditLogEntryAdmin } from "@u18/contracts";
+import type { AuditLogEntryAdmin, UserRefAdmin } from "@u18/contracts";
 import {
   Badge,
   Card,
@@ -27,6 +27,7 @@ import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { UserRef } from "./user-ref";
 
 /**
  * 監査ログの閲覧（`admin.under18.dev/audit`、#375 / #382 / #390 決定 16 ③）。
@@ -53,6 +54,17 @@ import { formatDateTime } from "./format";
 export type AuditPageProps = {
   readonly csrfToken: string;
   readonly entries: readonly AuditLogEntryAdmin[];
+  /**
+   * `entries` の `userId` の名前解決（#482、`resolveUserRefs` が束ねる）。
+   *
+   * **「利用者」列の意味はイベントによって違う。** 利用者を対象とする
+   * イベント（`ops.user.suspended` 等）では対象本人、クライアントを
+   * 対象とするイベント（`oauth.client.created` 等）では実行した管理者が
+   * 入る（`AuditLogEntryAdmin.userId` の JSDoc）。**ここではその違いを
+   * 正さない**——`UserRef` は ID を名前に変えるだけで、列の意味づけは
+   * 契約側の既存の区別のまま。
+   */
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
   readonly nextCursor: string | null;
   readonly event?: string;
   readonly userId?: string;
@@ -60,7 +72,10 @@ export type AuditPageProps = {
   readonly error?: string;
 };
 
-const EntryRow: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry }) => (
+const EntryRow: FC<{
+  readonly entry: AuditLogEntryAdmin;
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ entry, userRefs }) => (
   <TableRow>
     <TableCell>{formatDateTime(entry.createdAt)}</TableCell>
     <TableCell class="whitespace-normal">
@@ -74,11 +89,7 @@ const EntryRow: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry }) => (
       )}
     </TableCell>
     <TableCell class="whitespace-normal">
-      {entry.userId === null ? (
-        <span class={ITEM_META_CLASS}>—</span>
-      ) : (
-        <span class={ITEM_RAW_CLASS}>{entry.userId}</span>
-      )}
+      <UserRef id={entry.userId} refs={userRefs} />
     </TableCell>
     <TableCell class="whitespace-normal">
       <span class={ITEM_META_CLASS}>{entry.actor ?? "—"}</span>
@@ -135,6 +146,7 @@ const EntryRow: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry }) => (
 export const AuditPage: FC<AuditPageProps> = ({
   csrfToken,
   entries,
+  userRefs,
   nextCursor,
   event,
   userId,
@@ -252,7 +264,7 @@ export const AuditPage: FC<AuditPageProps> = ({
               </TableHeader>
               <TableBody>
                 {entries.map((entry) => (
-                  <EntryRow entry={entry} />
+                  <EntryRow entry={entry} userRefs={userRefs} />
                 ))}
               </TableBody>
             </Table>
