@@ -34,7 +34,7 @@ import type {
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { UserRef } from "./user-ref";
 
 /**
@@ -293,6 +293,7 @@ export const NfcPage: FC<NfcPageProps> = ({
     heading="NFC カード"
     lead="発行したカードの一覧と、タグに焼く URL を確認できます。他人のカードも無効化・遷移先の書き換えができます。"
     maxWidth="max-w-6xl"
+    scripts={[ISLAND_PATH]}
   >
     <p class={ITEM_META_CLASS}>
       <a href="/nfc/analytics" class="underline underline-offset-4">
