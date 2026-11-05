@@ -506,7 +506,7 @@ describe("GET /nfc/:cardId（カード詳細、#472）", () => {
     );
 
     const html = await response.text();
-    expect(html).not.toContain("data-copy=\"\"");
+    expect(html).not.toContain('data-copy=""');
     expect(html).toContain("未設定");
   });
 

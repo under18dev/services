@@ -435,9 +435,7 @@ const AuditEntries: FC<{
                 ) : (
                   <div class="flex items-start gap-2">
                     <div>
-                      {entry.reason === null ? null : (
-                        <p class={ITEM_META_CLASS}>{entry.reason}</p>
-                      )}
+                      {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
                       {entry.metadata === null ? null : (
                         <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
                       )}
