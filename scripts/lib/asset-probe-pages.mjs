@@ -158,6 +158,38 @@ export function coveredByPrefix(pairs, assetPath) {
 }
 
 /**
+ * `ASSET_ROUTES` の共通ディレクトリを機械的に求める（#453）。
+ *
+ * **`smoke-asset-probe.sh` の `page:prefix` の `prefix` を手で書かせない
+ * ための計算。** `route-inventory.ts` が持っているのは**公開パス**で
+ * あって route ではない —— dashboard-worker は `KIWA_STYLESHEET_ROUTE`
+ * （`/ui/...`、Service Binding 越しに auth-worker から借りる経路）と
+ * `KIWA_STYLESHEET_PATH`（`/account/ui/...`、実際に配信する公開パス）が
+ * 別物で、route のほうを拾うと prefix が `/ui/` になって壊れる
+ * （3b が実測、issue #453 のコメント）。`ASSET_ROUTES` は後者しか持たない。
+ *
+ * **1 つの Worker が違うディレクトリへアセットを配ることは無い前提。**
+ * 揃わなければ「どちらが本物か」を機械には決められないので、ディレクトリ
+ * ごとにパスをまとめて返す——呼び出し側が食い違ったパスを名指しできる
+ * ようにするため（「あいまいです」だけでは直す場所が分からない）。
+ */
+export function commonAssetPrefix(assets) {
+  const dirnameOf = (path) => path.slice(0, path.lastIndexOf("/") + 1);
+  const byDir = new Map();
+  for (const asset of assets) {
+    const dir = dirnameOf(asset);
+    const group = byDir.get(dir) ?? [];
+    group.push(asset);
+    byDir.set(dir, group);
+  }
+  if (byDir.size === 1) return { ok: true, prefix: [...byDir.keys()][0] };
+  return {
+    ok: false,
+    groups: [...byDir.entries()].map(([prefix, paths]) => ({ prefix, paths })),
+  };
+}
+
+/**
  * @param unprobeable 既定は実物の `UNPROBEABLE`。**テストから差し替えられる
  *   ようにしてある** —— 引数の `workers` とモジュール定数を混ぜて見ると、
  *   組み立てた入力に実物が紛れ込む（テストで実際に踏んだ）。
@@ -168,8 +200,10 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
 
   if (declared === null) {
     problems.push(
-      "smoke-asset-probe.sh の宣言を読めませんでした（`probe_pages_for` の case が無いか、" +
-        "`ページ:接頭辞` の組になっていない要素がある）。書き方を変えたなら readProbeDeclaration も直すこと。",
+      "scripts/generated/asset-probe-pages.sh の宣言を読めませんでした（`probe_pages_for` の " +
+        "case が無いか、`ページ:接頭辞` の組になっていない要素がある）。" +
+        "`node scripts/generate-asset-probe-pages.mjs` で作り直すか、書き方を変えたなら " +
+        "readProbeDeclaration も直すこと。",
     );
     return { ok: false, problems, declared: {} };
   }
@@ -214,8 +248,10 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
     if (pairs === undefined) {
       problems.push(
         `${name}: ハッシュ付きアセット（${assets.join(", ")}）を配っていますが、` +
-          `smoke-asset-probe.sh の probe_pages_for に宣言がありません。` +
-          `ページと接頭辞を足すか、外から確かめられないなら UNPROBEABLE に理由ごと書くこと。`,
+          `scripts/generated/asset-probe-pages.sh の probe_pages_for に宣言がありません。` +
+          `route-inventory.ts に PROBE_PAGES を足して ` +
+          `\`node scripts/generate-asset-probe-pages.mjs\` を実行するか、` +
+          `外から確かめられないなら UNPROBEABLE に理由ごと書くこと。`,
       );
       continue;
     }
@@ -228,15 +264,17 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
     if (inventoryPages === null) {
       problems.push(
         `${name}: route-inventory.ts に PROBE_PAGES がありません。` +
-          `smoke-asset-probe.sh と同じ一覧を置き、Worker 側のテストでレンダリングして確かめること。`,
+          `scripts/generated/asset-probe-pages.sh と同じ一覧を置き、` +
+          `Worker 側のテストでレンダリングして確かめること。`,
       );
     } else {
       const fromInventory = [...inventoryPages].sort();
       if (JSON.stringify(declaredPages) !== JSON.stringify(fromInventory)) {
         problems.push(
-          `${name}: smoke-asset-probe.sh（${declaredPages.join(" ")}）と ` +
+          `${name}: scripts/generated/asset-probe-pages.sh（${declaredPages.join(" ")}）と ` +
             `route-inventory.ts の PROBE_PAGES（${fromInventory.join(" ")}）が一致しません。` +
-            `本番が引くページと、参照を確かめたページが別物になります。`,
+            `古い生成物が残っているので \`node scripts/generate-asset-probe-pages.mjs\` で ` +
+            `作り直すこと。本番が引くページと、参照を確かめたページが別物になります。`,
         );
       }
     }
@@ -300,9 +338,16 @@ export function check({ probeText, workers, unprobeable = UNPROBEABLE, deployTex
   return { ok: problems.length === 0, problems, declared };
 }
 
-/** リポジトリを読んで `check` に渡す形にする。 */
+/**
+ * リポジトリを読んで `check` に渡す形にする。
+ *
+ * **`probe_pages_for` の宣言は `scripts/generated/asset-probe-pages.sh`
+ * から読む。** `smoke-asset-probe.sh` 自身はそれを `source` するだけに
+ * なった（#453、`node scripts/generate-asset-probe-pages.mjs` が
+ * route-inventory.ts から作る）。
+ */
 export function collect(root = ROOT) {
-  const probeText = readFileSync(join(root, "scripts/smoke-asset-probe.sh"), "utf8");
+  const probeText = readFileSync(join(root, "scripts/generated/asset-probe-pages.sh"), "utf8");
   const deployText = readFileSync(join(root, ".github/workflows/deploy.yml"), "utf8");
   const appsDir = join(root, "apps");
   const workers = readdirSync(appsDir, { withFileTypes: true })
