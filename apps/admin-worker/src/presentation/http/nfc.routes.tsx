@@ -171,11 +171,19 @@ async function fetchAndRenderCardDetail(
     return cardResult.error.code === "not_found" ? cardNotFound(c) : serviceUnavailable(c);
   }
 
-  const tapHistory = await container.nfcCards.cardTapHistory({
-    actorUserId: session.sub,
-    cardId,
-    days,
-  });
+  // `cardTapHistory`（Service Binding 越しの呼び出し）は reject しうる
+  // ——`ok: false` と違い、通信そのものが落ちる経路（`app.tsx` の `/` が
+  // `Promise.allSettled` を使う理由と同じ）。`resolveUserRefs` は reject
+  // しない（3b の指摘）が、`Promise.all` に混ぜると `cardTapHistory` の
+  // reject がこちらごと巻き込む——`.catch` で先に畳んでおく。
+  const [tapHistoryResult, ownerRefs] = await Promise.all([
+    container.nfcCards
+      .cardTapHistory({ actorUserId: session.sub, cardId, days })
+      .catch((): null => null),
+    resolveUserRefs(container.identityAdmin, session.sub, [cardResult.value.ownerUserId]),
+  ]);
+  const tapHistory =
+    tapHistoryResult !== null && tapHistoryResult.ok ? tapHistoryResult.value : null;
 
   c.header("Cache-Control", "no-store");
   return c.html(
@@ -183,7 +191,8 @@ async function fetchAndRenderCardDetail(
       csrfToken={ensureCsrfToken(c)}
       card={cardResult.value}
       days={days}
-      tapHistory={tapHistory.ok ? tapHistory.value : null}
+      tapHistory={tapHistory}
+      ownerRefs={ownerRefs}
       {...(error === undefined ? {} : { error })}
     />,
     error === undefined ? 200 : 400,

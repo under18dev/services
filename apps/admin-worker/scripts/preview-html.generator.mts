@@ -9,6 +9,7 @@ import type {
   CardTapHistoryDelegatedInput,
   GetCardDelegatedInput,
   GetUserDelegatedInput,
+  GetUsersByIdsDelegatedInput,
   IdentityAdminDelegatedRpcContract,
   ListAuditLogsDelegatedInput,
   ListCardsByOwnerDelegatedInput,
@@ -498,6 +499,16 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
     const user = USERS.find((u) => u.id === input.userId);
     return user === undefined ? rpcErr(RpcErrorCode.NotFound, "user not found") : rpcOk(user);
   },
+  // カードの所有者・監査ログの actor を名前で出す（#471）。
+  getUsersByIds: async (input: GetUsersByIdsDelegatedInput) =>
+    rpcOk(
+      USERS.filter((u) => input.userIds.includes(u.id)).map((u) => ({
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        status: u.status,
+      })),
+    ),
   listOAuthClients: async () => rpcOk(CLIENTS),
   countOAuthClients: async () => rpcOk(CLIENTS.length),
   listAuditLogs: async (input: ListAuditLogsDelegatedInput) =>

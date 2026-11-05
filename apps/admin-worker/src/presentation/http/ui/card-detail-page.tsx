@@ -23,12 +23,14 @@ import type {
   AdminCardDetailDelegated,
   AdminCardStatusDelegated,
   CardTapHistoryAnalytics,
+  UserRefAdmin,
 } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { UserRef } from "./user-ref";
 
 /**
  * カード 1 枚の詳細（`admin.under18.dev/nfc/:cardId`、#472）。
@@ -37,12 +39,13 @@ import { formatDateTime } from "./format";
  * いつ発行で何回タップされたかは、長い表を目で追うしかなかった
  * （`user-detail-page.tsx` が一覧に対して持つ関係と同じ形）。
  *
- * ## 所有者の名前はまだ出せない（#471 待ち）
+ * ## 所有者の名前は #471（`ui/user-ref.tsx`）経由
  *
  * nfc-worker は Identity D1 を持たず、`AdminCardDetailDelegated` にも
- * userId までしか無い。名前解決は #471（`ui/user-ref.tsx`）が作る——
- * **ここでは自前で同じ見た目を作らない**（3b の指示）。差し替えが
- * `OwnerRef` の import 1 行で済むよう、呼び出し箇所を閉じてある。
+ * userId までしか無い。名前解決は `ui/user-refs.ts` の `resolveUserRefs`
+ * （ルート側、`nfc.routes.tsx` の `fetchAndRenderCardDetail`）が行い、
+ * 表示は共有の `UserRef`（`ui/user-ref.tsx`）に任せる——**ここで独自の
+ * 所有者コンポーネントは持たない**（#473 も同じものを使う）。
  *
  * ## タップの時間帯別・生ログは出していない
  *
@@ -65,6 +68,8 @@ export type CardDetailPageProps = {
   readonly days: DayWindow;
   /** タップ履歴の取得に失敗していれば `null`（`nfc-analytics-page.tsx` と同じ判断）。 */
   readonly tapHistory: CardTapHistoryAnalytics | null;
+  /** `resolveUserRefs` の戻り値（#471）。解決できなければ `UserRef` 自身が ID を出す。 */
+  readonly ownerRefs: ReadonlyMap<string, UserRefAdmin>;
   readonly error?: string;
 };
 
@@ -79,33 +84,6 @@ const STATUS_VARIANT: Readonly<Record<AdminCardStatusDelegated, "secondary" | "d
   issued: "secondary",
   active: "secondary",
   disabled: "destructive",
-};
-
-/**
- * 所有者の表示。**#471（`ui/user-ref.tsx`）が入るまでの仮実装。**
- *
- * 名前を解決する手段がまだ無いので、常に「引けなかった」場合の見た目を
- * 出す（3b の指示）。
- *
- * - ID の先頭 8 文字 + `…` を `<code>` で、`title` に全体を入れる。
- * - **リンクにしない。** まだ名前を確認していない ID へ誘導しない。
- * - **「不明」とは書かない。** 行が無いのか名前が引けなかったのかを
- *   運用者が区別できなくなる。
- *
- * **差し替えは、呼び出し側でこの関数を `ui/user-ref.tsx` の import へ
- * 替えるだけで済む**——ここ以外に所有者の見た目を描く場所を作らない。
- * フォールバックの見た目（ID の先頭 8 文字 + `…`、8 文字以下はそのまま）
- * は、#471 の `ui/user-ref.tsx`（`feat/471-user-refs` ブランチで確認済み）
- * が「名前が引けなかったとき」に出すものと合わせてある——差し替えた
- * ときに見た目が変わらないようにするため。
- */
-const OwnerRef: FC<{ readonly userId: string }> = ({ userId }) => {
-  const short = userId.length <= 8 ? userId : `${userId.slice(0, 8)}…`;
-  return (
-    <code class={ITEM_RAW_CLASS} title={userId}>
-      {short}
-    </code>
-  );
 };
 
 /**
@@ -134,7 +112,10 @@ const DisabledBanner: FC<{ readonly card: AdminCardDetailDelegated }> = ({ card 
   );
 };
 
-const CardOverview: FC<{ readonly card: AdminCardDetailDelegated }> = ({ card }) => (
+const CardOverview: FC<{
+  readonly card: AdminCardDetailDelegated;
+  readonly ownerRefs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ card, ownerRefs }) => (
   <Card>
     <CardHeader>
       <CardTitle>
@@ -154,7 +135,7 @@ const CardOverview: FC<{ readonly card: AdminCardDetailDelegated }> = ({ card })
         <div>
           <dt class={LABEL_CLASS}>所有者</dt>
           <dd class={ITEM_META_CLASS}>
-            {card.ownerUserId === null ? "未紐づけ" : <OwnerRef userId={card.ownerUserId} />}
+            <UserRef id={card.ownerUserId} refs={ownerRefs} />
           </dd>
         </div>
         <div>
@@ -417,6 +398,7 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
   card,
   days,
   tapHistory,
+  ownerRefs,
   error,
 }) => (
   <KiwaShell
@@ -460,7 +442,7 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
       </div>
 
       <section data-panel="overview" class="flex flex-col gap-4">
-        <CardOverview card={card} />
+        <CardOverview card={card} ownerRefs={ownerRefs} />
       </section>
 
       <section data-panel="taps" class="flex flex-col gap-4">
