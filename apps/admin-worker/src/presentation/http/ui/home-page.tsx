@@ -7,11 +7,12 @@ import {
   KiwaShell,
 } from "@u18/web-ui/kiwa";
 import { ITEM_META_CLASS, ITEM_RAW_CLASS } from "@u18/web-ui/kiwa/island-classes";
-import type { AdminCardStatusDelegated, AuditLogEntryAdmin } from "@u18/contracts";
+import type { AdminCardStatusDelegated, AuditLogEntryAdmin, UserRefAdmin } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { UserRef } from "./user-ref";
 
 /**
  * ホーム（`/`、#449）。**承認済みの人だけが来る**（`app.ts` のガード）。
@@ -56,6 +57,15 @@ export type HomePageProps = {
   readonly nfcCounts: Readonly<Record<AdminCardStatusDelegated, number>> | null;
   readonly clientCount: number | null;
   readonly recentAuditEntries: readonly AuditLogEntryAdmin[] | null;
+  /**
+   * `recentAuditEntries` の `userId` の名前解決（#482）。
+   *
+   * **`recentAuditEntries` が `null`（取得に失敗）でも、ここは空の `Map`
+   * でよい。** `UserRef` は解決できなかった ID を生のまま出すだけで、
+   * 「監査ログ自体が取れなかった」こととは区別されて表示される
+   * （そもそも `recentAuditEntries` が `null` なら一覧自体を描かない）。
+   */
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
 };
 
 const TILE_CLASS =
@@ -100,7 +110,10 @@ const OAuthClientCountTile: FC<{ readonly count: number | null }> = ({ count }) 
   </a>
 );
 
-const RecentAuditEntry: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry }) => (
+const RecentAuditEntry: FC<{
+  readonly entry: AuditLogEntryAdmin;
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ entry, userRefs }) => (
   <li class={ITEM_META_CLASS}>
     {formatDateTime(entry.createdAt)}
     {" ・ "}
@@ -108,7 +121,7 @@ const RecentAuditEntry: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry })
     {entry.userId === null ? null : (
       <>
         {" ・ "}
-        <span class={ITEM_RAW_CLASS}>{entry.userId}</span>
+        <UserRef id={entry.userId} refs={userRefs} />
       </>
     )}
   </li>
@@ -119,6 +132,7 @@ export const HomePage: FC<HomePageProps> = ({
   nfcCounts,
   clientCount,
   recentAuditEntries,
+  userRefs,
 }) => (
   <KiwaShell
     title="u18 Admin"
@@ -151,7 +165,7 @@ export const HomePage: FC<HomePageProps> = ({
         ) : (
           <ul class="flex flex-col gap-2">
             {recentAuditEntries.map((entry) => (
-              <RecentAuditEntry entry={entry} />
+              <RecentAuditEntry entry={entry} userRefs={userRefs} />
             ))}
           </ul>
         )}

@@ -27,6 +27,7 @@ import { registerClientsRoutes } from "./clients.routes";
 import { registerNfcAnalyticsRoutes } from "./nfc-analytics.routes";
 import { registerNfcCardDetailRoutes, registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
+import { resolveUserRefs } from "./user-refs";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
 import { ADMIN_ISLAND_JS } from "./ui/generated/admin-island.bundle";
 import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
@@ -530,6 +531,23 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       container.identityAdmin.listAuditLogs({ actorUserId: session.sub, limit: 5 }),
     ]);
 
+    const recentAuditEntries =
+      audit.status === "fulfilled" && audit.value.ok ? audit.value.value.entries : null;
+    // **`allSettled` の塊には混ぜない**（#482、3b のレビュー指摘）。
+    // `resolveUserRefs` は落ちても例外を投げず空の `Map` を返す
+    // （`user-refs.ts` の冒頭）ので、`Promise.all` に混ぜても技術的には
+    // 壊れないが、**「監査ログは取れたが名前解決が落ちた」を「監査ログ
+    // ごと取れなかった」に畳んでしまう**読み方を避けるため、
+    // 監査ログが取れたことを確かめたあとに別で呼ぶ。
+    const userRefs =
+      recentAuditEntries === null
+        ? new Map()
+        : await resolveUserRefs(
+            container.identityAdmin,
+            session.sub,
+            recentAuditEntries.map((entry) => entry.userId),
+          );
+
     c.header("Cache-Control", "no-store");
     return c.html(
       <HomePage
@@ -538,9 +556,8 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
         clientCount={
           clients.status === "fulfilled" && clients.value.ok ? clients.value.value : null
         }
-        recentAuditEntries={
-          audit.status === "fulfilled" && audit.value.ok ? audit.value.value.entries : null
-        }
+        recentAuditEntries={recentAuditEntries}
+        userRefs={userRefs}
       />,
     );
   });

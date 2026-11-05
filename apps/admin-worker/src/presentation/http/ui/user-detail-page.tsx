@@ -1,4 +1,9 @@
-import type { AdminCardViewDelegated, AuditLogEntryAdmin, UserAdminSummary } from "@u18/contracts";
+import type {
+  AdminCardViewDelegated,
+  AuditLogEntryAdmin,
+  UserAdminSummary,
+  UserRefAdmin,
+} from "@u18/contracts";
 import {
   Alert,
   AlertDescription,
@@ -31,6 +36,7 @@ import type { SuspensionOrigin } from "../suspension-origin";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { UserRef } from "./user-ref";
 
 /**
  * 利用者 1 人の詳細（`admin.under18.dev/users/:userId`、#455）。
@@ -84,11 +90,38 @@ export type UserDetailPageProps = {
   readonly suspension: SuspensionOrigin;
   /** 直近の監査ログ。**引けなかったら `null`**（空配列と区別する）。 */
   readonly auditEntries: readonly AuditLogEntryAdmin[] | null;
+  /**
+   * 監査ログの `metadata.actorUserId`（実行した管理者）の名前解決
+   * （#482、`resolveUserRefs` が束ねる）。
+   *
+   * **`entry.userId` ではなく `metadata.actorUserId` を引く。** この画面は
+   * `listAuditLogs({ userId })` で絞り込んでいるので、`entry.userId` は
+   * 常にこの利用者自身（対象）になり、実行者ではない——実行者は
+   * `DelegatedManageUserUseCase` が `metadata.actorUserId` として
+   * 埋め込んでいる（`entry.metadata` は生の JSON で出す方針のままなので、
+   * この 1 キーだけを別枠で名前にする）。
+   */
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
   /** 持っているカード。**引けなかったら `null`**（同上）。 */
   readonly cards: readonly AdminCardViewDelegated[] | null;
   readonly error?: string;
   readonly notice?: string;
 };
+
+/**
+ * `entry.metadata` から `actorUserId`（実行した管理者）を取り出す。
+ *
+ * **これ以上 `metadata` の形に踏み込まない。** 他のキーは生の JSON の
+ * ままで出す——`audit-page.tsx` と同じ「イベントごとに形が違うので
+ * 固定の表で組まない」方針を守りつつ、ここだけは複数のイベント
+ * （`ops.user.suspended` / `reinstated` / `sessions_revoked`）が共通して
+ * 持つキーなので、名前に変える価値がある。
+ */
+export function actorUserIdFromMetadata(metadata: Record<string, unknown> | null): string | null {
+  if (metadata === null) return null;
+  const value = metadata.actorUserId;
+  return typeof value === "string" ? value : null;
+}
 
 /** 一覧（`users-page.tsx`）と同じ見せ方。**`suspended` を「凍結」と言い切らない。** */
 const StatusBadge: FC<{ readonly status: UserAdminSummary["status"] }> = ({ status }) => {
@@ -327,9 +360,10 @@ const OwnedCards: FC<{ readonly cards: readonly AdminCardViewDelegated[] | null 
   );
 };
 
-const AuditEntries: FC<{ readonly entries: readonly AuditLogEntryAdmin[] | null }> = ({
-  entries,
-}) => {
+const AuditEntries: FC<{
+  readonly entries: readonly AuditLogEntryAdmin[] | null;
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ entries, userRefs }) => {
   if (entries === null) {
     return <p class={EMPTY_CLASS}>いま監査ログを取得できません。あとでもう一度開いてください。</p>;
   }
@@ -345,42 +379,60 @@ const AuditEntries: FC<{ readonly entries: readonly AuditLogEntryAdmin[] | null 
           <TableHead data-sort="date">日時</TableHead>
           <TableHead data-sort="text">イベント</TableHead>
           <TableHead data-sort="text">結果</TableHead>
+          <TableHead>実行者</TableHead>
           <TableHead>詳細</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {entries.map((entry) => (
-          <TableRow key={entry.id}>
-            <TableCell>{formatDateTime(entry.createdAt)}</TableCell>
-            <TableCell class="whitespace-normal">
-              <span class={ITEM_RAW_CLASS}>{entry.event}</span>
-            </TableCell>
-            <TableCell>
-              {entry.outcome === "success" ? (
-                <Badge variant="success">成功</Badge>
-              ) : (
-                <Badge variant="destructive">失敗</Badge>
-              )}
-            </TableCell>
-            {/*
-              **`metadata` は生の JSON で出す**（`audit-page.tsx` と同じ理由）。
-              イベントごとに形が違うので、固定の表に組むと新しいイベントの
-              たびにこの画面も直すことになる。
-            */}
-            <TableCell class="whitespace-normal">
-              {entry.reason === null && entry.metadata === null ? (
-                <span class={ITEM_META_CLASS}>—</span>
-              ) : (
-                <>
-                  {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
-                  {entry.metadata === null ? null : (
-                    <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
-                  )}
-                </>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
+        {entries.map((entry) => {
+          const actorUserId = actorUserIdFromMetadata(entry.metadata);
+          return (
+            <TableRow key={entry.id}>
+              <TableCell>{formatDateTime(entry.createdAt)}</TableCell>
+              <TableCell class="whitespace-normal">
+                <span class={ITEM_RAW_CLASS}>{entry.event}</span>
+              </TableCell>
+              <TableCell>
+                {entry.outcome === "success" ? (
+                  <Badge variant="success">成功</Badge>
+                ) : (
+                  <Badge variant="destructive">失敗</Badge>
+                )}
+              </TableCell>
+              {/*
+                **`entry.userId` ではない。** この画面は `userId` で絞り込んで
+                いるので、`entry.userId` は常にこの利用者自身（対象）になる
+                ——実行者は `metadata.actorUserId`（#482、型の JSDoc を参照）。
+              */}
+              <TableCell class="whitespace-normal">
+                {actorUserId === null ? (
+                  <span class={ITEM_META_CLASS}>—</span>
+                ) : (
+                  <UserRef id={actorUserId} refs={userRefs} />
+                )}
+              </TableCell>
+              {/*
+                **`metadata` は生の JSON でも出す**（`audit-page.tsx` と同じ
+                理由）。イベントごとに形が違うので、固定の表に組むと
+                新しいイベントのたびにこの画面も直すことになる——上の
+                「実行者」列は `actorUserId` という 1 キーだけの特別扱いで、
+                残りのキーは引き続きここにそのまま出す。
+              */}
+              <TableCell class="whitespace-normal">
+                {entry.reason === null && entry.metadata === null ? (
+                  <span class={ITEM_META_CLASS}>—</span>
+                ) : (
+                  <>
+                    {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
+                    {entry.metadata === null ? null : (
+                      <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
+                    )}
+                  </>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
@@ -392,6 +444,7 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
   user,
   suspension,
   auditEntries,
+  userRefs,
   cards,
   error,
   notice,
@@ -525,7 +578,7 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
         <CardDescription>新しい順です。続きは監査ログの画面で読めます。</CardDescription>
       </CardHeader>
       <CardContent>
-        <AuditEntries entries={auditEntries} />
+        <AuditEntries entries={auditEntries} userRefs={userRefs} />
         {/*
           **`<a href="/audit?user_id=...">` にしない。** `/audit` の絞り込みは
           form POST の本文で渡す作りで（検索語を URL に残さないため）、

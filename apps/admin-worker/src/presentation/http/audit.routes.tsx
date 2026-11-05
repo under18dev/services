@@ -3,6 +3,7 @@ import type { Context, Hono } from "hono";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { csrfRejected, serviceUnavailable } from "./ui/message-page";
 import { AuditPage } from "./ui/audit-page";
+import { resolveUserRefs } from "./user-refs";
 import type { AppBindings } from "./types";
 
 /**
@@ -62,11 +63,18 @@ async function renderAuditPage(
     return serviceUnavailable(c);
   }
 
+  const userRefs = await resolveUserRefs(
+    container.identityAdmin,
+    session.sub,
+    page.value.entries.map((entry) => entry.userId),
+  );
+
   c.header("Cache-Control", "no-store");
   return c.html(
     <AuditPage
       csrfToken={ensureCsrfToken(c)}
       entries={page.value.entries}
+      userRefs={userRefs}
       nextCursor={page.value.nextCursor}
       {...(options.event === undefined ? {} : { event: options.event })}
       {...(options.userId === undefined ? {} : { userId: options.userId })}

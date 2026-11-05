@@ -9,6 +9,7 @@ import { APPROVAL_AUDIT_EVENTS } from "../../domain/approval-audit-events";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { csrfRejected } from "./ui/message-page";
 import { ApprovalsPage } from "./ui/approvals-page";
+import { resolveUserRefs } from "./user-refs";
 import type { AppBindings } from "./types";
 
 /**
@@ -214,6 +215,13 @@ async function renderApprovalsPage(
   const container = c.get("container");
   const session = c.get("session");
   const approvals = await container.approvals.listAll();
+  // **`sub` と `approvedBySub` を 1 回でまとめて解決する**（#482）。
+  // `resolveUserRefs` 自身が null と重複を落とすので、ここで選り分けない。
+  const refs = await resolveUserRefs(
+    container.identityAdmin,
+    session.sub,
+    approvals.flatMap((approval) => [approval.sub, approval.approvedBySub]),
+  );
 
   c.header("Cache-Control", "no-store");
   return c.html(
@@ -221,6 +229,7 @@ async function renderApprovalsPage(
       csrfToken={ensureCsrfToken(c)}
       approvals={approvals}
       viewerSub={session.sub}
+      refs={refs}
       {...(extra.error === undefined ? {} : { error: extra.error })}
       {...(extra.notice === undefined ? {} : { notice: extra.notice })}
     />,

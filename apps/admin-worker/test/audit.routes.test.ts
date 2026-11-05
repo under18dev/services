@@ -97,6 +97,27 @@ describe("GET /audit", () => {
     expect(html).toMatch(/name="csrf_token"/);
   });
 
+  it("利用者を名前で出す（#482）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listAuditLogs: async () =>
+        rpcOk({ entries: [entry({ userId: "usr_taro" })], nextCursor: null }),
+      getUsersByIds: async () =>
+        rpcOk([{ id: "usr_taro", username: "taro", displayName: "太郎", status: "active" }]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/audit`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("太郎 (@taro)");
+    expect(html).toContain('href="/users/usr_taro"');
+  });
+
   it("listAuditLogs が失敗したら 503", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({

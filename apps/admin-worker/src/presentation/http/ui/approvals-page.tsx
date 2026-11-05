@@ -17,6 +17,7 @@ import {
   LABEL_CLASS,
   LIST_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
+import type { UserRefAdmin } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import type { ApprovalListRow } from "../../../application/ports/approval.repository";
 import { PERMISSION_BITS, type PermissionBitName } from "../../../domain/permissions";
@@ -24,6 +25,7 @@ import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { UserRef } from "./user-ref";
 
 /**
  * 承認者・権限の管理（`admin.under18.dev/approvals`、#190）。
@@ -43,6 +45,20 @@ import { formatDateTime } from "./format";
  *
  * `clients-page.tsx` と同じ判断。admin-worker にはまだ島が無く、
  * 低頻度の管理操作のために新しく持ち込む見合いが無い。
+ *
+ * ## 相手を名前で出す（#482）
+ *
+ * **ここは「誰に管理画面の権限を与えるか」を決める画面である。** 以前は
+ * `sub` の生の ID しか出ておらず、与えようとしている相手が誰なのかを
+ * 画面の上で確かめられなかった——利用者の凍結もカードの無効化も、
+ * ここで渡した権限で行われる。`UserRef` / `resolveUserRefs`（#471）で
+ * `sub`（承認済みの本人）と `approvedBySub`（承認者）の両方を解決する。
+ *
+ * **新規承認の sub 入力欄は直さない。** 入力した時点ではまだ存在を
+ * 確かめようがなく（送信して初めて auth-worker 側の実在確認が走る）、
+ * 入力中にリアルタイムで名前を引く仕組みは `UserRef`/`resolveUserRefs`
+ * の再利用だけでは作れない——JS での逐次問い合わせが要る別の作業に
+ * なるため、この issue では見送る（issue #482 の冒頭にも同じ注記）。
  */
 
 const PERMISSION_ORDER = Object.keys(PERMISSION_BITS) as readonly PermissionBitName[];
@@ -52,6 +68,8 @@ export type ApprovalsPageProps = {
   readonly approvals: readonly ApprovalListRow[];
   /** いまログインしている人の sub。自分自身の行の操作を言葉で説明するために使う。 */
   readonly viewerSub: string;
+  /** `sub` / `approvedBySub` の名前解決（#482、`resolveUserRefs` が束ねる）。 */
+  readonly refs: ReadonlyMap<string, UserRefAdmin>;
   readonly error?: string;
   readonly notice?: string;
 };
@@ -60,16 +78,22 @@ const ApprovalRow: FC<{
   readonly approval: ApprovalListRow;
   readonly csrfToken: string;
   readonly viewerSub: string;
-}> = ({ approval, csrfToken, viewerSub }) => (
+  readonly refs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ approval, csrfToken, viewerSub, refs }) => (
   <li class={ITEM_BODY_CLASS}>
     <div class={ITEM_TITLE_CLASS}>
-      <span>{approval.sub}</span>
+      <UserRef id={approval.sub} refs={refs} />
       {approval.isSuperApprover ? <Badge variant="secondary">super approver</Badge> : null}
       {approval.sub === viewerSub ? <Badge variant="outline">自分</Badge> : null}
     </div>
     <p class={ITEM_META_CLASS}>
       承認 {formatDateTime(approval.createdAt.toISOString())}
-      {approval.approvedBySub === null ? "" : ` / 承認者: ${approval.approvedBySub}`}
+      {approval.approvedBySub === null ? null : (
+        <>
+          {" "}
+          / 承認者: <UserRef id={approval.approvedBySub} refs={refs} />
+        </>
+      )}
     </p>
 
     <form method="post" action={`/approvals/${approval.sub}/super`} class={ITEM_BODY_CLASS}>
@@ -126,6 +150,7 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
   csrfToken,
   approvals,
   viewerSub,
+  refs,
   error,
   notice,
 }) => (
@@ -192,7 +217,12 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
         ) : (
           <ul class={LIST_CLASS}>
             {approvals.map((approval) => (
-              <ApprovalRow approval={approval} csrfToken={csrfToken} viewerSub={viewerSub} />
+              <ApprovalRow
+                approval={approval}
+                csrfToken={csrfToken}
+                viewerSub={viewerSub}
+                refs={refs}
+              />
             ))}
           </ul>
         )}

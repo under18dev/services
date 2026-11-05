@@ -466,6 +466,96 @@ describe("承認リスト", () => {
     expect(html).not.toContain("承認待ちの人数");
   });
 
+  it("直近の管理操作の利用者を名前で出す（#482）", async () => {
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+
+    const app = createApp({
+      approvals,
+      nfcCards: minimalNfcCards(),
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        listAuditLogs: async () =>
+          rpcOk({
+            entries: [
+              {
+                id: "aud_1",
+                event: "ops.user.suspended",
+                userId: "usr_taro",
+                actor: "admin-worker",
+                outcome: "success",
+                reason: "abuse",
+                metadata: null,
+                ipHash: null,
+                userAgent: null,
+                createdAt: "2026-10-31T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          }),
+        getUsersByIds: async () =>
+          rpcOk([{ id: "usr_taro", username: "taro", displayName: "太郎", status: "active" }]),
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("太郎 (@taro)");
+    expect(html).toContain('href="/users/usr_taro"');
+  });
+
+  it("監査ログは取れたが名前解決が RPC の例外で落ちても、一覧は出る（#482）", async () => {
+    // **「監査ログは取れたが名前解決が落ちた」を「監査ログごと取れなかった」
+    // に畳まない**（3b のレビュー指摘）。`resolveUserRefs` は
+    // `allSettled` の塊には混ぜず、監査ログが取れたあとに別で呼ぶ
+    // （`app.tsx` の `/` ハンドラを参照）。
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+
+    const app = createApp({
+      approvals,
+      nfcCards: minimalNfcCards(),
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        listAuditLogs: async () =>
+          rpcOk({
+            entries: [
+              {
+                id: "aud_1",
+                event: "ops.user.suspended",
+                userId: "usr_taro",
+                actor: "admin-worker",
+                outcome: "success",
+                reason: "abuse",
+                metadata: null,
+                ipHash: null,
+                userAgent: null,
+                createdAt: "2026-10-31T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          }),
+        getUsersByIds: () => Promise.reject(new Error("binding unavailable")),
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    // 監査ログの一覧自体は出ている——「いま取れません」ではない。
+    expect(html).toContain("ops.user.suspended");
+    expect(html).not.toContain("いま取れません");
+  });
+
   it("一部の集計が失敗しても、他の塊とサインイン情報は出す（#449）", async () => {
     const approvals = fakeApprovals(["usr_ok"]);
     const sessionCookie = await loginAs("usr_ok", approvals);
