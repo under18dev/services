@@ -136,7 +136,11 @@ describe("GET /approvals", () => {
     expect(html).toContain("（NFC_READ）");
     expect(html).toContain("ログイン中の端末の追い出しができます。");
     // **`APPROVAL_GRANT` は他の 7 つと見た目を分ける。**
-    expect(html).toContain("権限を配る（実質的な昇格）");
+    // 節の見出しはラベル（「権限を配る」）と同じ文字列を繰り返さない
+    // （指摘: 3b、節に項目が 1 つしか無いので 2 回読ませると重複でしかない）。
+    expect(html).toContain("ここだけ特に重い（実質的な昇格）");
+    expect(html).not.toContain("権限を配る（実質的な昇格）");
+    expect(html).toContain('value="APPROVAL_GRANT"');
     // super approver（この fixture では SUB だけ）の既存の説明文を
     // 変えていない（指摘: issue #487 の書き方の決め）。
     expect(html).toContain(
