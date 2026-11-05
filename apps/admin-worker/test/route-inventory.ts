@@ -160,6 +160,12 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/users/:userId/suspend" },
   { method: "POST", path: "/users/:userId/reinstate" },
   { method: "POST", path: "/users/:userId/revoke-sessions" },
+  /**
+   * この人のカードをまとめて止める（#486）。**凍結（suspend）とは別の
+   * route。** 1 つの form の `confirmed` で 2 段階（1 段階目: 内訳の確認、
+   * 2 段階目: 実行）を兼ねる——`/nfc/batch-disable` と同じ形。
+   */
+  { method: "POST", path: "/users/:userId/disable-cards" },
   { method: "POST", path: "/audit/search" },
   // 承認者・権限の管理（#190）。
   { method: "POST", path: "/approvals" },

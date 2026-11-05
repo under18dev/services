@@ -4,6 +4,7 @@ import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
   AdminCardViewDelegated,
   AuditLogEntryAdmin,
+  DisableCardDelegatedInput,
   GetUserDelegatedInput,
   IdentityAdminDelegatedRpcContract,
   ListAuditLogsDelegatedInput,
@@ -767,6 +768,277 @@ describe("GET /users/:userId", () => {
 
     const html = await response.text();
     expect(html).toContain("自分のアカウントは停止できません");
+  });
+});
+
+describe("POST /users/:userId/disable-cards（#486）", () => {
+  async function csrfContext(
+    identityAdmin: IdentityAdminDelegatedRpcContract,
+    nfcCards: NfcAdminDelegatedRpcContract,
+  ): Promise<{ readonly app: ReturnType<typeof createApp>; readonly cookie: string }> {
+    const sessionCookie = await loginAsApproved();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin, nfcCards });
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    return { app, cookie: `${sessionCookie}; ${csrfCookie}` };
+  }
+
+  async function post(
+    app: ReturnType<typeof createApp>,
+    cookie: string,
+    body: URLSearchParams,
+  ): Promise<Response> {
+    return app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/disable-cards`, {
+        method: "POST",
+        headers: {
+          Cookie: cookie,
+          Origin: ORIGIN,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+  }
+
+  async function getDetail(
+    identityAdmin: IdentityAdminDelegatedRpcContract,
+    nfcCards: NfcAdminDelegatedRpcContract,
+  ): Promise<Response> {
+    const sessionCookie = await loginAsApproved();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin, nfcCards });
+    return app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+  }
+
+  it("有効な利用者（active）には、カードを止めるボタンを出さない", async () => {
+    const identity = fakeIdentityAdmin();
+    const response = await getDetail(identity.rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    expect(html).not.toContain("この人のカードをまとめて止める");
+  });
+
+  it("停止中の利用者には、カードを止めるボタンを出す", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const response = await getDetail(identity.rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    expect(html).toContain("この人のカードをまとめて止める");
+  });
+
+  it("CSRF トークンが無ければ 403 で、disableCard を呼ばない", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const { rpc, calls } = fakeNfcCards({ disableCard: async () => rpcOk(null) });
+    const sessionCookie = await loginAsApproved();
+    const app = createApp({
+      approvals: fakeApprovals([SUB]),
+      identityAdmin: identity.rpc,
+      nfcCards: rpc,
+    });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/disable-cards`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ confirmed: "1" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.listCardsByOwner).toHaveLength(0);
+  });
+
+  it("1 段階目（confirmed 無し）は書き込まず、所持・止められる・既に無効化済みの内訳を出す", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const { rpc } = fakeNfcCards({
+      listCardsByOwner: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_a", status: "active" }),
+            card({ cardId: "nfc_b", status: "issued" }),
+            card({ cardId: "nfc_c", status: "disabled" }),
+          ],
+        }),
+      disableCard: () => {
+        throw new Error("1 段階目で呼ばれた");
+      },
+    });
+    const { app, cookie } = await csrfContext(identity.rpc, rpc);
+    const csrfToken = csrfTokenFrom(cookie);
+
+    const response = await post(app, cookie, new URLSearchParams({ csrf_token: csrfToken }));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("所持");
+    expect(html).toContain("3 枚");
+    expect(html).toContain("2 枚");
+    expect(html).toContain("既に無効化済み");
+    expect(html).toContain("1 枚");
+    expect(html).toContain("本当に 2 枚を無効化する");
+  });
+
+  it("所持カードが全部無効化済みなら、1 段階目でエラーにする", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const { rpc } = fakeNfcCards({
+      listCardsByOwner: async () => rpcOk({ cards: [card({ status: "disabled" })] }),
+    });
+    const { app, cookie } = await csrfContext(identity.rpc, rpc);
+    const csrfToken = csrfTokenFrom(cookie);
+
+    const response = await post(app, cookie, new URLSearchParams({ csrf_token: csrfToken }));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("止められるカードがありません");
+  });
+
+  it("2 段階目は、1 段階目の内訳をそのまま信用せず、もう一度分類し直す", async () => {
+    // **1 段階目を見てから 2 段階目を押すまでの間に状態が変わっても、
+    // 2 段階目はそのときのフレッシュな一覧を見る。** `csrfContext` の
+    // GET を 1 回目として、1 段階目の POST までは 2 枚とも active——
+    // その後、2 段階目を押す前に（本人が自分で手放した、等を想定して）
+    // 片方が既に無効化済みになる。
+    let postCount = 0;
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const { rpc } = fakeNfcCards({
+      listCardsByOwner: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_a", status: postCount < 1 ? "active" : "disabled" }),
+            card({ cardId: "nfc_b", status: "active" }),
+          ],
+        }),
+      disableCard: async ({ cardId }) => {
+        expect(cardId).toBe("nfc_b");
+        return rpcOk(null);
+      },
+    });
+    const { app, cookie } = await csrfContext(identity.rpc, rpc);
+    const csrfToken = csrfTokenFrom(cookie);
+
+    // 1 段階目: この時点では "nfc_a" もまだ active。
+    const confirmResponse = await post(app, cookie, new URLSearchParams({ csrf_token: csrfToken }));
+    expect(await confirmResponse.text()).toContain("本当に 2 枚を無効化する");
+    postCount += 1;
+
+    // 2 段階目: "nfc_a" が既に無効化済みになっている状態で押す。
+    const response = await post(
+      app,
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken, confirmed: "1" }),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    // **"nfc_a" を巻き込んでいない。** 1 段階目の内訳（2 枚）をそのまま
+    // 信用していたら、ここで "nfc_a" にも `disableCard` を呼んでいた。
+    expect(html).toContain("1 枚を無効化しました");
+  });
+
+  it("2 段階目: disableCard に reason: owner_suspended を渡し、actorUserId は session.sub", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const disableCalls: DisableCardDelegatedInput[] = [];
+    const { rpc } = fakeNfcCards({
+      listCardsByOwner: async () => rpcOk({ cards: [card({ cardId: "nfc_a", status: "active" })] }),
+      disableCard: async (input) => {
+        disableCalls.push(input);
+        return rpcOk(null);
+      },
+    });
+    const { app, cookie } = await csrfContext(identity.rpc, rpc);
+    const csrfToken = csrfTokenFrom(cookie);
+
+    await post(app, cookie, new URLSearchParams({ csrf_token: csrfToken, confirmed: "1" }));
+
+    expect(disableCalls).toEqual([
+      { actorUserId: SUB, cardId: "nfc_a", reason: "owner_suspended" },
+    ]);
+  });
+
+  it("失敗理由を not_found とそれ以外で分ける。全部「見つかりませんでした」に畳まない", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const { rpc } = fakeNfcCards({
+      listCardsByOwner: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_missing", status: "active" }),
+            card({ cardId: "nfc_broken", status: "active" }),
+          ],
+        }),
+      disableCard: async ({ cardId }) =>
+        cardId === "nfc_missing"
+          ? rpcErr(RpcErrorCode.NotFound, "no such card")
+          : rpcErr(RpcErrorCode.Internal, "boom"),
+    });
+    const { app, cookie } = await csrfContext(identity.rpc, rpc);
+    const csrfToken = csrfTokenFrom(cookie);
+
+    const response = await post(
+      app,
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken, confirmed: "1" }),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("nfc_missing");
+    expect(html).toContain("そのカードは見つかりませんでした");
+    expect(html).toContain("nfc_broken");
+    expect(html).toContain("いま処理できませんでした");
+    // **"見つかりませんでした" に畳んでいない**——2 枚とも同じ文言なら、
+    // 一時的な障害まで「もう無い」と読める（issue #486 への指摘）。
+    expect(html).toContain("nfc_broken</code> — いま処理できませんでした");
+    expect(html).not.toContain("nfc_broken</code> — そのカードは見つかりませんでした");
+  });
+
+  it("一度に処理するのは上限まで。超えたぶんは次の実行に回す", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const manyCards = Array.from({ length: 101 }, (_, i) =>
+      card({ cardId: `nfc_${i}`, status: "active" }),
+    );
+    const { rpc } = fakeNfcCards({
+      listCardsByOwner: async () => rpcOk({ cards: manyCards }),
+      disableCard: () => {
+        throw new Error("1 段階目で呼ばれた");
+      },
+    });
+    const { app, cookie } = await csrfContext(identity.rpc, rpc);
+    const csrfToken = csrfTokenFrom(cookie);
+
+    const response = await post(app, cookie, new URLSearchParams({ csrf_token: csrfToken }));
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("本当に 100 枚を無効化する");
+    expect(html).toContain("一度に止められる枚数には上限があります");
   });
 });
 

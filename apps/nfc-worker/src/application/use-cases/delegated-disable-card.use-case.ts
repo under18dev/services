@@ -1,3 +1,4 @@
+import { ADMIN_ACTION_DISABLED_REASON } from "../../domain/services/disabled-reason";
 import type { CardEventRecorder, CardRepository, Clock, NfcOutcome } from "../ports";
 import { outcomeErr, outcomeOk } from "../ports";
 
@@ -11,6 +12,14 @@ export type DelegatedDisableCardInput = {
    */
   readonly actorUserId: string;
   readonly cardId: string;
+  /**
+   * `disabled_reason` に書く理由（#486）。**省略時は `ADMIN_ACTION_DISABLED_REASON`
+   * （`"admin_action"`）**——単発の運営操作という、この口のこれまでの
+   * 既定の意味そのまま。admin-worker の凍結連動の無効化だけが
+   * `"owner_suspended"` を渡す（契約の `disableCardDelegatedInputSchema`
+   * の JSDoc を参照）。
+   */
+  readonly reason?: string;
 };
 
 /**
@@ -50,15 +59,19 @@ export class DelegatedDisableCardUseCase {
     if (card === null) return outcomeErr({ kind: "card_not_found" });
 
     if (!card.isDisabled) {
+      const reason = input.reason ?? ADMIN_ACTION_DISABLED_REASON;
       const now = this.clock.now();
-      const disabled = await this.cards.disableAsAdmin(input.cardId, "admin_action", now);
+      const disabled = await this.cards.disableAsAdmin(input.cardId, reason, now);
       if (!disabled) return outcomeErr({ kind: "card_not_found" });
 
+      // **イベントの `metadata.reason` も同じ値に揃える**（#436 の
+      // `DelegatedBatchDisableCardsUseCase` と同じ判断）。1 つの操作が
+      // 2 つの違う文字列で説明される状態を増やさない。
       await this.events.record({
         cardId: input.cardId,
         event: "card.disabled",
         actorUserId: input.actorUserId,
-        metadata: { reason: "admin_action", actingAsAdmin: true },
+        metadata: { reason, actingAsAdmin: true },
       });
     }
 
