@@ -7,6 +7,7 @@ import type {
   CountBatchIssuedCardsDelegatedInput,
   CountDisabledInBatchDelegatedInput,
   DisableCardDelegatedInput,
+  IdentityAdminDelegatedRpcContract,
   IssueCardsDelegatedInput,
   IssueCardsDelegatedResult,
   ListAllCardsDelegatedResult,
@@ -19,7 +20,14 @@ import type {
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
-import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
+import {
+  ORIGIN,
+  cookieHeaderFrom,
+  executionContext,
+  fakeApprovals,
+  loginAs,
+  minimalIdentityAdmin,
+} from "./helpers";
 
 /**
  * NFC 管理画面（`/nfc`、#382 / #390 決定 16 ③）。
@@ -180,6 +188,90 @@ describe("GET /nfc", () => {
     expect(html).not.toContain(`${env.SHORT_URL_ORIGIN}/c/nfc_active`);
     // CSRF の hidden input が、発行フォームに描かれていること。
     expect(html).toMatch(/name="csrf_token"/);
+  });
+
+  it("所有者を名前で出す（#471）。解決できれば利用者詳細へのリンクになる", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [card({ cardId: "nfc_active", status: "active", ownerUserId: "usr_taro" })],
+          truncated: false,
+        }),
+    });
+    const identityAdmin: IdentityAdminDelegatedRpcContract = {
+      ...minimalIdentityAdmin(),
+      getUsersByIds: async () =>
+        rpcOk([
+          { id: "usr_taro", username: "taro", displayName: "太郎", status: "active" as const },
+        ]),
+    };
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc, identityAdmin });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("太郎 (@taro)");
+    expect(html).toContain('href="/users/usr_taro"');
+    // 解決できたので、生の ID を <code> で出す経路は通らない。
+    expect(html).not.toContain(">usr_taro<");
+  });
+
+  it("所有者を名前で出す（#471）。解決できなければ ID の先頭だけを <code> で出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_active", status: "active", ownerUserId: "usr_does_not_resolve" }),
+          ],
+          truncated: false,
+        }),
+    });
+    const identityAdmin: IdentityAdminDelegatedRpcContract = {
+      ...minimalIdentityAdmin(),
+      // 名前が引けなかった想定——`Map` に入らない。
+      getUsersByIds: async () => rpcOk([]),
+    };
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc, identityAdmin });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    // **「不明」と書かない**（issue #471 の冒頭）。先頭 8 文字 + `…` を出す。
+    expect(html).toContain("usr_does…");
+    expect(html).toContain('title="usr_does_not_resolve"');
+    expect(html).not.toContain("不明");
+    expect(html).not.toContain('href="/users/usr_does_not_resolve"');
+  });
+
+  it("所有者がいない（未紐づけ）カードはダッシュのまま", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [card({ cardId: "nfc_issued", status: "issued", ownerUserId: null })],
+          truncated: false,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("—");
   });
 
   it("所有者のいる disabled には復帰フォームだけを出す。active には出さない", async () => {

@@ -128,6 +128,52 @@ export type GetUserDelegatedInput = z.infer<typeof getUserDelegatedInputSchema>;
  */
 export type GetUserDelegatedResult = RpcResult<UserAdminSummary>;
 
+// ------------------------------------------------------------ getUsersByIds
+
+/**
+ * 一覧に「所有者」「actor」を名前で出すための、まとめ引き（#471）。
+ *
+ * **`getUser` をループで呼ばないこと。** カードや監査ログの一覧は 1 画面に
+ * 最大 50〜200 行あり、1 行ごとに Service Binding を叩くと**行数ぶんの
+ * 往復が走る。** まとめて引く口を別に置く——`listUsers` に絞り込みが
+ * 無いのと同じ理由で、`getUser` を使い回さない。
+ *
+ * **`userIds` は最大 100。** `listUsersInputSchema` の `limit` と同じ
+ * 理由——「名簿を 1 リクエストで吸い出す口」を作らないため。
+ *
+ * **重複と空の除去は呼ぶ側の仕事。** ここでは検証しない
+ * （`resolveUserRefs` の冒頭を参照）。auth-worker 側は渡された ID を
+ * そのまま `IN` 句へ流すだけで、重複があっても二重に数えない
+ * （`findByIds` が一意な行の集合を返すだけだから）。
+ */
+export const getUsersByIdsDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  userIds: z.array(z.string().min(1).max(64)).max(100),
+});
+export type GetUsersByIdsDelegatedInput = z.infer<typeof getUsersByIdsDelegatedInputSchema>;
+
+/**
+ * 一覧に名前を出すためだけの最小の型。
+ *
+ * **`UserAdminSummary` を使い回さないこと。** あれは `primaryEmail` を
+ * 持つ——カードの所有者や監査ログの actor を並べる一覧に他人のアドレスが
+ * 出る画面を作ってしまう。フィルタではなく型で落とす（RR-13）。
+ */
+export type UserRefAdmin = {
+  readonly id: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly status: "active" | "suspended" | "deleted";
+};
+
+/**
+ * **見つからなかった ID は、結果から黙って落ちる。** エラーにしない——
+ * 退会済み・存在しない ID が 1 件混ざっただけで一覧全体の名前解決が
+ * 落ちる作りにしないため（`resolveUserRefs` の冒頭を参照）。何件
+ * 渡しても、返るのは見つかった分だけである。
+ */
+export type GetUsersByIdsDelegatedResult = RpcResult<readonly UserRefAdmin[]>;
+
 // -------------------------------------------------------- listOAuthClients
 
 export const listOAuthClientsDelegatedInputSchema = z.object({
@@ -237,6 +283,11 @@ export interface IdentityAdminDelegatedRpcContract {
    * しない**（`listUsers` と同じ扱い。監査ログに 1 行も書かない）。
    */
   getUser(input: GetUserDelegatedInput): Promise<GetUserDelegatedResult>;
+  /**
+   * まとめ引き（#471）。**読み取りなので `actorUserId` の実在確認もしない**
+   * （`getUser` と同じ扱い。監査ログに 1 行も書かない）。
+   */
+  getUsersByIds(input: GetUsersByIdsDelegatedInput): Promise<GetUsersByIdsDelegatedResult>;
   suspendUser(input: SuspendUserDelegatedInput): Promise<SuspendUserDelegatedResult>;
   reinstateUser(input: ReinstateUserDelegatedInput): Promise<ReinstateUserDelegatedResult>;
   revokeUserSessions(

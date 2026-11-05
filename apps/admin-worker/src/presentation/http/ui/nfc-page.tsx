@@ -26,11 +26,16 @@ import {
   ITEM_META_CLASS,
   LABEL_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
-import type { AdminCardStatusDelegated, AdminCardViewDelegated } from "@u18/contracts";
+import type {
+  AdminCardStatusDelegated,
+  AdminCardViewDelegated,
+  UserRefAdmin,
+} from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { UserRef } from "./user-ref";
 
 /**
  * NFC カードの管理画面（`admin.under18.dev/nfc`、#382 / #390 決定 16 ③）。
@@ -58,10 +63,14 @@ import { KIWA_STYLESHEET_PATH } from "./asset-paths";
  * 外部へ飛べる**——カードを奪った側が遷移先を変え、確認しに来た運営に
  * 踏ませる経路になる。
  *
- * ## 所有者は userId までしか出ない（移行元と同じ理由）
+ * ## 所有者は名前で出す（#471）
  *
- * 表示名もメールアドレスも引かない。nfc-worker は Identity D1 を
- * 持たず、`NfcAdminDelegatedRpcContract` もそれを返さない。
+ * **以前は `userId` の生の UUID までしか出なかった。** nfc-worker は
+ * Identity D1 を持たず、`NfcAdminDelegatedRpcContract` も名前を返さない
+ * ——そこで admin-worker 側が `auth-worker` の `getUsersByIds`（delegated
+ * RPC）をまとめて叩き、`userRefs`（呼ぶ側が解決した `Map`）として渡す。
+ * 表示は `ui/user-ref.tsx` の `UserRef` 1 つに集約してある——#472/#473 も
+ * これを使う。
  *
  * ## インラインの `style` を書かない
  *
@@ -92,6 +101,8 @@ export type NfcPageProps = {
   readonly truncated: boolean;
   /** 焼く用の URL 一覧（`issued` のカードだけ、1 行に 1 本）。組み立てるのはルート側。 */
   readonly tapUrls: readonly string[];
+  /** 所有者の名前解決の結果（`user-refs.ts` の `resolveUserRefs`、#471）。 */
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
   readonly csrfToken: string;
   /** 直前の発行で出した枚数（PRG で戻ってきたとき）。 */
   readonly issuedCount: number | null;
@@ -262,6 +273,7 @@ export const NfcPage: FC<NfcPageProps> = ({
   cards,
   truncated,
   tapUrls,
+  userRefs,
   csrfToken,
   issuedCount,
   error,
@@ -579,15 +591,27 @@ export const NfcPage: FC<NfcPageProps> = ({
           <CardDescription>{cards.length} 枚。発行の新しい順です。</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
+          {/*
+            絞り込み欄（#470）。**`hidden` で描く——JS が無ければ存在しない
+            ものとして読める。JS がこれを外して使えるようにする。
+          */}
+          <input
+            type="text"
+            data-filter="nfc-cards-table"
+            hidden
+            placeholder="絞り込む"
+            aria-label="カードの一覧を絞り込む"
+            class={`${INPUT_CLASS} mb-2`}
+          />
+          <Table id="nfc-cards-table" data-sortable>
             <TableHeader>
               <TableRow>
-                <TableHead>カード ID</TableHead>
-                <TableHead>状態</TableHead>
-                <TableHead>所有者</TableHead>
-                <TableHead>遷移先</TableHead>
-                <TableHead>ロット</TableHead>
-                <TableHead>発行</TableHead>
+                <TableHead data-sort="text">カード ID</TableHead>
+                <TableHead data-sort="text">状態</TableHead>
+                <TableHead data-sort="text">所有者</TableHead>
+                <TableHead data-sort="text">遷移先</TableHead>
+                <TableHead data-sort="text">ロット</TableHead>
+                <TableHead data-sort="date">発行</TableHead>
                 <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -601,12 +625,17 @@ export const NfcPage: FC<NfcPageProps> = ({
                   ——その場合もページ自体は開くので、行き止まりにはならない。
                 */
                 <TableRow key={card.cardId} id={`card-${card.cardId}`}>
-                  <TableCell class="font-mono text-xs">{card.cardId}</TableCell>
+                  <TableCell class="font-mono text-xs">
+                    {card.cardId} {/* コピー用（#470）。JS が外すまでは存在しない。 */}
+                    <button type="button" data-copy={card.cardId} hidden class="text-xs underline">
+                      コピー
+                    </button>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[card.status]}>{STATUS_LABEL[card.status]}</Badge>
                   </TableCell>
-                  <TableCell class="font-mono text-xs break-all">
-                    {card.ownerUserId ?? "—"}
+                  <TableCell class="whitespace-normal">
+                    <UserRef id={card.ownerUserId} refs={userRefs} />
                   </TableCell>
                   <TableCell class="max-w-xs font-mono text-xs break-all whitespace-normal">
                     {/* **リンクにしない**（冒頭を参照）。 */}

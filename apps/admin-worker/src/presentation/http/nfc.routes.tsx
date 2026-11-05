@@ -1,10 +1,11 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
-import type { RpcErrorCode } from "@u18/contracts";
+import type { AdminCardViewDelegated, RpcErrorCode, UserRefAdmin } from "@u18/contracts";
 import type { Context, Hono } from "hono";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { isAllowedOrigin, isJsonRequest } from "./origin";
 import { csrfRejected, serviceUnavailable } from "./ui/message-page";
 import { cardTapUrl } from "./nfc-tap-url";
+import { resolveUserRefs } from "./user-refs";
 import { NfcPage } from "./ui/nfc-page";
 import type { AppBindings } from "./types";
 
@@ -95,25 +96,52 @@ function batchReinstatedCountFromQuery(raw: string | undefined): number | null {
   return parsed;
 }
 
+/**
+ * 一覧の再取得＋所有者の名前解決（#471）。4 箇所の描き直し
+ * （通常表示・エラー・batch 無効化／復帰の確認）が同じ形で必要とするので、
+ * ここへまとめる——**バラバラに書くと、どれか 1 箇所だけ `userRefs` を
+ * 渡し忘れた行が「—」のまま残る**（他は名前が出るのにここだけ出ない、
+ * という気づきにくい崩れ方をする）。
+ *
+ * **取得できなければ `null`。** `serviceUnavailable` を返すかどうかは
+ * 呼ぶ側が決める——ここでは判定しない。
+ */
+async function loadCardsForRender(c: Context<AppBindings>): Promise<{
+  readonly cards: readonly AdminCardViewDelegated[];
+  readonly truncated: boolean;
+  readonly tapUrls: readonly string[];
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
+} | null> {
+  const container = c.get("container");
+  const session = c.get("session");
+  const result = await container.nfcCards.listAllCards();
+  if (!result.ok) return null;
+
+  const tapUrls = result.value.cards
+    .filter((card) => card.status === "issued")
+    .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+
+  const userRefs = await resolveUserRefs(
+    container.identityAdmin,
+    session.sub,
+    result.value.cards.map((card) => card.ownerUserId),
+  );
+
+  return { cards: result.value.cards, truncated: result.value.truncated, tapUrls, userRefs };
+}
+
 export function registerNfcRoutes(app: Hono<AppBindings>): void {
   app.get("/nfc", pageSecurityHeaders, async (c) => {
-    const container = c.get("container");
-    const result = await container.nfcCards.listAllCards();
-
-    if (!result.ok) {
-      return serviceUnavailable(c);
-    }
-
-    const tapUrls = result.value.cards
-      .filter((card) => card.status === "issued")
-      .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+    const loaded = await loadCardsForRender(c);
+    if (loaded === null) return serviceUnavailable(c);
 
     c.header("Cache-Control", "no-store");
     return c.html(
       <NfcPage
-        cards={result.value.cards}
-        truncated={result.value.truncated}
-        tapUrls={tapUrls}
+        cards={loaded.cards}
+        truncated={loaded.truncated}
+        tapUrls={loaded.tapUrls}
+        userRefs={loaded.userRefs}
         csrfToken={ensureCsrfToken(c)}
         issuedCount={issuedCountFromQuery(c.req.query(ISSUED_COUNT_PARAM))}
         error={null}
@@ -505,23 +533,16 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
  * 同じ理由）。ここは 400 で描く。
  */
 async function renderNfcPageWithError(c: Context<AppBindings>, message: string): Promise<Response> {
-  const container = c.get("container");
-  const result = await container.nfcCards.listAllCards();
-
-  if (!result.ok) {
-    return serviceUnavailable(c);
-  }
-
-  const tapUrls = result.value.cards
-    .filter((card) => card.status === "issued")
-    .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+  const loaded = await loadCardsForRender(c);
+  if (loaded === null) return serviceUnavailable(c);
 
   c.header("Cache-Control", "no-store");
   return c.html(
     <NfcPage
-      cards={result.value.cards}
-      truncated={result.value.truncated}
-      tapUrls={tapUrls}
+      cards={loaded.cards}
+      truncated={loaded.truncated}
+      tapUrls={loaded.tapUrls}
+      userRefs={loaded.userRefs}
       csrfToken={ensureCsrfToken(c)}
       issuedCount={null}
       error={message}
@@ -546,23 +567,16 @@ async function renderNfcPageWithBatchConfirm(
   batchDisable: { readonly batch: string; readonly count: number },
   error: string | null = null,
 ): Promise<Response> {
-  const container = c.get("container");
-  const result = await container.nfcCards.listAllCards();
-
-  if (!result.ok) {
-    return serviceUnavailable(c);
-  }
-
-  const tapUrls = result.value.cards
-    .filter((card) => card.status === "issued")
-    .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+  const loaded = await loadCardsForRender(c);
+  if (loaded === null) return serviceUnavailable(c);
 
   c.header("Cache-Control", "no-store");
   return c.html(
     <NfcPage
-      cards={result.value.cards}
-      truncated={result.value.truncated}
-      tapUrls={tapUrls}
+      cards={loaded.cards}
+      truncated={loaded.truncated}
+      tapUrls={loaded.tapUrls}
+      userRefs={loaded.userRefs}
       csrfToken={ensureCsrfToken(c)}
       issuedCount={null}
       error={null}
@@ -587,23 +601,16 @@ async function renderNfcPageWithBatchReinstateConfirm(
   batchReinstate: { readonly batch: string; readonly count: number },
   error: string | null = null,
 ): Promise<Response> {
-  const container = c.get("container");
-  const result = await container.nfcCards.listAllCards();
-
-  if (!result.ok) {
-    return serviceUnavailable(c);
-  }
-
-  const tapUrls = result.value.cards
-    .filter((card) => card.status === "issued")
-    .map((card) => cardTapUrl(container.env.SHORT_URL_ORIGIN, card.cardId));
+  const loaded = await loadCardsForRender(c);
+  if (loaded === null) return serviceUnavailable(c);
 
   c.header("Cache-Control", "no-store");
   return c.html(
     <NfcPage
-      cards={result.value.cards}
-      truncated={result.value.truncated}
-      tapUrls={tapUrls}
+      cards={loaded.cards}
+      truncated={loaded.truncated}
+      tapUrls={loaded.tapUrls}
+      userRefs={loaded.userRefs}
       csrfToken={ensureCsrfToken(c)}
       issuedCount={null}
       error={null}

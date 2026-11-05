@@ -213,6 +213,86 @@ describe("getUser", () => {
   });
 });
 
+describe("getUsersByIds", () => {
+  it("見つかった分だけ、ID で引いた順ではなく見つかった順に返す", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+    await seedPlainUser({ id: "usr_hanako", username: "hanako", email: "hanako@example.com" });
+
+    const result = await rpc.getUsersByIds({
+      actorUserId: "usr_admin",
+      userIds: ["usr_taro", "usr_hanako"],
+    });
+
+    expect(result.ok, "getUsersByIds が失敗した").toBe(true);
+    if (!result.ok) return;
+    const byId = new Map(result.value.map((u) => [u.id, u]));
+    expect(byId.get("usr_taro")?.displayName).toBe("名前 taro");
+    expect(byId.get("usr_hanako")?.username).toBe("hanako");
+  });
+
+  it("primaryEmail を持たない（UserAdminSummary を使い回さない、RR-13）", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    const result = await rpc.getUsersByIds({
+      actorUserId: "usr_admin",
+      userIds: ["usr_taro"],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]).not.toHaveProperty("primaryEmail");
+  });
+
+  it("見つからない ID が混ざっても落ちない。見つかった分だけ返る", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    const result = await rpc.getUsersByIds({
+      actorUserId: "usr_admin",
+      userIds: ["usr_taro", "usr_does_not_exist"],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.map((u) => u.id)).toEqual(["usr_taro"]);
+  });
+
+  it("空配列なら空配列（失敗ではない）", async () => {
+    const result = await rpc.getUsersByIds({ actorUserId: "usr_admin", userIds: [] });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([]);
+  });
+
+  it("101 件は invalid_input（上限 100）", async () => {
+    const userIds = Array.from({ length: 101 }, (_, i) => `usr_${i}`);
+
+    const result = await rpc.getUsersByIds({ actorUserId: "usr_admin", userIds });
+
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+  });
+
+  it("読み取りなので、実在しない actorUserId でも通る（getUser と同じ扱い）", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    const result = await rpc.getUsersByIds({
+      actorUserId: "usr_does_not_exist",
+      userIds: ["usr_taro"],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("監査ログに 1 行も書かない", async () => {
+    await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
+
+    await rpc.getUsersByIds({ actorUserId: "usr_admin", userIds: ["usr_taro"] });
+
+    const rows = await db().select().from(auditLogs).all();
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe("suspendUser / reinstateUser / revokeUserSessions", () => {
   it("停止でき、理由が監査へ残る", async () => {
     const admin: SeededUser = await seedLoggedInUser();

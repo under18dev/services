@@ -1,6 +1,6 @@
 import { type IdentityDatabase, userEmails, users } from "@u18/db";
 import { newId, newUserId } from "@u18/domain";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type {
   NewUser,
   UpdateProfileOutcome,
@@ -38,6 +38,13 @@ export class DrizzleUserRepository implements UserRepository {
   async findById(id: string): Promise<User | null> {
     const row = await this.db.select().from(users).where(eq(users.id, id)).get();
     return row ? toDomain(row) : null;
+  }
+
+  /** まとめ引き（#471）。空配列なら `IN ()` を組まず、クエリを投げない。 */
+  async findByIds(ids: readonly string[]): Promise<readonly User[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db.select().from(users).where(inArray(users.id, ids)).all();
+    return rows.map(toDomain);
   }
 
   /**
