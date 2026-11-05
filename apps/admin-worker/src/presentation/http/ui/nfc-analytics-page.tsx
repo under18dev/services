@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@u18/web-ui/kiwa";
-import { ITEM_META_CLASS } from "@u18/web-ui/kiwa/island-classes";
+import { ITEM_META_CLASS, ITEM_RAW_CLASS } from "@u18/web-ui/kiwa/island-classes";
 import type {
   AdminCardStatusDelegated,
   BatchAnalyticsRow,
@@ -369,6 +369,58 @@ const CardUsageSection: FC<{ readonly usage: CardUsageRankingAnalytics | null }>
   </Card>
 );
 
+/**
+ * `nfc_cards.disabled_reason` のうち、コードが実際に書く値（#496）。
+ *
+ * **正本はここ。** 以前はこの画面が理由コードを 1 つも訳さず生のまま
+ * 並べていて、`schema`（`packages/nfc-db/src/schema/cards.ts`）のコメントが
+ * 挙げていた例（`"abuse"` `"ops"`）はどこにも実在しなかった。コードが
+ * 書く値はソースから数えられる——`lost` / `unused` は `cards.routes.ts`
+ * の `POST /:cardId/disable`、`admin_action` は
+ * `DelegatedDisableCardUseCase`、`admin_batch` は
+ * `domain/services/disabled-reason.ts` の `ADMIN_BATCH_DISABLED_REASON`
+ * （#436）、`owner_suspended` は同ファイルの
+ * `OWNER_SUSPENDED_DISABLED_REASON`（アカウント凍結に連動した無効化、
+ * #486）。
+ *
+ * **`"ops"` はコードの既定語彙では無いが、今も実在する運用値。**
+ * ランブック §12.4(5)（対象利用者の行自体が無い、孤立カードへの対応）が
+ * 手書き SQL で使い続けている——過去の 1 回きりの書き込みではないので、
+ * 「過去の行にだけ残っている値」として扱わず、ここに含めてラベルを
+ * 付ける（コードが書く値ではないので、上の 5 つとは別に添えてある）。
+ *
+ * **ここに無い値（`"abuse"` など、実在が確認できていないもの）は
+ * 生のコードのまま出す。** 「不明」とは書かない——#471 の `UserRef` と
+ * 同じ理由で、値そのものが無いのか、知らない値が入っているのかを
+ * 運用者が区別できなくなる。
+ */
+const DISABLED_REASON_LABEL: Readonly<Record<string, string>> = {
+  lost: "紛失のため",
+  unused: "使っていないため",
+  admin_action: "運営の単発操作で無効化",
+  admin_batch: "運営の一括無効化",
+  owner_suspended: "所有者の利用停止に伴う無効化",
+  ops: "孤立カードへの運用対応（ランブック §12.4(5)）",
+};
+
+/** 理由コード 1 つぶんの表示。**既知なら日本語＋コード、未知ならコードのまま。** */
+const DisabledReasonLabel: FC<{ readonly reason: string | null }> = ({ reason }) => {
+  if (reason === null) return <span class={ITEM_META_CLASS}>（なし）</span>;
+
+  const label = DISABLED_REASON_LABEL[reason];
+  if (label === undefined) {
+    // **「不明」と書かない。** 値が無いのではなく、ここに登録していない
+    // だけ——その違いが読めなくなる。
+    return <code class={ITEM_RAW_CLASS}>{reason}</code>;
+  }
+
+  return (
+    <>
+      {label} <span class={ITEM_META_CLASS}>（{reason}）</span>
+    </>
+  );
+};
+
 const DisabledReasonSection: FC<{
   readonly disabledBreakdown: DisabledReasonBreakdownAnalytics | null;
 }> = ({ disabledBreakdown }) => (
@@ -376,7 +428,10 @@ const DisabledReasonSection: FC<{
     <CardHeader>
       <CardTitle>無効化の内訳</CardTitle>
       <CardDescription>
-        理由コードは出てきた値をそのまま数えています（語彙はまだ揃っていません）。
+        理由コードは、カードを止めた経路（本人の申告・運営の操作・アカウント凍結など）で
+        決まります。既知の値は日本語で、対応表に無い値はコードのまま出します——
+        ここに出ている理由コードが、いま無効化されているカードに実在するものの全部です
+        （絞り込みはしていません）。
       </CardDescription>
     </CardHeader>
     <CardContent>
@@ -388,14 +443,16 @@ const DisabledReasonSection: FC<{
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>理由コード</TableHead>
+              <TableHead>理由</TableHead>
               <TableHead>枚数</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {disabledBreakdown.rows.map((row) => (
               <TableRow key={row.reason ?? "__null__"}>
-                <TableCell class="font-mono text-xs">{row.reason ?? "（なし）"}</TableCell>
+                <TableCell class="whitespace-normal">
+                  <DisabledReasonLabel reason={row.reason} />
+                </TableCell>
                 <TableCell>{row.count}</TableCell>
               </TableRow>
             ))}

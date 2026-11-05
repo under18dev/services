@@ -108,7 +108,26 @@ export const nfcCards = sqliteTable(
     transferCount: integer("transfer_count").notNull().default(0),
 
     disabledAt: timestampMs("disabled_at"),
-    /** 無効化の理由コード（自由文は入れない）。例: "lost", "abuse", "ops"。 */
+    /**
+     * 無効化の理由コード（自由文は入れない）。
+     *
+     * **型の制約はここには無い。** 実際にコードが書く値は
+     * `"lost"` / `"unused"`（所有者が選ぶ、`cards.routes.ts` の
+     * `POST /:cardId/disable`）、`"admin_action"`（運営の単発操作、
+     * `DelegatedDisableCardUseCase`）、`"admin_batch"`（運営の一括無効化、
+     * `domain/services/disabled-reason.ts` の `ADMIN_BATCH_DISABLED_REASON`、
+     * #436）、`"owner_suspended"`（アカウント凍結に連動した無効化、
+     * `OWNER_SUSPENDED_DISABLED_REASON`、#486）の 5 つ。**旧版のコメントが
+     * 例に挙げていた `"abuse"` は、実際にはどのコードも書いていない。**
+     *
+     * `"ops"` は違う——こちらは今もランブック §12.4(5)（対象利用者の行
+     * 自体が無い、孤立カードへの対応）が手書き SQL で使い続けている運用値
+     * であって、過去の 1 回きりの書き込みではない（#496）。コードの既定
+     * 語彙ではないので、この 5 つの一覧には含めていない。
+     *
+     * 日本語ラベルの正本は admin-worker の `nfc-analytics-page.tsx`
+     * （`DISABLED_REASON_LABEL`）。
+     */
     disabledReason: text("disabled_reason"),
 
     /**
