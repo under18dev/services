@@ -8,6 +8,7 @@ import {
   ASSET_ROUTES,
   EXTERNALLY_UNVERIFIABLE_ASSETS,
   NAV_PAGE_ROUTES,
+  PENDING_ROUTES,
   PROBE_PAGES,
 } from "./route-inventory";
 import {
@@ -338,5 +339,59 @@ describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は
       pagesWithMarkers.length,
       "どのページも data-sortable/data-filter/data-copy/data-tabs を含んでいない——fake のデータが空のままになっていないか確認すること",
     ).toBeGreaterThan(0);
+  });
+
+  /**
+   * `/pending` は `NAV_PAGE_ROUTES` に入らない（指摘: 3b、#488 で発覚）。
+   *
+   * **承認済みの管理者が辿る画面ではなく、未承認の人だけが見る画面**
+   * だから——`route-inventory.ts` の区分がそう決めている。上のテストは
+   * `NAV_PAGE_ROUTES` だけを引くので、`/pending` に `data-copy` を足して
+   * `ISLAND_PATH` を忘れても、上のテストは気づかずに緑のまま通る。
+   *
+   * **`NAV_PAGE_ROUTES` へ `/pending` を足すのは違う。** あの一覧は
+   * `check-app-catalog-routes.mjs` が `ADMIN_NAV_GROUPS`（サイドバーの
+   * 並び）と突き合わせる意味も持っており、`/pending` はサイドバーに
+   * 出ない画面——意味の違う一覧へ押し込むと、次に読む人が「承認済みの
+   * 画面の一覧」という前提を疑わなくなる。別のテストとして、同じ確認を
+   * `PENDING_ROUTES` にも足す。
+   */
+  it("PENDING_ROUTES も同様——/pending も data-* を使うなら ISLAND_PATH を読む", async () => {
+    const sub = "usr_pending_island_coverage";
+    const approvals = fakeApprovals([]); // 未承認のまま。
+    const cookie = await loginAs(sub, approvals);
+
+    const paths = PENDING_ROUTES.filter((route) => route.method === "GET").map(
+      (route) => route.path,
+    );
+    expect(paths.length).toBeGreaterThan(0);
+
+    const MARKERS = ["data-sortable", "data-filter", "data-copy", "data-tabs"];
+    let sawMarker = false;
+
+    for (const path of paths) {
+      const response = await createApp({ approvals }).fetch(
+        new Request(`${ORIGIN}${path}`, { headers: { Cookie: cookie } }),
+        env,
+        executionContext(),
+      );
+      expect(response.status, `${path} が 200 を返さない`).toBe(200);
+
+      const html = await response.text();
+      if (MARKERS.some((marker) => html.includes(marker))) {
+        sawMarker = true;
+        expect(
+          html,
+          `${path} は data-sortable/data-filter/data-copy/data-tabs のいずれかを使うのに、ISLAND_PATH を読んでいない`,
+        ).toContain(ISLAND_PATH);
+      }
+    }
+
+    // 属性を 1 つも見なかったら、上のループは何も確かめずに通っている
+    // （上の NAV_PAGE_ROUTES 版と同じ注意）。
+    expect(
+      sawMarker,
+      "/pending が data-sortable/data-filter/data-copy/data-tabs を 1 つも含んでいない",
+    ).toBe(true);
   });
 });
