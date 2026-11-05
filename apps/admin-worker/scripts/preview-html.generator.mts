@@ -709,6 +709,77 @@ JS が有効なら、タブで切り替えられます。
     html: tabsSampleHtml,
   });
 
+  /**
+   * `data-select` / `data-select-all` / `data-select-count` の見本（#481）。
+   * **実在するルートではない。** `/nfc` 自体の書き換え（1 枚ずつの操作を
+   * 外し、選択 + 一括操作を入れる）は別セッションの担当で、まだ main に
+   * 入っていない——`tabs-sample` と同じ理由で、架空データの見本を先に
+   * 出しておく。
+   *
+   * **送信先（`action`）は実在しない。** ここは JS 側の挙動（件数表示・
+   * 全選択・絞り込みとの連携）を確かめる見本であって、実際の一括操作を
+   * 試す場所ではない。
+   */
+  const bulkSelectSampleHtml = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>選択と一括操作の見本 | u18 Identity</title>
+<link rel="stylesheet" href="./kiwa.css" />
+<script type="module" src="./admin-island.js" defer></script>
+</head>
+<body>
+<main class="px-5 py-8 md:px-10 md:py-12">
+<div class="mx-auto flex w-full max-w-3xl flex-col gap-6">
+<div class="flex flex-col gap-2">
+<h1 class="text-2xl">選択と一括操作の見本（架空データ）</h1>
+<p class="text-sm/relaxed text-foreground-muted">
+JS が無効でも、チェックして下のボタンを押せば一括操作の form は送信できます
+（送信先はこの見本では実在しません）。JS が有効なら、件数表示と「表示中を
+全選択」が動きます。上の絞り込み欄で banana を隠すと、banana の選択も
+一緒に外れます。
+</p>
+</div>
+<form method="post" action="/__preview-only__/bulk-sample" class="flex flex-col gap-4">
+<input
+  type="text"
+  data-filter="sample-cards"
+  hidden
+  placeholder="この一覧から絞り込み"
+  aria-label="この一覧から絞り込み"
+  class="w-full rounded-lg border border-border px-3 py-2 text-sm"
+/>
+<table id="sample-cards" data-sortable class="w-full text-sm">
+<thead>
+<tr>
+<th><input type="checkbox" data-select-all="sample-cards" hidden /></th>
+<th data-sort="text">カード ID</th>
+<th data-sort="text">状態</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><input type="checkbox" data-select="sample-cards" name="card_id" value="nfc_apple" /></td><td>nfc_apple</td><td>有効</td></tr>
+<tr><td><input type="checkbox" data-select="sample-cards" name="card_id" value="nfc_banana" /></td><td>nfc_banana</td><td>有効</td></tr>
+<tr><td><input type="checkbox" data-select="sample-cards" name="card_id" value="nfc_cherry" /></td><td>nfc_cherry</td><td>無効化済み</td></tr>
+</tbody>
+</table>
+<output data-select-count="sample-cards" class="text-sm text-foreground-muted">選択したカードに対して操作します。</output>
+<div class="flex gap-3">
+<button type="submit" name="action" value="disable" class="rounded-lg border border-border px-3 py-2 text-sm">選択したカードを無効化する</button>
+<button type="submit" name="action" value="reinstate" class="rounded-lg border border-border px-3 py-2 text-sm">選択したカードを復帰させる</button>
+</div>
+</form>
+</div>
+</main>
+</body>
+</html>
+`;
+  pages.push({
+    name: "bulk-select-sample",
+    title: "選択と一括操作の見本（#481、架空データ）",
+    html: bulkSelectSampleHtml,
+  });
+
   await writeFile(`${OUTPUT_DIR}/kiwa.css`, KIWA_STYLESHEET, "utf8");
   await writeFile(`${OUTPUT_DIR}/admin-island.js`, ADMIN_ISLAND_JS, "utf8");
   for (const page of pages) {

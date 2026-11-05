@@ -1,11 +1,13 @@
 /**
- * admin-worker 最初のクライアント JS（#470）。
+ * admin-worker 最初のクライアント JS（#470、選択・一括操作は #481）。
  *
- * **全画面の前提にしない。** ここが足すのは並べ替え・絞り込み・コピー・
- * タブ・通知のトーストだけで、どれも「無くても読める・無くても操作できる」
- * ものの上に乗る後付けの便利さである。読み込みに失敗しても、CSP で弾かれ
- * ても、JS を切っていても、画面は（並べ替え前の既定順・全行表示・タブなら
- * 縦一列で）そのまま成立する。
+ * **全画面の前提にしない。** ここが足すのは並べ替え・絞り込み・選択の
+ * 件数表示 / 全選択・コピー・タブ・通知のトーストだけで、どれも「無くても
+ * 読める・無くても操作できる」ものの上に乗る後付けの便利さである
+ * （選択そのもの・一括操作の送信は素の form で成立する——`attachSelection`
+ * の JSDoc を参照）。読み込みに失敗しても、CSP で弾かれても、JS を切って
+ * いても、画面は（並べ替え前の既定順・全行表示・タブなら縦一列で）
+ * そのまま成立する。
  *
  * ## `data-*` 属性がセッション間の契約である
  *
@@ -145,7 +147,19 @@ export function attachFilter(input: HTMLInputElement): void {
     for (const row of rows) {
       const matches = query === "" || (row.textContent?.toLowerCase().includes(query) ?? false);
       row.hidden = !matches;
-      if (matches) shown += 1;
+      if (matches) {
+        shown += 1;
+        continue;
+      }
+      // **隠した行の選択を外す（#481）。** CSS の `hidden` は form の
+      // 送信を止めない——チェックの付いたまま隠れると、運用者が見ていない
+      // 行まで一括操作の対象になる。`change` を飛ばすのは、
+      // `attachSelection` 側の件数表示・全選択の状態を同期させるため。
+      for (const checkbox of row.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+        if (!checkbox.checked) continue;
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      }
     }
     const text =
       query === "" ? `${rows.length} 件` : `${shown} / ${rows.length} 件（この一覧から絞り込み）`;
@@ -156,6 +170,105 @@ export function attachFilter(input: HTMLInputElement): void {
   input.addEventListener("input", apply);
   input.hidden = false;
   apply();
+}
+
+// --------------------------------------------------------------------- 選択
+
+/**
+ * チェックボックスの行（`<tr>` か `<li>`、`rowsOf` と同じ定義）。見つから
+ * なければチェックボックス自身を行として扱う——行の外（表に入っていない
+ * 単独のチェックボックス）でも壊れないようにするため。
+ */
+function rowOf(checkbox: HTMLInputElement): HTMLElement {
+  return checkbox.closest<HTMLElement>("tr, li") ?? checkbox;
+}
+
+/** 絞り込みで隠れていない行のチェックボックスだけを返す（#481）。 */
+function visibleCheckboxesOf(checkboxes: readonly HTMLInputElement[]): HTMLInputElement[] {
+  return checkboxes.filter((checkbox) => !rowOf(checkbox).hidden);
+}
+
+/**
+ * 一括操作のための選択（#481）。
+ *
+ * **一覧の 1 行ずつの操作を無くし、選択 + 一括操作へ置き換える**
+ * （運用者の指示：「カード一覧からは 1 枚ずつ操作できなくていい。
+ * 詳細ページからやる。代わりにソート・検索・選択 and 一括操作を」）。
+ *
+ * ## 選択そのものは JS を要求しない
+ *
+ * `<input type="checkbox" data-select name="card_id" value="...">` は
+ * ただの form 要素。JS が落ちても、チェックして送信ボタンを押せば
+ * 一括操作は成立する——**ここが足すのは「N 件選択中」の件数表示と
+ * 「表示中を全選択」だけ**（絶対条件）。操作ボタン自体を隠したり
+ * 無効化したりしない。
+ *
+ * ## 「全選択」が選ぶのは、いま見えている行だけ
+ *
+ * `rows.hidden` が `true` な行（絞り込みで隠れている）は対象外にする。
+ * **理由: 一覧は `truncated` で打ち切られることもあり、絞り込み中に
+ * 「全部選んだ」と運用者に読ませると、見ていないカードを止め損なう・
+ * 見ていないカードまで止める、という事故になる**（issue 本文）。
+ *
+ * ## 絞り込みを変えたら選択も見直す
+ *
+ * このファイル自身の責務ではなく、`attachFilter` 側が「隠した行の
+ * チェックを外して `change` を飛ばす」ところまでやる——ここはその
+ * `change` を拾って件数と「全選択」の状態を更新するだけでよい。
+ * 2 つの機能を直接結合させない（`attachFilter` は selection の存在を
+ * 知らない）ための役割分担。
+ */
+export function attachSelection(group: string): void {
+  const checkboxes = Array.from(
+    document.querySelectorAll<HTMLInputElement>(`input[data-select="${group}"]`),
+  );
+  if (checkboxes.length === 0) return;
+
+  const selectAll = document.querySelector<HTMLInputElement>(`input[data-select-all="${group}"]`);
+  const counters = Array.from(
+    document.querySelectorAll<HTMLElement>(`[data-select-count="${group}"]`),
+  );
+
+  function recount(): void {
+    const visible = visibleCheckboxesOf(checkboxes);
+    const checked = visible.filter((checkbox) => checkbox.checked);
+
+    for (const counter of counters) counter.textContent = `${checked.length} 件選択中`;
+
+    if (selectAll !== null) {
+      // **`indeterminate` は属性ではなくプロパティ。** HTML に書けないので
+      // JS からしか立てられない——立てないと「一部だけ選択」のときに
+      // 全選択チェックボックスが素の on/off のどちらかに丸められ、
+      // 「もう一度押すと何が起きるか」が読み取れない。
+      selectAll.checked = visible.length > 0 && checked.length === visible.length;
+      selectAll.indeterminate = checked.length > 0 && checked.length < visible.length;
+    }
+  }
+
+  for (const checkbox of checkboxes) {
+    checkbox.addEventListener("change", recount);
+  }
+
+  if (selectAll !== null) {
+    selectAll.hidden = false;
+    selectAll.addEventListener("change", () => {
+      // **チェックを外すだけのときも「見えている行」に限る。** 絞り込みで
+      // 隠れている行はそもそも `attachFilter` がチェックを外しているので、
+      // ここで触れても触れなくても結果は同じだが、「全選択が見える範囲
+      // だけに効く」という性質を片方の分岐だけに持たせない。
+      for (const checkbox of visibleCheckboxesOf(checkboxes)) {
+        checkbox.checked = selectAll.checked;
+      }
+      recount();
+    });
+  }
+
+  // **起動直後に 1 度呼ぶ。** サーバーが描いた静的な文言（JS 無しの
+  // ときに読む文）を、件数つきの文言へ差し替える——「0 件選択中」から
+  // 始まる。`data-select-count` を空のまま出さないこと、という絶対条件は
+  // サーバー側（呼び出し元）の責務だが、JS が動く場合はここで必ず
+  // 上書きされる。
+  recount();
 }
 
 // --------------------------------------------------------------------- コピー
@@ -309,6 +422,17 @@ for (const table of document.querySelectorAll<HTMLTableElement>("table[data-sort
 }
 for (const input of document.querySelectorAll<HTMLInputElement>("input[data-filter]")) {
   attachFilter(input);
+}
+{
+  // **`data-select` を持つ要素から group の集合を取る。** 1 画面に複数の
+  // 選択グループを置く可能性を閉じないため、決め打ちの文字列を 1 つだけ
+  // 呼ぶのではなく、実際に存在する group をすべて拾う。
+  const groups = new Set(
+    Array.from(document.querySelectorAll<HTMLInputElement>("input[data-select]"))
+      .map((checkbox) => checkbox.getAttribute("data-select"))
+      .filter((group): group is string => group !== null),
+  );
+  for (const group of groups) attachSelection(group);
 }
 for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-copy]")) {
   attachCopyButton(button);

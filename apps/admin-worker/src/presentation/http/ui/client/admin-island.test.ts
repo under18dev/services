@@ -3,6 +3,7 @@ import {
   attachCopyButton,
   attachFilter,
   attachNoticeToast,
+  attachSelection,
   attachSortableTable,
   attachTabs,
   attachTooltips,
@@ -11,7 +12,7 @@ import {
 } from "./admin-island";
 
 /**
- * `admin-island.ts` の DOM 挙動（#470）。
+ * `admin-island.ts` の DOM 挙動（#470、選択・一括操作は #481）。
  *
  * **ここだけが `document` を要求する。** 他のテスト（`test/**`）は
  * workerd（`@cloudflare/vitest-plugin`）の中で動くので `document` が無い
@@ -20,10 +21,18 @@ import {
  *
  * ## タブを厚めに見ている理由
  *
- * この issue の 3 画面（/audit /clients /nfc/analytics）はどれもタブを
+ * #470 の 3 画面（/audit /clients /nfc/analytics）はどれもタブを
  * 使わない——#454 の解析 6 区画は縦一列のままにする、という明示の判断の
  * ため。それでも `data-tabs` は #471〜#473 への契約として渡すので、**誰も
  * 動かさないコードのまま main へ入れない**（指摘: 3b）。
+ *
+ * ## 選択（`attachSelection`）と絞り込み（`attachFilter`）の連携も見る
+ *
+ * #481 で「絞り込みが隠した行の選択を外す」という依存が増えた。2 つの
+ * 関数は互いを import していない（`attachFilter` は selection の存在を
+ * 知らない、素の `change` イベントで繋がっている）ので、`attachFilter`
+ * 側のテストに 1 本、`attachSelection` 側の起動テストにも別の 1 本を
+ * 置いて、どちらが壊れても拾えるようにしてある。
  */
 
 describe("attachSortableTable", () => {
@@ -134,6 +143,102 @@ describe("attachFilter", () => {
   it("rowsOf は対象が無くても空配列を返す", () => {
     document.body.innerHTML = `<ul id="empty"></ul>`;
     expect(rowsOf(document.getElementById("empty")!)).toEqual([]);
+  });
+
+  it("絞り込みで隠れた行のチェックを外す（#481）——hidden は送信を止めないため", () => {
+    document.body.innerHTML = `
+      <input data-filter="t1" hidden />
+      <table id="t1"><tbody>
+        <tr><td>apple<input type="checkbox" data-select="g" checked /></td></tr>
+        <tr><td>banana<input type="checkbox" data-select="g" checked /></td></tr>
+      </tbody></table>
+    `;
+    const input = document.querySelector<HTMLInputElement>("input[data-filter]")!;
+    attachFilter(input);
+
+    input.value = "ban";
+    input.dispatchEvent(new Event("input"));
+
+    const checkboxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>("input[type=checkbox]"),
+    );
+    // apple の行は隠れた → チェックを外す。banana の行は見えている → 触らない。
+    expect(checkboxes.map((c) => c.checked)).toEqual([false, true]);
+  });
+});
+
+describe("attachSelection", () => {
+  function buildTable(): void {
+    document.body.innerHTML = `
+      <input type="checkbox" data-select-all="cards" hidden />
+      <output data-select-count="cards">選択したカードに対して操作します。</output>
+      <table><tbody>
+        <tr><td>a</td><td><input type="checkbox" data-select="cards" name="card_id" value="a" /></td></tr>
+        <tr><td>b</td><td><input type="checkbox" data-select="cards" name="card_id" value="b" /></td></tr>
+        <tr><td>c</td><td><input type="checkbox" data-select="cards" name="card_id" value="c" /></td></tr>
+      </tbody></table>
+    `;
+  }
+
+  it("起動直後にサーバーの静的な文言を件数つきへ差し替える（絶対条件: 空欄を残さない）", () => {
+    buildTable();
+    attachSelection("cards");
+    expect(document.querySelector('[data-select-count="cards"]')?.textContent).toBe("0 件選択中");
+  });
+
+  it("チェックすると件数が増える", () => {
+    buildTable();
+    attachSelection("cards");
+    const [a] = document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]');
+    a!.checked = true;
+    a!.dispatchEvent(new Event("change"));
+    expect(document.querySelector('[data-select-count="cards"]')?.textContent).toBe("1 件選択中");
+  });
+
+  it("全選択は hidden を外し、全部チェックする", () => {
+    buildTable();
+    attachSelection("cards");
+    const selectAll = document.querySelector<HTMLInputElement>('input[data-select-all="cards"]')!;
+    expect(selectAll.hidden).toBe(false);
+
+    selectAll.checked = true;
+    selectAll.dispatchEvent(new Event("change"));
+
+    const boxes = document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]');
+    expect(Array.from(boxes).map((b) => b.checked)).toEqual([true, true, true]);
+    expect(document.querySelector('[data-select-count="cards"]')?.textContent).toBe("3 件選択中");
+  });
+
+  it("全選択は、いま見えている行だけを選ぶ（絞り込みで隠れた行は選ばない）", () => {
+    buildTable();
+    const rows = document.querySelectorAll<HTMLElement>("tbody > tr");
+    rows[2]!.hidden = true; // c の行だけ絞り込みで隠れている想定。
+
+    attachSelection("cards");
+    const selectAll = document.querySelector<HTMLInputElement>('input[data-select-all="cards"]')!;
+    selectAll.checked = true;
+    selectAll.dispatchEvent(new Event("change"));
+
+    const boxes = document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]');
+    // a, b は選ばれる。隠れている c は選ばれない。
+    expect(Array.from(boxes).map((b) => b.checked)).toEqual([true, true, false]);
+  });
+
+  it("一部だけ選ばれていると全選択は indeterminate になる", () => {
+    buildTable();
+    attachSelection("cards");
+    const [a] = document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]');
+    a!.checked = true;
+    a!.dispatchEvent(new Event("change"));
+
+    const selectAll = document.querySelector<HTMLInputElement>('input[data-select-all="cards"]')!;
+    expect(selectAll.indeterminate).toBe(true);
+    expect(selectAll.checked).toBe(false);
+  });
+
+  it("group に一致するチェックボックスが無ければ何もしない", () => {
+    document.body.innerHTML = `<p>何も無い</p>`;
+    expect(() => attachSelection("nothing")).not.toThrow();
   });
 });
 
