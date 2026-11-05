@@ -175,12 +175,21 @@ const DETAIL_CARD_ID = CARDS[CARDS.length - 1]!.cardId;
 /** 引き取り済みでタップ 0 件（死蔵）のデモ。`cardDetailFor` の判定と対にしてある。 */
 const DORMANT_CARD_ID = CARDS[21]!.cardId;
 
+/**
+ * `owner_suspended`（#486）・`ops`（ランブック §12.4(5) の運用値）と、
+ * どこにも登録していない `"abuse"`（#496 —— 実在は確認できていない旧版
+ * コメントの例）を混ぜて、既知ラベルと生コードの両方の出し分けを
+ * プレビューで確認できるようにする。
+ */
 const DISABLED_REASON_ROWS: readonly { readonly reason: string | null; readonly count: number }[] =
   [
     { reason: "lost", count: 3 },
     { reason: "unused", count: 2 },
     { reason: "admin_action", count: 2 },
     { reason: "admin_batch", count: 1 },
+    { reason: "owner_suspended", count: 1 },
+    { reason: "ops", count: 1 },
+    { reason: "abuse", count: 1 },
   ];
 
 /**

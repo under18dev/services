@@ -144,11 +144,20 @@ const STATUS_LABEL: Readonly<Record<CardView["status"], string>> = {
  * **運営が黙って止めると問い合わせが来る。** ここで一覧に出す文言が、
  * 「自分で止めた」のか「運営に止められた」のかを所有者が読める
  * 唯一の場所である。
+ *
+ * **`admin_batch` / `owner_suspended` を足した（#496）。** 日本語ラベルの
+ * 正本は admin-worker の `nfc-analytics-page.tsx` の `DISABLED_REASON_LABEL`
+ * ——あちらは運営向けの集計表示、こちらは所有者本人向けの通知なので
+ * 言い回しは書き分けているが、**コードが実際に書く値の一覧はそちらと
+ * 揃えてある。** `owner_suspended` は #486（`OWNER_SUSPENDED_DISABLED_REASON`）
+ * で実際に書かれるようになった値。
  */
 const DISABLED_REASON_LABEL: Readonly<Record<string, string>> = {
   lost: "紛失のため",
   unused: "使っていないため",
   admin_action: "運営により無効化されました",
+  admin_batch: "運営によりまとめて無効化されました",
+  owner_suspended: "アカウントの利用停止により無効化されました",
 };
 
 const STATUS_VARIANT: Readonly<Record<CardView["status"], "secondary" | "destructive">> = {
