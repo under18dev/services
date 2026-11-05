@@ -2,6 +2,7 @@ import { rpcOk } from "@u18/contracts";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
+import { ISLAND_PATH } from "../src/presentation/http/ui/asset-paths";
 import { PERMISSION_BITS } from "../src/domain/permissions";
 import {
   ORIGIN,
@@ -116,6 +117,44 @@ describe("GET /approvals", () => {
     // **承認者も名前になる。** `approvedBySub` は SUB（自分）なので、
     // 承認者の節にも「管理者 (@admin)」が出る。
     expect(html).toContain("承認者: ");
+  });
+
+  it("sub と承認者の両方に data-copy ボタンを付け、ISLAND_PATH を読む（#504）", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    await approvals.grant("usr_other", false, SUB);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const identityAdmin = {
+      ...minimalIdentityAdmin(),
+      getUsersByIds: async () =>
+        rpcOk([
+          { id: SUB, username: "admin", displayName: "管理者", status: "active" as const },
+          {
+            id: "usr_other",
+            username: "other",
+            displayName: "別の承認者",
+            status: "active" as const,
+          },
+        ]),
+    };
+    const app = createApp({ approvals, identityAdmin });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    // **sub 本人（対象）と承認者、両方コピーできる**——`UserRef` に替わる前
+    // は画面の文字として出ていた値（#482 の副作用で失っていた）。
+    expect(html).toContain(`data-copy="${SUB}" hidden`);
+    expect(html).toContain('data-copy="usr_other" hidden');
+    // **`UserRef` の表示自体は変えていない。** 名前はそのまま出る。
+    expect(html).toContain("管理者 (@admin)");
+    expect(html).toContain("別の承認者 (@other)");
+    // **`/approvals` は `NAV_PAGE_ROUTES` にある**ので、ISLAND_PATH を
+    // 忘れると #480 の検査がここで落ちる（指摘: 3b）。
+    expect(html).toContain(ISLAND_PATH);
   });
 
   it("権限の定数名ではなく日本語名と説明を出す（#487）", async () => {

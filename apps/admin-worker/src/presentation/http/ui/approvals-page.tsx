@@ -24,7 +24,7 @@ import type { ApprovalListRow } from "../../../application/ports/approval.reposi
 import { PERMISSION_BITS, type PermissionBitName } from "../../../domain/permissions";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 import { UserRef } from "./user-ref";
 
@@ -60,6 +60,15 @@ import { UserRef } from "./user-ref";
  * 入力中にリアルタイムで名前を引く仕組みは `UserRef`/`resolveUserRefs`
  * の再利用だけでは作れない——JS での逐次問い合わせが要る別の作業に
  * なるため、この issue では見送る（issue #482 の冒頭にも同じ注記）。
+ *
+ * ## sub の生の文字列は、名前の隣のコピーボタンで取る（#504）
+ *
+ * `UserRef` に替えた副作用で、生の `sub` が画面の文字として出なくなった
+ * ——残るのは `href="/users/<sub>"` の中だけで、CLI（`pnpm approval:
+ * grant/revoke/status --sub <SUB>`）が要求するこの値を、運用者がリンクを
+ * 右クリックして URL から切り出すしか無い状態になっていた。`UserRef`
+ * 自体は変えず（表示は #482 の成果のまま）、隣に `data-copy` ボタンを
+ * 足す——`/users` 一覧の ID 列（`users-page.tsx`）と同じ形。
  *
  * ## 剥奪は 2 段階確認（#487）
  *
@@ -169,6 +178,16 @@ const ApprovalRow: FC<{
   <li class={ITEM_BODY_CLASS}>
     <div class={ITEM_TITLE_CLASS}>
       <UserRef id={approval.sub} refs={refs} />
+      {/*
+        **sub のコピー**（#504）。#482 で `UserRef`（名前 + リンク）に
+        したことで、生の sub を画面の文字として取る手段が無くなった
+        ——CLI（`pnpm approval:grant/revoke/status --sub <SUB>`）が
+        この値を要求する。`UserRef` 自体は変えず、隣にボタンを足すだけ
+        （`/users` 一覧の ID 列、`users-page.tsx` と同じ形）。
+      */}
+      <button type="button" data-copy={approval.sub} hidden class="text-xs underline">
+        コピー
+      </button>
       {approval.isSuperApprover ? <Badge variant="secondary">super approver</Badge> : null}
       {approval.sub === viewerSub ? <Badge variant="outline">自分</Badge> : null}
     </div>
@@ -177,7 +196,10 @@ const ApprovalRow: FC<{
       {approval.approvedBySub === null ? null : (
         <>
           {" "}
-          / 承認者: <UserRef id={approval.approvedBySub} refs={refs} />
+          / 承認者: <UserRef id={approval.approvedBySub} refs={refs} />{" "}
+          <button type="button" data-copy={approval.approvedBySub} hidden class="text-xs underline">
+            コピー
+          </button>
         </>
       )}
     </p>
@@ -261,6 +283,7 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="承認者・権限"
     lead="admin.under18.dev を使ってよい人と、操作ごとの権限を管理します。"
+    scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
       <Card>
