@@ -28,7 +28,7 @@ import type {
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 import { UserRef } from "./user-ref";
 
@@ -407,6 +407,7 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
     current="nfc"
     brandHref="/"
     stylesheet={KIWA_STYLESHEET_PATH}
+    scripts={[ISLAND_PATH]}
     heading="カードの詳細"
     lead="誰のカードで、いつ発行され、何回タップされたかを 1 枚で確かめられます。"
     maxWidth="max-w-6xl"
@@ -424,19 +425,33 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
     )}
 
     {/*
-      #470 のタブ。JS が無ければ `data-panel` の節は縦に並ぶだけで、
-      見本（`preview:html` のタブページ）が出るまで挙動は当てにしない
-      （3b の指示）。
+      #470 のタブ（`admin-island.ts` の `attachTabs`）。markup・クラスは
+      `ui/client/README.md` の見本、`client-detail-page.tsx`（#473）と同じ
+      形に揃えてある——書き方が画面ごとに分かれるのを避けるため。
+      JS が無ければ `data-panel` の節は見出し付きで縦に並ぶ（絶対条件）。
+      JS があれば既定で 1 枚目だけが見える。
     */}
     <div data-tabs>
-      <div role="tablist" class="flex gap-2">
-        <button type="button" data-tab="overview" class="text-sm font-medium text-foreground">
+      <div role="tablist" class="flex gap-2 border-b border-border" aria-label="カード詳細のタブ">
+        <button
+          type="button"
+          data-tab="overview"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
           概要
         </button>
-        <button type="button" data-tab="taps" class="text-sm font-medium text-foreground">
+        <button
+          type="button"
+          data-tab="taps"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
           タップ
         </button>
-        <button type="button" data-tab="actions" class="text-sm font-medium text-foreground">
+        <button
+          type="button"
+          data-tab="actions"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
           操作
         </button>
       </div>
