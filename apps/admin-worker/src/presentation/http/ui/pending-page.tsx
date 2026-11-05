@@ -6,9 +6,9 @@ import {
   CardTitle,
   KiwaShell,
 } from "@u18/web-ui/kiwa";
-import { ITEM_META_CLASS, ITEM_RAW_CLASS, INPUT_CLASS } from "@u18/web-ui/kiwa/island-classes";
+import { ITEM_RAW_CLASS } from "@u18/web-ui/kiwa/island-classes";
 import type { FC } from "hono/jsx";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 
 /**
  * 承認待ちの画面（`/pending`、#443）。**運用者が必ず通る唯一の入口。**
@@ -17,15 +17,21 @@ import { KIWA_STYLESHEET_PATH } from "./asset-paths";
  * admin-worker 自身の承認リストにまだ無い人の行き先（`app.ts` のガード
  * を参照）。
  *
- * ## `<pre><code>` ではなく `<textarea readonly>`
+ * ## コピーボタン（#488）
  *
- * コマンドをコピーできるようにしたいが、**クライアント JS はゼロ**
- * （#443）。admin-worker にはまだ島の仕組みが無く（`build-client.mjs`
- * の冒頭を参照）、コピーボタン 1 個のために新しく組むのは見合わない。
+ * かつては `<textarea readonly>` ＋「クリックして Ctrl+A」の案内文だった
+ * ——#443 の時点では admin-worker にクライアント JS が無く（#470 より前）、
+ * コピーボタン 1 個のために新しく組むのは見合わなかったため。いまは
+ * `admin-island.ts`（#470）の `data-copy` がどの画面からも使えるので、
+ * 素直にボタンへ置き換えた。案内文は不要になったので消した。
  *
- * `<textarea readonly>` はトリプルクリックか `Ctrl+A` で全選択でき、
- * `<pre><code>` を手でドラッグするより確実にコピーできる——JS を
- * 1 行も使わずに得られる改善として、これを選んだ。
+ * **`NAV_PAGE_ROUTES` の外にある画面であること。** `/pending` は未承認の
+ * 人だけが見る画面で、承認済みの管理者が辿る `route-inventory.ts` の
+ * `NAV_PAGE_ROUTES` には入らない——`test/asset-coverage.test.ts` の
+ * 「`data-*` を使う画面は `ISLAND_PATH` も読む」という検査はそちらを
+ * 引くので、この画面はその検査の対象外になる（別途 `PENDING_ROUTES` を
+ * 足して確かめている。同ファイルを参照）。**`scripts` を忘れても検査が
+ * 気づかない以上、ここで確実に渡すこと。**
  *
  * ## `sub` を `<code>` で固定幅にする
  *
@@ -45,6 +51,7 @@ export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand }) => (
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="承認待ち"
     lead="ログインはできました。この管理画面を使うには、承認の権限を持つ人の承認が必要です。"
+    scripts={[ISLAND_PATH]}
   >
     <Card>
       <CardHeader>
@@ -52,7 +59,17 @@ export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand }) => (
         <CardDescription>承認する人に、この ID を伝えてください。</CardDescription>
       </CardHeader>
       <CardContent>
-        <p class={ITEM_RAW_CLASS}>{sub}</p>
+        <div class="flex items-center gap-2">
+          <p class={ITEM_RAW_CLASS}>{sub}</p>
+          <button
+            type="button"
+            class="shrink-0 text-xs text-foreground underline underline-offset-4"
+            data-copy={sub}
+            hidden
+          >
+            コピー
+          </button>
+        </div>
       </CardContent>
     </Card>
 
@@ -65,15 +82,17 @@ export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand }) => (
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <textarea
-          readonly
-          rows={2}
-          class={`${INPUT_CLASS} h-auto resize-none font-mono text-xs`}
-          aria-label="承認コマンド"
-        >
-          {grantCommand}
-        </textarea>
-        <p class={ITEM_META_CLASS}>クリックしてから Ctrl+A（Mac は Cmd+A）で全体を選択できます。</p>
+        <div class="flex items-start gap-2">
+          <p class={ITEM_RAW_CLASS}>{grantCommand}</p>
+          <button
+            type="button"
+            class="shrink-0 text-xs text-foreground underline underline-offset-4"
+            data-copy={grantCommand}
+            hidden
+          >
+            コピー
+          </button>
+        </div>
       </CardContent>
     </Card>
   </KiwaShell>
