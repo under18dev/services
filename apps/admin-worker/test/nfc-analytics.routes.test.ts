@@ -93,6 +93,28 @@ describe("GET /nfc/analytics", () => {
     expect(html).toContain("持ち主が変わり続けるカード");
   });
 
+  /**
+   * **`/nfc?batch=` へ辿り着く唯一の経路**（issue #481 への追記）。
+   * バッチ名を持つ行はリンクに、「（バッチ名なし）」の行（`batch: null`）
+   * はリンクにしない——`null` は「`なし` という名前のバッチ」ではない。
+   */
+  it("バッチ別の表で、バッチ名を /nfc?batch= へのリンクにする。バッチ名なしはリンクにしない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: fullNfcCards() });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/analytics`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('href="/nfc?batch=bunkasai-2026"');
+    // 「（バッチ名なし）」はテキストのまま——`<a>` の中に出てこない。
+    expect(html).toContain("（バッチ名なし）");
+    expect(html).not.toMatch(/<a[^>]*>\s*（バッチ名なし）\s*<\/a>/);
+  });
+
   it("days 未指定は 30 を既定にし、見出し・ハイライトに使い回す", async () => {
     const sessionCookie = await loginAsApproved();
     const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: fullNfcCards() });

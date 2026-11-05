@@ -186,7 +186,7 @@ const DISABLED_REASON_ROWS: readonly { readonly reason: string | null; readonly 
 /**
  * カード詳細（#472）の 1 枚ぶん。`CARDS` には `transferCount` /
  * `disabledReason` / `tapCount` / `lastTappedAt` が無い（一覧用の型に
- * 無いので）——ここで決定的に作る。1 枚だけ「理由が記録されていません」
+ * 無いので）——ここで決定的に作る。1 枚だけ「理由は記録されていません」
  * （運用者からの指摘で足した表示）を再現する。
  */
 const DISABLED_REASON_CYCLE: readonly (string | null)[] = [
