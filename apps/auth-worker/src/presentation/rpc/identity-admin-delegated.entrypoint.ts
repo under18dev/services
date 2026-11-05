@@ -1,5 +1,6 @@
 import {
   countOAuthClientsDelegatedInputSchema,
+  countUsersDelegatedInputSchema,
   createOAuthClientDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
   getOAuthClientDelegatedInputSchema,
@@ -17,6 +18,8 @@ import {
   suspendUserDelegatedInputSchema,
   type CountOAuthClientsDelegatedInput,
   type CountOAuthClientsDelegatedResult,
+  type CountUsersDelegatedInput,
+  type CountUsersDelegatedResult,
   type CreateOAuthClientDelegatedInput,
   type CreateOAuthClientDelegatedResult,
   type DisableOAuthClientDelegatedInput,
@@ -257,6 +260,17 @@ export class IdentityAdminDelegatedRPC
 
     const container = createContainer(this.env, {}, this.context());
     const result = await container.useCases.delegatedCountOAuthClients.execute();
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(result.value);
+  }
+
+  async countUsers(input: CountUsersDelegatedInput): Promise<CountUsersDelegatedResult> {
+    const parsed = countUsersDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedCountUsers.execute();
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk(result.value);

@@ -50,6 +50,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     listOAuthClients: async () => rpcOk([]),
     getOAuthClient: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     countOAuthClients: async () => rpcOk(0),
+    countUsers: async () => rpcOk({ active: 0, suspended: 0, deleted: 0 }),
     createOAuthClient: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     disableOAuthClient: async () => rpcErr(RpcErrorCode.Internal, "unused"),
     setOAuthClientOwner: async () => rpcErr(RpcErrorCode.Internal, "unused"),

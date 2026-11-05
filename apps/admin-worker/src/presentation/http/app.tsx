@@ -525,9 +525,10 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     // ままだと、その 1 件でホーム全体が 500 になる（運用者の指示「ホームを
     // 行き止まりにしない」に反する）。reject した塊は「いま取れません」
     // （`null`）に落とすだけで、残りは出す。
-    const [nfc, clients, audit] = await Promise.allSettled([
+    const [nfc, clients, userCounts, audit] = await Promise.allSettled([
       container.nfcCards.countCards(),
       container.identityAdmin.countOAuthClients({ actorUserId: session.sub }),
+      container.identityAdmin.countUsers({ actorUserId: session.sub }),
       container.identityAdmin.listAuditLogs({ actorUserId: session.sub, limit: 5 }),
     ]);
 
@@ -555,6 +556,9 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
         nfcCounts={nfc.status === "fulfilled" && nfc.value.ok ? nfc.value.value : null}
         clientCount={
           clients.status === "fulfilled" && clients.value.ok ? clients.value.value : null
+        }
+        userCounts={
+          userCounts.status === "fulfilled" && userCounts.value.ok ? userCounts.value.value : null
         }
         recentAuditEntries={recentAuditEntries}
         userRefs={userRefs}

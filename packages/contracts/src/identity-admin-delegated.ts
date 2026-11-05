@@ -218,6 +218,32 @@ export const countOAuthClientsDelegatedInputSchema = z.object({
 export type CountOAuthClientsDelegatedInput = z.infer<typeof countOAuthClientsDelegatedInputSchema>;
 export type CountOAuthClientsDelegatedResult = RpcResult<number>;
 
+// ------------------------------------------------------------- countUsers
+
+/**
+ * 利用者数（admin-worker のホーム用、#512）。`countOAuthClients`
+ * （#449）と同じ判断で、`listUsers` を呼んで数えない——集計は
+ * auth-worker 側の `count(*) ... group by status` 1 本で行う
+ * （`UserRepository.countByStatus()` の冒頭を参照）。
+ *
+ * **`deleted` も含めて返す。** ホームの NFC カードの塊が「未紐づけ /
+ * 有効 / 無効化済み」の 3 つを並べて出しているのに揃えた——1 つの
+ * 状態だけを隠すと、カードの行と並んだときに「合計が合わない」と
+ * 運用者を混乱させる（issue #512 の指摘）。退会者数を常時見せたい
+ * かは別の議論だが、**出す/出さないを決めるより、3 状態を一貫して
+ * 出すほうが単純**で、`group by` が既に全状態の件数を計算している
+ * ので追加のクエリも要らない。
+ */
+export const countUsersDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+});
+export type CountUsersDelegatedInput = z.infer<typeof countUsersDelegatedInputSchema>;
+export type CountUsersDelegatedResult = RpcResult<{
+  readonly active: number;
+  readonly suspended: number;
+  readonly deleted: number;
+}>;
+
 // ------------------------------------------------------- createOAuthClient
 
 export const createOAuthClientDelegatedInputSchema = z.object({
@@ -325,6 +351,7 @@ export interface IdentityAdminDelegatedRpcContract {
   countOAuthClients(
     input: CountOAuthClientsDelegatedInput,
   ): Promise<CountOAuthClientsDelegatedResult>;
+  countUsers(input: CountUsersDelegatedInput): Promise<CountUsersDelegatedResult>;
   createOAuthClient(
     input: CreateOAuthClientDelegatedInput,
   ): Promise<CreateOAuthClientDelegatedResult>;
