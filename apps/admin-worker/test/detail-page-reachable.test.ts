@@ -10,6 +10,7 @@ import {
   minimalNfcCards,
   ORIGIN,
 } from "./helpers";
+import { NAV_PAGE_ROUTES } from "./route-inventory";
 
 /**
  * 「詳細ページはあるが、一覧のどこからもリンクされていない」穴（#502）。
@@ -19,12 +20,19 @@ import {
  * は見ていない——`/clients` の一覧に `/clients/:clientId` へのリンクが
  * 1 本も無いまま本番に出ていたのに、どの検査も気づかなかった。
  *
- * `NAV_PAGE_ROUTES`（`route-inventory.ts`）にある `:param` 詳細ページ
- * それぞれについて、対応する一覧の HTML に実際の href が含まれることを
- * 確かめる。次に詳細ページを増やした人がここへ 1 行足し忘れても、
- * このテスト自体は落ちない——そこは `route-inventory.test.ts` と同じ
- * 「一覧に足すのは手で」という前提に乗っている。ここで保証するのは
- * **足した行について、本当にリンクが張られているか**。
+ * **対象は手書きの配列にしない。** `NAV_PAGE_ROUTES` から `:param` を
+ * 持つ GET ルートを拾い、末尾の `/:param` を落として一覧のパスを導く
+ * （`/nfc/:cardId` → `/nfc`、`/clients/:clientId` → `/clients`、
+ * `/users/:userId` → `/users`）。手書きの配列だと、次に詳細ページを
+ * 足した人がここへの追記を忘れても検査が気づかない——今日 1 日で
+ * 繰り返し踏んだ「宣言はあるが対象に入っていない」のと同じ形になる。
+ *
+ * 導いた各ルートに対応する具体的な ID は `DETAIL_PAGE_TARGETS` に持つ
+ * （こちらは手書きせざるを得ない——どの文字列を fixture の ID として
+ * 使うかは、ルールからは導けない）。**`NAV_PAGE_ROUTES` に新しい
+ * `:param` 詳細ページが増えたのに `DETAIL_PAGE_TARGETS` へ足し忘れると、
+ * この後の `.map` が例外で落ちる**——「見落としても緑のまま」ではなく
+ * 「見落としたら落ちる」側に倒してある。
  */
 describe("一覧から詳細ページへのリンクが実在する（#502）", () => {
   const TARGET_USER_ID = "usr_detail_link_target";
@@ -80,14 +88,36 @@ describe("一覧から詳細ページへのリンクが実在する（#502）", 
     };
   }
 
+  /** `NAV_PAGE_ROUTES` の `:param` 詳細ページごとの、具体的な fixture ID。 */
+  const DETAIL_PAGE_TARGETS: Readonly<Record<string, string>> = {
+    "/nfc/:cardId": TARGET_CARD_ID,
+    "/clients/:clientId": TARGET_CLIENT_ID,
+    "/users/:userId": TARGET_USER_ID,
+  };
+
   const CASES: ReadonlyArray<{
     readonly listPath: string;
     readonly detailPath: string;
-  }> = [
-    { listPath: "/nfc", detailPath: `/nfc/${TARGET_CARD_ID}` },
-    { listPath: "/clients", detailPath: `/clients/${TARGET_CLIENT_ID}` },
-    { listPath: "/users", detailPath: `/users/${TARGET_USER_ID}` },
-  ];
+  }> = NAV_PAGE_ROUTES.filter((route) => route.method === "GET" && route.path.includes(":")).map(
+    (route) => {
+      const target = DETAIL_PAGE_TARGETS[route.path];
+      if (target === undefined) {
+        throw new Error(
+          `${route.path} 用の fixture ID が DETAIL_PAGE_TARGETS に無い——NAV_PAGE_ROUTES に ` +
+            "足したら、ここにも 1 行足すこと",
+        );
+      }
+      return {
+        listPath: route.path.replace(/\/:[^/]+$/, ""),
+        detailPath: route.path.replace(/:[^/]+$/, target),
+      };
+    },
+  );
+
+  it("導出した対象が 0 件でない", () => {
+    // 0 件だと下の it.each が何も実行せずに緑で通る。
+    expect(CASES.length).toBeGreaterThan(0);
+  });
 
   it.each(CASES)("$listPath に $detailPath へのリンクがある", async ({ listPath, detailPath }) => {
     const sub = "usr_detail_link_viewer";
