@@ -164,6 +164,15 @@ const CardOverview: FC<{
           {/* **リンクにしない**（`nfc-page.tsx` と同じ理由——利用者が自由に入れた外部 URL）。 */}
           <dd class="max-w-xs font-mono text-xs break-all whitespace-normal text-foreground-soft">
             {card.targetUrl ?? "未設定"}
+            {card.targetUrl === null ? null : (
+              <>
+                {" "}
+                {/* コピー用（#470）。JS が外すまでは存在しない（#488）。 */}
+                <button type="button" data-copy={card.targetUrl} hidden class="text-xs underline">
+                  コピー
+                </button>
+              </>
+            )}
           </dd>
         </div>
       </dl>

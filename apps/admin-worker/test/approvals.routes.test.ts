@@ -117,6 +117,36 @@ describe("GET /approvals", () => {
     // 承認者の節にも「管理者 (@admin)」が出る。
     expect(html).toContain("承認者: ");
   });
+
+  it("権限の定数名ではなく日本語名と説明を出す（#487）", async () => {
+    // `usr_other` は super approver ではないので、権限のチェックボックスが出る。
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    // 日本語名が主役、定数名は補助として併記。
+    expect(html).toContain("カードを見る");
+    expect(html).toContain("（NFC_READ）");
+    expect(html).toContain("ログイン中の端末の追い出しができます。");
+    // **`APPROVAL_GRANT` は他の 7 つと見た目を分ける。**
+    // 節の見出しはラベル（「権限を配る」）と同じ文字列を繰り返さない
+    // （指摘: 3b、節に項目が 1 つしか無いので 2 回読ませると重複でしかない）。
+    expect(html).toContain("ここだけ特に重い（実質的な昇格）");
+    expect(html).not.toContain("権限を配る（実質的な昇格）");
+    expect(html).toContain('value="APPROVAL_GRANT"');
+    // super approver（この fixture では SUB だけ）の既存の説明文を
+    // 変えていない（指摘: issue #487 の書き方の決め）。
+    expect(html).toContain(
+      "super approver は全操作を無条件に行えます。個別の権限ビットは意味を持ちません。",
+    );
+  });
 });
 
 describe("POST /approvals（新規承認）", () => {
@@ -281,11 +311,18 @@ describe("POST /approvals/:sub/permissions", () => {
   });
 });
 
-describe("POST /approvals/:sub/revoke", () => {
-  it("他人の承認を剥奪できる", async () => {
+describe("POST /approvals/:sub/revoke（2 段階確認、#487）", () => {
+  it("1 回目（confirm 無し）は何も変えず、名前入りの確認画面を返す", async () => {
     const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
     const sessionCookie = await loginAs(SUB, approvals);
-    const app = createApp({ approvals });
+    const identityAdmin = {
+      ...minimalIdentityAdmin(),
+      getUsersByIds: async () =>
+        rpcOk([
+          { id: "usr_other", username: "other", displayName: "別の人", status: "active" as const },
+        ]),
+    };
+    const app = createApp({ approvals, identityAdmin });
     const { cookie, csrfToken } = await csrfContext(app, sessionCookie);
 
     const response = await post(
@@ -296,10 +333,35 @@ describe("POST /approvals/:sub/revoke", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await approvals.isApproved("usr_other")).toBe(false);
+    // **何も書き込まれていない。** 確認画面を出しただけ。
+    expect(await approvals.isApproved("usr_other")).toBe(true);
+    const html = await response.text();
+    expect(html).toContain("本当に剥奪しますか");
+    // **誰を剥奪するのか、名前で出ている**（issue の肝）。
+    expect(html).toContain("別の人 (@other)");
+    expect(html).toContain('name="confirm" value="true"');
   });
 
-  it("最後の super approver である自分自身を剥奪できない", async () => {
+  it("2 回目（confirm=true）で実際に剥奪する", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+    const { cookie, csrfToken } = await csrfContext(app, sessionCookie);
+
+    const response = await post(
+      app,
+      "/approvals/usr_other/revoke",
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken, confirm: "true" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await approvals.isApproved("usr_other")).toBe(false);
+    const html = await response.text();
+    expect(html).toContain("usr_other の承認を剥奪しました。");
+  });
+
+  it("最後の super approver である自分自身を剥奪できない（confirm=true でも）", async () => {
     const approvals = fakeApprovals([SUB], [SUB]);
     const sessionCookie = await loginAs(SUB, approvals);
     const app = createApp({ approvals });
@@ -309,9 +371,68 @@ describe("POST /approvals/:sub/revoke", () => {
       app,
       `/approvals/${SUB}/revoke`,
       cookie,
-      new URLSearchParams({ csrf_token: csrfToken }),
+      new URLSearchParams({ csrf_token: csrfToken, confirm: "true" }),
     );
 
     expect(await approvals.isApproved(SUB)).toBe(true);
+  });
+
+  it("剥奪できない場合は、1 回目の時点で確認画面を出さずに理由だけ返す（指摘: 3b）", async () => {
+    // **1 段階目で「この人を剥奪します」を見せたあと、2 段階目でロックアウト
+    // 判定に落ちると、運用者は確認を押してから拒否されることになる。**
+    // 締め出し判定は確認画面より先に済ませてあるべき。
+    const approvals = fakeApprovals([SUB], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+    const { cookie, csrfToken } = await csrfContext(app, sessionCookie);
+
+    const response = await post(
+      app,
+      `/approvals/${SUB}/revoke`,
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken }),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("本当に剥奪しますか");
+    // 自分自身の剥奪なので、人数に関係なく「自分自身」の理由になる
+    // （`checkApprovalRevocation` は actorSub === targetSub を先に見る）。
+    expect(html).toContain("自分自身の承認を剥奪できない（super approver）");
+  });
+
+  it("確認画面の表示から実行までの間に最後の 1 人になっていたら、2 回目で拒否される", async () => {
+    // **1 段階目の判定結果を 2 段階目で使い回さない。** 状態は古いかも
+    // しれない——`/nfc/batch-disable` が再入力のたびに対象枚数を数え直す
+    // のと同じ前提。
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB, "usr_other"]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+    const { cookie, csrfToken } = await csrfContext(app, sessionCookie);
+
+    // 確認画面を一度開く（この時点では super が 2 人いるので通る）。
+    await post(
+      app,
+      "/approvals/usr_other/revoke",
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken }),
+    );
+
+    // その間に、別の操作で SUB(自分) が super ではなくなったとする——
+    // 承認そのものは残す（丸ごと revoke すると、自分がこの先 /approvals
+    // に入れなくなり、2 回目のリクエストが権限ガードに弾かれて別の失敗に
+    // すり替わる。見たいのは「人数が減った」ことへの反応であって、
+    // 自分の権限が消えたことへの反応ではない）。
+    await approvals.grant(SUB, false, null);
+
+    const response = await post(
+      app,
+      "/approvals/usr_other/revoke",
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken, confirm: "true" }),
+    );
+
+    expect(await approvals.isApproved("usr_other")).toBe(true);
+    const html = await response.text();
+    expect(html).toContain("最後の super approver の承認を剥奪できない");
   });
 });

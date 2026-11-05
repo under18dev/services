@@ -43,7 +43,32 @@ export function sortValueOf(cell: Element | undefined, kind: SortKind): string |
     return Number.isNaN(n) ? Number.NEGATIVE_INFINITY : n;
   }
   if (kind === "date") {
-    const t = Date.parse(text);
+    // **末尾の「 JST」を落としてから読む。** `ui/format.ts` の
+    // `formatDateTime` は `Intl.DateTimeFormat("ja-JP")` の
+    // 「YYYY/MM/DD HH:MM」に ` JST` を足した文字列を返す。スラッシュ
+    // 区切りの非 ISO 形式は `Date.parse` が読めるが、**末尾にタイムゾーン
+    // の略称が付くと丸ごと `NaN` になる**（実測、V8——`/audit` 本体を
+    // 含む `data-sort="date"` の列が、足した #470 の時点から今日まで
+    // 「押しても並びが変わらない」まま気づかれずに残っていた）。
+    //
+    // ## admin-worker に日時の書式が 2 つあることと繋がっている（#488）
+    //
+    // `nfc-page.tsx` の `toDate()`（カードの発行日を「YYYY-MM-DD」だけで
+    // 出す、時刻も JST も付けない別の整形）は、素の ISO 日付なので
+    // `Date.parse` にそのまま通り、このバグを踏んでいない。**このバグが
+    // `formatDateTime` 側だけで起きていたのは、書式が 1 つしか無いからでは
+    // なく、たまたま 2 つのうち片方だけ運良く `Date.parse` と相性が良い
+    // 形をしていたから**である。次に誰かが `toDate()` を `formatDateTime`
+    // へ揃えたら、ここの `.replace()` が無いと同じ「押しても並びが変わら
+    // ない」が `/nfc` の「発行」列にも広がる——書式を統一する側ではなく、
+    // **ここ（並べ替え側）が両方の書式を受け止められることを保証する**
+    // 作りにしてある。
+    //
+    // 落としたあとの文字列をどのタイムゾーンとして読むかは関知しない
+    // ——ここは並べ替えの相対順序だけが要るので、どのセルも同じだけ
+    // ずれれば順序は変わらない。表示用の絶対時刻には使わない。
+    const withoutTimezoneName = text.replace(/\s+[A-Za-z]+$/, "");
+    const t = Date.parse(withoutTimezoneName);
     return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
   }
   return text;
