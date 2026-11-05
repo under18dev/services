@@ -184,6 +184,7 @@ describe("ログイン後の画面を合わせると、アイランドまで覆�
 describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は、必ず ISLAND_PATH も読む", () => {
   const TARGET_USER_ID = "usr_island_coverage_target";
   const TARGET_CLIENT_ID = "app_island_coverage_target";
+  const TARGET_CARD_ID = "nfc_island_coverage_target";
 
   /**
    * **0 件ではなく 1 件を返す。** `data-sortable` / `data-filter` /
@@ -196,7 +197,7 @@ describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は
    */
   function overridesFor(approvals: ReturnType<typeof fakeApprovals>) {
     const card = {
-      cardId: "nfc_island_coverage",
+      cardId: TARGET_CARD_ID,
       status: "active" as const,
       ownerUserId: TARGET_USER_ID,
       targetUrl: "https://go.under18.dev/c/nfc_island_coverage",
@@ -247,6 +248,25 @@ describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は
         ...minimalNfcCards(),
         listAllCards: async () => rpcOk({ cards: [card], truncated: false }),
         listCardsByOwner: async () => rpcOk({ cards: [card] }),
+        // カード詳細（#472、`/nfc/:cardId`）も NAV_PAGE_ROUTES にあるので対象。
+        getCard: async () =>
+          rpcOk({
+            ...card,
+            transferCount: 0,
+            disabledReason: null,
+            tapCount: 0,
+            lastTappedAt: null,
+          }),
+        cardTapHistory: async () =>
+          rpcOk({
+            dailyTotals: [],
+            totalTaps: 0,
+            retentionDays: 180,
+            lastTappedAt: null,
+            daysSinceLastTap: null,
+            last7d: { total: 0, previousTotal: 0 },
+            last30d: { total: 0, previousTotal: 0 },
+          }),
         tapTimeseries: async () =>
           rpcOk({
             dailyTotals: [],
@@ -280,7 +300,10 @@ describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は
     const cookie = await loginAs(sub, approvals, overrides);
 
     const paths = NAV_PAGE_ROUTES.filter((route) => route.method === "GET").map((route) =>
-      route.path.replace(":userId", TARGET_USER_ID).replace(":clientId", TARGET_CLIENT_ID),
+      route.path
+        .replace(":userId", TARGET_USER_ID)
+        .replace(":clientId", TARGET_CLIENT_ID)
+        .replace(":cardId", TARGET_CARD_ID),
     );
     // 0 件だと下の assertion が何も確かめずに通る。
     expect(paths.length).toBeGreaterThan(0);

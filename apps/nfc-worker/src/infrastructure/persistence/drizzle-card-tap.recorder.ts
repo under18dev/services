@@ -1,4 +1,4 @@
-import { gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { nfcCardTaps, type NfcDatabase } from "@u18/nfc-db";
 import type { CardTapRecorder } from "../../application/ports";
 
@@ -61,5 +61,38 @@ export class DrizzleCardTapRecorder implements CardTapRecorder {
       .from(nfcCardTaps)
       .all();
     return Number(rows[0]?.total ?? 0);
+  }
+
+  async summaryFor(cardId: string): Promise<{
+    readonly total: number;
+    readonly firstTappedAt: string;
+    readonly lastTappedAt: string;
+  } | null> {
+    const rows = await this.db
+      .select({
+        total: sql<number>`sum(${nfcCardTaps.count})`,
+        first: sql<string | null>`min(${nfcCardTaps.date})`,
+        last: sql<string | null>`max(${nfcCardTaps.date})`,
+      })
+      .from(nfcCardTaps)
+      .where(eq(nfcCardTaps.cardId, cardId))
+      .all();
+
+    const row = rows[0];
+    if (row === undefined || row.first === null || row.last === null) return null;
+    return { total: Number(row.total), firstTappedAt: row.first, lastTappedAt: row.last };
+  }
+
+  async cardDailyTotals(
+    cardId: string,
+    sinceDate: string,
+  ): Promise<readonly { readonly date: string; readonly total: number }[]> {
+    const rows = await this.db
+      .select({ date: nfcCardTaps.date, total: sql<number>`sum(${nfcCardTaps.count})` })
+      .from(nfcCardTaps)
+      .where(and(eq(nfcCardTaps.cardId, cardId), gte(nfcCardTaps.date, sinceDate)))
+      .groupBy(nfcCardTaps.date)
+      .all();
+    return rows.map((row) => ({ date: row.date, total: Number(row.total) }));
   }
 }

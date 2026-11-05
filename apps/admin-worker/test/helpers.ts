@@ -36,6 +36,8 @@ export function minimalNfcCards(): NfcAdminDelegatedRpcContract {
     listAllCards: unused("listAllCards"),
     listCardsByOwner: unused("listCardsByOwner"),
     issueCards: unused("issueCards"),
+    getCard: unused("getCard"),
+    cardTapHistory: unused("cardTapHistory"),
     countCards: async () => rpcOk({ issued: 0, active: 0, disabled: 0 }),
     tapTimeseries: unused("tapTimeseries"),
     usageFunnel: unused("usageFunnel"),
