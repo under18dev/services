@@ -176,6 +176,46 @@ const DETAIL_CARD_ID = CARDS[CARDS.length - 1]!.cardId;
 const DORMANT_CARD_ID = CARDS[21]!.cardId;
 
 /**
+ * 「よく使われているカード」（#512、運用者の要望「カード詳細にアナリティクスを」
+ * がきっかけ）。**それまでの 2 枚（無効化＋理由未記録、死蔵）は、タップ節が
+ * 空のまま出る点では同じだった**——`cardDetailFor` の判定だと active でも
+ * 7 の倍数 index は tapCount: 0 になり、プレビューの素の `/nfc/:cardId` が
+ * たまたまどちらも 0 件のまま運用者の目に触れていた。実装の問題ではなく、
+ * **プレビューの架空データが主役の機能を 1 度も見せていなかった**のが
+ * 原因（3b の実測）。
+ *
+ * `DETAIL_CARD_ID` / `DORMANT_CARD_ID` を数えたあとに push する——先に数えて
+ * おかないと `CARDS[CARDS.length - 1]` がこのカード自身を指してしまい、
+ * 「無効化・理由未記録」のデモが別のカードにすり替わる。
+ */
+const busyCard = pushCard("active", ACTIVE_OWNERS[0]!, BATCHES[0]!, 200, 190, null);
+const BUSY_CARD_ID = busyCard.cardId;
+
+/**
+ * `BUSY_CARD_ID` 専用のタップ日別パターン（`cardTapHistory` と
+ * `cardDetailFor` の両方が参照する——数字がずれないよう 1 箇所にまとめる）。
+ *
+ * - **直近 7 日は前の 7 日よりはっきり多い**（前期間比較で「増えている」
+ *   が見える。減っている側は 1 枚では両立できないので、3b の指示どおり
+ *   どちらか片方に倒した）。
+ * - **14〜174 日前は山谷のある周期**（sin 波）——30/90/180 日の切り替えで
+ *   見える形が変わる。
+ * - **175〜179 日前はまばらに数件だけ**——180 日の保持期間の縁に、
+ *   データがあるのか無いのかが分かる形で置く。
+ */
+function bustlingDailyTotal(daysAgo: number): number {
+  if (daysAgo >= 175) return daysAgo % 3 === 0 ? 1 : 0;
+  if (daysAgo < 7) return 4 + (6 - daysAgo);
+  if (daysAgo < 14) return 1;
+  const wave = Math.sin((daysAgo / 9) * Math.PI) * 3;
+  return Math.max(0, Math.round(wave + 2));
+}
+const BUSY_CARD_TOTAL_180D = Array.from({ length: 180 }, (_, d) => bustlingDailyTotal(d)).reduce(
+  (sum, n) => sum + n,
+  0,
+);
+
+/**
  * `owner_suspended`（#486）・`ops`（ランブック §12.4(5) の運用値）と、
  * どこにも登録していない `"abuse"`（#496 —— 実在は確認できていない旧版
  * コメントの例）を混ぜて、既知ラベルと生コードの両方の出し分けを
@@ -208,6 +248,25 @@ const DISABLED_REASON_CYCLE: readonly (string | null)[] = [
 
 function cardDetailFor(card: AdminCardViewDelegated): AdminCardDetailDelegated {
   const index = CARDS.indexOf(card);
+  // `BUSY_CARD_ID` は専用のタップパターン（`bustlingDailyTotal`）を持つので、
+  // 一般式を通さない——通すと `cardTapHistory` の日別合計とここの `tapCount`
+  // が食い違う。
+  if (card.cardId === BUSY_CARD_ID) {
+    return {
+      cardId: card.cardId,
+      status: card.status,
+      ownerUserId: card.ownerUserId,
+      targetUrl: card.targetUrl,
+      batch: card.batch,
+      issuedAt: card.issuedAt,
+      claimedAt: card.claimedAt,
+      transferCount: 1,
+      disabledAt: card.disabledAt,
+      disabledReason: null,
+      tapCount: BUSY_CARD_TOTAL_180D,
+      lastTappedAt: isoDaysAgo(0).slice(0, 10),
+    };
+  }
   // 7 の倍数の active カードは、引き取り済みでタップ 0 件の「死蔵」の見た目を
   // 再現する（issue #472 の「死蔵の 1 枚ごとの顔」）。
   const tapCount = card.status === "active" && index % 7 !== 0 ? 3 + (index % 40) : 0;
@@ -477,6 +536,33 @@ const nfcCards: NfcAdminDelegatedRpcContract = {
     if (card === undefined) return rpcErr(RpcErrorCode.NotFound, "not_found");
 
     const detail = cardDetailFor(card);
+
+    if (card.cardId === BUSY_CARD_ID) {
+      // **`bustlingDailyTotal` をそのまま使う。** `daysAgo` は 0 が今日なので、
+      // 古い日から並べる `dailyTotals` とは向きが逆——map する側で合わせる。
+      const dailyTotals = Array.from({ length: input.days }, (_, i) => {
+        const daysAgo = input.days - 1 - i;
+        return { date: isoDaysAgo(daysAgo).slice(0, 10), total: bustlingDailyTotal(daysAgo) };
+      });
+      const totalTaps = dailyTotals.reduce((sum, day) => sum + day.total, 0);
+      const sumOver = (from: number, to: number) =>
+        Array.from({ length: to - from }, (_, i) => bustlingDailyTotal(from + i)).reduce(
+          (s, n) => s + n,
+          0,
+        );
+      return rpcOk({
+        dailyTotals,
+        totalTaps,
+        retentionDays: 180,
+        lastTappedAt: isoDaysAgo(0).slice(0, 10),
+        daysSinceLastTap: 0,
+        // **直近 7 日 > その前の 7 日（増えている側）。** 1 枚で両方の
+        // 向きは見せられないので、3b の指示どおりどちらか片方に倒した。
+        last7d: { total: sumOver(0, 7), previousTotal: sumOver(7, 14) },
+        last30d: { total: sumOver(0, 30), previousTotal: sumOver(30, 60) },
+      });
+    }
+
     const dailyTotals = Array.from({ length: input.days }, (_, i) => {
       const date = isoDaysAgo(input.days - 1 - i).slice(0, 10);
       const total = detail.tapCount > 0 && i % 4 === 0 ? 1 : 0;
@@ -738,6 +824,12 @@ async function main(): Promise<void> {
     "nfc-card-detail-dormant",
     `カード詳細（/nfc/${DORMANT_CARD_ID}、#472・死蔵のデモ）`,
     `/nfc/${DORMANT_CARD_ID}`,
+    sessionCookie,
+  );
+  await addPage(
+    "nfc-card-detail-busy",
+    `カード詳細（/nfc/${BUSY_CARD_ID}、#512・タップ履歴のあるカードのデモ）`,
+    `/nfc/${BUSY_CARD_ID}`,
     sessionCookie,
   );
   await addPage("users", "利用者一覧（/users）", "/users", sessionCookie);
