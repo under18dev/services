@@ -66,6 +66,12 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   "POST /users/:userId/suspend": "USER_SUSPEND",
   "POST /users/:userId/reinstate": "USER_SUSPEND",
   "POST /users/:userId/revoke-sessions": "USER_SUSPEND",
+  // この人のカードをまとめて止める（#486）。**`USER_SUSPEND` ではなく
+  // `NFC_WRITE`。** 実際に書き込む先は nfc_cards（`disableCard` と同じ
+  // 効果）であって、利用者の `status` には触れない——「同じ能力には
+  // 同じビット」を守らないと、USER_SUSPEND だけ持つ人が NFC_WRITE 無しに
+  // カードを止められる抜け道になる。
+  "POST /users/:userId/disable-cards": "NFC_WRITE",
 
   "POST /audit/search": "AUDIT_READ",
 

@@ -6,6 +6,7 @@ import type {
   ListAuditLogsDelegatedResult,
   ListCardsByOwnerDelegatedResult,
   RpcError,
+  RpcErrorCode,
   SuspendReason,
 } from "@u18/contracts";
 import type { Context, Hono } from "hono";
@@ -17,7 +18,13 @@ import {
   decideSuspensionOrigin,
   type SuspensionOrigin,
 } from "./suspension-origin";
-import { UserDetailPage, actorUserIdFromMetadata } from "./ui/user-detail-page";
+import {
+  UserDetailPage,
+  actorUserIdFromMetadata,
+  type DisableCardsConfirmState,
+  type DisableCardsFailureRow,
+  type DisableCardsResultState,
+} from "./ui/user-detail-page";
 import { UsersPage } from "./ui/users-page";
 import { resolveUserRefs } from "./user-refs";
 import type { AppBindings } from "./types";
@@ -211,7 +218,12 @@ function userNotFound(c: Context<AppBindings>): Response | Promise<Response> {
 async function renderUserDetailPage(
   c: Context<AppBindings>,
   userId: string,
-  options: { error?: string; notice?: string },
+  options: {
+    error?: string;
+    notice?: string;
+    disableCardsConfirm?: DisableCardsConfirmState;
+    disableCardsResult?: DisableCardsResultState;
+  },
 ): Promise<Response> {
   const session = c.get("session");
   const container = c.get("container");
@@ -283,6 +295,8 @@ async function renderUserDetailPage(
       auditEntries={auditEntries}
       userRefs={userRefs}
       cards={cardsOf(cards)}
+      disableCardsConfirm={options.disableCardsConfirm ?? null}
+      disableCardsResult={options.disableCardsResult ?? null}
       {...(options.error === undefined ? {} : { error: options.error })}
       {...(options.notice === undefined ? {} : { notice: options.notice })}
     />,
@@ -305,6 +319,60 @@ function manageFailureMessage(
     }
   }
   return "いま操作できません。しばらく待ってからもう一度お試しください。";
+}
+
+/**
+ * 「この人のカードをまとめて止める」1 回の上限（#486）。
+ *
+ * **`nfc.routes.tsx` の `BULK_SELECT_LIMIT` と同じ値、同じ理由。** あちらは
+ * 選択できる枚数の上限だが、ここには選択が無い——「所持しているカード
+ * 全部」が対象になるので、代わりに**一度に処理する枚数**の上限として
+ * 使う。`nfc.routes.tsx` 側は export していないので、値だけここでも
+ * 持つ（2 箇所に増えても、どちらも「1 リクエストで流し込みすぎない」
+ * という同じ意図を指しているので実害が無い）。
+ */
+const DISABLE_CARDS_LIMIT = 100;
+
+/**
+ * 1 回ぶんの失敗を文言へ訳す（#486）。**`nfc.routes.tsx` の
+ * `bulkFailureReason` と同じ区別。** `not_found` とそれ以外を分ける——
+ * 両方を「見つかりませんでした」に畳むと、凍結対応の最中に出た
+ * 「見つかりません」を運用者が「もう無い（＝対処済み）」と読む
+ * （実際には Service Binding の一時的な障害だった、がありえる）。
+ */
+function disableCardsFailureReason(code: RpcErrorCode): string {
+  return code === "not_found"
+    ? "そのカードは見つかりませんでした。"
+    : "いま処理できませんでした。時間をおいて、もう一度お試しください。";
+}
+
+/**
+ * 所持カードを「止められる」「既に無効化済み」へ分ける（#486）。
+ *
+ * **確認画面を描くときと、実行する直前の 2 回、同じ関数で分け直す**
+ * （`nfc.routes.tsx` の `categorizeForDisable` と同じ設計。issue #486 への
+ * 指摘と同じ）。1 段階目で見てから押すまでの間に、本人が別の端末で
+ * カードを手放す・他の運営が無効化する、ということが起こりうる——
+ * 確認画面の内訳をそのまま信用しない。
+ *
+ * **上限を超えたぶんはエラーにしない。** `nfc.routes.tsx` の選択一括操作
+ * と違い、ここには選び直す手段が無い——対象は常に「この人の全部」。
+ * 先頭 `DISABLE_CARDS_LIMIT` 件だけを対象にし、残りは次の実行に回す
+ * （無効化されたカードは次の呼び出しで「既に無効化済み」側へ移るので、
+ * 繰り返し押せば必ず収束する）。
+ */
+function categorizeOwnerCardsForDisable(cards: readonly AdminCardViewDelegated[]): {
+  readonly totalCount: number;
+  readonly eligibleCardIds: readonly string[];
+  readonly alreadyDisabledCount: number;
+  readonly cappedAtLimit: boolean;
+} {
+  const eligible = cards.filter((card) => card.status !== "disabled");
+  const alreadyDisabledCount = cards.length - eligible.length;
+  const cappedAtLimit = eligible.length > DISABLE_CARDS_LIMIT;
+  const eligibleCardIds = eligible.slice(0, DISABLE_CARDS_LIMIT).map((card) => card.cardId);
+
+  return { totalCount: cards.length, eligibleCardIds, alreadyDisabledCount, cappedAtLimit };
 }
 
 export function registerUsersRoutes(app: Hono<AppBindings>): void {
@@ -443,5 +511,83 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
       `${redirectTargetOf(form, userId)}?${NOTICE_PARAM}=revoked&${REVOKED_PARAM}=${result.value.revokedSessions}`,
       303,
     );
+  });
+
+  /**
+   * この人のカードをまとめて止める（#486）。**凍結（`/suspend`）とは
+   * 別の route。** 新しい一括 RPC を作らず、既存の 1 枚ずつの口
+   * （`disableCard`）をここで回す——1 枚ごとに正しい `actorUserId` つきで
+   * `nfc_card_events` が残る（`nfc.routes.tsx` の `/nfc/bulk-disable` と
+   * 同じ判断、issue #486 の指示）。
+   *
+   * ## 2 段階確認。常に詳細へ戻す
+   *
+   * 一覧（`/users`）からは呼べない route なので、`cameFromDetail` /
+   * `redirectTargetOf` を使わない——戻り先は常にこの利用者の詳細である。
+   *
+   * ## 選択が無いので、確認のたびに `listCardsByOwner` を引き直す
+   *
+   * `confirmed` の有無に関わらず、この関数の先頭で毎回フレッシュに
+   * 取得して `categorizeOwnerCardsForDisable` で分け直す——1 段階目を
+   * 見てから押すまでの間に状態が変わっていても追従する
+   * （`nfc.routes.tsx` と同じ設計）。
+   */
+  app.post("/users/:userId/disable-cards", pageSecurityHeaders, async (c) => {
+    const userId = c.req.param("userId");
+    const form = await c.req.formData().catch(() => null);
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, `/users/${encodeURIComponent(userId)}`);
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+
+    const cardsResult = await container.nfcCards.listCardsByOwner({
+      actorUserId: session.sub,
+      ownerUserId: userId,
+    });
+    if (!cardsResult.ok) {
+      return renderUserDetailPage(c, userId, {
+        error: "いまカードの一覧を取得できません。しばらくしてからもう一度お試しください。",
+      });
+    }
+
+    const { totalCount, eligibleCardIds, alreadyDisabledCount, cappedAtLimit } =
+      categorizeOwnerCardsForDisable(cardsResult.value.cards);
+
+    const confirmed = form.get("confirmed")?.toString() === "1";
+    if (!confirmed) {
+      if (eligibleCardIds.length === 0) {
+        return renderUserDetailPage(c, userId, {
+          error: "止められるカードがありません（所持していないか、すでに全部無効化済みです）。",
+        });
+      }
+      const confirm: DisableCardsConfirmState = {
+        totalCount,
+        eligibleCount: eligibleCardIds.length,
+        alreadyDisabledCount,
+        cappedAtLimit,
+      };
+      return renderUserDetailPage(c, userId, { disableCardsConfirm: confirm });
+    }
+
+    const succeeded: string[] = [];
+    const failed: DisableCardsFailureRow[] = [];
+    for (const cardId of eligibleCardIds) {
+      const result = await container.nfcCards.disableCard({
+        actorUserId: session.sub,
+        cardId,
+        reason: "owner_suspended",
+      });
+      if (result.ok) {
+        succeeded.push(cardId);
+      } else {
+        failed.push({ cardId, reason: disableCardsFailureReason(result.error.code) });
+      }
+    }
+
+    const disableCardsResult: DisableCardsResultState = { succeeded, failed };
+    return renderUserDetailPage(c, userId, { disableCardsResult });
   });
 }

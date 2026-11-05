@@ -39,3 +39,62 @@
  * 行を見ながら運用側で判断すること。
  */
 export const ADMIN_BATCH_DISABLED_REASON = "admin_batch";
+
+/**
+ * 単発の運営操作（`DelegatedDisableCardUseCase`）の既定値（#486 で
+ * 定数へ切り出した）。
+ *
+ * **#436 の時点では切り出していなかった。** あのときは「使い回さなかった
+ * 値」として比較に出てくるだけで、コード側で分岐の既定値として参照する
+ * 必要が無かった。#486 で `DelegatedDisableCardUseCase` が理由を選べる
+ * ようになり（`reason?: string`）、**省略時の既定値をコードから参照する
+ * 必要が生まれた**ので、他の 2 つと同じ形で定数にする。
+ */
+export const ADMIN_ACTION_DISABLED_REASON = "admin_action";
+
+/**
+ * アカウントの凍結に連動してカードを止めたときの理由（#486）。
+ *
+ * ## なぜ `"admin_action"` を使い回さなかったのか
+ *
+ * `ADMIN_BATCH_DISABLED_REASON` とまったく同じ判断である。凍結の解除
+ * （ランブック §11.5）で運用者が知りたいのは「**この凍結のせいで
+ * 止まったカードはどれか**」——`"admin_action"` のままだと、**その人が
+ * 別の理由（紛失の申告など）で前に単発操作で止めた 1 枚**と区別が
+ * 付かない。「無効化は片道」なので、間違えて戻すと元に戻せない
+ * （この issue 自体は凍結解除での自動復帰を作らないが、**理由コードを
+ * 分けておかないと、将来それを作るときの WHERE 句が書けない**）。
+ *
+ * ## なぜ `"owner_suspended"` で、`"owner_account_disabled"` ではないか
+ *
+ * トリガーは `users.status` が `"suspended"` になったことで、
+ * admin-worker / auth-worker 全体がこの状態をずっと `"suspended"` と
+ * 呼んでいる（`UserAdminSummary.status` 等）。`"disabled"` という別の
+ * 語を当てると、同じ状態に 2 つの呼び名ができるうえ、
+ * `nfc_cards.disabled_reason` という列自体が「`disabled` な理由」として
+ * 読まれる文脈でもう一度 `"disabled"` を使うことになり、**「カードが
+ * disabled なのは disabled だから」という同語反復**に見える。
+ *
+ * ランブックの手書き SQL（`nfc_card_events` への INSERT）は
+ * `json_object('reason', 'owner_account_disabled')` と書いていたが、
+ * **これは別の列（`nfc_card_events.metadata.reason`、自由記述の JSON）
+ * への一度きりの例であって、型で守られたコードでも、他の読み出しが
+ * 使っているフィルタ条件でもない。** しかも同じランブックの
+ * `nfc_cards.disabled_reason` 列への UPDATE は実は `'ops'` を使っており
+ * （下の節を参照）、**2 つの既存ランブック値はそもそも揃っていない**
+ * ——どちらか一方に寄せる理由にならない。このコードと一緒に、
+ * ランブックの手書き SQL 自体を消す（#486 の範囲）。
+ *
+ * ## `'ops'` の行が本番に実在した場合
+ *
+ * このコードより前にランブック §11 ステップ 6 の手書き SQL で
+ * `disabled_reason = 'ops'` にした行があれば、`owner_suspended` を
+ * 条件にする読み出し（凍結起因で止めた枚数、将来の「凍結解除で戻す」
+ * 一括操作の WHERE 句）には引っかからない——**安全側（戻し漏れ）に
+ * 倒れるだけで、巻き込みにはならない。** `'ops'` 行を「このアカウントの
+ * 凍結が原因」と取り違えて勝手に復帰させる経路は無い。本番にこの行が
+ * 実在するかは確かめていない（読み取りの許可が無い）。実在すれば、
+ * 運用側で個別に監査ログ / `nfc_card_events` を見ながら判断すること
+ * （`ADMIN_BATCH_DISABLED_REASON` の同じ節と同じ扱い）。
+ */
+export const OWNER_SUSPENDED_DISABLED_REASON = "owner_suspended";

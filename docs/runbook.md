@@ -2707,37 +2707,22 @@ where user_id = '<USER_ID>' and revoked_at is null;
 #### ステップ 6 — NFC カードを止める
 
 > **これは #92 で NFC が入ってから必要になった手順で、§7.1 には書かれていない。**
+> **#486 より前は本番 D1 への手書き SQL だけが手段だったが、画面に置き換えた。**
 
 `nfc_cards.owner_user_id` には**外部キーが無い**（`u18-nfc` は別 D1 なので張れない。`packages/nfc-db/src/schema/cards.ts`）。そして `ResolveCardUseCase` は**所有者の生死を見ない** —— 1 タップごとに Identity へ RPC を飛ばすと NFC 側の負荷が Identity の障害になるため、意図的にそうしてある。
 
-**結果として、アカウントを凍結しても、その人の NFC カードはタップされ続け、遷移先へリダイレクトし続ける。** 止めるには NFC 側を明示的に倒すしかない。
+**結果として、アカウントを凍結しても、その人の NFC カードはタップされ続け、遷移先へリダイレクトし続ける。** 止めるには NFC 側を明示的に倒す必要がある。
 
-```bash
-cd /Users/tanahiro2010/Documents/proj/teams/under18dev/services/apps/nfc-worker
-npx wrangler d1 execute u18-nfc --remote --command "
-select id, status, target_url, datetime(claimed_at/1000, 'unixepoch') as claimed_at
-from nfc_cards where owner_user_id = '<USER_ID>';
-"
-npx wrangler d1 execute u18-nfc --remote --command "
-update nfc_cards
-set status = 'disabled', disabled_at = unixepoch() * 1000,
-    disabled_reason = 'ops', updated_at = unixepoch() * 1000
-where owner_user_id = '<USER_ID>' and status <> 'disabled';
-"
-```
+**`admin.under18.dev/users/<USER_ID>` を開き、「この人のカードをまとめて止める」を押す（#486）。**
 
-NFC 側の証跡は `audit_logs` ではなく `nfc_card_events` に入る（別 D1 なので当然だが、**インシデント調査で片方しか見ない事故が起きやすい**）。手で足す場合は ID 接頭辞が `nev_`、`created_at` はここでも DEFAULT 無しの NOT NULL である。
+1. 押すと、所持枚数・止められる枚数・既に無効化済みの枚数の内訳が出る。
+2. 内訳を確認し、「本当に N 枚を無効化する」を押す。
 
-```bash
-npx wrangler d1 execute u18-nfc --remote --command "
-insert into nfc_card_events (id, card_id, event, actor_user_id, metadata, created_at)
-select 'nev_' || lower(hex(randomblob(16))), id, 'card.disabled', null,
-       json_object('reason', 'owner_account_disabled'), unixepoch() * 1000
-from nfc_cards where owner_user_id = '<USER_ID>';
-"
-```
+**本番 D1 への手書き SQL はもう使わない。** 以前の手順は `where owner_user_id = '<USER_ID>'` を打ち間違えれば別人のカードを止められ、`nfc_card_events` の監査行も手で作る必要があって `actor_user_id` が常に `null` になっていた——**誰が止めたのかが残らなかった。** 画面は既存の 1 枚ずつの無効化の口（`disableCard`）をカードの枚数ぶん呼ぶので、1 枚ごとに正しい `actor_user_id` つきで `nfc_card_events` が残る。`disabled_reason` にも専用の値（`owner_suspended`）が入る——理由は `apps/nfc-worker/src/domain/services/disabled-reason.ts` の `OWNER_SUSPENDED_DISABLED_REASON` を参照。
 
-**無効化は片道である。** `DisableCardUseCase` の設計上、所有者は自分で戻せない（紛失対策としての意味を保つため）。誤って止めた場合の復帰は §11.5 に含めてある。
+**それでも、NFC 側の証跡は `audit_logs` ではなく `nfc_card_events` に入ることは変わらない**（別 D1 なので当然だが、**インシデント調査で片方しか見ない事故が起きやすい**）。凍結そのものの記録（`audit_logs`）と、カードを無効化した記録（`nfc_card_events`）は別の場所にある——画面ができても、調べるときはどちらも見ること。
+
+**無効化は片道である。** `DisableCardUseCase` の設計上、所有者は自分で戻せない（紛失対策としての意味を保つため）。誤って止めた場合の復帰は §11.5 に含めてある。**この画面には「凍結解除でカードを自動で戻す」機能は無い**——戻すなら §11.5 の手順を使う。
 
 #### ステップ 7 — Passkey は、この時点では消さない
 
@@ -2838,11 +2823,13 @@ npx wrangler d1 execute u18-nfc --remote --command "
 update nfc_cards
 set status = 'active', disabled_at = null, disabled_reason = null, updated_at = unixepoch() * 1000
 where owner_user_id = '<USER_ID>' and status = 'disabled'
-  and disabled_reason = 'ops' and owner_user_id is not null and target_url is not null;
+  and disabled_reason = 'owner_suspended' and owner_user_id is not null and target_url is not null;
 "
 ```
 
-**`disabled_reason = 'ops'` を条件に入れること。** これを外すと、**利用者が自分で「紛失した」として止めたカード（`reason = 'lost'`）まで復活させてしまう。** 紛失報告を無効化する操作であり、拾った人間の手でリダイレクトが生きる。`target_url is not null` も必須で、未設定のカードを `active` にすると `isResolvable()` の前提が崩れる（解決時に `card_not_found` へ落ちるので実害は出ないが、状態として嘘になる）。
+**`disabled_reason = 'owner_suspended'` を条件に入れること（#486 で値が変わった）。** これを外すと、**利用者が自分で「紛失した」として止めたカード（`reason = 'lost'`）や、この凍結とは無関係な単発の運営操作（`admin_action`）まで復活させてしまう。** `target_url is not null` も必須で、未設定のカードを `active` にすると `isResolvable()` の前提が崩れる（解決時に `card_not_found` へ落ちるので実害は出ないが、状態として嘘になる）。
+
+**`#486` より前に（旧ステップ 6 の手書き SQL で）`disabled_reason = 'ops'` にしたカードは、この SQL では戻らない。** `'ops'` は理由を区別しない値だったので、条件に足すと**単発の運営操作や紛失報告まで巻き込む**——`apps/nfc-worker/src/domain/services/disabled-reason.ts` の `OWNER_SUSPENDED_DISABLED_REASON` の JSDoc に同じ注記がある。該当する行が見つかったら、`nfc_card_events` を見ながら個別に戻してよいか判断すること。
 
 **復帰させたら `ops.account.reactivated` を記録する**（§10.6）。凍結と復帰が対で残っていないと、あとで「この利用者は一度凍結されている」という事実だけが見えて理由が辿れない。
 
@@ -3259,7 +3246,16 @@ select id, status from users where id in ('<ID1>', '<ID2>', ...);
 
 返ってこなかった ID が「存在しないユーザーを指しているカード」である。**自動で直す経路は無い。** 対応は 2 つしかない。
 
-1. 該当カードを `status = 'disabled'`、`disabled_reason = 'ops'` にして止める（§11.2 ステップ 6 の SQL）。所有者を復帰させられる見込みが無い場合。
+1. 該当カードを `status = 'disabled'`、`disabled_reason = 'ops'` にして止める。所有者を復帰させられる見込みが無い場合。
+   ```bash
+   npx wrangler d1 execute u18-nfc --remote --command "
+   update nfc_cards
+   set status = 'disabled', disabled_at = unixepoch() * 1000,
+       disabled_reason = 'ops', updated_at = unixepoch() * 1000
+   where id = '<CARD_ID>' and status <> 'disabled';
+   "
+   ```
+   **`admin.under18.dev/users/<USER_ID>` の画面（#486）は使えない。** あちらは対象の利用者が存在する前提（`getUser` が通ること）で動く——ここは`owner_user_id` が指す利用者自体がもう存在しないケースなので、手で SQL を打つしかない。`disabled_reason` を `owner_suspended` にしないのもそのため——あの値は「凍結に連動した無効化」を意味し、ここは凍結ではなく**ユーザーの行自体が無い**という別の状況である。
 2. `owner_user_id = null`、`status = 'issued'`、`target_url = null` に戻して未紐づけへ差し戻す。**カードを回収できている場合に限る。** 回収していないのに `issued` へ戻すと、**そのカードを持っている人間がタップするだけで自分のものにできる**（#358 でコードが無くなったので、以前より確実に取られる）。
 
 **この照合を自動化する仕組みは無く、定期的に回す Cron も無い。** 復元を行ったときの手順として本節に書いてあるだけである。整合チェックの常設は残件とする（§12.6）。

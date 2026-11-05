@@ -20,6 +20,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  getButtonClasses,
 } from "@u18/web-ui/kiwa";
 import {
   DANGER_BUTTON_CLASS,
@@ -104,9 +105,48 @@ export type UserDetailPageProps = {
   readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
   /** 持っているカード。**引けなかったら `null`**（同上）。 */
   readonly cards: readonly AdminCardViewDelegated[] | null;
+  /**
+   * 「この人のカードをまとめて止める」の 2 段階確認（#486）。**非 null
+   * なら確認待ちの状態**——`/nfc/bulk-disable`（#481）と同じ形。
+   * `null` なら「対象を確認する」の通常フォームを出す。
+   */
+  readonly disableCardsConfirm: DisableCardsConfirmState;
+  /** 実行結果（#486）。`/nfc` の `BulkResultState` と同じく、部分失敗を正直に出す。 */
+  readonly disableCardsResult: DisableCardsResultState;
   readonly error?: string;
   readonly notice?: string;
 };
+
+/**
+ * 「この人のカードをまとめて止める」の 2 段階確認（#486）。
+ *
+ * **`selectedCardIds` を持たない。** `/nfc/bulk-disable`（#481）の
+ * `BulkConfirmState` と違い、ここに「選択」は無い——対象は
+ * 「この利用者が持っているカード全部」で、`listCardsByOwner` の結果
+ * そのものが母集団になる。**選択が無い以上、確認画面で枚数と内訳を
+ * 出すことが唯一の歯止めになる**（issue #486 の指摘）。
+ */
+export type DisableCardsConfirmState = {
+  readonly totalCount: number;
+  readonly eligibleCount: number;
+  readonly alreadyDisabledCount: number;
+  /**
+   * `eligibleCount` が 1 回の上限を超えていて、先頭の分だけが対象に
+   * なる（`users.routes.tsx` の `BULK_SELECT_LIMIT` を参照）。**選択が
+   * 無いのでエラーにして止めない**——実行すれば対象から外れ、
+   * もう一度押すと次の分が対象になる（`disabled` が自然に除外する
+   * ので、無限ループにはならない）。
+   */
+  readonly cappedAtLimit: boolean;
+} | null;
+
+export type DisableCardsFailureRow = { readonly cardId: string; readonly reason: string };
+
+/** 実行結果（#486）。`/nfc` の `BulkResultState` と同じ形——成功のリダイレクトに畳まない。 */
+export type DisableCardsResultState = {
+  readonly succeeded: readonly string[];
+  readonly failed: readonly DisableCardsFailureRow[];
+} | null;
 
 /**
  * `entry.metadata` から `actorUserId`（実行した管理者）を取り出す。
@@ -370,6 +410,93 @@ const OwnedCards: FC<{ readonly cards: readonly AdminCardViewDelegated[] | null 
   );
 };
 
+/**
+ * 「この人のカードをまとめて止める」（#486）。
+ *
+ * **凍結（`UserActions` の「停止する」）とは別のフォーム・別の route。**
+ * 「停止する」を押したら勝手にカードも止まる、にはしない——#422 / #436
+ * と同じ判断で、弱い操作を 2 つ並べるほうが、強い操作を 1 つ作るより
+ * 安全である。`user.status === "suspended"` のときだけ出す（止める
+ * 意味があるのは停止中の人だけ——退会・運営凍結のどちらでも、本人が
+ * いまログインできない以上、カードだけが生きている状態を望ましいと
+ * 考える理由が無い）。
+ */
+const DisableCardsSection: FC<{
+  readonly userId: string;
+  readonly csrfToken: string;
+  readonly confirm: DisableCardsConfirmState;
+  readonly result: DisableCardsResultState;
+}> = ({ userId, csrfToken, confirm, result }) => {
+  const actionPath = `/users/${encodeURIComponent(userId)}/disable-cards`;
+
+  if (result !== null) {
+    return (
+      <div class="flex flex-col gap-3 border-t border-border pt-4">
+        <p class={ITEM_META_CLASS} role="status">
+          <strong>{result.succeeded.length} 枚を無効化しました。</strong>
+          {result.failed.length > 0 ? (
+            <>
+              {" "}
+              / <strong>{result.failed.length} 枚失敗しました。</strong>
+            </>
+          ) : null}
+        </p>
+        {result.failed.length > 0 ? (
+          <div>
+            <p class={ITEM_META_CLASS}>失敗した内訳:</p>
+            <ul class="flex flex-col gap-0.5 pl-1 text-sm text-destructive">
+              {result.failed.map((row) => (
+                <li key={row.cardId}>
+                  <code class="font-mono text-xs">{row.cardId}</code> — {row.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (confirm !== null) {
+    return (
+      <div class="flex flex-col gap-3 border-t border-border pt-4">
+        <p class={ITEM_META_CLASS} role="status">
+          所持 <strong>{confirm.totalCount} 枚</strong>のうち、止められるのは{" "}
+          <strong>{confirm.eligibleCount} 枚</strong>です（既に無効化済み{" "}
+          {confirm.alreadyDisabledCount} 枚）。
+        </p>
+        {confirm.cappedAtLimit ? (
+          <p class={ITEM_META_CLASS}>
+            一度に止められる枚数には上限があります。実行後、もう一度このボタンを押すと残りに進みます。
+          </p>
+        ) : null}
+        <form method="post" action={actionPath} class="flex flex-wrap items-center gap-3">
+          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+          <input type="hidden" name="confirmed" value="1" />
+          <button type="submit" class={DANGER_BUTTON_CLASS}>
+            本当に {confirm.eligibleCount} 枚を無効化する
+          </button>
+          <a
+            href={`/users/${encodeURIComponent(userId)}`}
+            class="text-sm text-foreground-muted underline underline-offset-4"
+          >
+            キャンセルする
+          </a>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <form method="post" action={actionPath} class="border-t border-border pt-4">
+      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+      <button type="submit" class={getButtonClasses("outline")}>
+        この人のカードをまとめて止める
+      </button>
+    </form>
+  );
+};
+
 const AuditEntries: FC<{
   readonly entries: readonly AuditLogEntryAdmin[] | null;
   readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
@@ -469,6 +596,8 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
   auditEntries,
   userRefs,
   cards,
+  disableCardsConfirm,
+  disableCardsResult,
   error,
   notice,
 }) => (
@@ -597,6 +726,21 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
       </CardHeader>
       <CardContent>
         <OwnedCards cards={cards} />
+        {/*
+          **停止中の人だけに出す**（#486）。アカウントを止めても、NFC
+          カードは別に明示的に止めないとタップされ続ける——所有者の
+          生死を見ない設計のため（`ResolveCardUseCase`、ランブック §11
+          ステップ 6）。凍結の操作とは別のフォーム（`DisableCardsSection`
+          の冒頭を参照）。
+        */}
+        {user.status === "suspended" ? (
+          <DisableCardsSection
+            userId={user.id}
+            csrfToken={csrfToken}
+            confirm={disableCardsConfirm}
+            result={disableCardsResult}
+          />
+        ) : null}
       </CardContent>
     </Card>
 
