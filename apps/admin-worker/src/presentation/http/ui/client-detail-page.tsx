@@ -350,7 +350,8 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
         <CardHeader>
           <CardTitle>操作</CardTitle>
           <CardDescription>
-            一覧（`/clients`）と同じ操作です。ここで変えると一覧にも反映されます。
+            持ち主・表示用 URL の変更と失効は、ここでまとめて行います
+            （#508、一覧からは行内の操作を外しました）。変更は一覧の表示にも反映されます。
           </CardDescription>
         </CardHeader>
         <CardContent class={ITEM_BODY_CLASS}>

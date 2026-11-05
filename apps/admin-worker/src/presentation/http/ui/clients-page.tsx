@@ -31,18 +31,31 @@ import { UserRef } from "./user-ref";
  * 決定 16 ③ 段取り 3）。
  *
  * **`/account/admin/clients`（dashboard-worker、d5 が作ったもの、#380）から
- * 移した。** 画面の中身（一覧・登録・失効）はそのまま持ってきている。
+ * 移した。** 画面の中身（一覧・登録）はそのまま持ってきている。
  * 変わったのは呼び方（セッション Cookie 経由の UseCase →
  * `IdentityAdminDelegatedRPC` 経由）と置き場所だけ。
  *
- * ## 登録・失効の本体は JS を 1 行も要求しない（移行元と同じ理由）
+ * ## 行内の操作はこの画面から消した（#508）
  *
- * 一覧も登録も失効も**ただの form POST** である。**#470 でアイランドを
- * 読むようになったが、どれも後付けの便利さ（絞り込み・コピー）でしかない
- * ——登録・失効の成否には関わらない。** `client_secret` が 1 度しか
- * 返らないことと直結する判断はそのまま: JS の有無で出し分けると、
- * **登録だけ済んで秘密を受け取れない**利用者が出る。秘密はサーバーが描き、
- * ブラウザは表示するだけ。
+ * 運用者の指示（#481、カード一覧について。`/clients` にも同じ形が残って
+ * いた）: 一覧からは 1 枚（1 件）ずつ操作できなくていい、詳細ページから
+ * やる。**持ち主の変更・表示用 URL の変更・失効は `/clients/:clientId`
+ * （#473）へ寄せた。** `POST /clients/owner` / `/clients/app-url` /
+ * `/clients/disable` のルート自体は消していない——詳細ページが使う
+ * （`cameFromDetail` で戻り先を振り分ける。本体は `clients.routes.tsx`）。
+ *
+ * **一次パーティは失効できない、という注記（旧: 一次パーティは押す前に
+ * 分かる）も詳細側へ移した。** 失効ボタン自体が無い画面に、失効できない
+ * 理由を書く意味が無いため。
+ *
+ * ## 登録の本体は JS を 1 行も要求しない（移行元と同じ理由）
+ *
+ * 登録は**ただの form POST** である。**#470 でアイランドを読むように
+ * なったが、どれも後付けの便利さ（絞り込み・コピー）でしかない**
+ * ——登録の成否には関わらない。`client_secret` が 1 度しか返らないことと
+ * 直結する判断はそのまま: JS の有無で出し分けると、**登録だけ済んで秘密を
+ * 受け取れない**利用者が出る。秘密はサーバーが描き、ブラウザは表示する
+ * だけ。
  *
  * コピーボタンはアイランドが有効化するだけ。**値そのものはサーバーが
  * 描き、アイランドには持たせない。**
@@ -56,12 +69,6 @@ import { UserRef } from "./user-ref";
  * 入れていない —— 登録は運営だけが叩く稀な操作で、重複に気づいたら片方を
  * 失効させれば済むため、新しい状態保持の仕組みを足すほどの見合いが無い
  * （delegated 契約側の JSDoc も参照）。
- *
- * ## 一次パーティは押す前に分かる（移行元と同じ理由）
- *
- * `isFirstParty` のクライアントは失効させられない（delegated UseCase が
- * `conflict` を返す）。**押してから断られる形にしない** —— ボタンを出さず、
- * 理由を添える。
  *
  * ## `isAdmin` の出し分けは無い（移行元との違い）
  *
@@ -173,12 +180,11 @@ const SecretOnce: FC<{ readonly created: CreatedClient }> = ({ created }) => (
   </Card>
 );
 
-/** 1 行ぶん。失効のボタンは「押せるときだけ」出す。 */
+/** 1 行ぶん。**操作は持たない**（#508）——持ち主・表示用 URL・失効は詳細へ。 */
 const ClientRow: FC<{
   readonly client: OAuthClientSummary;
-  readonly csrfToken: string;
   readonly ownerRefs: ReadonlyMap<string, UserRefAdmin>;
-}> = ({ client, csrfToken, ownerRefs }) => (
+}> = ({ client, ownerRefs }) => (
   <li class={ITEM_BODY_CLASS}>
     <div class={ITEM_TITLE_CLASS}>
       {/*
@@ -231,65 +237,16 @@ const ClientRow: FC<{
       だけ生の ID のままだと、同じ画面の 2 つの表示が食い違う（#482）。
       `resolveUserRefs` はまとめ引きなので、一覧の行数が増えても
       Service Binding の往復は増えない（`user-refs.ts` の冒頭）。
+      **持ち主の変更フォームは詳細へ移した（#508）。** ここは読むだけ。
     */}
-    <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
-      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-      <input type="hidden" name="client_id" value={client.clientId} />
-      <label class={FIELD_CLASS}>
-        <span class={LABEL_CLASS}>持ち主の userId（空欄で外す）</span>
-        <input
-          class={INPUT_CLASS}
-          type="text"
-          name="owner_user_id"
-          maxlength={64}
-          value={client.ownerUserId ?? ""}
-        />
-      </label>
-      <div>
-        <button type="submit" class="text-sm text-foreground underline underline-offset-4">
-          持ち主を変更する
-        </button>
-      </div>
-    </form>
     <p class={ITEM_META_CLASS}>表示用 URL: {client.appUrl ?? "—"}</p>
     {/*
       **ここではリンクにしない。** 管理画面での確認用の値であって、
       運営が押して開くための導線ではない——利用者向けの `/account/apps`
-      側だけがリンクにする（#457）。
+      側だけがリンクにする（#457）。**変更フォームは詳細へ移した
+      （#508）。** 失効の可否（一次パーティは不可）も同様——操作自体が
+      無い画面に、操作できない理由を書く意味が無い。
     */}
-    <form method="post" action="/clients/app-url" class={ITEM_BODY_CLASS}>
-      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-      <input type="hidden" name="client_id" value={client.clientId} />
-      <label class={FIELD_CLASS}>
-        <span class={LABEL_CLASS}>表示用 URL（空欄で外す。https のみ）</span>
-        <input
-          class={INPUT_CLASS}
-          type="url"
-          name="app_url"
-          maxlength={2048}
-          value={client.appUrl ?? ""}
-        />
-      </label>
-      <div>
-        <button type="submit" class="text-sm text-foreground underline underline-offset-4">
-          表示用 URL を変更する
-        </button>
-      </div>
-    </form>
-    {client.isFirstParty ? (
-      <p class={ITEM_META_CLASS}>
-        u18 公式のクライアントは、この画面からは失効させられません。
-        ログイン画面そのものが止まるためです。
-      </p>
-    ) : client.disabledAt === null ? (
-      <form method="post" action="/clients/disable">
-        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-        <input type="hidden" name="client_id" value={client.clientId} />
-        <button type="submit" class="text-sm text-destructive underline underline-offset-4">
-          失効させる
-        </button>
-      </form>
-    ) : null}
   </li>
 );
 
@@ -308,7 +265,7 @@ export const ClientsPage: FC<ClientsPageProps> = ({
     brandHref="/"
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="OAuth クライアント"
-    lead="u18 でログインできるアプリの登録と失効を行います。"
+    lead="クライアント名を押すと詳細が開き、持ち主・表示用 URL の変更と失効はそこから行います。この画面は検索・並べ替えと新規登録が主な役目です。"
     scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
@@ -409,7 +366,7 @@ export const ClientsPage: FC<ClientsPageProps> = ({
             />
             <ul id="clients-list" class={LIST_CLASS}>
               {clients.map((client) => (
-                <ClientRow client={client} csrfToken={csrfToken} ownerRefs={ownerRefs} />
+                <ClientRow client={client} ownerRefs={ownerRefs} />
               ))}
             </ul>
           </div>

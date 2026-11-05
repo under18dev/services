@@ -135,12 +135,42 @@ describe("GET /clients", () => {
     expect(html).toContain("App A");
     expect(html).toContain("App B");
     expect(html).toContain("u18 公式");
-    // 一次パーティには失効フォーム（持ち主変更フォームとは別の action）が無い。
-    const disableForms = [
-      ...html.matchAll(/<form method="post" action="\/clients\/disable">[\s\S]*?<\/form>/g),
-    ];
-    expect(disableForms.map((m) => m[0]).join("")).not.toContain('value="app_b"');
+    // **登録フォームぶんの CSRF トークンだけが残る。** 新規登録（#508 の
+    // 範囲外）のためのもので、行内の操作（持ち主・表示用 URL・失効）用では
+    // ない。
     expect(html).toMatch(/name="csrf_token"/);
+  });
+
+  /**
+   * **行内の操作フォーム 3 種を一覧から外した**（#508、`/nfc` を #481 で
+   * 外したのと同じ形）。詳細（`/clients/:clientId`）へ寄せたので、一覧の
+   * 行自体はこれらの action を一切持たない——一次パーティかどうかに
+   * 関わらず。
+   */
+  it("行内の持ち主・表示用 URL・失効フォームを一覧から外した（#508）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listOAuthClients: async () =>
+        rpcOk([
+          client({ clientId: "app_a", name: "App A" }),
+          client({ clientId: "app_b", name: "App B", isFirstParty: true }),
+        ]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain('action="/clients/owner"');
+    expect(html).not.toContain('action="/clients/app-url"');
+    expect(html).not.toContain('action="/clients/disable"');
+    // **代わりに、クライアント名が詳細へのリンクになっている。**
+    expect(html).toContain('href="/clients/app_a"');
+    expect(html).toContain('href="/clients/app_b"');
   });
 
   it("listOAuthClients が失敗したら 503", async () => {
