@@ -150,11 +150,45 @@ verify_asset_url() {
   fi
 
   local asset_url="${base}${url}"
+  local head_file status
+  head_file="$(mktemp)"
+  # **ページの取得と同じ理由で `-f` を使わない（かつステータス行を読む）。**
+  # `-f` は 4xx/5xx でしか空応答にならない——302 は `-f` にとって
+  # エラーではなく、`-L` も無いのでリダイレクト先を追わないぶん
+  # そのヘッダがそのまま返る。それを下の immutable の検査だけに
+  # 食わせると、「アセットが配られていない」のに「immutable が
+  # 付いていません」という**的外れな理由**で落ちる（#479、302 を
+  # 実際に引いて実測）。
+  #
+  # **`|| echo 000` を使わない。** curl は失敗時にも `-w` で `000` を
+  # 出すので、連結されて `000000` になり得る（このファイルのページ取得側
+  # と同じ事情）。
+  if status="$(curl -sS -o /dev/null -D "$head_file" -w '%{http_code}' --max-time 20 "$asset_url" 2>/dev/null)"; then
+    :
+  else
+    status="unreachable"
+  fi
   local headers
-  headers="$(curl -fsS -o /dev/null -D - --max-time 20 "$asset_url" || true)"
+  headers="$(cat "$head_file")"
+  rm -f "$head_file"
 
-  if [ -z "$headers" ]; then
+  if [ "$status" = "unreachable" ] || [ -z "$headers" ]; then
     echo "::error::${asset_url} を取得できませんでした（${context} が参照しています）。"
+    failures=$((failures + 1))
+    return
+  fi
+
+  # **immutable より先に、200 であることを見る。** ステータスを見ずに
+  # いきなりキャッシュヘッダを探すと、「配られていない」が「キャッシュの
+  # 設定が無い」という別の理由として報告される——運用者が深夜に
+  # `PUBLIC_PATHS` の 1 行の抜けを疑わず、キャッシュ設定を探して遠回り
+  # することになる。しかも、いつか 302 応答に immutable を付ける変更が
+  # 入れば、この検査はその瞬間から何も見なくなる（強い前提を弱い下流の
+  # 検査に肩代わりさせない）。
+  if [ "$status" != "200" ]; then
+    echo "::error::${asset_url} が 200 ではありません（HTTP ${status}）。参照元: ${context}"
+    echo "  アセットが配られていません。PUBLIC_PATHS から落ちていないか、"
+    echo "  <script src>/<link href> のハッシュと配信ルートのハッシュがずれていないかを見てください。"
     failures=$((failures + 1))
     return
   fi
