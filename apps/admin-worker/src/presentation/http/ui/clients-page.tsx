@@ -181,7 +181,18 @@ const ClientRow: FC<{
 }> = ({ client, csrfToken, ownerRefs }) => (
   <li class={ITEM_BODY_CLASS}>
     <div class={ITEM_TITLE_CLASS}>
-      <span>{client.name}</span>
+      {/*
+        **行から詳細（`/clients/:clientId`、#473）へ入る導線（#502）。**
+        `/users`（#455）・`/nfc`（#481）と同じ規則——人がその行を見分ける
+        のに使う表示名をリンクにし、`client_id` は下の読む・コピーする
+        場所のまま動かさない。
+      */}
+      <a
+        href={`/clients/${encodeURIComponent(client.clientId)}`}
+        class="underline underline-offset-4"
+      >
+        {client.name}
+      </a>
       {client.isFirstParty ? <Badge variant="secondary">u18 公式</Badge> : null}
       {client.clientType === "public" ? <Badge variant="outline">public</Badge> : null}
       {client.disabledAt === null ? null : <Badge variant="destructive">失効済み</Badge>}
