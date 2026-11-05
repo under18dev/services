@@ -39,6 +39,21 @@
 # ページの取得に `curl -f` を使わないのはこのため。使うと 401 で落ち、
 # 「アセットが引けない」ではなく「ページが取れない」になる。
 #
+# ## ページの参照では足りないアセットもある（#479）
+#
+# admin-worker のアイランド（`/ui/admin-island.<hash>.js`）は `/audit`
+# `/clients` `/nfc/analytics` というログイン後の画面だけが読む。
+# `probe_pages_for` が未認証で引く `/callback` はそれを参照しないので、
+# **ページの HTML から見つける今までのやり方では、この 1 ファイルだけ
+# 本番から 1 度も引かれない**——配信ルートが丸ごと消えても、deploy は
+# 緑のままになる（`apps/admin-worker/test/route-inventory.ts` の
+# `EXTERNALLY_UNVERIFIABLE_ASSETS` に同じ注記がある）。
+#
+# `/health` が `assets`（配信中のパスの一覧）を返す Worker があれば、
+# ページを経由せずそのパスを直接引く——ログインを要らない。`assets` を
+# 返さない Worker では何もしない（この issue では admin-worker だけに
+# 閉じる判断）。
+#
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
@@ -80,21 +95,20 @@ shift 2
 # 理由ごと書いてあり、ログイン後の参照は Worker 側のテストが確かめる。
 #
 # あちらは「アセットを配る Worker が全部ここに居るか」も突き合わせている。
-probe_pages_for() {
-  case "$1" in
-    auth-worker) echo "/login:/ui/" ;;
-    dashboard-worker) echo "/account:/account/ui/" ;;
-    # **`/` ではなく `/callback` を引く**（#447）。`/` は未ログインで
-    # `/login` へ 302 するだけで画面を持たないので、ここからは参照を
-    # 読めない。`/callback` は裸で叩いても（state も code も無くても）
-    # `MessagePage`（Kiwa UI）を 400 で返すので、未認証でも引ける
-    # （`apps/admin-worker/src/presentation/http/app.tsx` の `fail()`）。
-    # 接頭辞は auth-worker と同じ形——admin-worker もルート直下に
-    # `/ui/` を持つ別オリジンである。
-    admin-worker) echo "/callback:/ui/" ;;
-    *) echo "" ;;
-  esac
-}
+#
+# **`probe_pages_for` は手で書かない（#453）。** `node
+# scripts/generate-asset-probe-pages.mjs` が、各 Worker の
+# `test/route-inventory.ts` の `PROBE_PAGES`（page）と `ASSET_ROUTES`
+# の共通ディレクトリ（prefix）から機械的に作り、
+# `scripts/generated/asset-probe-pages.sh` へ書き出す。Worker ごとに
+# そのページ・接頭辞を選んだ理由（admin-worker が `/callback` を引く
+# 理由など）は、そちらの手作業をやめた代わりに route-inventory.ts の
+# JSDoc だけに残っている——二重に書くと片方だけ直る。
+#
+# 生成物が古いまま commit されると黙って壊れる（#453 の issue 本体が
+# 指摘する形そのもの）ので、`pnpm check:asset-probe-pages-gen` が CI で
+# 作り直した内容と突き合わせている。
+source "$(dirname "${BASH_SOURCE[0]}")/generated/asset-probe-pages.sh"
 
 # ページが明示されていなければ、その Worker ぶんを引く。
 if [ "$#" -eq 0 ]; then
@@ -113,6 +127,80 @@ fi
 
 failures=0
 checked=0
+
+# 1 本のアセット URL を本番から引き、ハッシュが入っていること・
+# immutable が付いていることを見る（#211）。呼ぶ側（ページの参照を
+# 読む側／`/health` の宣言を読む側、#479）が共通して必要とするので、
+# ここへまとめる——バラバラに書くと、片方だけ直す事故が起きる
+# （このファイル冒頭の auth-worker の例と同じ形）。
+#
+# `$checked` は呼ぶ前に呼び出し側が増やすこと。「どこから見つけたか」
+# （ページの参照／`/health` の宣言）で数え方を変えたくない。
+verify_asset_url() {
+  local url="$1"
+  local context="$2"
+
+  # 内容ハッシュが入っていること（#211）。入っていなければ immutable を
+  # 付けてはいけないので、キャッシュの検査より先に見る。
+  if ! printf '%s' "$url" | grep -qE '\.[0-9a-f]{16}\.'; then
+    echo "::error::${url} に内容ハッシュが入っていません（#211）。参照元: ${context}"
+    failures=$((failures + 1))
+    return
+  fi
+
+  local asset_url="${base}${url}"
+  local head_file status
+  head_file="$(mktemp)"
+  # **ページの取得と同じ理由で `-f` を使わない（かつステータス行を読む）。**
+  # `-f` は 4xx/5xx でしか空応答にならない——302 は `-f` にとって
+  # エラーではなく、`-L` も無いのでリダイレクト先を追わないぶん
+  # そのヘッダがそのまま返る。それを下の immutable の検査だけに
+  # 食わせると、「アセットが配られていない」のに「immutable が
+  # 付いていません」という**的外れな理由**で落ちる（#479、302 を
+  # 実際に引いて実測）。
+  #
+  # **`|| echo 000` を使わない。** curl は失敗時にも `-w` で `000` を
+  # 出すので、連結されて `000000` になり得る（このファイルのページ取得側
+  # と同じ事情）。
+  if status="$(curl -sS -o /dev/null -D "$head_file" -w '%{http_code}' --max-time 20 "$asset_url" 2>/dev/null)"; then
+    :
+  else
+    status="unreachable"
+  fi
+  local headers
+  headers="$(cat "$head_file")"
+  rm -f "$head_file"
+
+  if [ "$status" = "unreachable" ] || [ -z "$headers" ]; then
+    echo "::error::${asset_url} を取得できませんでした（${context} が参照しています）。"
+    failures=$((failures + 1))
+    return
+  fi
+
+  # **immutable より先に、200 であることを見る。** ステータスを見ずに
+  # いきなりキャッシュヘッダを探すと、「配られていない」が「キャッシュの
+  # 設定が無い」という別の理由として報告される——運用者が深夜に
+  # `PUBLIC_PATHS` の 1 行の抜けを疑わず、キャッシュ設定を探して遠回り
+  # することになる。しかも、いつか 302 応答に immutable を付ける変更が
+  # 入れば、この検査はその瞬間から何も見なくなる（強い前提を弱い下流の
+  # 検査に肩代わりさせない）。
+  if [ "$status" != "200" ]; then
+    echo "::error::${asset_url} が 200 ではありません（HTTP ${status}）。参照元: ${context}"
+    echo "  アセットが配られていません。PUBLIC_PATHS から落ちていないか、"
+    echo "  <script src>/<link href> のハッシュと配信ルートのハッシュがずれていないかを見てください。"
+    failures=$((failures + 1))
+    return
+  fi
+
+  if ! printf '%s' "$headers" | grep -qi 'cache-control:.*immutable'; then
+    echo "::error::${asset_url} に immutable が付いていません。URL にハッシュが入っている以上、付いているべきです。"
+    echo "  $(printf '%s' "$headers" | head -n 1)"
+    failures=$((failures + 1))
+    return
+  fi
+
+  echo "  OK ${url}"
+}
 
 for spec in "$@"; do
   page_path="${spec%%:*}"
@@ -196,39 +284,63 @@ for spec in "$@"; do
         ;;
     esac
 
-    # 内容ハッシュが入っていること（#211）。入っていなければ immutable を
-    # 付けてはいけないので、キャッシュの検査より先に見る。
-    if ! printf '%s' "$url" | grep -qE '\.[0-9a-f]{16}\.'; then
-      echo "::error::${url} に内容ハッシュが入っていません（#211）。参照元: ${page_path}"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    asset_url="${base}${url}"
-    headers="$(curl -fsS -o /dev/null -D - --max-time 20 "$asset_url" || true)"
-
-    if [ -z "$headers" ]; then
-      echo "::error::${asset_url} を取得できませんでした（${page_path} はこの URL を参照しています）。"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    if ! printf '%s' "$headers" | grep -qi 'cache-control:.*immutable'; then
-      echo "::error::${asset_url} に immutable が付いていません。URL にハッシュが入っている以上、付いているべきです。"
-      echo "  $(printf '%s' "$headers" | head -n 1)"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    echo "  OK ${url}"
+    verify_asset_url "$url" "$page_path"
   done <<EOF
 ${urls}
 EOF
 done
+
+# **`/health` が配信中のアセットを直接宣言していれば、それも直接引く**
+# （#479）。ページの HTML に参照が無くても確かめられる——ログイン後の
+# 画面だけが読むアイランドは、未認証の `PROBE_PAGES` からは見えない
+# （`EXTERNALLY_UNVERIFIABLE_ASSETS` を参照）。配信パスそのものを
+# 検査するので、ログインを要らない。
+#
+# **`assets` を持たない Worker では何もしない。** `"assets"` という文字列
+# すら本文に無ければ、素通りする——他の Worker にこの口を揃えるかどうかは、
+# この issue（#479）では決めない。
+#
+# **`jq` が無い環境で、検査が黙って消えることを許さない（3b のレビュー
+# 指摘、実測）。** `jq` が入っていなければ `jq -r '.assets[]?'` は空文字列を
+# 返し、`2>/dev/null || true` と合わせて**エラーにならず、検査自体が
+# 0 件のまま走らなくなる。** しかも終わりの要約は「すべて本番から引けます」
+# という、何も問題が無かったときと同じ文言を出す——**この PR が
+# `verify_asset_url` で直した「見るべきものが出てこないのに合格に
+# 化ける」のと、まったく同じ形の穴。**
+#
+# 見分け方は「本文に `"assets"` という文字列はあるのに、取り出せた件数が
+# 0 件」かどうか。これなら `jq` が無い場合も、`jq` はあるが応答が壊れた
+# JSON だった場合も、同じ 1 つの条件で拾える。
+health_url="${base}/health"
+health_body="$(curl -sS --max-time 20 "$health_url" 2>/dev/null || true)"
+health_assets="$(printf '%s' "$health_body" | jq -r '.assets[]?' 2>/dev/null || true)"
+health_checked=0
+
+if printf '%s' "$health_body" | grep -q '"assets"'; then
+  if [ -z "$health_assets" ]; then
+    echo "::error::${health_url} の本文に \"assets\" が含まれていますが、1 件も取り出せませんでした。"
+    echo "  jq がインストールされていないか、応答が壊れた JSON になっている可能性があります。"
+    failures=$((failures + 1))
+  else
+    echo "GET ${health_url}  (assets を直接引く)"
+    while IFS= read -r url; do
+      [ -z "$url" ] && continue
+      checked=$((checked + 1))
+      health_checked=$((health_checked + 1))
+      verify_asset_url "$url" "/health の assets"
+    done <<EOF
+${health_assets}
+EOF
+  fi
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "::error::${failures} 件の失敗がありました。"
   exit 1
 fi
 
-echo "${worker}: ${#} ページが参照する ${checked} 件のアセットは、すべて本番から引けます。"
+summary="${worker}: ${#} ページが参照する $((checked - health_checked)) 件"
+if [ "$health_checked" -gt 0 ]; then
+  summary="${summary}、/health が宣言する ${health_checked} 件"
+fi
+echo "${summary}のアセットは、すべて本番から引けます。"

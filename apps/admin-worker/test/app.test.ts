@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { Clock } from "../src/composition/container";
-import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { createFakeIdp } from "./fake-idp";
 import {
   ORIGIN,
@@ -24,6 +24,21 @@ describe("/health", () => {
     const app = createApp();
     const response = await app.fetch(new Request(`${ORIGIN}/health`), env, executionContext());
     expect(response.status).toBe(200);
+  });
+
+  /**
+   * #479。**`asset-paths.ts` の実際の値と突き合わせる** —— 固定文字列を
+   * 書き写すと、ハッシュが変わったときにテストだけが古いまま緑で残る
+   * （本番の `smoke-asset-probe.sh` がここを直接 curl するので、
+   * 突き合わせの甘さがそのまま検査の甘さになる）。
+   */
+  it("配信中のアセットのパスを載せる", async () => {
+    const app = createApp();
+    const response = await app.fetch(new Request(`${ORIGIN}/health`), env, executionContext());
+    const body = await response.json();
+    expect(body).toMatchObject({
+      assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH],
+    });
   });
 });
 
@@ -349,10 +364,18 @@ describe("承認リスト", () => {
     expect(html).toContain("admin-approval.mjs grant");
     expect(html).toContain("--sub usr_waiting");
     expect(html).toContain("--super");
-    // **コピーできるように `<textarea readonly>` にしてある**（#443）。
-    // `<pre><code>` のままだとドラッグでしかコピーできない。
-    expect(html).toMatch(/<textarea[^>]*readonly[^>]*>/);
+    // **コピーボタンで持ち出せる**（#488）。`data-copy` の値そのものに
+    // sub とコマンド全体が乗っている——`<textarea readonly>` は #470 より
+    // 前の、まだ島の仕組みが無かった頃の代替だった（削除済み）。
+    expect(html).toContain('data-copy="usr_waiting"');
+    expect(html).toContain('data-copy="node apps/admin-worker/scripts/admin-approval.mjs grant');
+    expect(html).not.toMatch(/<textarea/);
     expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
+    // **`/pending` は `NAV_PAGE_ROUTES` の外にある**ので、
+    // `test/asset-coverage.test.ts` の「`data-*` を使う画面は
+    // `ISLAND_PATH` も読む」という検査がここを見ない（#488 で発覚）。
+    // ここで直接確かめる。
+    expect(html).toContain(ISLAND_PATH);
   });
 
   it("承認済みが /pending を開くと / へ戻される（ループにしない）", async () => {

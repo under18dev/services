@@ -59,22 +59,28 @@ export const ASSET_ROUTES: readonly Route[] = [
 export const PROBE_PAGES: readonly string[] = ["/callback"];
 
 /**
- * `PROBE_PAGES` だけでは外から確かめられないアセット（#470、
- * dashboard-worker の `EXTERNALLY_UNVERIFIABLE_ASSETS` と同じ形）。
+ * `PROBE_PAGES`（ページの参照を読む検査）だけでは外から確かめられない
+ * アセット（#470、dashboard-worker の `EXTERNALLY_UNVERIFIABLE_ASSETS`
+ * と同じ形）。
  *
  * **アイランドを読むのはログイン後の画面（`/audit` `/clients`
  * `/nfc/analytics`）だけ。** `/callback` は失敗画面を 400 で返すだけで、
  * 並べ替えも絞り込みも無い——アイランドを読まない。
  *
- * 書いてあれば、**その配信が壊れても本番検査は気づかない**ことが
- * 読んだ人に伝わる。
+ * **ここに書いてあっても、本番で検査されていないわけではない（#479）。**
+ * 「ページの HTML から参照を見つける」方式では見えない、というだけ——
+ * `/health` の `assets`（`app.tsx` の `/health` ハンドラ）が配信パスを
+ * 直接宣言しており、`scripts/smoke-asset-probe.sh` はページを経由せず
+ * そのパスを直接引く。この一覧が残っているのは「どの検査方式が、なぜ
+ * この 1 件を見落とすか」を書き残すためである。
  */
 export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
   "/ui/admin-island.<hash>.js":
     "アイランドを読むのは /audit /clients /nfc/analytics だけで、どれも" +
     "ログインと承認の両方のガードの内側にある。PROBE_PAGES が未認証で" +
     "引ける /callback はログイン前の失敗画面で、並べ替え・絞り込み・" +
-    "コピー・通知のどれも持たないため参照しない。",
+    "コピー・通知のどれも持たないため参照しない（本番での検査は " +
+    "/health の assets 経由で別に行われている、#479）。",
 };
 
 /**
