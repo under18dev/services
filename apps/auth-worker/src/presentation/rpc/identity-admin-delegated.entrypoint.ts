@@ -3,6 +3,7 @@ import {
   createOAuthClientDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
   getUserDelegatedInputSchema,
+  getUsersByIdsDelegatedInputSchema,
   listAuditLogsDelegatedInputSchema,
   listOAuthClientsDelegatedInputSchema,
   listUsersDelegatedInputSchema,
@@ -21,6 +22,8 @@ import {
   type DisableOAuthClientDelegatedResult,
   type GetUserDelegatedInput,
   type GetUserDelegatedResult,
+  type GetUsersByIdsDelegatedInput,
+  type GetUsersByIdsDelegatedResult,
   type IdentityAdminDelegatedRpcContract,
   type ListAuditLogsDelegatedInput,
   type ListAuditLogsDelegatedResult,
@@ -46,6 +49,7 @@ import {
   toAuditLogEntryAdmin,
   toClientSummary,
   toUserAdminSummary,
+  toUserRefAdmin,
 } from "./identity-admin.entrypoint";
 
 /**
@@ -143,6 +147,23 @@ export class IdentityAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk(toUserAdminSummary(result.value));
+  }
+
+  /**
+   * まとめ引き（#471）。**`not_found` にならない。** 見つからなかった
+   * ID は結果から黙って落ちる——`GetUsersByIdsDelegatedResult` の冒頭。
+   */
+  async getUsersByIds(input: GetUsersByIdsDelegatedInput): Promise<GetUsersByIdsDelegatedResult> {
+    const parsed = getUsersByIdsDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedGetUsersByIds.execute({
+      userIds: parsed.data.userIds,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(result.value.map(toUserRefAdmin));
   }
 
   async suspendUser(input: SuspendUserDelegatedInput): Promise<SuspendUserDelegatedResult> {

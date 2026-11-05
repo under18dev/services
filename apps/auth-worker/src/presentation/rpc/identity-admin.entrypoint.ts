@@ -28,6 +28,7 @@ import {
   type SuspendUserInput,
   type SuspendUserResult,
   type UserAdminSummary,
+  type UserRefAdmin,
   type OAuthClientSummary,
 } from "@u18/contracts";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -79,6 +80,22 @@ export function toUserAdminSummary(user: User): UserAdminSummary {
     status: props.status,
     hasAdminFlag: props.isAdmin,
     createdAt: props.createdAt.toISOString(),
+  };
+}
+
+/**
+ * `User`（Domain）を、名前解決だけのための最小 DTO へ写す（#471）。
+ *
+ * **`toUserAdminSummary` を使い回さないこと。** あれは `primaryEmail` を
+ * 持つ——カードの所有者や監査ログの actor を並べる一覧に他人のアドレスが
+ * 出る画面を作ってしまう（`UserRefAdmin` の JSDoc、RR-13）。
+ */
+export function toUserRefAdmin(user: User): UserRefAdmin {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    status: user.status,
   };
 }
 

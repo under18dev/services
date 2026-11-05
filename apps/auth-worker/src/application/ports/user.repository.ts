@@ -29,6 +29,22 @@ export type UpdateProfileOutcome =
  */
 export interface UserRepository {
   findById(id: string): Promise<User | null>;
+  /**
+   * まとめ引き（#471、admin-worker の一覧が所有者・actor を名前で出すため）。
+   *
+   * **`findById` をループで呼ばないこと。** 1 行ごとに読むと行数ぶんの
+   * 往復が走る——`IN` 句 1 回にまとめる。
+   *
+   * **見つからない ID は結果に含めない。** 呼ぶ側（`DelegatedGetUsersByIdsUseCase`）
+   * はこれを「取りこぼし」として扱う前提で、ここでは `null` を混ぜたり
+   * 例外を投げたりしない。
+   *
+   * **重複があっても二重に返さない。** 一意な `id` に対する行の集合を
+   * 返すだけなので、呼ぶ側が重複を落とさなくても壊れない
+   * （落とすのが望ましいのは、呼び出しの大きさを抑えるためであって、
+   * 正しさのためではない）。
+   */
+  findByIds(ids: readonly string[]): Promise<readonly User[]>;
   /** 大文字小文字を無視して検索する。 */
   findByEmail(email: string): Promise<User | null>;
   findByUsername(username: string): Promise<User | null>;

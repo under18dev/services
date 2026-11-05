@@ -275,15 +275,15 @@ const OwnedCards: FC<{ readonly cards: readonly AdminCardViewDelegated[] | null 
   }
 
   return (
-    <Table>
+    <Table id="owned-cards-table" data-sortable>
       <TableHeader>
         <TableRow>
-          <TableHead>カード ID</TableHead>
-          <TableHead>状態</TableHead>
-          <TableHead>遷移先</TableHead>
-          <TableHead>ロット</TableHead>
-          <TableHead>発行</TableHead>
-          <TableHead>引き取り</TableHead>
+          <TableHead data-sort="text">カード ID</TableHead>
+          <TableHead data-sort="text">状態</TableHead>
+          <TableHead data-sort="text">遷移先</TableHead>
+          <TableHead data-sort="text">ロット</TableHead>
+          <TableHead data-sort="date">発行</TableHead>
+          <TableHead data-sort="date">引き取り</TableHead>
           <TableHead>操作</TableHead>
         </TableRow>
       </TableHeader>
@@ -339,12 +339,12 @@ const AuditEntries: FC<{ readonly entries: readonly AuditLogEntryAdmin[] | null 
   }
 
   return (
-    <Table>
+    <Table id="audit-entries-table" data-sortable>
       <TableHeader>
         <TableRow>
-          <TableHead>日時</TableHead>
-          <TableHead>イベント</TableHead>
-          <TableHead>結果</TableHead>
+          <TableHead data-sort="date">日時</TableHead>
+          <TableHead data-sort="text">イベント</TableHead>
+          <TableHead data-sort="text">結果</TableHead>
           <TableHead>詳細</TableHead>
         </TableRow>
       </TableHeader>

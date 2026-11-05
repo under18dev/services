@@ -51,6 +51,7 @@ export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
   return {
     listUsers: unused("listUsers"),
     getUser: unused("getUser"),
+    getUsersByIds: async () => rpcOk([]),
     suspendUser: unused("suspendUser"),
     reinstateUser: unused("reinstateUser"),
     revokeUserSessions: unused("revokeUserSessions"),

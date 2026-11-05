@@ -148,6 +148,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
       calls.getUser.push(input);
       return rpcOk(user({ id: input.userId }));
     },
+    getUsersByIds: async () => rpcOk([]),
     suspendUser: async (input) => {
       calls.suspendUser.push(input);
       return rpcOk({ revokedSessions: 2 });

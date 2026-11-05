@@ -33,6 +33,13 @@ export class InMemoryUserRepository implements UserRepository {
     return props ? User.fromPersistence(props) : null;
   }
 
+  async findByIds(ids: readonly string[]): Promise<readonly User[]> {
+    const idSet = new Set(ids);
+    return [...this.store.values()]
+      .filter((props) => idSet.has(props.id))
+      .map((props) => User.fromPersistence(props));
+  }
+
   async findByEmail(email: string): Promise<User | null> {
     for (const props of this.store.values()) {
       if (props.email.toLowerCase() === email.toLowerCase()) return User.fromPersistence(props);

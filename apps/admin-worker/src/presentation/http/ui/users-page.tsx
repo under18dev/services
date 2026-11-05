@@ -205,7 +205,11 @@ const UserRow: FC<{
      **内部 ID を出す。** 停止やセッションの失効の宛先がこれになる。
      */}
     <TableCell class="whitespace-normal">
-      <span class={ITEM_RAW_CLASS}>{user.id}</span>
+      <span class={ITEM_RAW_CLASS}>{user.id}</span>{" "}
+      {/* コピー用（#470）。JS が外すまでは存在しない。 */}
+      <button type="button" data-copy={user.id} hidden class="text-xs underline">
+        コピー
+      </button>
     </TableCell>
     <TableCell class="whitespace-normal">
       <UserActions user={user} csrfToken={csrfToken} isSelf={isSelf} />
@@ -296,27 +300,41 @@ export const UsersPage: FC<UsersPageProps> = ({
         {users.length === 0 ? (
           <p class={EMPTY_CLASS}>一致する利用者はいません。</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>利用者</TableHead>
-                <TableHead>メールアドレス</TableHead>
-                <TableHead>状態</TableHead>
-                <TableHead>登録</TableHead>
-                <TableHead>ID</TableHead>
-                {/*
-                  **見出しを空にしない。** 読み上げで「列が 6 つある」と
-                  分かっても、最後の列が何かは分からない。
-                */}
-                <TableHead>操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((user) => (
-                <UserRow user={user} csrfToken={csrfToken} isSelf={user.id === actorUserId} />
-              ))}
-            </TableBody>
-          </Table>
+          <>
+            {/*
+              絞り込み欄（#470）。**`hidden` で描く——JS が無ければ存在しない
+              ものとして読める。JS がこれを外して使えるようにする。
+            */}
+            <input
+              type="text"
+              data-filter="users-table"
+              hidden
+              placeholder="絞り込む"
+              aria-label="利用者の一覧を絞り込む"
+              class={`${INPUT_CLASS} mb-2`}
+            />
+            <Table id="users-table" data-sortable>
+              <TableHeader>
+                <TableRow>
+                  <TableHead data-sort="text">利用者</TableHead>
+                  <TableHead data-sort="text">メールアドレス</TableHead>
+                  <TableHead data-sort="text">状態</TableHead>
+                  <TableHead data-sort="date">登録</TableHead>
+                  <TableHead data-sort="text">ID</TableHead>
+                  {/*
+                    **見出しを空にしない。** 読み上げで「列が 6 つある」と
+                    分かっても、最後の列が何かは分からない。
+                  */}
+                  <TableHead>操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.map((user) => (
+                  <UserRow user={user} csrfToken={csrfToken} isSelf={user.id === actorUserId} />
+                ))}
+              </TableBody>
+            </Table>
+          </>
         )}
         {nextCursor === null ? null : (
           /*
