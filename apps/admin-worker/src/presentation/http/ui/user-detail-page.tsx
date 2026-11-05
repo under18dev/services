@@ -317,13 +317,38 @@ const OwnedCards: FC<{ readonly cards: readonly AdminCardViewDelegated[] | null 
           <TableHead data-sort="text">ロット</TableHead>
           <TableHead data-sort="date">発行</TableHead>
           <TableHead data-sort="date">引き取り</TableHead>
-          <TableHead>操作</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {cards.map((card) => (
           <TableRow key={card.cardId}>
-            <TableCell class={ITEM_RAW_CLASS}>{card.cardId}</TableCell>
+            {/*
+              **カード ID 自体が `/nfc/:cardId`（カード詳細、#472）への
+              リンク**（#488、指摘: 3b）。カードへの操作（無効化・復帰・
+              遷移先の書き換え・手放させる）はこの画面に持ってこない——
+              それらは詳細側の責務で、ここに同じフォームを並べると**同じ
+              操作が 2 画面に散る**（#433 が `/account/*` から運営向けの
+              画面を消した理由と同じ形）。以前は「カードの詳細へ」という
+              別列のリンクだったが、ID 自体をリンクにしたので列ごと消した
+              ——同じ行き先への導線が 2 つあると、どちらを押すべきか迷う。
+              `/users` 一覧は逆に ID 列をリンクにしない（表示名のほうを
+              リンクにし、ID はコピーだけの場所にする）——あちらには
+              `displayName` という別の人間向けラベルがあるが、カードには
+              ID 以外に識別子が無く、ID 自身がリンクと「読む・コピーする」
+              の両方を兼ねる。
+            */}
+            <TableCell class={ITEM_RAW_CLASS}>
+              <a
+                href={`/nfc/${encodeURIComponent(card.cardId)}`}
+                class="underline underline-offset-4"
+              >
+                {card.cardId}
+              </a>{" "}
+              {/* コピー用（#470）。JS が外すまでは存在しない（#488）。 */}
+              <button type="button" data-copy={card.cardId} hidden class="text-xs underline">
+                コピー
+              </button>
+            </TableCell>
             <TableCell>
               <Badge variant={CARD_STATUS_VARIANT[card.status]}>
                 {CARD_STATUS_LABEL[card.status]}
@@ -337,21 +362,6 @@ const OwnedCards: FC<{ readonly cards: readonly AdminCardViewDelegated[] | null 
             <TableCell class={ITEM_META_CLASS}>{formatDateTime(card.issuedAt)}</TableCell>
             <TableCell class={ITEM_META_CLASS}>
               {card.claimedAt === null ? "—" : formatDateTime(card.claimedAt)}
-            </TableCell>
-            {/*
-              **カードへの操作はこの画面に持ってこない。** 無効化・復帰・
-              遷移先の書き換え・手放させるは `/nfc/:cardId`（カード詳細、
-              #472）側の責務で、ここに同じフォームを並べると**同じ操作が
-              2 画面に散る**（#433 が `/account/*` から運営向けの画面を
-              消した理由と同じ形）。
-            */}
-            <TableCell>
-              <a
-                href={`/nfc/${encodeURIComponent(card.cardId)}`}
-                class="text-sm text-foreground underline underline-offset-4"
-              >
-                カードの詳細へ
-              </a>
             </TableCell>
           </TableRow>
         ))}
@@ -512,7 +522,12 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
           <div>
             <dt class={LABEL_CLASS}>利用者 ID</dt>
             {/* **操作の宛先はこれである**（username は本人が変えられる）。 */}
-            <dd class={ITEM_RAW_CLASS}>{user.id}</dd>
+            <dd class={ITEM_RAW_CLASS}>
+              {user.id} {/* コピー用（#470）。JS が外すまでは存在しない（#488）。 */}
+              <button type="button" data-copy={user.id} hidden class="text-xs underline">
+                コピー
+              </button>
+            </dd>
           </div>
           <div>
             <dt class={LABEL_CLASS}>登録</dt>
