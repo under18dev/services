@@ -169,7 +169,26 @@ export function registerApprovalsRoutes(app: Hono<AppBindings>): void {
     return renderApprovalsPage(c, { notice: `${targetSub} の権限を更新しました。` });
   });
 
-  /** 承認そのものの剥奪。**最後の super approver・自分自身の剥奪は拒否される。** */
+  /**
+   * 承認そのものの剥奪。**最後の super approver・自分自身の剥奪は拒否される。**
+   *
+   * ## 2 段階確認（#487）
+   *
+   * 押した瞬間にその人は管理画面へ入れなくなる、他のどの破壊的操作よりも
+   * 重い操作なのに確認が無かった（issue #487）。`confirm=true` が付いて
+   * いない 1 回目は、実際には何も変えず確認画面を返すだけにする。
+   *
+   * **締め出し判定（`checkApprovalRevocation`）を確認画面より先に呼ぶ。**
+   * 1 段階目で「この人を剥奪します」と見せたあと 2 段階目でロックアウト
+   * 判定に落ちると、運用者は確認を押してから拒否されることになる——
+   * 剥奪できないなら、そもそも確認画面を出さずに理由だけ返す（指摘: 3b）。
+   *
+   * **2 段階目でも判定を呼び直す。** 確認画面を表示してから実際に押す
+   * までの間に、別の操作で状態が変わりうる（例: 最後の 1 人になった）。
+   * 1 段階目の結果を信用せず、実行の直前にもう一度確かめる
+   * （`/nfc/batch-disable` が再入力のたびに対象枚数を数え直すのと同じ
+   * 形の「状態は古いかもしれない」という前提）。
+   */
   app.post("/approvals/:sub/revoke", async (c) => {
     const form = await c.req.formData().catch(() => null);
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
@@ -178,6 +197,7 @@ export function registerApprovalsRoutes(app: Hono<AppBindings>): void {
     }
 
     const targetSub = c.req.param("sub");
+    const confirmed = form.get("confirm")?.toString() === "true";
     const session = c.get("session");
     const container = c.get("container");
 
@@ -195,6 +215,12 @@ export function registerApprovalsRoutes(app: Hono<AppBindings>): void {
     });
     if (!check.ok) return renderApprovalsPage(c, { error: check.reason });
 
+    if (!confirmed) {
+      // 1 段階目。剥奪できることは確認済みなので、誰を剥奪するのか
+      // 名前で見せて、確定の押下を待つ——ここでは何も書き込まない。
+      return renderApprovalsPage(c, { revokeConfirmSub: targetSub });
+    }
+
     await container.approvals.revoke(targetSub);
     await container.approvals.recordAuditEvent({
       event: APPROVAL_AUDIT_EVENTS.revoked.event,
@@ -210,7 +236,12 @@ export function registerApprovalsRoutes(app: Hono<AppBindings>): void {
 /** 一覧をもう一度引いて画面を描き直す。**4 本の経路すべてが共有する**（`clients.routes.tsx` と同じ理由）。 */
 async function renderApprovalsPage(
   c: Context<AppBindings>,
-  extra: { readonly error?: string; readonly notice?: string },
+  extra: {
+    readonly error?: string;
+    readonly notice?: string;
+    /** 剥奪の 1 段階目（#487）。非 undefined なら、この sub の確認画面を出す。 */
+    readonly revokeConfirmSub?: string;
+  },
 ): Promise<Response> {
   const container = c.get("container");
   const session = c.get("session");
@@ -232,6 +263,9 @@ async function renderApprovalsPage(
       refs={refs}
       {...(extra.error === undefined ? {} : { error: extra.error })}
       {...(extra.notice === undefined ? {} : { notice: extra.notice })}
+      {...(extra.revokeConfirmSub === undefined
+        ? {}
+        : { revokeConfirmSub: extra.revokeConfirmSub })}
     />,
   );
 }

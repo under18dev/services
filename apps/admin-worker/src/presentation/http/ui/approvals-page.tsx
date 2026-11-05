@@ -10,6 +10,7 @@ import {
 import {
   FIELD_CLASS,
   INPUT_CLASS,
+  ITEM_ACTIONS_CLASS,
   ITEM_BODY_CLASS,
   ITEM_META_CLASS,
   ITEM_RAW_CLASS,
@@ -59,9 +60,73 @@ import { UserRef } from "./user-ref";
  * 入力中にリアルタイムで名前を引く仕組みは `UserRef`/`resolveUserRefs`
  * の再利用だけでは作れない——JS での逐次問い合わせが要る別の作業に
  * なるため、この issue では見送る（issue #482 の冒頭にも同じ注記）。
+ *
+ * ## 剥奪は 2 段階確認（#487）
+ *
+ * 押した瞬間にその人は管理画面へ入れなくなる、ロットの一括無効化等より
+ * 重い操作なのに確認が無かった。`revokeConfirmSub` が立っているときだけ
+ * 確認カードを出す——**締め出し判定はサーバー側（`approvals.routes.tsx`）
+ * がこのカードを出す前に済ませている**ので、ここでは「名前を見せて
+ * 確定を待つ」以上のことをしない。
+ *
+ * ## 権限名の日本語化（#487）
+ *
+ * 定数名をそのまま出していたのを、日本語の名前と 1 行の説明に差し替えた。
+ * **文言は issue #487 のコメントで確定済みのものをそのまま使っている**
+ * ——ここで言い回しを変えない。`APPROVAL_GRANT` だけ他の 7 つと節を
+ * 分けている（「管理画面の中で何ができるか」ではなく「管理画面を使える
+ * 人を増やせる」という実質的な昇格のため、重みが違う）。
  */
 
 const PERMISSION_ORDER = Object.keys(PERMISSION_BITS) as readonly PermissionBitName[];
+
+/**
+ * 権限ビットの日本語名と 1 行の説明（issue #487 のコメントで確定）。
+ *
+ * **定数名も併記する。** `scripts/admin-approval.mjs`（CLI）が同じ名前を
+ * 使うため消せない——ただし主役は日本語のほうで、定数は補助。
+ */
+const PERMISSION_LABELS: Readonly<
+  Record<PermissionBitName, { label: string; description: string }>
+> = {
+  NFC_READ: {
+    label: "カードを見る",
+    description: "カードの一覧・1 枚の詳細・タップの解析を開けます。",
+  },
+  NFC_WRITE: {
+    label: "カードを操作する",
+    description: "発行・無効化・復帰・所有権の剥奪・遷移先の書き換えができます。",
+  },
+  USER_READ: {
+    label: "利用者を見る",
+    description: "利用者の一覧・検索・1 人の詳細を開けます。",
+  },
+  USER_SUSPEND: {
+    label: "利用者を止める",
+    description: "利用者の凍結・解除と、ログイン中の端末の追い出しができます。",
+  },
+  CLIENT_READ: {
+    label: "アプリを見る",
+    description: "OAuth クライアントの一覧・1 件の詳細を開けます。",
+  },
+  CLIENT_WRITE: {
+    label: "アプリを操作する",
+    description: "登録・失効・持ち主と表示用 URL の変更ができます。",
+  },
+  AUDIT_READ: {
+    label: "監査ログを読む",
+    description: "誰が何をしたかの記録を全件たどれます。",
+  },
+  APPROVAL_GRANT: {
+    label: "権限を配る",
+    description:
+      "この管理画面を使える人を増やし、その人の権限を決められます。" +
+      "渡した相手も同じことができるようになります。",
+  },
+};
+
+/** `APPROVAL_GRANT` は他の 7 つと並びを分ける（#487）。 */
+const REGULAR_PERMISSION_ORDER = PERMISSION_ORDER.filter((name) => name !== "APPROVAL_GRANT");
 
 export type ApprovalsPageProps = {
   readonly csrfToken: string;
@@ -72,7 +137,28 @@ export type ApprovalsPageProps = {
   readonly refs: ReadonlyMap<string, UserRefAdmin>;
   readonly error?: string;
   readonly notice?: string;
+  /**
+   * 剥奪の 1 段階目（#487）。立っていれば、この sub の確認カードを出す。
+   * **締め出し判定はこのカードが出る前にサーバー側で済んでいる**
+   * ——ここでは名前を見せて確定を待つだけ。
+   */
+  readonly revokeConfirmSub?: string;
 };
+
+/** 権限 1 つぶんのチェックボックス。日本語名を主役にし、定数名は補助として併記する（#487）。 */
+const PermissionCheckbox: FC<{
+  readonly name: PermissionBitName;
+  readonly checked: boolean;
+}> = ({ name, checked }) => (
+  <label class={ITEM_RAW_CLASS}>
+    <input type="checkbox" name="bit" value={name} checked={checked} />{" "}
+    <strong>{PERMISSION_LABELS[name].label}</strong>
+    <span class={ITEM_META_CLASS}>
+      {" "}
+      {PERMISSION_LABELS[name].description}（{name}）
+    </span>
+  </label>
+);
 
 const ApprovalRow: FC<{
   readonly approval: ApprovalListRow;
@@ -117,17 +203,26 @@ const ApprovalRow: FC<{
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
         <fieldset class={FIELD_CLASS}>
           <span class={LABEL_CLASS}>権限</span>
-          {PERMISSION_ORDER.map((name) => (
-            <label class={ITEM_RAW_CLASS}>
-              <input
-                type="checkbox"
-                name="bit"
-                value={name}
-                checked={(approval.permissions & PERMISSION_BITS[name]) !== 0n}
-              />{" "}
-              {name}
-            </label>
+          {REGULAR_PERMISSION_ORDER.map((name) => (
+            <PermissionCheckbox
+              key={name}
+              name={name}
+              checked={(approval.permissions & PERMISSION_BITS[name]) !== 0n}
+            />
           ))}
+        </fieldset>
+        <Separator />
+        {/*
+          **`APPROVAL_GRANT` だけ節を分ける（#487）。** 他の 7 つは
+          「管理画面の中で何ができるか」だが、これは「管理画面を使える人を
+          増やせる」——実質的な昇格で、重みが違う。同じ並びに混ぜない。
+        */}
+        <fieldset class={FIELD_CLASS}>
+          <span class={LABEL_CLASS}>権限を配る（実質的な昇格）</span>
+          <PermissionCheckbox
+            name="APPROVAL_GRANT"
+            checked={(approval.permissions & PERMISSION_BITS.APPROVAL_GRANT) !== 0n}
+          />
         </fieldset>
         <div>
           <button type="submit" class="text-sm text-foreground underline underline-offset-4">
@@ -153,6 +248,7 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
   refs,
   error,
   notice,
+  revokeConfirmSub,
 }) => (
   <KiwaShell
     title="承認者・権限"
@@ -174,6 +270,32 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
       <Card>
         <CardContent>
           <p class={ITEM_META_CLASS}>{notice}</p>
+        </CardContent>
+      </Card>
+    )}
+
+    {revokeConfirmSub === undefined ? null : (
+      <Card>
+        <CardHeader>
+          <CardTitle>本当に剥奪しますか</CardTitle>
+        </CardHeader>
+        <CardContent class={ITEM_BODY_CLASS}>
+          <p class={ITEM_META_CLASS}>
+            <UserRef id={revokeConfirmSub} refs={refs} /> の承認を剥奪します。 この人は
+            admin.under18.dev へ入れなくなります。
+          </p>
+          <div class={ITEM_ACTIONS_CLASS}>
+            <form method="post" action={`/approvals/${revokeConfirmSub}/revoke`}>
+              <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+              <input type="hidden" name="confirm" value="true" />
+              <button type="submit" class="text-sm text-destructive underline underline-offset-4">
+                本当に剥奪する
+              </button>
+            </form>
+            <a href="/approvals" class="text-sm text-foreground-muted underline underline-offset-4">
+              キャンセル
+            </a>
+          </div>
         </CardContent>
       </Card>
     )}
