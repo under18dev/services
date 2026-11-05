@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { Clock } from "../src/composition/container";
-import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { createFakeIdp } from "./fake-idp";
 import {
   ORIGIN,
@@ -24,6 +24,21 @@ describe("/health", () => {
     const app = createApp();
     const response = await app.fetch(new Request(`${ORIGIN}/health`), env, executionContext());
     expect(response.status).toBe(200);
+  });
+
+  /**
+   * #479。**`asset-paths.ts` の実際の値と突き合わせる** —— 固定文字列を
+   * 書き写すと、ハッシュが変わったときにテストだけが古いまま緑で残る
+   * （本番の `smoke-asset-probe.sh` がここを直接 curl するので、
+   * 突き合わせの甘さがそのまま検査の甘さになる）。
+   */
+  it("配信中のアセットのパスを載せる", async () => {
+    const app = createApp();
+    const response = await app.fetch(new Request(`${ORIGIN}/health`), env, executionContext());
+    const body = await response.json();
+    expect(body).toMatchObject({
+      assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH],
+    });
   });
 });
 

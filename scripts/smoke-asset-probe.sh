@@ -39,6 +39,21 @@
 # ページの取得に `curl -f` を使わないのはこのため。使うと 401 で落ち、
 # 「アセットが引けない」ではなく「ページが取れない」になる。
 #
+# ## ページの参照では足りないアセットもある（#479）
+#
+# admin-worker のアイランド（`/ui/admin-island.<hash>.js`）は `/audit`
+# `/clients` `/nfc/analytics` というログイン後の画面だけが読む。
+# `probe_pages_for` が未認証で引く `/callback` はそれを参照しないので、
+# **ページの HTML から見つける今までのやり方では、この 1 ファイルだけ
+# 本番から 1 度も引かれない**——配信ルートが丸ごと消えても、deploy は
+# 緑のままになる（`apps/admin-worker/test/route-inventory.ts` の
+# `EXTERNALLY_UNVERIFIABLE_ASSETS` に同じ注記がある）。
+#
+# `/health` が `assets`（配信中のパスの一覧）を返す Worker があれば、
+# ページを経由せずそのパスを直接引く——ログインを要らない。`assets` を
+# 返さない Worker では何もしない（この issue では admin-worker だけに
+# 閉じる判断）。
+#
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
@@ -113,6 +128,46 @@ fi
 
 failures=0
 checked=0
+
+# 1 本のアセット URL を本番から引き、ハッシュが入っていること・
+# immutable が付いていることを見る（#211）。呼ぶ側（ページの参照を
+# 読む側／`/health` の宣言を読む側、#479）が共通して必要とするので、
+# ここへまとめる——バラバラに書くと、片方だけ直す事故が起きる
+# （このファイル冒頭の auth-worker の例と同じ形）。
+#
+# `$checked` は呼ぶ前に呼び出し側が増やすこと。「どこから見つけたか」
+# （ページの参照／`/health` の宣言）で数え方を変えたくない。
+verify_asset_url() {
+  local url="$1"
+  local context="$2"
+
+  # 内容ハッシュが入っていること（#211）。入っていなければ immutable を
+  # 付けてはいけないので、キャッシュの検査より先に見る。
+  if ! printf '%s' "$url" | grep -qE '\.[0-9a-f]{16}\.'; then
+    echo "::error::${url} に内容ハッシュが入っていません（#211）。参照元: ${context}"
+    failures=$((failures + 1))
+    return
+  fi
+
+  local asset_url="${base}${url}"
+  local headers
+  headers="$(curl -fsS -o /dev/null -D - --max-time 20 "$asset_url" || true)"
+
+  if [ -z "$headers" ]; then
+    echo "::error::${asset_url} を取得できませんでした（${context} が参照しています）。"
+    failures=$((failures + 1))
+    return
+  fi
+
+  if ! printf '%s' "$headers" | grep -qi 'cache-control:.*immutable'; then
+    echo "::error::${asset_url} に immutable が付いていません。URL にハッシュが入っている以上、付いているべきです。"
+    echo "  $(printf '%s' "$headers" | head -n 1)"
+    failures=$((failures + 1))
+    return
+  fi
+
+  echo "  OK ${url}"
+}
 
 for spec in "$@"; do
   page_path="${spec%%:*}"
@@ -196,39 +251,45 @@ for spec in "$@"; do
         ;;
     esac
 
-    # 内容ハッシュが入っていること（#211）。入っていなければ immutable を
-    # 付けてはいけないので、キャッシュの検査より先に見る。
-    if ! printf '%s' "$url" | grep -qE '\.[0-9a-f]{16}\.'; then
-      echo "::error::${url} に内容ハッシュが入っていません（#211）。参照元: ${page_path}"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    asset_url="${base}${url}"
-    headers="$(curl -fsS -o /dev/null -D - --max-time 20 "$asset_url" || true)"
-
-    if [ -z "$headers" ]; then
-      echo "::error::${asset_url} を取得できませんでした（${page_path} はこの URL を参照しています）。"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    if ! printf '%s' "$headers" | grep -qi 'cache-control:.*immutable'; then
-      echo "::error::${asset_url} に immutable が付いていません。URL にハッシュが入っている以上、付いているべきです。"
-      echo "  $(printf '%s' "$headers" | head -n 1)"
-      failures=$((failures + 1))
-      continue
-    fi
-
-    echo "  OK ${url}"
+    verify_asset_url "$url" "$page_path"
   done <<EOF
 ${urls}
 EOF
 done
+
+# **`/health` が配信中のアセットを直接宣言していれば、それも直接引く**
+# （#479）。ページの HTML に参照が無くても確かめられる——ログイン後の
+# 画面だけが読むアイランドは、未認証の `PROBE_PAGES` からは見えない
+# （`EXTERNALLY_UNVERIFIABLE_ASSETS` を参照）。配信パスそのものを
+# 検査するので、ログインを要らない。
+#
+# **`assets` を持たない Worker では何もしない。** `jq` が空を返すだけで
+# 検査自体が走らない——他の Worker にこの口を揃えるかどうかは、
+# この issue（#479）では決めない。
+health_url="${base}/health"
+health_body="$(curl -sS --max-time 20 "$health_url" 2>/dev/null || true)"
+health_assets="$(printf '%s' "$health_body" | jq -r '.assets[]?' 2>/dev/null || true)"
+health_checked=0
+
+if [ -n "$health_assets" ]; then
+  echo "GET ${health_url}  (assets を直接引く)"
+  while IFS= read -r url; do
+    [ -z "$url" ] && continue
+    checked=$((checked + 1))
+    health_checked=$((health_checked + 1))
+    verify_asset_url "$url" "/health の assets"
+  done <<EOF
+${health_assets}
+EOF
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "::error::${failures} 件の失敗がありました。"
   exit 1
 fi
 
-echo "${worker}: ${#} ページが参照する ${checked} 件のアセットは、すべて本番から引けます。"
+summary="${worker}: ${#} ページが参照する $((checked - health_checked)) 件"
+if [ "$health_checked" -gt 0 ]; then
+  summary="${summary}、/health が宣言する ${health_checked} 件"
+fi
+echo "${summary}のアセットは、すべて本番から引けます。"
