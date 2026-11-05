@@ -27,7 +27,7 @@ import {
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -235,6 +235,7 @@ export const UsersPage: FC<UsersPageProps> = ({
     heading="利用者"
     lead="u18 に登録されている利用者を探します。"
     maxWidth="max-w-6xl"
+    scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
       <Card>
