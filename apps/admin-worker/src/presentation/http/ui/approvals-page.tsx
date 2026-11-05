@@ -216,9 +216,12 @@ const ApprovalRow: FC<{
           **`APPROVAL_GRANT` だけ節を分ける（#487）。** 他の 7 つは
           「管理画面の中で何ができるか」だが、これは「管理画面を使える人を
           増やせる」——実質的な昇格で、重みが違う。同じ並びに混ぜない。
+          **見出しはラベル（「権限を配る」）と同じ言葉を繰り返さない。**
+          節が 1 項目しか持たないので、同じ文字列を 2 回続けて読ませると
+          重複でしかなかった（指摘: 3b）。
         */}
         <fieldset class={FIELD_CLASS}>
-          <span class={LABEL_CLASS}>権限を配る（実質的な昇格）</span>
+          <span class={LABEL_CLASS}>ここだけ特に重い（実質的な昇格）</span>
           <PermissionCheckbox
             name="APPROVAL_GRANT"
             checked={(approval.permissions & PERMISSION_BITS.APPROVAL_GRANT) !== 0n}
