@@ -311,6 +311,7 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
     const session = c.get("session");
     const clientId = (form.get("client_id")?.toString() ?? "").trim();
     const appUrl = (form.get("app_url")?.toString() ?? "").trim();
+    const toDetail = cameFromDetail(form);
 
     const container = c.get("container");
     const result = await container.identityAdmin.setOAuthClientAppUrl({
@@ -320,10 +321,16 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
     });
 
     if (!result.ok) {
-      return renderClientsPage(c, { error: setAppUrlFailureMessage(result.error.code) });
+      const error = setAppUrlFailureMessage(result.error.code);
+      return toDetail
+        ? renderClientDetailPage(c, clientId, { error })
+        : renderClientsPage(c, { error });
     }
 
-    return renderClientsPage(c, { notice: "表示用 URL を変更しました。" });
+    const notice = "表示用 URL を変更しました。";
+    return toDetail
+      ? renderClientDetailPage(c, clientId, { notice })
+      : renderClientsPage(c, { notice });
   });
 }
 

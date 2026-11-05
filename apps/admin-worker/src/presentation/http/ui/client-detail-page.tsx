@@ -327,6 +327,27 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
             </div>
           </form>
 
+          <form method="post" action="/clients/app-url" class={ITEM_BODY_CLASS}>
+            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+            <input type="hidden" name="client_id" value={client.clientId} />
+            <input type="hidden" name="from" value="detail" />
+            <label class={FIELD_CLASS}>
+              <span class={LABEL_CLASS}>表示用 URL（空欄で外す。https のみ）</span>
+              <input
+                class={INPUT_CLASS}
+                type="url"
+                name="app_url"
+                maxlength={2048}
+                value={client.appUrl ?? ""}
+              />
+            </label>
+            <div>
+              <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+                表示用 URL を変更する
+              </button>
+            </div>
+          </form>
+
           {client.isFirstParty ? (
             <p class={ITEM_META_CLASS}>
               u18 公式のクライアントは、この画面からは失効させられません。ログイン画面そのものが

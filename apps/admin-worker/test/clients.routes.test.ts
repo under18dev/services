@@ -234,6 +234,32 @@ describe("GET /clients/:clientId（#473）", () => {
     expect(html).toContain("この画面からは失効させられません");
   });
 
+  /**
+   * **一覧（`clients-page.tsx`）には 3 つの操作フォームがあり、この画面は
+   * 2 つしか無かった**（3b のレビュー）。「一覧と同じ操作です」と言い切る
+   * 説明文があるのに app_url だけ変えられないのは、表示だけで操作できない
+   * 中途半端な詳細ページになる——説明文を弱めるのではなく、フォームを足す。
+   */
+  it("表示用 URL（app_url）を変更するフォームも持つ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", appUrl: "https://app.example/" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('action="/clients/app-url"');
+    expect(html).toContain('value="https://app.example/"');
+    expect(html).toContain('name="from" value="detail"');
+  });
+
   it("appUrl があれば target=_blank と rel=noopener noreferrer 付きでリンクにする", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
@@ -1321,6 +1347,47 @@ describe("POST /clients/app-url", () => {
     const html = await response.text();
     expect(html).not.toContain("usable https URL");
     expect(html).toContain("https で始まる");
+  });
+
+  it("from=detail なら一覧ではなく詳細画面を描き直す（#473）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", name: "Detail Target" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app-url`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          app_url: "https://app.example/",
+          from: "detail",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('data-panel="overview"');
+    expect(html).toContain("Detail Target");
   });
 });
 
