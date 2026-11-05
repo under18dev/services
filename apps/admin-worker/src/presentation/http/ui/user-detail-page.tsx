@@ -426,18 +426,31 @@ const AuditEntries: FC<{
                 理由）。イベントごとに形が違うので、固定の表に組むと
                 新しいイベントのたびにこの画面も直すことになる——上の
                 「実行者」列は `actorUserId` という 1 キーだけの特別扱いで、
-                残りのキーは引き続きここにそのまま出す。
+                残りのキーは引き続きここにそのまま出す。コピーボタンも
+                `audit-page.tsx` と同じ形で添える（#488）。
               */}
               <TableCell class="whitespace-normal">
                 {entry.reason === null && entry.metadata === null ? (
                   <span class={ITEM_META_CLASS}>—</span>
                 ) : (
-                  <>
-                    {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
+                  <div class="flex items-start gap-2">
+                    <div>
+                      {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
+                      {entry.metadata === null ? null : (
+                        <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
+                      )}
+                    </div>
                     {entry.metadata === null ? null : (
-                      <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
+                      <button
+                        type="button"
+                        class="shrink-0 text-xs text-foreground underline underline-offset-4"
+                        data-copy={JSON.stringify(entry.metadata)}
+                        hidden
+                      >
+                        コピー
+                      </button>
                     )}
-                  </>
+                  </div>
                 )}
               </TableCell>
             </TableRow>

@@ -81,6 +81,71 @@ describe("attachSortableTable", () => {
   it("日付でないテキストを number として読んでも落ちない", () => {
     expect(sortValueOf(undefined, "number")).toBe(Number.NEGATIVE_INFINITY);
   });
+
+  /**
+   * `ui/format.ts` の `formatDateTime` が返す実際の形（「YYYY/MM/DD HH:MM
+   * JST」）で並べ替えが効くこと。**末尾の「 JST」を `Date.parse` がそのまま
+   * 読むと丸ごと `NaN` を返す**（実測、V8）——`/audit` を含む
+   * `data-sort="date"` の列すべてが、#470 で足した時点からこのバグを
+   * 持っていた（クリックしても順序が変わらないまま、誰も気づかずにいた）。
+   * ユニットテストが `"2026-11-01"` のような ISO 文字列だけで書かれて
+   * いて、本物の表示文字列を一度も通していなかったのが原因。
+   */
+  it("formatDateTime が出す「YYYY/MM/DD HH:MM JST」でも日付として並べ替わる", () => {
+    document.body.innerHTML = `
+      <table data-sortable>
+        <thead><tr><th data-sort="date">日時</th></tr></thead>
+        <tbody>
+          <tr><td>2026/11/12 09:15 JST</td></tr>
+          <tr><td>2026/11/05 20:03 JST</td></tr>
+          <tr><td>2026/11/08 00:00 JST</td></tr>
+        </tbody>
+      </table>
+    `;
+    const table = document.querySelector<HTMLTableElement>("table")!;
+    attachSortableTable(table);
+    table.querySelector<HTMLButtonElement>("thead th button")!.click();
+
+    const firstCells = Array.from(table.querySelectorAll("tbody tr")).map(
+      (row) => row.children[0]?.textContent,
+    );
+    expect(firstCells).toEqual([
+      "2026/11/05 20:03 JST",
+      "2026/11/08 00:00 JST",
+      "2026/11/12 09:15 JST",
+    ]);
+  });
+
+  it("sortValueOf('date') は末尾の JST を落として読む", () => {
+    const early = document.createElement("td");
+    early.textContent = "2026/11/05 20:03 JST";
+    const late = document.createElement("td");
+    late.textContent = "2026/11/12 09:15 JST";
+
+    const earlyValue = sortValueOf(early, "date");
+    const lateValue = sortValueOf(late, "date");
+    expect(earlyValue).not.toBe(Number.NEGATIVE_INFINITY);
+    expect(earlyValue).toBeLessThan(lateValue as number);
+  });
+
+  /**
+   * admin-worker には日時の書式が 2 つある——`formatDateTime`（上のテスト）
+   * と `nfc-page.tsx` の `toDate()`（素の ISO 日付「YYYY-MM-DD」、時刻も
+   * JST も付けない）。**後者が壊れていないことも合わせて見る**——`.replace()`
+   * を足す前も後も、素の ISO 形式はタイムゾーン名が無いので何も削られず、
+   * そのまま `Date.parse` に通る（指摘: 3b、#488）。
+   */
+  it("sortValueOf('date') は toDate() の素の ISO 日付（JST 無し）でも読める", () => {
+    const early = document.createElement("td");
+    early.textContent = "2026-07-31";
+    const late = document.createElement("td");
+    late.textContent = "2026-08-05";
+
+    const earlyValue = sortValueOf(early, "date");
+    const lateValue = sortValueOf(late, "date");
+    expect(earlyValue).not.toBe(Number.NEGATIVE_INFINITY);
+    expect(earlyValue).toBeLessThan(lateValue as number);
+  });
 });
 
 describe("attachFilter", () => {
