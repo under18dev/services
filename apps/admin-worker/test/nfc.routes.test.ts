@@ -2190,12 +2190,17 @@ describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", ()
             card({ cardId: "nfc_a", status: "issued" }),
             card({ cardId: "nfc_b", status: "active" }),
             card({ cardId: "nfc_c", status: "disabled" }),
+            card({ cardId: "nfc_d", status: "issued" }),
           ],
           truncated: false,
         }),
       disableCard: async (input) => {
         calls.disableCard.push(input);
         if (input.cardId === "nfc_b") return rpcErr(RpcErrorCode.NotFound, "not_found");
+        // **`not_found` 以外の失敗も区別して文言に出ること**（3b のレビュー）。
+        // 「そのカードは見つかりませんでした」に畳むと、Service Binding の
+        // 一時的な障害まで「もう対処済み」と読める。
+        if (input.cardId === "nfc_d") return rpcErr(RpcErrorCode.Internal, "boom");
         return rpcOk(null);
       },
     });
@@ -2216,19 +2221,28 @@ describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", ()
       csrfCookie,
       csrfToken,
       {
-        card_id: ["nfc_a", "nfc_b", "nfc_c"],
+        card_id: ["nfc_a", "nfc_b", "nfc_c", "nfc_d"],
         confirmed: "1",
       },
     );
 
     expect(response.status).toBe(200);
     // `nfc_c`（既に disabled）は対象外なので呼ばれない。
-    expect(calls.disableCard.map((input) => input.cardId).sort()).toEqual(["nfc_a", "nfc_b"]);
+    expect(calls.disableCard.map((input) => input.cardId).sort()).toEqual([
+      "nfc_a",
+      "nfc_b",
+      "nfc_d",
+    ]);
     expect(calls.disableCard.every((input) => input.actorUserId === SUB)).toBe(true);
     const html = await response.text();
     expect(html).toContain("1 件成功");
-    expect(html).toContain("1 件失敗");
+    expect(html).toContain("2 件失敗");
     expect(html).toContain("対象外 1 件");
+    // `not_found` とそれ以外を区別した文言になっていること。
+    expect(html).toContain("そのカードは見つかりませんでした。");
+    expect(html).toContain(
+      "いま処理できませんでした。時間をおいて、残りだけもう一度お試しください。",
+    );
   });
 });
 

@@ -293,6 +293,22 @@ function categorizeForDisable(
   return { eligibleCardIds, ineligible };
 }
 
+/**
+ * 一括操作 1 件ぶんの失敗を文言へ訳す（#481）。**`not_found` とそれ以外を
+ * 区別する。** 両方を「そのカードは見つかりませんでした。」に畳むと、
+ * Service Binding の一時的な障害や `conflict` まで「もう無い（＝対処済み）」
+ * と読める——運用者が「箱ごと盗まれたので 40 枚止める」を押した直後に、
+ * **止まっていないカードを止まったと思って帰ることになる**（3b のレビュー）。
+ *
+ * **「残りだけもう一度」と書けるのは `succeeded` を既に出しているから。**
+ * 失敗した分だけ選び直して再送信すれば、成功済みの分を二重に処理しない。
+ */
+function bulkFailureReason(code: RpcErrorCode): string {
+  return code === "not_found"
+    ? "そのカードは見つかりませんでした。"
+    : "いま処理できませんでした。時間をおいて、残りだけもう一度お試しください。";
+}
+
 /** `categorizeForDisable` の対（#481）。`disabled` のカードだけが対象。 */
 function categorizeForReinstate(
   selected: readonly string[],
@@ -866,7 +882,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       if (result.ok) {
         succeeded.push(cardId);
       } else {
-        failed.push({ cardId, reason: "そのカードは見つかりませんでした。" });
+        failed.push({ cardId, reason: bulkFailureReason(result.error.code) });
       }
     }
 
@@ -935,15 +951,27 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       // **持ち主の有無でカードごとに呼び分ける。** `categorizeForReinstate`
       // の時点では `disabled` であることしか見ていない——実行直前の
       // `cardsById` が持つ `ownerUserId` を見て、1 枚ごとに正しい口を選ぶ。
+      //
+      // **`card?.ownerUserId === null` と書かない。** `eligibleCardIds` は
+      // `cardsById` 自身から作っているので `card` が無いことは無いはずだが、
+      // もし無ければ `?.` は `undefined === null` で false になり、**持ち主
+      // ありの口（`reinstateCard`）へ落ちる**——`reinstateCard` を所有者の
+      // 無いカードへ呼ぶと「所有者の無いまま `active` になる」契約が名指し
+      // で警告する壊れた行ができる（3b のレビュー）。「起こらないはず」を
+      // `?.` で黙って流さず、無ければ明示的に失敗として扱う。
       const card = cardsById.get(cardId);
+      if (card === undefined) {
+        failed.push({ cardId, reason: "そのカードは見つかりませんでした。" });
+        continue;
+      }
       const result =
-        card?.ownerUserId === null
+        card.ownerUserId === null
           ? await container.nfcCards.reinstateCardToIssued({ actorUserId: session.sub, cardId })
           : await container.nfcCards.reinstateCard({ actorUserId: session.sub, cardId });
       if (result.ok) {
         succeeded.push(cardId);
       } else {
-        failed.push({ cardId, reason: "そのカードは見つかりませんでした。" });
+        failed.push({ cardId, reason: bulkFailureReason(result.error.code) });
       }
     }
 
