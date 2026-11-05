@@ -7,7 +7,7 @@
     "dev": "node scripts/build-client.mjs && wrangler dev",
     "deploy": "wrangler deploy",
     "build": "node scripts/build-client.mjs && wrangler deploy --dry-run --outdir dist",
-    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "typecheck": "node scripts/build-client.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsc -p tsconfig.scripts.json",
     "test": "node scripts/build-client.mjs && vitest run && vitest run -c vitest.client.config.ts",
     "build:client": "node scripts/build-client.mjs",
     "preview:html": "node scripts/build-client.mjs && node scripts/preview-html.mjs",
