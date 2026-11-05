@@ -297,24 +297,42 @@ done
 # （`EXTERNALLY_UNVERIFIABLE_ASSETS` を参照）。配信パスそのものを
 # 検査するので、ログインを要らない。
 #
-# **`assets` を持たない Worker では何もしない。** `jq` が空を返すだけで
-# 検査自体が走らない——他の Worker にこの口を揃えるかどうかは、
+# **`assets` を持たない Worker では何もしない。** `"assets"` という文字列
+# すら本文に無ければ、素通りする——他の Worker にこの口を揃えるかどうかは、
 # この issue（#479）では決めない。
+#
+# **`jq` が無い環境で、検査が黙って消えることを許さない（3b のレビュー
+# 指摘、実測）。** `jq` が入っていなければ `jq -r '.assets[]?'` は空文字列を
+# 返し、`2>/dev/null || true` と合わせて**エラーにならず、検査自体が
+# 0 件のまま走らなくなる。** しかも終わりの要約は「すべて本番から引けます」
+# という、何も問題が無かったときと同じ文言を出す——**この PR が
+# `verify_asset_url` で直した「見るべきものが出てこないのに合格に
+# 化ける」のと、まったく同じ形の穴。**
+#
+# 見分け方は「本文に `"assets"` という文字列はあるのに、取り出せた件数が
+# 0 件」かどうか。これなら `jq` が無い場合も、`jq` はあるが応答が壊れた
+# JSON だった場合も、同じ 1 つの条件で拾える。
 health_url="${base}/health"
 health_body="$(curl -sS --max-time 20 "$health_url" 2>/dev/null || true)"
 health_assets="$(printf '%s' "$health_body" | jq -r '.assets[]?' 2>/dev/null || true)"
 health_checked=0
 
-if [ -n "$health_assets" ]; then
-  echo "GET ${health_url}  (assets を直接引く)"
-  while IFS= read -r url; do
-    [ -z "$url" ] && continue
-    checked=$((checked + 1))
-    health_checked=$((health_checked + 1))
-    verify_asset_url "$url" "/health の assets"
-  done <<EOF
+if printf '%s' "$health_body" | grep -q '"assets"'; then
+  if [ -z "$health_assets" ]; then
+    echo "::error::${health_url} の本文に \"assets\" が含まれていますが、1 件も取り出せませんでした。"
+    echo "  jq がインストールされていないか、応答が壊れた JSON になっている可能性があります。"
+    failures=$((failures + 1))
+  else
+    echo "GET ${health_url}  (assets を直接引く)"
+    while IFS= read -r url; do
+      [ -z "$url" ] && continue
+      checked=$((checked + 1))
+      health_checked=$((health_checked + 1))
+      verify_asset_url "$url" "/health の assets"
+    done <<EOF
 ${health_assets}
 EOF
+  fi
 fi
 
 if [ "$failures" -gt 0 ]; then
