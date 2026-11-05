@@ -12,8 +12,17 @@ export default tseslint.config(
       "**/.wrangler/**",
       "**/worker-configuration.d.ts",
       "packages/db/drizzle/**",
-      // クライアントアイランドのバンドル（生成物）。
+      // クライアントアイランドのバンドル（生成物）。`.gitignore` と同じ
+      // 4 本——auth-worker だけを先に書いていて、他 3 Worker が漏れていた
+      // （#470 で `admin-worker/preview-html/` に生成物の JS を書き出す
+      // ようになり、ESLint がそれを拾って気づいた。それまでは `generated/`
+      // がビルド前に存在せず、`preview-html/` も HTML/CSS しか無かったので
+      // 拾われていなかった）。
       "apps/auth-worker/src/presentation/http/ui/generated/**",
+      "apps/dashboard-worker/src/presentation/http/ui/generated/**",
+      "apps/nfc-worker/src/presentation/http/ui/generated/**",
+      "apps/admin-worker/src/presentation/http/ui/generated/**",
+      "apps/admin-worker/preview-html/**",
     ],
   },
   ...tseslint.configs.recommended,

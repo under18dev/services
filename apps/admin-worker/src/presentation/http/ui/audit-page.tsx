@@ -25,7 +25,7 @@ import {
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -40,6 +40,14 @@ import { formatDateTime } from "./format";
  * 形が違う**（`ops.user.suspended` は `reason` を持つが `oauth.code.issued`
  * は持たない）。固定の表で組もうとすると、新しいイベントを足すたびに
  * この画面も直すことになる。
+ *
+ * ## 並べ替え・絞り込み・コピーは `admin-island.ts` が付ける（#470）
+ *
+ * サーバー側の絞り込み（`/audit/search`、イベント名・利用者 ID・結果）は
+ * そのまま残す。**島が足すのはいま画面に出ている分への並べ替えと
+ * 文字列絞り込みだけ**——`ui/client/README.md` を参照。IP ハッシュと
+ * メタデータはコピーボタンを添える。長い文字列を選択でコピーするより
+ * 速い、という後付けの便利さであって、JS が無くても両方そのまま読める。
  */
 
 export type AuditPageProps = {
@@ -81,18 +89,44 @@ const EntryRow: FC<{ readonly entry: AuditLogEntryAdmin }> = ({ entry }) => (
       見せない）が当てはまらない。
     */}
     <TableCell class="whitespace-normal">
-      <span class={ITEM_RAW_CLASS}>{entry.ipHash ?? "—"}</span>
+      {entry.ipHash === null ? (
+        <span class={ITEM_META_CLASS}>—</span>
+      ) : (
+        <div class="flex items-center gap-2">
+          <span class={ITEM_RAW_CLASS}>{entry.ipHash}</span>
+          <button
+            type="button"
+            class="shrink-0 text-xs text-foreground underline underline-offset-4"
+            data-copy={entry.ipHash}
+            hidden
+          >
+            コピー
+          </button>
+        </div>
+      )}
     </TableCell>
     <TableCell class="whitespace-normal">
       {entry.reason === null && entry.metadata === null ? (
         <span class={ITEM_META_CLASS}>—</span>
       ) : (
-        <>
-          {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
+        <div class="flex items-start gap-2">
+          <div>
+            {entry.reason === null ? null : <p class={ITEM_META_CLASS}>{entry.reason}</p>}
+            {entry.metadata === null ? null : (
+              <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
+            )}
+          </div>
           {entry.metadata === null ? null : (
-            <pre class={ITEM_RAW_CLASS}>{JSON.stringify(entry.metadata)}</pre>
+            <button
+              type="button"
+              class="shrink-0 text-xs text-foreground underline underline-offset-4"
+              data-copy={JSON.stringify(entry.metadata)}
+              hidden
+            >
+              コピー
+            </button>
           )}
-        </>
+        </div>
       )}
     </TableCell>
   </TableRow>
@@ -116,11 +150,14 @@ export const AuditPage: FC<AuditPageProps> = ({
     heading="監査ログ"
     lead="u18 で記録されている操作の履歴を調べます。"
     maxWidth="max-w-6xl"
+    scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
       <Card>
         <CardContent>
-          <p class={ITEM_META_CLASS}>{error}</p>
+          <p class={ITEM_META_CLASS} data-notice>
+            {error}
+          </p>
         </CardContent>
       </Card>
     )}
@@ -183,28 +220,43 @@ export const AuditPage: FC<AuditPageProps> = ({
       <CardHeader>
         <CardTitle>新しい順</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent class="flex flex-col gap-3">
         {entries.length === 0 ? (
           <p class={EMPTY_CLASS}>一致する記録はありません。</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>日時</TableHead>
-                <TableHead>イベント</TableHead>
-                <TableHead>結果</TableHead>
-                <TableHead>利用者</TableHead>
-                <TableHead>Worker</TableHead>
-                <TableHead>IP ハッシュ</TableHead>
-                <TableHead>詳細</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((entry) => (
-                <EntryRow entry={entry} />
-              ))}
-            </TableBody>
-          </Table>
+          <>
+            {/*
+              **サーバー側の絞り込み（上のフォーム）とは別物。** こちらは
+              いま表の上に出ている分だけを見る——`ui/client/README.md` の
+              「絞り込み」を参照。
+            */}
+            <input
+              class={INPUT_CLASS}
+              type="search"
+              data-filter="audit-table"
+              placeholder="この一覧から絞り込み"
+              aria-label="この一覧から絞り込み"
+              hidden
+            />
+            <Table id="audit-table" data-sortable>
+              <TableHeader>
+                <TableRow>
+                  <TableHead data-sort="date">日時</TableHead>
+                  <TableHead data-sort="text">イベント</TableHead>
+                  <TableHead>結果</TableHead>
+                  <TableHead>利用者</TableHead>
+                  <TableHead>Worker</TableHead>
+                  <TableHead>IP ハッシュ</TableHead>
+                  <TableHead>詳細</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {entries.map((entry) => (
+                  <EntryRow entry={entry} />
+                ))}
+              </TableBody>
+            </Table>
+          </>
         )}
         {nextCursor === null ? null : (
           <form method="post" action="/audit/search">

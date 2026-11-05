@@ -40,7 +40,11 @@ export const PUBLIC_ROUTES: readonly Route[] = [
  * と同じ形）。`route-inventory.test.ts` が `normalizeAssetHash` で実物を
  * 畳んでから比べる。
  */
-export const ASSET_ROUTES: readonly Route[] = [{ method: "GET", path: "/ui/kiwa.<hash>.css" }];
+export const ASSET_ROUTES: readonly Route[] = [
+  { method: "GET", path: "/ui/kiwa.<hash>.css" },
+  /** 並べ替え・絞り込み・コピー・タブ・通知のアイランド（#470）。 */
+  { method: "GET", path: "/ui/admin-island.<hash>.js" },
+];
 
 /**
  * 外形から確かめられるページ（#447、`scripts/smoke-asset-probe.sh` /
@@ -53,6 +57,25 @@ export const ASSET_ROUTES: readonly Route[] = [{ method: "GET", path: "/ui/kiwa.
  * （`src/presentation/http/app.tsx` の `/callback` ハンドラ）。
  */
 export const PROBE_PAGES: readonly string[] = ["/callback"];
+
+/**
+ * `PROBE_PAGES` だけでは外から確かめられないアセット（#470、
+ * dashboard-worker の `EXTERNALLY_UNVERIFIABLE_ASSETS` と同じ形）。
+ *
+ * **アイランドを読むのはログイン後の画面（`/audit` `/clients`
+ * `/nfc/analytics`）だけ。** `/callback` は失敗画面を 400 で返すだけで、
+ * 並べ替えも絞り込みも無い——アイランドを読まない。
+ *
+ * 書いてあれば、**その配信が壊れても本番検査は気づかない**ことが
+ * 読んだ人に伝わる。
+ */
+export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
+  "/ui/admin-island.<hash>.js":
+    "アイランドを読むのは /audit /clients /nfc/analytics だけで、どれも" +
+    "ログインと承認の両方のガードの内側にある。PROBE_PAGES が未認証で" +
+    "引ける /callback はログイン前の失敗画面で、並べ替え・絞り込み・" +
+    "コピー・通知のどれも持たないため参照しない。",
+};
 
 /**
  * 入口。セッションの有無・承認の有無で `/login` か `/pending` かへ
@@ -84,6 +107,8 @@ export const NAV_PAGE_ROUTES: readonly Route[] = [
    */
   { method: "GET", path: "/nfc/:cardId" },
   { method: "GET", path: "/clients" },
+  /** クライアント詳細（#473）。`/users/:userId` と同じ理由で並びには出さない。 */
+  { method: "GET", path: "/clients/:clientId" },
   { method: "GET", path: "/users" },
   { method: "GET", path: "/users/:userId" },
   { method: "GET", path: "/audit" },

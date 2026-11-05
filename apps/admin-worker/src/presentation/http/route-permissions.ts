@@ -25,6 +25,10 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   // 解析画面（#454）。読み取り専用（タップ時系列・ファネル・バッチ別・死蔵検出）。
   "GET /nfc/analytics": "NFC_READ",
   "GET /clients": "CLIENT_READ",
+  // クライアント詳細（#473）。ADMIN_NAV_GROUPS には出ないが、一覧と
+  // 同じ読み取りなので USER_READ 相当の CLIENT_READ（`GET /users/:userId`
+  // と同じ判断）。
+  "GET /clients/:clientId": "CLIENT_READ",
   "GET /users": "USER_READ",
   // 利用者詳細（#455）。ADMIN_NAV_GROUPS には出ないが、操作ではなく
   // 読み取りなので一覧と同じ USER_READ。

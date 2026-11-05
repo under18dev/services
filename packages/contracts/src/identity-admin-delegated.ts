@@ -182,6 +182,29 @@ export const listOAuthClientsDelegatedInputSchema = z.object({
 export type ListOAuthClientsDelegatedInput = z.infer<typeof listOAuthClientsDelegatedInputSchema>;
 export type ListOAuthClientsDelegatedResult = RpcResult<readonly OAuthClientSummary[]>;
 
+// --------------------------------------------------------- getOAuthClient
+
+/**
+ * クライアント 1 件を引く（admin-worker のクライアント詳細ページ用、#473）。
+ *
+ * **`listOAuthClients` を引いて呼ぶ側で 1 件に絞らないこと。** `getUser`
+ * と同じ判断——画面に出すのは常に 1 行なのに、取得の重さだけが登録数に
+ * 比例する形にしない（`GetUserDelegatedInput` の冒頭を参照）。
+ */
+export const getOAuthClientDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  clientId: z.string().min(1).max(255),
+});
+export type GetOAuthClientDelegatedInput = z.infer<typeof getOAuthClientDelegatedInputSchema>;
+
+/**
+ * **存在しない `clientId` は `not_found`。** `getUser` と同じ意味——
+ * 「管理機能を隠す」ためのものではなく、文字どおり「その行が無い」。
+ *
+ * **呼ぶ側はこれを行き止まりにしないこと。** `getUser` の JSDoc と同じ理由。
+ */
+export type GetOAuthClientDelegatedResult = RpcResult<OAuthClientSummary>;
+
 // ------------------------------------------------------- countOAuthClients
 
 /**
@@ -294,6 +317,11 @@ export interface IdentityAdminDelegatedRpcContract {
     input: RevokeUserSessionsDelegatedInput,
   ): Promise<RevokeUserSessionsDelegatedResult>;
   listOAuthClients(input: ListOAuthClientsDelegatedInput): Promise<ListOAuthClientsDelegatedResult>;
+  /**
+   * クライアント 1 件だけを引く（#473）。**`getUser` と同じ扱い**——
+   * 読み取りなので `actorUserId` の実在確認もせず、監査ログにも書かない。
+   */
+  getOAuthClient(input: GetOAuthClientDelegatedInput): Promise<GetOAuthClientDelegatedResult>;
   countOAuthClients(
     input: CountOAuthClientsDelegatedInput,
   ): Promise<CountOAuthClientsDelegatedResult>;

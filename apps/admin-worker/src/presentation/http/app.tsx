@@ -27,7 +27,8 @@ import { registerClientsRoutes } from "./clients.routes";
 import { registerNfcAnalyticsRoutes } from "./nfc-analytics.routes";
 import { registerNfcCardDetailRoutes, registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
-import { KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
+import { ADMIN_ISLAND_JS } from "./ui/generated/admin-island.bundle";
 import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
 import { HomePage } from "./ui/home-page";
 import { forbiddenPermission, MessagePage } from "./ui/message-page";
@@ -109,7 +110,16 @@ const REQUIRED_ACR = "passkey";
  * これを読むので、セッションより先に配らないと「ログイン画面自体が
  * スタイルを失う」ことになる。
  */
-const PUBLIC_PATHS = new Set(["/health", "/login", "/callback", "/logout", KIWA_STYLESHEET_PATH]);
+const PUBLIC_PATHS = new Set([
+  "/health",
+  "/login",
+  "/callback",
+  "/logout",
+  KIWA_STYLESHEET_PATH,
+  // 並べ替え・絞り込み・コピー・タブ・通知のアイランド（#470）。CSS と
+  // 同じ理由——個人情報を含まず、全員に同じ中身を配る。
+  ISLAND_PATH,
+]);
 
 /** 承認待ちの画面。ログイン済みだが承認リストに無い人の行き先。ガードの対象外。 */
 const PENDING_PATH = "/pending";
@@ -265,6 +275,22 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
   app.get(KIWA_STYLESHEET_PATH, (c) =>
     c.body(KIWA_STYLESHEET, 200, {
       "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
+    }),
+  );
+
+  /**
+   * 並べ替え・絞り込み・コピー・タブ・通知のアイランド（#470）。
+   *
+   * URL に内容ハッシュが入っているので `immutable` で配信してよい
+   * （`asset-paths.ts`）。`PUBLIC_PATHS` にも入れてある——セッション/権限の
+   * 2 本のガードより先に通す必要がある。入れ忘れると、ログイン済みの
+   * 運営がこのファイルを読むたびに 403 になる（宣言の無いルートは既定
+   * 拒否のため）。
+   */
+  app.get(ISLAND_PATH, (c) =>
+    c.body(ADMIN_ISLAND_JS, 200, {
+      "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
     }),
   );

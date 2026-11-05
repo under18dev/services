@@ -2,6 +2,7 @@ import {
   countOAuthClientsDelegatedInputSchema,
   createOAuthClientDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
+  getOAuthClientDelegatedInputSchema,
   getUserDelegatedInputSchema,
   getUsersByIdsDelegatedInputSchema,
   listAuditLogsDelegatedInputSchema,
@@ -20,6 +21,8 @@ import {
   type CreateOAuthClientDelegatedResult,
   type DisableOAuthClientDelegatedInput,
   type DisableOAuthClientDelegatedResult,
+  type GetOAuthClientDelegatedInput,
+  type GetOAuthClientDelegatedResult,
   type GetUserDelegatedInput,
   type GetUserDelegatedResult,
   type GetUsersByIdsDelegatedInput,
@@ -222,6 +225,28 @@ export class IdentityAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk(result.value.map(toClientSummary));
+  }
+
+  /**
+   * クライアント 1 件（#473）。**`listOAuthClients` の結果から呼び出し側が
+   * 絞るのではなく、主キーで引く**——理由は契約の `GetOAuthClientDelegatedInput`
+   * の冒頭。
+   *
+   * 存在しない `clientId` は `not_found`。
+   */
+  async getOAuthClient(
+    input: GetOAuthClientDelegatedInput,
+  ): Promise<GetOAuthClientDelegatedResult> {
+    const parsed = getOAuthClientDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedGetOAuthClient.execute({
+      clientId: parsed.data.clientId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk(toClientSummary(result.value));
   }
 
   async countOAuthClients(

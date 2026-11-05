@@ -22,7 +22,7 @@ import {
 import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -34,15 +34,17 @@ import { formatDateTime } from "./format";
  * 変わったのは呼び方（セッション Cookie 経由の UseCase →
  * `IdentityAdminDelegatedRPC` 経由）と置き場所だけ。
  *
- * ## この画面は JS を 1 行も要求しない（移行元と同じ理由）
+ * ## 登録・失効の本体は JS を 1 行も要求しない（移行元と同じ理由）
  *
- * 一覧も登録も失効も**ただの form POST** である。アイランドを読まないのは、
- * **`client_secret` が 1 度しか返らない**ことと直結している —— JS の有無で
- * 出し分けると、**登録だけ済んで秘密を受け取れない**利用者が出る。秘密は
- * サーバーが描き、ブラウザは表示するだけ。
+ * 一覧も登録も失効も**ただの form POST** である。**#470 でアイランドを
+ * 読むようになったが、どれも後付けの便利さ（絞り込み・コピー）でしかない
+ * ——登録・失効の成否には関わらない。** `client_secret` が 1 度しか
+ * 返らないことと直結する判断はそのまま: JS の有無で出し分けると、
+ * **登録だけ済んで秘密を受け取れない**利用者が出る。秘密はサーバーが描き、
+ * ブラウザは表示するだけ。
  *
- * コピーボタンを後から足すならアイランドでよい。**値そのものをアイランドに
- * 描かせないこと。**
+ * コピーボタンはアイランドが有効化するだけ。**値そのものはサーバーが
+ * 描き、アイランドには持たせない。**
  *
  * ## `client_secret` を URL に載せない（移行元と同じ理由）
  *
@@ -66,6 +68,15 @@ import { formatDateTime } from "./format";
  * `isAdmin` と `AdminNotFoundPage` を持っていた。admin-worker は承認済みの
  * 運営だけが `app.ts` のガードを通って辿り着く別アプリなので、ここへ来る
  * 時点で全員が運営である（`nfc-page.tsx` と同じ判断）。
+ *
+ * ## 絞り込みとコピーは `admin-island.ts` が付ける（#470）
+ *
+ * 一覧は `<ul>` であって `<table>` ではない——`data-filter` をテーブルに
+ * 限定しなかった理由がこれ（`ui/client/README.md` を参照）。`client_id` /
+ * `client_secret` にコピーボタンを添える。**`client_secret` の値自体は
+ * サーバーが描く。** JS はボタンを有効化するだけで、値をアイランドに
+ * 持たせない（冒頭の「コピーボタンを後から足すならアイランドでよい。
+ * 値そのものをアイランドに描かせないこと」のとおり）。
  */
 
 export type CreatedClient = {
@@ -126,7 +137,17 @@ const SecretOnce: FC<{ readonly created: CreatedClient }> = ({ created }) => (
           */}
           <label class={FIELD_CLASS}>
             <span class={LABEL_CLASS}>client_secret</span>
-            <input class={INPUT_CLASS} type="text" readonly value={created.clientSecret} />
+            <div class="flex items-center gap-2">
+              <input class={INPUT_CLASS} type="text" readonly value={created.clientSecret} />
+              <button
+                type="button"
+                class="shrink-0 text-sm text-foreground underline underline-offset-4"
+                data-copy={created.clientSecret}
+                hidden
+              >
+                コピー
+              </button>
+            </div>
           </label>
           <p class={ITEM_META_CLASS}>
             控えそこねた場合は、このクライアントを失効させて別の client_id で登録し直してください。
@@ -134,7 +155,17 @@ const SecretOnce: FC<{ readonly created: CreatedClient }> = ({ created }) => (
         </div>
       )}
       <Separator />
-      <p class={ITEM_RAW_CLASS}>client_id: {created.client.clientId}</p>
+      <div class="flex items-center gap-2">
+        <p class={ITEM_RAW_CLASS}>client_id: {created.client.clientId}</p>
+        <button
+          type="button"
+          class="shrink-0 text-xs text-foreground underline underline-offset-4"
+          data-copy={created.client.clientId}
+          hidden
+        >
+          コピー
+        </button>
+      </div>
     </CardContent>
   </Card>
 );
@@ -151,7 +182,17 @@ const ClientRow: FC<{ readonly client: OAuthClientSummary; readonly csrfToken: s
       {client.clientType === "public" ? <Badge variant="outline">public</Badge> : null}
       {client.disabledAt === null ? null : <Badge variant="destructive">失効済み</Badge>}
     </div>
-    <p class={ITEM_RAW_CLASS}>{client.clientId}</p>
+    <div class="flex items-center gap-2">
+      <p class={ITEM_RAW_CLASS}>{client.clientId}</p>
+      <button
+        type="button"
+        class="shrink-0 text-xs text-foreground underline underline-offset-4"
+        data-copy={client.clientId}
+        hidden
+      >
+        コピー
+      </button>
+    </div>
     <p class={ITEM_META_CLASS}>
       登録 {formatDateTime(client.createdAt)}
       {client.disabledAt === null ? "" : ` / 失効 ${formatDateTime(client.disabledAt)}`}
@@ -250,18 +291,23 @@ export const ClientsPage: FC<ClientsPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="OAuth クライアント"
     lead="u18 でログインできるアプリの登録と失効を行います。"
+    scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
       <Card>
         <CardContent>
-          <p class={ITEM_META_CLASS}>{error}</p>
+          <p class={ITEM_META_CLASS} data-notice>
+            {error}
+          </p>
         </CardContent>
       </Card>
     )}
     {notice === undefined ? null : (
       <Card>
         <CardContent>
-          <p class={ITEM_META_CLASS}>{notice}</p>
+          <p class={ITEM_META_CLASS} data-notice>
+            {notice}
+          </p>
         </CardContent>
       </Card>
     )}
@@ -334,11 +380,21 @@ export const ClientsPage: FC<ClientsPageProps> = ({
         {clients.length === 0 ? (
           <p class={EMPTY_CLASS}>まだ登録されていません。</p>
         ) : (
-          <ul class={LIST_CLASS}>
-            {clients.map((client) => (
-              <ClientRow client={client} csrfToken={csrfToken} />
-            ))}
-          </ul>
+          <div class="flex flex-col gap-3">
+            <input
+              class={INPUT_CLASS}
+              type="search"
+              data-filter="clients-list"
+              placeholder="この一覧から絞り込み"
+              aria-label="この一覧から絞り込み"
+              hidden
+            />
+            <ul id="clients-list" class={LIST_CLASS}>
+              {clients.map((client) => (
+                <ClientRow client={client} csrfToken={csrfToken} />
+              ))}
+            </ul>
+          </div>
         )}
       </CardContent>
     </Card>

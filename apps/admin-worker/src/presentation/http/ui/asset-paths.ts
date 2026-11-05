@@ -13,8 +13,18 @@
  * 文字列を書き写さないこと。ここを import すれば常に正しい値になる。
  */
 import { hashedFileName } from "@u18/web-ui";
+import { ADMIN_ISLAND_JS } from "./generated/admin-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 
 /** admin-worker はルート直下に載る（`/account` 接頭辞を持たない別オリジン）。 */
 export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
 export const KIWA_STYLESHEET_PATH = KIWA_STYLESHEET_ROUTE;
+
+/**
+ * 並べ替え・絞り込み・コピー・タブ・通知のアイランド（#470）。
+ *
+ * **個人情報を含まない。** CSS と同じく全利用者（運営）に同じ中身で、
+ * `PUBLIC_PATHS` にも入れてよい——`app.tsx` を参照。
+ */
+export const ISLAND_ROUTE = `/ui/${hashedFileName("admin-island.js", ADMIN_ISLAND_JS)}`;
+export const ISLAND_PATH = ISLAND_ROUTE;
