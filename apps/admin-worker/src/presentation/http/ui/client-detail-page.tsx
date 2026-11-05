@@ -29,7 +29,7 @@ import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { UserRef } from "./user-ref";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -40,14 +40,16 @@ import { formatDateTime } from "./format";
  * 二択で、`#441` で持ち主を持たせてもその持ち主が誰なのかは生の ID でしか
  * 出なかった。この画面はその 1 件を、他の行を気にせず確かめる場所。
  *
- * ## タブは #470 の `data-tabs` に合わせる予定（まだ繋がない）
+ * ## タブ（#470 の `data-tabs`、admin-island.ts の `attachTabs`）
  *
- * `<section data-panel="key">` を 4 つ並べているが、**`<button data-tab>`
- * の選択用ボタンはまだ置いていない。** タブの見本（2b が用意）が出て
- * いないので、押しても何も起きないボタンを残さないため（JS の無い間は
- * 縦に並ぶだけで成立する）。見出しの文言（概要 / redirect_uri /
- * 監査ログ / 操作）は、そのままタブのラベルになる前提で短くしてある
- * ——繋ぐ段になって文言を変えずに済むように。
+ * `<section data-panel="key">` の 4 枚に `<button data-tab="key">` の
+ * 選択列を足した（`ui/client/README.md` の見本と同じ markup・
+ * クラス）。見出しの文言（概要 / redirect_uri / 監査ログ / 操作）を
+ * そのままタブのラベルに使っている——見出しを先に短く整えておいたのは
+ * このため。
+ *
+ * **JS が無ければ 4 枚とも見出し付きで縦に並ぶ**（`attachTabs` は
+ * `hidden` を JS 側からしか付けない、README の絶対条件）。
  */
 
 export type ClientDetailPageProps = {
@@ -149,6 +151,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
     heading="クライアントの詳細"
     lead="1 件のクライアントを確かめてから、同じ画面で操作できます。"
     maxWidth="max-w-6xl"
+    scripts={[ISLAND_PATH]}
   >
     <div>
       <a href="/clients" class="text-sm text-foreground-muted underline underline-offset-4">
@@ -176,6 +179,40 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
     )}
 
     <div data-tabs>
+      <div
+        role="tablist"
+        class="flex gap-2 border-b border-border"
+        aria-label="クライアントの詳細のタブ"
+      >
+        <button
+          type="button"
+          data-tab="overview"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
+          概要
+        </button>
+        <button
+          type="button"
+          data-tab="redirect-uris"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
+          redirect_uri
+        </button>
+        <button
+          type="button"
+          data-tab="audit"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
+          監査ログ
+        </button>
+        <button
+          type="button"
+          data-tab="operations"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+        >
+          操作
+        </button>
+      </div>
       <Card data-panel="overview">
         <CardHeader>
           <CardTitle>

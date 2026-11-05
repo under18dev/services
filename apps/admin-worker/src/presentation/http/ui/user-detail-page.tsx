@@ -29,7 +29,7 @@ import type { FC } from "hono/jsx";
 import { CSRF_FIELD_NAME } from "../csrf";
 import type { SuspensionOrigin } from "../suspension-origin";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
 
 /**
@@ -405,6 +405,7 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
     heading="利用者の詳細"
     lead="状態と記録を確かめてから、同じ画面で操作できます。"
     maxWidth="max-w-6xl"
+    scripts={[ISLAND_PATH]}
   >
     {/*
       **一覧へ戻る導線を上にも置く。** サイドバーの「利用者」でも戻れるが、

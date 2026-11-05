@@ -3,7 +3,13 @@ import { collectAssetRefs, normalizeAssetHash } from "@u18/web-ui";
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
-import { ASSET_ROUTES, EXTERNALLY_UNVERIFIABLE_ASSETS, PROBE_PAGES } from "./route-inventory";
+import { ISLAND_PATH } from "../src/presentation/http/ui/asset-paths";
+import {
+  ASSET_ROUTES,
+  EXTERNALLY_UNVERIFIABLE_ASSETS,
+  NAV_PAGE_ROUTES,
+  PROBE_PAGES,
+} from "./route-inventory";
 import {
   executionContext,
   fakeApprovals,
@@ -92,9 +98,15 @@ describe("本番検査が引くページで、アセットを全部覆える", (
 describe("ログイン後の画面を合わせると、アイランドまで覆える", () => {
   /**
    * アイランドを読む 3 画面（#470: `/audit` `/clients` `/nfc/analytics`）
-   * だけを引く。**`/nfc` `/users` `/approvals` は引かない**
-   * ——そちらにアイランドを足したのは別 issue（#471〜）で、ここで
-   * 必要な fake を増やすと「このテストが見たいもの」がぼやける。
+   * だけを引く。**`/nfc` `/users` `/approvals` は引かない**——こちらが見るのは
+   * 「`EXPECTED_ASSETS` を過不足なく覆っているか」で、fake を増やすと
+   * 「このテストが見たいもの」がぼやける。
+   *
+   * **`/nfc` `/users` `/users/:userId` に `ISLAND_PATH` が無いこと自体は、
+   * この後の「data-* を使う画面は ISLAND_PATH も読む」が全画面に対して
+   * 見ている。** 実際に #471 がその 3 画面へ `data-sortable` 等を足した
+   * 時点で `ISLAND_PATH` を読んでおらず、本番でコピーボタン・絞り込み欄が
+   * 永久に `hidden` のままだった（指摘: 3b、#480 のレビューで発覚）。
    */
   it("/audit /clients /nfc/analytics の参照が、宣言したアセットを全部覆う", async () => {
     const seen = new Set<string>();
@@ -142,5 +154,166 @@ describe("ログイン後の画面を合わせると、アイランドまで覆�
     }
 
     expect([...seen].sort()).toEqual(expect.arrayContaining(EXPECTED_ASSETS));
+  });
+});
+
+/**
+ * `data-sortable` / `data-filter` / `data-copy` / `data-tabs` を使う画面は、
+ * `ISLAND_PATH` も読んでいること（指摘: 3b、#480 のレビューで発覚）。
+ *
+ * ## 片方だけ足せる状態が本体の問題
+ *
+ * `data-copy` の付いたボタンも `data-filter` の付いた入力欄も、**サーバーは
+ * `hidden` で描き、JS が外す約束**（`ui/client/README.md` の絶対条件）。
+ * アイランドを読まない画面にこの属性だけ足すと、**要素は一生 `hidden` の
+ * ままで、運用者からは「そもそも無い」のと区別が付かない。**
+ *
+ * 実際に、#471 が `nfc-page.tsx` / `users-page.tsx` / `user-detail-page.tsx`
+ * へこの属性を足した時点ではまだ `ISLAND_PATH` 自体が存在せず（#470 より
+ * 前にマージされたため）、#470 が後から `ISLAND_PATH` を作ったときに
+ * この 3 画面を見直す仕組みが無かった。レビューでも見逃された。
+ *
+ * ## 決め打ちで直すのではなく、全画面を実際にレンダリングして突き合わせる
+ *
+ * `route-inventory.ts` の `NAV_PAGE_ROUTES`（承認済みの管理者が辿り着く
+ * 全 GET ページ）を実際に引き、**属性が 1 つでもあれば `ISLAND_PATH` も
+ * あること**を見る。新しい画面が `data-copy` 等を足したときに、ここが
+ * 自動で気づく——`route-inventory.test.ts` が「登録されているルート」を
+ * 二方向で突き合わせているのと同じ考え方。
+ */
+describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は、必ず ISLAND_PATH も読む", () => {
+  const TARGET_USER_ID = "usr_island_coverage_target";
+  const TARGET_CLIENT_ID = "app_island_coverage_target";
+
+  /**
+   * **0 件ではなく 1 件を返す。** `data-sortable` / `data-filter` /
+   * `data-copy` は一覧が空のときは出ない画面がほとんど（`cards.length
+   * === 0` 等の分岐で空状態の文言に差し替わる）——0 件のまま検査すると、
+   * どの画面も属性を 1 つも出さないまま「ISLAND_PATH が無くても通る」
+   * 検査になってしまう。実際、最初にこの検査を書いたときは 0 件のままで
+   * 書いてしまい、`nfc-page.tsx` から `scripts` を一時的に外しても検査が
+   * 落ちなかった（ネガティブ確認で気づいた）。
+   */
+  function overridesFor(approvals: ReturnType<typeof fakeApprovals>) {
+    const card = {
+      cardId: "nfc_island_coverage",
+      status: "active" as const,
+      ownerUserId: TARGET_USER_ID,
+      targetUrl: "https://go.under18.dev/c/nfc_island_coverage",
+      batch: null,
+      issuedAt: "2026-01-01T00:00:00.000Z",
+      claimedAt: "2026-01-02T00:00:00.000Z",
+      disabledAt: null,
+    };
+    const user = {
+      id: TARGET_USER_ID,
+      username: "island-coverage",
+      displayName: "Island Coverage",
+      primaryEmail: "island-coverage@example.test",
+      emailVerified: true,
+      status: "active" as const,
+      hasAdminFlag: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const client = {
+      clientId: TARGET_CLIENT_ID,
+      name: "Island Coverage Client",
+      clientType: "public" as const,
+      isFirstParty: false,
+      logoUrl: null,
+      redirectUris: ["https://example.test/callback"],
+      scopes: ["openid"],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      disabledAt: null,
+      ownerUserId: null,
+      appUrl: null,
+    };
+    const auditEntry = {
+      id: "aud_island_coverage",
+      event: "oauth.client.created",
+      userId: TARGET_USER_ID,
+      actor: "admin-worker",
+      outcome: "success" as const,
+      reason: null,
+      metadata: null,
+      ipHash: null,
+      userAgent: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    return {
+      approvals,
+      nfcCards: {
+        ...minimalNfcCards(),
+        listAllCards: async () => rpcOk({ cards: [card], truncated: false }),
+        listCardsByOwner: async () => rpcOk({ cards: [card] }),
+        tapTimeseries: async () =>
+          rpcOk({
+            dailyTotals: [],
+            totalTaps: 0,
+            dailyAverage: 0,
+            maxDay: null,
+            retentionDays: 180,
+          }),
+        usageFunnel: async () =>
+          rpcOk({ issued: 0, claimedEver: 0, tappedEver: 0, retentionDays: 180 }),
+        batchAnalytics: async () => rpcOk({ rows: [] }),
+        cardUsageRanking: async () => rpcOk({ ranking: [], dormant: { count: 0, rows: [] } }),
+        disabledReasonBreakdown: async () => rpcOk({ rows: [] }),
+        transferCountDistribution: async () => rpcOk({ zero: 0, one: 0, two: 0, threeOrMore: 0 }),
+      },
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        listUsers: async () => rpcOk({ users: [user], nextCursor: null }),
+        getUser: async () => rpcOk(user),
+        listOAuthClients: async () => rpcOk([client]),
+        getOAuthClient: async () => rpcOk(client),
+        listAuditLogs: async () => rpcOk({ entries: [auditEntry], nextCursor: null }),
+      },
+    };
+  }
+
+  it("NAV_PAGE_ROUTES の全 GET ページで、属性が無いか ISLAND_PATH もあるかのどちらか", async () => {
+    const sub = "usr_island_coverage";
+    const approvals = fakeApprovals([sub]);
+    const overrides = overridesFor(approvals);
+    const cookie = await loginAs(sub, approvals, overrides);
+
+    const paths = NAV_PAGE_ROUTES.filter((route) => route.method === "GET").map((route) =>
+      route.path.replace(":userId", TARGET_USER_ID).replace(":clientId", TARGET_CLIENT_ID),
+    );
+    // 0 件だと下の assertion が何も確かめずに通る。
+    expect(paths.length).toBeGreaterThan(0);
+
+    const MARKERS = ["data-sortable", "data-filter", "data-copy", "data-tabs"];
+    const pagesWithMarkers: string[] = [];
+
+    for (const path of paths) {
+      const response = await createApp(overrides).fetch(
+        new Request(`${ORIGIN}${path}`, { headers: { Cookie: cookie } }),
+        env,
+        executionContext(),
+      );
+      expect(response.status, `${path} が 200 を返さない`).toBe(200);
+
+      const html = await response.text();
+      const usesIslandAttr = MARKERS.some((marker) => html.includes(marker));
+      if (usesIslandAttr) {
+        pagesWithMarkers.push(path);
+        expect(
+          html,
+          `${path} は data-sortable/data-filter/data-copy/data-tabs のいずれかを使うのに、ISLAND_PATH を読んでいない`,
+        ).toContain(ISLAND_PATH);
+      }
+    }
+
+    // **属性を 1 つも見なかったら、上のループは何も確かめずに通っている。**
+    // 1 件ずつ fake を用意したのはこのため——0 件のままだと空状態の文言に
+    // 差し替わり、どの画面も属性を出さない（このテストを書いた直後に
+    // ネガティブ確認で踏んだ）。
+    expect(
+      pagesWithMarkers.length,
+      "どのページも data-sortable/data-filter/data-copy/data-tabs を含んでいない——fake のデータが空のままになっていないか確認すること",
+    ).toBeGreaterThan(0);
   });
 });
