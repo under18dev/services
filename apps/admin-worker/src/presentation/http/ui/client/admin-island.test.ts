@@ -186,13 +186,42 @@ describe("attachSelection", () => {
     expect(document.querySelector('[data-select-count="cards"]')?.textContent).toBe("0 件選択中");
   });
 
-  it("チェックすると件数が増える", () => {
+  it("チェックすると件数が増える（マイクロタスク 1 回を待つ）", async () => {
     buildTable();
     attachSelection("cards");
     const [a] = document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]');
     a!.checked = true;
     a!.dispatchEvent(new Event("change"));
+    // **`recount()` はマイクロタスクへまとめている**（500 行での実測、
+    // #481 のレビュー）。同期で読むと更新前の値のままになる。
+    await Promise.resolve();
     expect(document.querySelector('[data-select-count="cards"]')?.textContent).toBe("1 件選択中");
+  });
+
+  it("同じ同期区間で何度 change が来ても recount は 1 回にまとめる", async () => {
+    buildTable();
+    attachSelection("cards");
+    const boxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]'),
+    );
+    const counter = document.querySelector('[data-select-count="cards"]')!;
+    let observedCount = 0;
+    const observer = new MutationObserver(() => {
+      observedCount += 1;
+    });
+    observer.observe(counter, { characterData: true, childList: true, subtree: true });
+
+    for (const box of boxes) {
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    }
+    await Promise.resolve();
+    observer.disconnect();
+
+    expect(counter.textContent).toBe("3 件選択中");
+    // 3 回の change に対して、書き換えは 1 回だけ（質的な確認。回数の
+    // 厳密な上限ではなく「3 回起きていない」ことだけを見る）。
+    expect(observedCount).toBeLessThan(boxes.length);
   });
 
   it("全選択は hidden を外し、全部チェックする", () => {
@@ -224,12 +253,13 @@ describe("attachSelection", () => {
     expect(Array.from(boxes).map((b) => b.checked)).toEqual([true, true, false]);
   });
 
-  it("一部だけ選ばれていると全選択は indeterminate になる", () => {
+  it("一部だけ選ばれていると全選択は indeterminate になる", async () => {
     buildTable();
     attachSelection("cards");
     const [a] = document.querySelectorAll<HTMLInputElement>('input[data-select="cards"]');
     a!.checked = true;
     a!.dispatchEvent(new Event("change"));
+    await Promise.resolve();
 
     const selectAll = document.querySelector<HTMLInputElement>('input[data-select-all="cards"]')!;
     expect(selectAll.indeterminate).toBe(true);
