@@ -57,8 +57,17 @@ export class DelegatedListAllCardsUseCase {
     private readonly cardTaps: CardTapRecorder,
   ) {}
 
-  async execute(): Promise<NfcOutcome<AdminCardList>> {
-    const rows = await this.cards.listAll(MAX_ADMIN_LIST);
+  /**
+   * `batch` を渡すと、打ち切り（`MAX_ADMIN_LIST`）の前にロット名で絞る
+   * （#481）。`listAll` 自体が WHERE 句で絞ってから `limit + 1` 件を取る
+   * ので、`truncated` は「そのロットの中で」打ち切ったかを指す——
+   * `AdminCardList.truncated` の JSDoc と同じ注記。
+   */
+  async execute(input: { readonly batch?: string } = {}): Promise<NfcOutcome<AdminCardList>> {
+    const rows = await this.cards.listAll(
+      MAX_ADMIN_LIST,
+      input.batch === undefined ? {} : { batch: input.batch },
+    );
     const truncated = rows.length > MAX_ADMIN_LIST;
     const page = rows.slice(0, MAX_ADMIN_LIST);
 

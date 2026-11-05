@@ -141,9 +141,47 @@ export type AdminCardViewDelegated = {
   readonly disabledAt: string | null;
 };
 
+/**
+ * 全カードの一覧（`/nfc`）だけで使う形（#481「並べ替えにタップ数を足す」）。
+ *
+ * **`AdminCardViewDelegated` に `tapCount` を直接足さない。**
+ * `ListCardsByOwnerDelegatedResult` が同じ `AdminCardViewDelegated` を
+ * 使い回していて、あちらは**所有者で引いたカードにタップ回数を乗せない**
+ * ことを型で保証している（この型の宣言の下の JSDoc を参照）——共有の型へ
+ * 足すと、その保証を黙って崩す。全カードの一覧にだけ要るので、専用の型を
+ * 別に起こす。
+ */
+export type AdminCardListViewDelegated = AdminCardViewDelegated & {
+  /** タップされた回数の合計（#394）。所有者には見せない——この一覧にだけ乗せる。 */
+  readonly tapCount: number;
+};
+
+/**
+ * `listAllCards` の入力（#481）。**全部省略可。** 省略すれば、これまでと
+ * 同じ「全カード」の一覧になる。
+ */
+export const listAllCardsDelegatedInputSchema = z.object({
+  /**
+   * ロット名で絞り込む（完全一致）。**クライアント側の絞り込み（#470）と
+   * 違い、`MAX_ADMIN_LIST` で打ち切る前に効く。** `/nfc/analytics` の
+   * バッチ別の表から「このロットの N 枚を見る」に辿り着く唯一の経路
+   * （issue #481 への追記）。
+   */
+  batch: z.string().min(1).max(64).optional(),
+});
+
+export type ListAllCardsDelegatedInput = z.infer<typeof listAllCardsDelegatedInputSchema>;
+
 export type ListAllCardsDelegatedResult = RpcResult<{
-  readonly cards: readonly AdminCardViewDelegated[];
-  /** 上限で打ち切ったか。true なら画面にそう出すこと（セッション版と同じ判断）。 */
+  readonly cards: readonly AdminCardListViewDelegated[];
+  /**
+   * 上限で打ち切ったか。true なら画面にそう出すこと（セッション版と同じ判断）。
+   *
+   * **`batch` を渡したときは「そのロットの中で」打ち切ったかの意味になる。**
+   * 全カードの打ち切りとは別の質問——`batch` 指定時にこれが true でも、
+   * 他のロットのカードが読めていないわけではない。画面側がこの違いを
+   * 読み違えないこと（3b のレビュー、issue #481）。
+   */
   readonly truncated: boolean;
 }>;
 
@@ -441,8 +479,13 @@ export interface NfcAdminDelegatedRpcContract {
   reinstateBatchToIssuedCards(
     input: ReinstateBatchToIssuedCardsDelegatedInput,
   ): Promise<ReinstateBatchToIssuedCardsDelegatedResult>;
-  /** 全カードの一覧。入力は無い——引数を受け取っても検証するものが無い。 */
-  listAllCards(): Promise<ListAllCardsDelegatedResult>;
+  /**
+   * 全カードの一覧。**`input` は省略できる**——省略すれば従来どおり
+   * 全カード。`batch` を渡せば、`MAX_ADMIN_LIST` の打ち切りの前にロット名
+   * で絞り込む（#481）。`actorUserId` は受け取らない——他の読み取り専用
+   * メソッドと同じ判断。
+   */
+  listAllCards(input?: ListAllCardsDelegatedInput): Promise<ListAllCardsDelegatedResult>;
   /** 状態ごとの枚数。入力は無い（#449）。 */
   countCards(): Promise<CountCardsDelegatedResult>;
   /**

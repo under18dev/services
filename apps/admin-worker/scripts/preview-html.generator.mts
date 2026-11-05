@@ -12,6 +12,7 @@ import type {
   GetUserDelegatedInput,
   GetUsersByIdsDelegatedInput,
   IdentityAdminDelegatedRpcContract,
+  ListAllCardsDelegatedInput,
   ListAuditLogsDelegatedInput,
   ListCardsByOwnerDelegatedInput,
   ListUsersDelegatedInput,
@@ -414,7 +415,14 @@ const nfcCards: NfcAdminDelegatedRpcContract = {
   reinstateBatchToIssuedCards: unused("reinstateBatchToIssuedCards"),
   countDisabledInBatch: unused("countDisabledInBatch"),
   issueCards: unused("issueCards"),
-  listAllCards: async () => rpcOk({ cards: CARDS, truncated: false }),
+  listAllCards: async (input?: ListAllCardsDelegatedInput) => {
+    const filtered =
+      input?.batch === undefined ? CARDS : CARDS.filter((c) => c.batch === input.batch);
+    return rpcOk({
+      cards: filtered.map((c) => ({ ...c, tapCount: cardDetailFor(c).tapCount })),
+      truncated: false,
+    });
+  },
   listCardsByOwner: async (input: ListCardsByOwnerDelegatedInput) =>
     rpcOk({ cards: CARDS.filter((c) => c.ownerUserId === input.ownerUserId) }),
   countCards: async () =>

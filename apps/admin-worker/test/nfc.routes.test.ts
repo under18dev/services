@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
-  AdminCardViewDelegated,
+  AdminCardListViewDelegated,
   BatchDisableCardsDelegatedInput,
   CardTapHistoryDelegatedInput,
   CountBatchIssuedCardsDelegatedInput,
@@ -42,7 +42,7 @@ import {
 
 const SUB = "usr_admin_nfc";
 
-function card(overrides: Partial<AdminCardViewDelegated> = {}): AdminCardViewDelegated {
+function card(overrides: Partial<AdminCardListViewDelegated> = {}): AdminCardListViewDelegated {
   return {
     cardId: "nfc_0001",
     status: "issued",
@@ -52,6 +52,7 @@ function card(overrides: Partial<AdminCardViewDelegated> = {}): AdminCardViewDel
     issuedAt: "2026-10-01T00:00:00.000Z",
     claimedAt: null,
     disabledAt: null,
+    tapCount: 0,
     ...overrides,
   };
 }
