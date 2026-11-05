@@ -458,6 +458,54 @@ describe("GET /clients/:clientId（#473）", () => {
     expect(html).not.toContain("いま監査ログを取得できません");
   });
 
+  it("持ち主と、監査ログの「操作した管理者」の両方を名前で出す（#482）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", ownerUserId: "usr_owner" })),
+      listAuditLogs: async (input) => {
+        if (input.event === "oauth.client.created") {
+          return rpcOk({
+            entries: [
+              {
+                id: "aud_1",
+                event: "oauth.client.created",
+                userId: "usr_admin",
+                actor: "admin-worker",
+                outcome: "success",
+                reason: null,
+                metadata: null,
+                ipHash: null,
+                userAgent: null,
+                createdAt: "2026-10-01T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          });
+        }
+        return rpcOk({ entries: [], nextCursor: null });
+      },
+      getUsersByIds: async () =>
+        rpcOk([
+          { id: "usr_owner", username: "owner", displayName: "持ち主", status: "active" },
+          { id: "usr_admin", username: "admin", displayName: "管理者", status: "active" },
+        ]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("持ち主 (@owner)");
+    expect(html).toContain("管理者 (@admin)");
+    expect(html).toContain('href="/users/usr_owner"');
+    expect(html).toContain('href="/users/usr_admin"');
+  });
+
   it("存在しない clientId は 404 で一覧へ戻す道を示す（行き止まりにしない）", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
@@ -1034,15 +1082,18 @@ describe("POST /clients/disable", () => {
   });
 });
 
-describe("GET /clients（持ち主の表示）", () => {
-  it("持ち主がいれば生の userId を出し、いなければ — を出す", async () => {
+describe("GET /clients（持ち主の表示、#482）", () => {
+  it("持ち主を名前で出す。解決できなければ ID の先頭だけ、いなければ — を出す", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
       listOAuthClients: async () =>
         rpcOk([
           client({ clientId: "app_owned", ownerUserId: "usr_alice" }),
+          client({ clientId: "app_unresolved", ownerUserId: "usr_does_not_resolve" }),
           client({ clientId: "app_unowned", ownerUserId: null }),
         ]),
+      getUsersByIds: async () =>
+        rpcOk([{ id: "usr_alice", username: "alice", displayName: "アリス", status: "active" }]),
     });
     const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
 
@@ -1053,8 +1104,12 @@ describe("GET /clients（持ち主の表示）", () => {
     );
 
     const html = await response.text();
-    expect(html).toContain("持ち主: usr_alice");
-    expect(html).toContain("持ち主: —");
+    expect(html).toContain("アリス (@alice)");
+    expect(html).toContain('href="/users/usr_alice"');
+    // **「不明」と書かない**（#471 と同じ方針）。先頭 8 文字 + `…` を出す。
+    expect(html).toContain("usr_does…");
+    expect(html).not.toContain("持ち主: usr_does_not_resolve");
+    expect(html).toContain("持ち主: <span");
   });
 });
 

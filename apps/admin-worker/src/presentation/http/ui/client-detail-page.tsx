@@ -37,8 +37,9 @@ import { formatDateTime } from "./format";
  *
  * **`clients-page.tsx`（一覧）には「1 件だけを確かめる場所」が無かった。**
  * `redirect_uris` も scope も作成日も、一覧の行の中に畳むか出さないかの
- * 二択で、`#441` で持ち主を持たせてもその持ち主が誰なのかは生の ID でしか
- * 出なかった。この画面はその 1 件を、他の行を気にせず確かめる場所。
+ * 二択だった。`#441` で持ち主を持たせたが、その持ち主が誰なのかは
+ * 生の ID でしか出なかった（一覧側も同様だったが、#482 で両方とも
+ * 名前に変わった）。この画面はその 1 件を、他の行を気にせず確かめる場所。
  *
  * ## タブ（#470 の `data-tabs`、admin-island.ts の `attachTabs`）
  *
@@ -55,8 +56,16 @@ import { formatDateTime } from "./format";
 export type ClientDetailPageProps = {
   readonly csrfToken: string;
   readonly client: OAuthClientSummary;
-  /** 持ち主の名前解決（#471、`resolveUserRefs` が束ねる）。`UserRef` が出し分ける。 */
-  readonly ownerRefs: ReadonlyMap<string, UserRefAdmin>;
+  /**
+   * 持ち主と、監査ログの「操作した管理者」の名前解決をまとめた 1 つの
+   * `Map`（#471 / #482、`resolveUserRefs` が束ねる）。`UserRef` が出し分ける。
+   *
+   * **1 つに統合してある。** `sub` でキーが決まるので、持ち主と監査ログの
+   * 実行者が同じ人であっても衝突しない——2 つの `Map` を持ち回るより、
+   * 呼ぶ側（`renderClientDetailPage`）で 1 つに合わせたほうが、
+   * `ClientDetailPage` 側は「名前を引く先はここだけ」で済む。
+   */
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
   /** クライアントに関係する直近の監査ログ。**引けなかったら `null`**（空配列と区別する）。 */
   readonly auditEntries: readonly AuditLogEntryAdmin[] | null;
   readonly error?: string;
@@ -70,9 +79,10 @@ const CopyButton: FC<{ readonly value: string }> = ({ value }) => (
   </button>
 );
 
-const AuditEntries: FC<{ readonly entries: readonly AuditLogEntryAdmin[] | null }> = ({
-  entries,
-}) => {
+const AuditEntries: FC<{
+  readonly entries: readonly AuditLogEntryAdmin[] | null;
+  readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ entries, userRefs }) => {
   if (entries === null) {
     return <p class={EMPTY_CLASS}>いま監査ログを取得できません。あとでもう一度開いてください。</p>;
   }
@@ -110,10 +120,10 @@ const AuditEntries: FC<{ readonly entries: readonly AuditLogEntryAdmin[] | null 
               **`userId` を「操作した管理者」として出す。** クライアント向けの
               監査イベントは対象をクライアントに持ち、`userId` には実行者が
               入る（`delegated-disable-oauth-client.use-case.ts` 等の JSDoc）。
-              「利用者」と書くと対象と取り違える。
+              「利用者」と書くと対象と取り違える。名前解決は #482。
             */}
             <TableCell class="whitespace-normal">
-              <span class={ITEM_META_CLASS}>{entry.userId ?? "—"}</span>
+              <UserRef id={entry.userId} refs={userRefs} />
             </TableCell>
             <TableCell class="whitespace-normal">
               {entry.reason === null && entry.metadata === null ? (
@@ -137,7 +147,7 @@ const AuditEntries: FC<{ readonly entries: readonly AuditLogEntryAdmin[] | null 
 export const ClientDetailPage: FC<ClientDetailPageProps> = ({
   csrfToken,
   client,
-  ownerRefs,
+  userRefs,
   auditEntries,
   error,
   notice,
@@ -259,7 +269,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
             <div>
               <dt class={LABEL_CLASS}>持ち主</dt>
               <dd>
-                <UserRef id={client.ownerUserId} refs={ownerRefs} />
+                <UserRef id={client.ownerUserId} refs={userRefs} />
               </dd>
             </div>
             <div>
@@ -331,7 +341,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <AuditEntries entries={auditEntries} />
+          <AuditEntries entries={auditEntries} userRefs={userRefs} />
         </CardContent>
       </Card>
 

@@ -1,4 +1,4 @@
-import type { OAuthClientSummary } from "@u18/contracts";
+import type { OAuthClientSummary, UserRefAdmin } from "@u18/contracts";
 import {
   Badge,
   Card,
@@ -24,6 +24,7 @@ import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
 import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 import { formatDateTime } from "./format";
+import { UserRef } from "./user-ref";
 
 /**
  * OAuth クライアントの管理（`admin.under18.dev/clients`、#308 / #333 / #390
@@ -87,6 +88,8 @@ export type CreatedClient = {
 export type ClientsPageProps = {
   readonly csrfToken: string;
   readonly clients: readonly OAuthClientSummary[];
+  /** 持ち主の名前解決（#482、`resolveUserRefs` が束ねる）。`UserRef` が出し分ける。 */
+  readonly ownerRefs: ReadonlyMap<string, UserRefAdmin>;
   /** 直前の登録。**この応答にしか無い** `client_secret` を持つ。 */
   readonly created?: CreatedClient;
   /** 直前の操作が失敗したときの、人が読む 1 文。 */
@@ -171,10 +174,11 @@ const SecretOnce: FC<{ readonly created: CreatedClient }> = ({ created }) => (
 );
 
 /** 1 行ぶん。失効のボタンは「押せるときだけ」出す。 */
-const ClientRow: FC<{ readonly client: OAuthClientSummary; readonly csrfToken: string }> = ({
-  client,
-  csrfToken,
-}) => (
+const ClientRow: FC<{
+  readonly client: OAuthClientSummary;
+  readonly csrfToken: string;
+  readonly ownerRefs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ client, csrfToken, ownerRefs }) => (
   <li class={ITEM_BODY_CLASS}>
     <div class={ITEM_TITLE_CLASS}>
       <span>{client.name}</span>
@@ -208,12 +212,14 @@ const ClientRow: FC<{ readonly client: OAuthClientSummary; readonly csrfToken: s
         <li class={ITEM_RAW_CLASS}>{uri}</li>
       ))}
     </ul>
-    <p class={ITEM_META_CLASS}>持ち主: {client.ownerUserId ?? "—"}</p>
+    <p class={ITEM_META_CLASS}>
+      持ち主: <UserRef id={client.ownerUserId} refs={ownerRefs} />
+    </p>
     {/*
-      **持ち主は `usr_xxx` の生の ID で出す。** 利用者名まで引いて解決
-      すると、この画面を開くたびに Users テーブルへの引き直しが増える——
-      NFC カード管理画面が `ownerUserId` を生のまま出しているのと同じ判断
-      （低頻度の管理操作のために往復を増やす見合いが無い、PR #441 参照）。
+      **詳細（`/clients/:clientId`、#473）はすでに名前で出ている。** 一覧
+      だけ生の ID のままだと、同じ画面の 2 つの表示が食い違う（#482）。
+      `resolveUserRefs` はまとめ引きなので、一覧の行数が増えても
+      Service Binding の往復は増えない（`user-refs.ts` の冒頭）。
     */}
     <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
       <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
@@ -279,6 +285,7 @@ const ClientRow: FC<{ readonly client: OAuthClientSummary; readonly csrfToken: s
 export const ClientsPage: FC<ClientsPageProps> = ({
   csrfToken,
   clients,
+  ownerRefs,
   created,
   error,
   notice,
@@ -391,7 +398,7 @@ export const ClientsPage: FC<ClientsPageProps> = ({
             />
             <ul id="clients-list" class={LIST_CLASS}>
               {clients.map((client) => (
-                <ClientRow client={client} csrfToken={csrfToken} />
+                <ClientRow client={client} csrfToken={csrfToken} ownerRefs={ownerRefs} />
               ))}
             </ul>
           </div>

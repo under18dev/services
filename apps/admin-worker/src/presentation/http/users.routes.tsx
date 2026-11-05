@@ -17,8 +17,9 @@ import {
   decideSuspensionOrigin,
   type SuspensionOrigin,
 } from "./suspension-origin";
-import { UserDetailPage } from "./ui/user-detail-page";
+import { UserDetailPage, actorUserIdFromMetadata } from "./ui/user-detail-page";
 import { UsersPage } from "./ui/users-page";
+import { resolveUserRefs } from "./user-refs";
 import type { AppBindings } from "./types";
 
 /**
@@ -259,6 +260,19 @@ async function renderUserDetailPage(
       // 「分からない」以外を返しようがない。
       { kind: "unknown" };
 
+  const auditEntries = entriesOf(audit);
+  // **`entry.userId` ではなく `metadata.actorUserId` を集める**（#482）。
+  // このクエリは `userId` で絞り込んでいるので、`entry.userId` は常に
+  // この利用者自身——実行者は `metadata.actorUserId` にしか無い
+  // （`UserDetailPageProps.userRefs` の JSDoc を参照）。
+  const userRefs = await resolveUserRefs(
+    container.identityAdmin,
+    session.sub,
+    auditEntries === null
+      ? []
+      : auditEntries.map((entry) => actorUserIdFromMetadata(entry.metadata)),
+  );
+
   c.header("Cache-Control", "no-store");
   return c.html(
     <UserDetailPage
@@ -266,7 +280,8 @@ async function renderUserDetailPage(
       actorUserId={session.sub}
       user={user}
       suspension={suspension}
-      auditEntries={entriesOf(audit)}
+      auditEntries={auditEntries}
+      userRefs={userRefs}
       cards={cardsOf(cards)}
       {...(options.error === undefined ? {} : { error: options.error })}
       {...(options.notice === undefined ? {} : { notice: options.notice })}
