@@ -1,0 +1,29 @@
+{
+  // `scripts/preview-html.generator.mts` だけの型検査（#476）。
+  //
+  // **本体の `tsconfig.json` には入れない。** あちらは `scripts/**` を
+  // 見ない設定のまま——`preview-html.generator.mts` は plain Node で動く
+  // （Workers 専用 API を要らない設計、ファイル冒頭の JSDoc を参照）ので、
+  // `node:fs/promises` のような Node の組み込みモジュールを使う。本体の
+  // `types` には Node の型が無いので、ここだけ `"node"` を足した別の
+  // tsconfig に分けてある（`tsconfig.client.json` を本体から分けている
+  // のと同じ理由——住み分けている実行環境ごとに型検査も分ける）。
+  //
+  // **それでも `worker-configuration.d.ts` / `worker-env.d.ts` は要る。**
+  // このファイルは `../src/presentation/http/app` 経由で本体のコードを
+  // 丸ごと import する（`createApp()` をそのまま使っている）ので、`Env`
+  // の型が無いと本体側で大量の `TS2339` が出る。
+  //
+  // 偽物（`IdentityAdminDelegatedRpcContract` 等の手書きの実装）に抜けが
+  // あると、ここが落ちる。契約を足すたびに黙って壊れていた経緯は issue #476
+  // を参照——落ちることは `IdentityAdminDelegatedRpcContract` に
+  // メソッドを 1 つ足して実測済み。
+  "extends": "../../packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node", "./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
+  },
+  "include": ["scripts/**/*.mts", "worker-configuration.d.ts", "worker-env.d.ts"]
+}
