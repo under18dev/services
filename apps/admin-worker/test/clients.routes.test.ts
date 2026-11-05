@@ -196,6 +196,41 @@ describe("GET /clients/:clientId（#473）", () => {
     expect(html).toContain('data-panel="operations"');
   });
 
+  /**
+   * **タブのボタン列（#470 の `data-tabs`、admin-island.ts の `attachTabs`）。**
+   * `data-tab` の値が `data-panel` と 1 対 1 で揃っていること、見出しの
+   * 文言がそのままラベルになっていることを確かめる。実際に切り替わる
+   * 挙動そのものは `admin-island.test.ts` が持つ——ここでは markup の
+   * 対応関係だけを見る。
+   */
+  it("data-tab の列を data-panel と揃えて持つ。JS が無ければ hidden を付けない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('data-tab="overview"');
+    expect(html).toContain('data-tab="redirect-uris"');
+    expect(html).toContain('data-tab="audit"');
+    expect(html).toContain('data-tab="operations"');
+    expect(html).toContain(">概要<");
+    expect(html).toContain(">redirect_uri<");
+    expect(html).toContain(">監査ログ<");
+    expect(html).toContain(">操作<");
+    // **JS 無しで縦に並ぶ絶対条件。** サーバーは `hidden` を 1 つも付けない
+    // ——付けるのは `attachTabs` だけ。
+    expect(html).not.toMatch(/data-panel="[^"]*"[^>]*\shidden/);
+  });
+
   it("client_id と redirect_uri にコピー用の目印（data-copy）を付ける", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
