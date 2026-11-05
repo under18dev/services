@@ -5,7 +5,9 @@ import type {
   AdminCardViewDelegated,
   AuditLogEntryAdmin,
   BatchAnalyticsRow,
+  GetOAuthClientDelegatedInput,
   GetUserDelegatedInput,
+  GetUsersByIdsDelegatedInput,
   IdentityAdminDelegatedRpcContract,
   ListAuditLogsDelegatedInput,
   ListCardsByOwnerDelegatedInput,
@@ -221,6 +223,9 @@ pushAudit("oauth.client.disabled", "usr_preview01", 8, "success", { clientId: "a
 pushAudit("oauth.client.owner_changed", "usr_preview01", 7, "success", {
   clientId: "app_preview3",
 });
+pushAudit("oauth.client.app_url_changed", "usr_preview01", 6, "success", {
+  clientId: "app_preview3",
+});
 pushAudit("ops.user.sessions_revoked", "usr_preview09", 6, "success", { revokedSessions: 1 });
 pushAudit("ops.user.reinstated", "usr_preview10", 30);
 pushAudit("ops.approval.granted", "usr_preview01", 100);
@@ -242,6 +247,7 @@ const CLIENTS: readonly OAuthClientSummary[] = [
     createdAt: isoDaysAgo(300),
     disabledAt: null,
     ownerUserId: null,
+    appUrl: null,
   },
   {
     clientId: "u18-nfc",
@@ -254,6 +260,7 @@ const CLIENTS: readonly OAuthClientSummary[] = [
     createdAt: isoDaysAgo(300),
     disabledAt: null,
     ownerUserId: null,
+    appUrl: null,
   },
   {
     clientId: "app_preview3",
@@ -266,6 +273,7 @@ const CLIENTS: readonly OAuthClientSummary[] = [
     createdAt: isoDaysAgo(60),
     disabledAt: null,
     ownerUserId: "usr_preview01",
+    appUrl: "https://bunkasai-gate.example.test/",
   },
   {
     clientId: "app_preview4",
@@ -278,6 +286,7 @@ const CLIENTS: readonly OAuthClientSummary[] = [
     createdAt: isoDaysAgo(40),
     disabledAt: null,
     ownerUserId: null,
+    appUrl: null,
   },
   {
     clientId: "app_preview5",
@@ -290,6 +299,7 @@ const CLIENTS: readonly OAuthClientSummary[] = [
     createdAt: isoDaysAgo(90),
     disabledAt: isoDaysAgo(8),
     ownerUserId: null,
+    appUrl: null,
   },
 ];
 
@@ -407,6 +417,7 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
   createOAuthClient: unused("createOAuthClient"),
   disableOAuthClient: unused("disableOAuthClient"),
   setOAuthClientOwner: unused("setOAuthClientOwner"),
+  setOAuthClientAppUrl: unused("setOAuthClientAppUrl"),
   listUsers: async (input: ListUsersDelegatedInput) => {
     let rows = USERS;
     if (input.query !== undefined) {
@@ -419,7 +430,20 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
     const user = USERS.find((u) => u.id === input.userId);
     return user === undefined ? rpcErr(RpcErrorCode.NotFound, "user not found") : rpcOk(user);
   },
+  getUsersByIds: async (input: GetUsersByIdsDelegatedInput) =>
+    rpcOk(
+      USERS.filter((u) => input.userIds.includes(u.id)).map((u) => ({
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        status: u.status,
+      })),
+    ),
   listOAuthClients: async () => rpcOk(CLIENTS),
+  getOAuthClient: async (input: GetOAuthClientDelegatedInput) => {
+    const found = CLIENTS.find((c) => c.clientId === input.clientId);
+    return found === undefined ? rpcErr(RpcErrorCode.NotFound, "client not found") : rpcOk(found);
+  },
   countOAuthClients: async () => rpcOk(CLIENTS.length),
   listAuditLogs: async (input: ListAuditLogsDelegatedInput) =>
     rpcOk({ entries: filterAuditLog(input), nextCursor: null }),
@@ -605,6 +629,12 @@ async function main(): Promise<void> {
     sessionCookie,
   );
   await addPage("clients", "OAuth クライアント（/clients）", "/clients", sessionCookie);
+  await addPage(
+    "clients-detail",
+    "OAuth クライアント詳細（/clients/app_preview3、#473）",
+    "/clients/app_preview3",
+    sessionCookie,
+  );
   await addPage("audit", "監査ログ（/audit）", "/audit", sessionCookie);
   await addPage("approvals", "承認・権限の管理（/approvals、#190）", "/approvals", sessionCookie);
   await addPage("pending", "承認待ち（/pending）", "/pending", pendingCookie);
