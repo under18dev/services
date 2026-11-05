@@ -458,7 +458,8 @@ describe("GET /nfc/:cardId（カード詳細、#472）", () => {
     const html = await response.text();
     expect(html).toContain("nfc_active");
     expect(html).toContain("bunkasai-2026");
-    // **所有者は userId の先頭だけ**（#471 が入るまでの仮実装）。
+    // 名前解決の fake を用意していないので、`UserRef`（#471 で入った）が
+    // 「引けなかった」場合のフォールバック（userId の先頭だけ）を出す。
     expect(html).toContain("usr_taro".slice(0, 8));
     // actorUserId は session.sub から、cardId は URL パラメータから。
     expect(calls.getCard).toEqual([{ actorUserId: SUB, cardId: "nfc_active" }]);
