@@ -246,6 +246,45 @@ describe("GET /users", () => {
     expect(html).toContain("停止しました");
     expect(html).toContain("2 件");
   });
+
+  /**
+   * **行内の操作フォーム 3 種を一覧から外した**（#489、`/nfc` を #481・
+   * `/clients` を #508 で外したのと同じ形）。詳細（`/users/:userId`）へ
+   * 寄せたので、一覧の行自体はこれらの action を一切持たない——`status`
+   * に関わらず。
+   */
+  it("行内の停止・解除・端末失効フォームを一覧から外した（#489）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listUsers: async () =>
+        rpcOk({
+          users: [
+            user({ id: "usr_active", status: "active" }),
+            user({ id: "usr_suspended", status: "suspended" }),
+          ],
+          nextCursor: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain('action="/users/usr_active/suspend"');
+    expect(html).not.toContain('action="/users/usr_active/reinstate"');
+    expect(html).not.toContain('action="/users/usr_active/revoke-sessions"');
+    expect(html).not.toContain('action="/users/usr_suspended/suspend"');
+    expect(html).not.toContain('action="/users/usr_suspended/reinstate"');
+    expect(html).not.toContain('action="/users/usr_suspended/revoke-sessions"');
+    expect(html).not.toContain('name="reason"');
+    // **代わりに、表示名が詳細へのリンクになっている。**
+    expect(html).toContain('href="/users/usr_active"');
+    expect(html).toContain('href="/users/usr_suspended"');
+  });
 });
 
 describe("POST /users/search", () => {

@@ -42,10 +42,11 @@ import { UserRef } from "./user-ref";
 /**
  * 利用者 1 人の詳細（`admin.under18.dev/users/:userId`、#455）。
  *
- * **一覧（`users-page.tsx`）には「押す前に確かめる材料」が無かった。**
- * 凍結・解除・セッションの失効は一覧の行から押せるが、**その人が
- * いまどういう状態で、なぜ止まっているのか**は行からは読めない。
- * この画面は、同じ操作を**確かめた直後に押せる場所**へ置き直したもの。
+ * **停止・解除・セッションの失効は、この画面だけが持つ**（#489、
+ * `/nfc`・#481 / `/clients`・#508 と同じ判断）。一覧（`users-page.tsx`）
+ * には「押す前に確かめる材料」が無い——**その人がいまどういう状態で、
+ * なぜ止まっているのか**は一覧の行からは読めない。この画面は、
+ * 確かめた直後に押せる場所である。
  *
  * ## いちばん大事なのは「なぜ止まっているか」である
  *
@@ -170,7 +171,7 @@ const StatusBadge: FC<{ readonly status: UserAdminSummary["status"] }> = ({ stat
   return <Badge variant="warning">停止中</Badge>;
 };
 
-/** 一覧（`users-page.tsx`）の停止フォームと同じ語。ここだけ別の言い方にしない。 */
+/** ランブック §11.1 の表が区別している理由をそのまま値にする。ここだけ別の言い方にしない。 */
 const SUSPEND_REASON_LABEL = {
   compromise: "侵害の疑い（戻す前提）",
   abuse: "規約違反",
@@ -231,20 +232,21 @@ const SuspensionReason: FC<{ readonly suspension: SuspensionOrigin }> = ({ suspe
 };
 
 /**
- * 停止・解除・セッションの失効。**一覧の `UserActions` と同じ操作を、
- * 同じ POST 先へ出す。**
+ * 停止・解除・セッションの失効。**この画面だけが持つ操作**（#489、
+ * 一覧（`users-page.tsx`）からは外した）。
  *
  * ## `from=detail` を積む
  *
- * 同じ route（`/users/:userId/suspend` など）を一覧と共有しているので、
- * 戻り先だけをフォームが申告する。積まないと、**確かめてから押した
- * 直後に一覧へ飛ばされ、結果を同じ画面で確かめられない。**
+ * route（`/users/:userId/suspend` など）はこの画面専用ではない——
+ * `cameFromDetail` / `redirectTargetOf`（`users.routes.tsx`）が戻り先を
+ * 振り分ける既存の仕組みをそのまま使っているので、戻り先だけをフォームが
+ * 申告する。積まないと、**確かめてから押した直後に一覧へ飛ばされ、
+ * 結果を同じ画面で確かめられない。**
  *
  * ## 退会による停止でも「解除」を隠さない
  *
- * 隠すと、**この画面のほうが一覧より弱くなる** ——一覧の行からは同じ
- * 操作が押せるので、隠しても防げず、「詳細を開くと操作が減る」という
- * 理由の説明できない差だけが残る。代わりに**上の節で警告を立て、
+ * 間違いだったと分かったときに戻す手段自体は残す。**隠すと、取り消せる
+ * はずの操作が取り消せなくなる。** 代わりに**上の節で警告を立て、
  * ボタンの文言を「それでも停止を解除する」に変える** ——押せること自体は
  * 残し、押すのが意識的な選択になるようにしてある。
  */
@@ -255,7 +257,7 @@ const UserActions: FC<{
   readonly suspension: SuspensionOrigin;
 }> = ({ user, csrfToken, isSelf, suspension }) => {
   if (user.status === "deleted") {
-    // 一覧と同じ判断。戻せない（個人情報が落ちている）し、止めるものも残っていない。
+    // 戻せない（個人情報が落ちている）し、止めるものも残っていない。
     return <p class={ITEM_META_CLASS}>個人情報を削除済みのため、操作できません。</p>;
   }
 
@@ -304,8 +306,8 @@ const UserActions: FC<{
         </form>
       )}
       {/*
-        **停止とは別に置く**（一覧と同じ）。止めずに切りたいことがある
-        ——端末を失くした人の救済など。自分に対しても押せる。
+        **停止とは別に置く。** 止めずに切りたいことがある——端末を
+        失くした人の救済など。自分に対しても押せる。
       */}
       <form method="post" action={`/users/${user.id}/revoke-sessions`}>
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
@@ -701,6 +703,10 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
     <Card>
       <CardHeader>
         <CardTitle>操作</CardTitle>
+        <CardDescription>
+          停止・停止の解除・ログイン中の端末を全部切るは、ここでまとめて行います
+          （#489、一覧からは行内の操作を外しました）。
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <UserActions

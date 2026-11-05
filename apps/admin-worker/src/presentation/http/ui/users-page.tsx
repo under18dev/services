@@ -17,7 +17,6 @@ import {
   EMPTY_CLASS,
   FIELD_CLASS,
   INPUT_CLASS,
-  ITEM_ACTIONS_CLASS,
   ITEM_BODY_CLASS,
   ITEM_META_CLASS,
   ITEM_RAW_CLASS,
@@ -54,17 +53,23 @@ import { formatDateTime } from "./format";
  * 管理者かどうかの出し分けをしていた。admin-worker はセッションガード
  * （`app.ts`）が既に「承認済みの管理者である」ことを確かめたあとにしか
  * 画面へ来ないので、渡す理由が無い。
+ *
+ * ## 行内の操作はこの画面から消した（#489）
+ *
+ * 運用者の指示（#481、カード一覧について。`/users` にも同じ形が残って
+ * いた）: 一覧からは 1 人ずつ操作できなくていい、詳細ページから
+ * やる。**停止・停止の解除・ログイン中の端末を全部切るは
+ * `/users/:userId`（#455）へ寄せた。** `POST /users/:userId/suspend` /
+ * `/reinstate` / `/revoke-sessions` のルート自体は消していない——詳細
+ * ページが使う（`cameFromDetail` で戻り先を振り分ける既存の仕組みは
+ * そのまま。本体は `users.routes.tsx`）。
+ *
+ * **`/nfc`（#481）・`/clients`（#508）と同じ判断。** `/users` は選択・
+ * 一括操作が要らない（利用者をまとめて止める場面が思い当たらない）ので、
+ * 行内操作を外すだけで片付く。
  */
 
 export type UsersPageProps = {
-  /**
-   * いま開いている管理者の `userId`（`session.sub`）。**自分の行に
-   * 停止を出さないため。**
-   *
-   * 守っているのはここではない（auth-worker が `conflict` を返す）。
-   * **押せるのに断られる形にしない**ための表示上の配慮である。
-   */
-  readonly actorUserId: string;
   readonly csrfToken: string;
   readonly users: readonly UserAdminSummary[];
   /** 続きがあるときだけ。**「次へ」の form に積む。** */
@@ -89,97 +94,20 @@ const StatusBadge: FC<{ readonly status: UserAdminSummary["status"] }> = ({ stat
   return <Badge variant="warning">停止中</Badge>;
 };
 
-/**
- * 1 行ぶんの操作。
- *
- * ## 停止には理由を選ばせる
- *
- * **`status` は `suspended` の 1 値しか持たない。** ランブック §11.1 の表が
- * 区別している「侵害の疑いによる緊急停止」と「規約違反による BAN」は、
- * **`audit_logs` にしか残らない。** 選ばせないと、後から「戻してよいのか」
- * を判断する材料が消える。
- *
- * ## 自分の行には停止を出さない
- *
- * 止めた瞬間に自分のセッションが死に、解除する人が居なくなる。
- * auth-worker も `conflict` で弾くが、**押せるのに断られる形にしない。**
- *
- * ## `deleted` には何も出さない
- *
- * 戻せない（個人情報が落ちている）し、止めるものも残っていない。
- */
-const UserActions: FC<{
-  readonly user: UserAdminSummary;
-  readonly csrfToken: string;
-  readonly isSelf: boolean;
-}> = ({ user, csrfToken, isSelf }) => {
-  if (user.status === "deleted") {
-    return <p class={ITEM_META_CLASS}>個人情報を削除済みのため、操作できません。</p>;
-  }
-
-  return (
-    <div class={ITEM_ACTIONS_CLASS}>
-      {/*
-        **操作ごとに別の `<form>` にする。** `nfc.routes.tsx` と同じ形
-        （`/nfc/:cardId/disable` / `/nfc/:cardId/target`）——「どの操作か」を
-        1 つの form の `action` フィールドで押し分けていた dashboard-worker
-        版と違い、URL が操作を表す。
-      */}
-      {user.status === "active" ? (
-        isSelf ? (
-          <p class={ITEM_META_CLASS}>自分のアカウントは停止できません。</p>
-        ) : (
-          <form method="post" action={`/users/${user.id}/suspend`}>
-            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-            <label class={ITEM_META_CLASS}>
-              <input type="radio" name="reason" value="compromise" required />{" "}
-              侵害の疑い（戻す前提）
-            </label>
-            <label class={ITEM_META_CLASS}>
-              <input type="radio" name="reason" value="abuse" required /> 規約違反
-            </label>
-            <button type="submit" class="text-sm text-destructive underline underline-offset-4">
-              停止する
-            </button>
-          </form>
-        )
-      ) : (
-        <form method="post" action={`/users/${user.id}/reinstate`}>
-          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-          <button type="submit" class="text-sm text-foreground underline underline-offset-4">
-            停止を解除する
-          </button>
-        </form>
-      )}
-      {/*
-        **停止とは別に置く。** 止めずに切りたいことがある（端末を失くした
-        人の救済など）。自分に対しても押せる ——「全端末からログアウト」に
-        あたるので、止めるのと違って困らない。
-      */}
-      <form method="post" action={`/users/${user.id}/revoke-sessions`}>
-        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-        <button type="submit" class="text-sm text-foreground underline underline-offset-4">
-          ログイン中の端末を全部切る
-        </button>
-      </form>
-    </div>
-  );
-};
-
+/** 1 行ぶん。**操作は持たない**（#489）——停止・解除・端末の失効は詳細へ。 */
 const UserRow: FC<{
   readonly user: UserAdminSummary;
-  readonly csrfToken: string;
-  readonly isSelf: boolean;
-}> = ({ user, csrfToken, isSelf }) => (
+}> = ({ user }) => (
   <TableRow>
     <TableCell class="whitespace-normal">
       <div class={ITEM_TITLE_CLASS}>
         {/*
-          **行から詳細へ入る導線**（#455）。一覧には「押す前に確かめる
-          材料」が無く、停止・解除・セッションの失効をここから押すのは
-          **確かめずに押す**ことだった。名前を入口にしているのは、
-          運用者が探しているのが「この人」だからである（ID 列は文字列
-          そのものを読む・コピーする場所なので、リンクにしない）。
+          **行から詳細へ入る導線**（#455）。停止・解除・セッションの失効は
+          詳細ページだけが持つ（#489）——一覧は「押す前に確かめる材料」を
+          持たないので、確かめずに押せる場所を残さない。名前を入口に
+          しているのは、運用者が探しているのが「この人」だからである
+          （ID 列は文字列そのものを読む・コピーする場所なので、リンクに
+          しない）。
         */}
         <a href={`/users/${user.id}`} class="underline underline-offset-4">
           {user.displayName}
@@ -211,14 +139,10 @@ const UserRow: FC<{
         コピー
       </button>
     </TableCell>
-    <TableCell class="whitespace-normal">
-      <UserActions user={user} csrfToken={csrfToken} isSelf={isSelf} />
-    </TableCell>
   </TableRow>
 );
 
 export const UsersPage: FC<UsersPageProps> = ({
-  actorUserId,
   csrfToken,
   users,
   nextCursor,
@@ -233,7 +157,7 @@ export const UsersPage: FC<UsersPageProps> = ({
     brandHref="/"
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="利用者"
-    lead="u18 に登録されている利用者を探します。"
+    lead="表示名を押すと詳細が開き、停止・停止の解除・ログイン中の端末を全部切るはそこから行います。この画面は検索・並べ替えが主な役目です。"
     maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
@@ -322,16 +246,11 @@ export const UsersPage: FC<UsersPageProps> = ({
                   <TableHead data-sort="text">状態</TableHead>
                   <TableHead data-sort="date">登録</TableHead>
                   <TableHead data-sort="text">ID</TableHead>
-                  {/*
-                    **見出しを空にしない。** 読み上げで「列が 6 つある」と
-                    分かっても、最後の列が何かは分からない。
-                  */}
-                  <TableHead>操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {users.map((user) => (
-                  <UserRow user={user} csrfToken={csrfToken} isSelf={user.id === actorUserId} />
+                  <UserRow user={user} />
                 ))}
               </TableBody>
             </Table>
