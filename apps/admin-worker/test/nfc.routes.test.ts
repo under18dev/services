@@ -465,6 +465,71 @@ describe("GET /nfc/:cardId（カード詳細、#472）", () => {
     expect(calls.getCard).toEqual([{ actorUserId: SUB, cardId: "nfc_active" }]);
   });
 
+  /** 遷移先 URL にコピー用の目印（data-copy）を付ける（#488）。 */
+  it("遷移先 URL にコピー用の目印（data-copy）を付ける", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async () =>
+        rpcOk({
+          cardId: "nfc_active",
+          status: "active",
+          ownerUserId: "usr_taro",
+          targetUrl: "https://example.com/taro",
+          batch: null,
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: "2026-10-02T00:00:00.000Z",
+          transferCount: 0,
+          disabledAt: null,
+          disabledReason: null,
+          tapCount: 0,
+          lastTappedAt: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_active`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('data-copy="https://example.com/taro" hidden');
+  });
+
+  /** `targetUrl` が無い（未設定）カードではコピーボタンを出さない。 */
+  it("遷移先 URL が未設定ならコピーボタンを出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async () =>
+        rpcOk({
+          cardId: "nfc_issued",
+          status: "issued",
+          ownerUserId: null,
+          targetUrl: null,
+          batch: null,
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: null,
+          transferCount: 0,
+          disabledAt: null,
+          disabledReason: null,
+          tapCount: 0,
+          lastTappedAt: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_issued`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("data-copy=\"\"");
+    expect(html).toContain("未設定");
+  });
+
   it("disabled なら理由と日時を上に出す。理由が空なら「記録されていません」", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeNfcCards({

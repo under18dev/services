@@ -582,6 +582,22 @@ describe("GET /users/:userId", () => {
     expect(html).toContain("誰が使ったかを記録しない設計のため出していません");
   });
 
+  it("埋め込みの監査ログの metadata JSON にコピー用の目印（data-copy）を付ける（#488）", async () => {
+    const identity = fakeIdentityAdmin({
+      listAuditLogs: async () =>
+        rpcOk({
+          entries: [auditEntry({ metadata: { reason: "compromise", revokedSessions: 2 } })],
+          nextCursor: null,
+        }),
+    });
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    expect(html).toContain(
+      'data-copy="{&quot;reason&quot;:&quot;compromise&quot;,&quot;revokedSessions&quot;:2}" hidden',
+    );
+  });
+
   it("カード ID 自体がカード詳細へのリンクで、コピーボタンも持つ（#488）", async () => {
     const response = await openDetail(fakeIdentityAdmin().rpc, fakeNfcCards().rpc);
 

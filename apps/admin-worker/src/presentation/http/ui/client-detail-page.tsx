@@ -92,11 +92,12 @@ const AuditEntries: FC<{
   }
 
   return (
-    <Table>
+    <Table id="client-audit-table" data-sortable>
       <TableHeader>
         <TableRow>
-          <TableHead>日時</TableHead>
-          <TableHead>イベント</TableHead>
+          {/* `data-sort` の型は `/audit` 本体と揃える（#488、指摘: 3b）。 */}
+          <TableHead data-sort="date">日時</TableHead>
+          <TableHead data-sort="text">イベント</TableHead>
           <TableHead>結果</TableHead>
           <TableHead>操作した管理者</TableHead>
           <TableHead>詳細</TableHead>

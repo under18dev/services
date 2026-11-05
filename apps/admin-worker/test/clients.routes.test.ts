@@ -250,6 +250,53 @@ describe("GET /clients/:clientId（#473）", () => {
     expect(html).toContain('data-copy="https://example.com/cb" hidden');
   });
 
+  /**
+   * 監査ログの表が並べ替えられること（#488）。**日時の型を `/audit` 本体と
+   * 揃える**——`text` 扱いだと文字列として並べ替わり、「2026/11/5」と
+   * 「2026/11/12」のような表記で順序が狂う（指摘: 3b）。
+   */
+  it("監査ログの表に data-sortable を持ち、日時の型が /audit 本体と揃っている", async () => {
+    const sessionCookie = await loginAsApproved();
+    // **0 件だと空状態の文言に差し替わり、表自体が描かれない。** 少なくとも
+    // 1 件無いと「data-sortable が出ない」が「属性を忘れた」のか「0 件
+    // だから」のか区別が付かない（#470 の asset-coverage.test.ts と同じ
+    // 注意）。
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001" })),
+      listAuditLogs: async () =>
+        rpcOk({
+          entries: [
+            {
+              id: "aud_1",
+              event: "oauth.client.created",
+              userId: "usr_admin",
+              actor: "admin-worker",
+              outcome: "success",
+              reason: null,
+              metadata: null,
+              ipHash: null,
+              userAgent: null,
+              createdAt: "2026-10-01T00:00:00.000Z",
+            },
+          ],
+          nextCursor: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("data-sortable");
+    expect(html).toContain('data-sort="date">日時');
+    expect(html).toContain('data-sort="text">イベント');
+  });
+
   it("一次パーティは失効フォームを出さない", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
