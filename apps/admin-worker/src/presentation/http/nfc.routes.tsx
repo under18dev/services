@@ -336,7 +336,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, form !== null && cameFromDetail(form) ? `/nfc/${cardId}` : "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
@@ -360,7 +360,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, form !== null && cameFromDetail(form) ? `/nfc/${cardId}` : "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
@@ -390,7 +390,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, form !== null && cameFromDetail(form) ? `/nfc/${cardId}` : "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
@@ -431,7 +431,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, form !== null && cameFromDetail(form) ? `/nfc/${cardId}` : "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
@@ -458,7 +458,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, form !== null && cameFromDetail(form) ? `/nfc/${cardId}` : "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
