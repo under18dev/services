@@ -66,10 +66,11 @@ export class DrizzleCardRepository implements CardRepository {
    * `claimedAt` を優先するのと違うのは、運営が探すのが
    * 「さっき発行したロット」だからである。
    */
-  async listAll(limit: number): Promise<readonly Card[]> {
+  async listAll(limit: number, filter?: { readonly batch?: string }): Promise<readonly Card[]> {
     const rows = await this.db
       .select()
       .from(nfcCards)
+      .where(filter?.batch === undefined ? undefined : eq(nfcCards.batch, filter.batch))
       .orderBy(desc(nfcCards.createdAt), desc(nfcCards.id))
       .limit(limit + 1)
       .all();

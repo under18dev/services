@@ -136,6 +136,16 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/nfc/batch-disable" },
   /** `/nfc/batch-disable` の逆（#436）。同じ理由で 1 本が 2 段階を兼ねる。 */
   { method: "POST", path: "/nfc/batch-reinstate" },
+  /**
+   * ID で 1 枚を直接開く（#481）。**GET だが「更新系・検索系」の意味で
+   * ここに置く。** `NAV_PAGE_ROUTES` には入れない——成功すれば
+   * `/nfc/:cardId` へ 303 で飛ぶだけで、それ自身は画面を持たない
+   * （`asset-coverage.test.ts` の「200 を返す」検査の対象から外れる）。
+   */
+  { method: "GET", path: "/nfc/open" },
+  /** 選択による一括無効化・復帰（#481 の本体）。 */
+  { method: "POST", path: "/nfc/bulk-disable" },
+  { method: "POST", path: "/nfc/bulk-reinstate" },
   { method: "POST", path: "/nfc/:cardId/disable" },
   { method: "POST", path: "/nfc/:cardId/release" },
   { method: "POST", path: "/nfc/:cardId/reinstate" },

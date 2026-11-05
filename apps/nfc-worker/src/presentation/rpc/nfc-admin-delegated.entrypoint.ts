@@ -7,6 +7,7 @@ import {
   disableCardDelegatedInputSchema,
   getCardDelegatedInputSchema,
   issueCardsDelegatedInputSchema,
+  listAllCardsDelegatedInputSchema,
   listCardsByOwnerDelegatedInputSchema,
   reinstateBatchToIssuedCardsDelegatedInputSchema,
   reinstateCardDelegatedInputSchema,
@@ -36,6 +37,7 @@ import {
   type GetCardDelegatedResult,
   type IssueCardsDelegatedInput,
   type IssueCardsDelegatedResult,
+  type ListAllCardsDelegatedInput,
   type ListAllCardsDelegatedResult,
   type ListCardsByOwnerDelegatedInput,
   type ListCardsByOwnerDelegatedResult,
@@ -309,12 +311,17 @@ export class NfcAdminDelegatedRPC
   }
 
   /**
-   * 全カードの一覧（#382）。**入力を検証しない** —— 引数を取らないので
-   * Zod のスキーマも無い。
+   * 全カードの一覧（#382）。**`input` は省略できる**——省略すれば全カード、
+   * `batch` を渡せば打ち切りの前にロット名で絞る（#481）。
    */
-  async listAllCards(): Promise<ListAllCardsDelegatedResult> {
+  async listAllCards(input?: ListAllCardsDelegatedInput): Promise<ListAllCardsDelegatedResult> {
+    const parsed = listAllCardsDelegatedInputSchema.safeParse(input ?? {});
+    if (!parsed.success) return rpcErr("invalid_input", "batch is malformed");
+
     const container = createContainer(this.env);
-    const result = await container.useCases.delegatedListAllCards.execute();
+    const result = await container.useCases.delegatedListAllCards.execute(
+      parsed.data.batch === undefined ? {} : { batch: parsed.data.batch },
+    );
     if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
 
     return rpcOk({
@@ -327,6 +334,7 @@ export class NfcAdminDelegatedRPC
         issuedAt: card.issuedAt,
         claimedAt: card.claimedAt,
         disabledAt: card.disabledAt,
+        tapCount: card.tapCount,
       })),
       truncated: result.value.truncated,
     });

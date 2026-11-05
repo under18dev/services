@@ -112,7 +112,12 @@ export type AdminCardView = {
  */
 export type AdminCardList = {
   readonly cards: readonly AdminCardView[];
-  /** 上限で打ち切ったか。true なら画面にそう出すこと。 */
+  /**
+   * 上限で打ち切ったか。true なら画面にそう出すこと。
+   *
+   * `batch` で絞って引いたときは「そのロットの中で」打ち切ったかを指す
+   * （#481、`DelegatedListAllCardsUseCase` の冒頭を参照）。
+   */
   readonly truncated: boolean;
 };
 
@@ -143,8 +148,13 @@ export interface CardRepository {
    * **`limit + 1` 件まで取ること。** 呼び出し側が「上限で切れたか」を
    * 判定できるようにするためで、ちょうど `limit` 件返すと
    * 「ちょうど上限だった」と「それ以上ある」が区別できない。
+   *
+   * **`filter.batch` は、打ち切りの前に効くこと**（#481）。ここで絞って
+   * から `limit + 1` 件を取る——絞り込んでいない全体から `limit + 1` 件を
+   * 取ったあとでバッチ名を比べると、対象のロットが 500 枚より後ろに
+   * 並んでいただけで「0 件」に見える事故になる。
    */
-  listAll(limit: number): Promise<readonly Card[]>;
+  listAll(limit: number, filter?: { readonly batch?: string }): Promise<readonly Card[]>;
 
   /** 運営によるカード発行。HTTP では公開しない（管理者ロールが未実装のため）。 */
   issue(card: NewCard, now: Date): Promise<void>;

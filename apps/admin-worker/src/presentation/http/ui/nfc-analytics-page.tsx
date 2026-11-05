@@ -245,7 +245,25 @@ const BatchAnalyticsSection: FC<{
           <TableBody>
             {batches.rows.map((row) => (
               <TableRow key={row.batch ?? "__no_batch__"}>
-                <TableCell>{row.batch ?? "（バッチ名なし）"}</TableCell>
+                <TableCell>
+                  {/*
+                    **「（バッチ名なし）」の行はリンクにしない**（issue #481
+                    への追記）。あれは `null` であって「`なし` という名前の
+                    バッチ」ではない——`/nfc?batch=` へ飛ばすと、
+                    バッチ名を持たない全カードを「ロット名が空文字のカード」
+                    として検索する形になり、質問がすり替わる。
+                  */}
+                  {row.batch === null ? (
+                    "（バッチ名なし）"
+                  ) : (
+                    <a
+                      href={`/nfc?batch=${encodeURIComponent(row.batch)}`}
+                      class="underline underline-offset-4"
+                    >
+                      {row.batch}
+                    </a>
+                  )}
+                </TableCell>
                 <TableCell>{row.issued}</TableCell>
                 <TableCell>
                   {row.claimedEver}（{rate(row.claimedEver, row.issued)}）
