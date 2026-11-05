@@ -95,21 +95,20 @@ shift 2
 # 理由ごと書いてあり、ログイン後の参照は Worker 側のテストが確かめる。
 #
 # あちらは「アセットを配る Worker が全部ここに居るか」も突き合わせている。
-probe_pages_for() {
-  case "$1" in
-    auth-worker) echo "/login:/ui/" ;;
-    dashboard-worker) echo "/account:/account/ui/" ;;
-    # **`/` ではなく `/callback` を引く**（#447）。`/` は未ログインで
-    # `/login` へ 302 するだけで画面を持たないので、ここからは参照を
-    # 読めない。`/callback` は裸で叩いても（state も code も無くても）
-    # `MessagePage`（Kiwa UI）を 400 で返すので、未認証でも引ける
-    # （`apps/admin-worker/src/presentation/http/app.tsx` の `fail()`）。
-    # 接頭辞は auth-worker と同じ形——admin-worker もルート直下に
-    # `/ui/` を持つ別オリジンである。
-    admin-worker) echo "/callback:/ui/" ;;
-    *) echo "" ;;
-  esac
-}
+#
+# **`probe_pages_for` は手で書かない（#453）。** `node
+# scripts/generate-asset-probe-pages.mjs` が、各 Worker の
+# `test/route-inventory.ts` の `PROBE_PAGES`（page）と `ASSET_ROUTES`
+# の共通ディレクトリ（prefix）から機械的に作り、
+# `scripts/generated/asset-probe-pages.sh` へ書き出す。Worker ごとに
+# そのページ・接頭辞を選んだ理由（admin-worker が `/callback` を引く
+# 理由など）は、そちらの手作業をやめた代わりに route-inventory.ts の
+# JSDoc だけに残っている——二重に書くと片方だけ直る。
+#
+# 生成物が古いまま commit されると黙って壊れる（#453 の issue 本体が
+# 指摘する形そのもの）ので、`pnpm check:asset-probe-pages-gen` が CI で
+# 作り直した内容と突き合わせている。
+source "$(dirname "${BASH_SOURCE[0]}")/generated/asset-probe-pages.sh"
 
 # ページが明示されていなければ、その Worker ぶんを引く。
 if [ "$#" -eq 0 ]; then
