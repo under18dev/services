@@ -306,18 +306,18 @@ const OwnedCards: FC<{ readonly cards: readonly AdminCardViewDelegated[] | null 
               {card.claimedAt === null ? "—" : formatDateTime(card.claimedAt)}
             </TableCell>
             {/*
-              **カードへの操作はこの画面に持ってこない。** 無効化・遷移先の
-              書き換え・手放させるは `/nfc` 側の責務で、ここに同じフォームを
-              並べると**同じ操作が 2 画面に散る**（#433 が `/account/*` から
-              運営向けの画面を消した理由と同じ形）。行の `id` を頼りに
-              `/nfc` の該当行へ飛ばす。
+              **カードへの操作はこの画面に持ってこない。** 無効化・復帰・
+              遷移先の書き換え・手放させるは `/nfc/:cardId`（カード詳細、
+              #472）側の責務で、ここに同じフォームを並べると**同じ操作が
+              2 画面に散る**（#433 が `/account/*` から運営向けの画面を
+              消した理由と同じ形）。
             */}
             <TableCell>
               <a
-                href={`/nfc#card-${card.cardId}`}
+                href={`/nfc/${encodeURIComponent(card.cardId)}`}
                 class="text-sm text-foreground underline underline-offset-4"
               >
-                NFC の管理へ
+                カードの詳細へ
               </a>
             </TableCell>
           </TableRow>
