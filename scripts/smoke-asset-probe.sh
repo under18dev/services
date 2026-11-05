@@ -128,6 +128,28 @@ fi
 failures=0
 checked=0
 
+# **デプロイ直後、アセットの 200 だけ数回リトライする**（#494）。
+#
+# 内容ハッシュが変わるデプロイ（Tailwind の出力が変わる・JS の中身が
+# 変わるなど、UI を触れば普通に起きる）では、`/callback` のような
+# ページが新しい版から返ったのに、そのすぐ後に投げたアセットへの要求が
+# 古い版へ届く瞬間がある——ページとアセットは別のリクエストで、同じ
+# Edge に当たる保証が無い。実際に `24634cb` のデプロイでこれが起き、
+# 本番は正常なのに admin-worker のジョブだけ赤くなった（#453 とは無関係）。
+#
+# 指数で間を空けて合計 30 秒（2 + 4 + 8 + 16）。**302 を成功として
+# 許すのではなく、200 になるまで（または回数を使い切るまで）同じ
+# 判定を繰り返すだけ**——`PUBLIC_PATHS` から配信ルートが丸ごと落ちる
+# ような本物の事故は、30 秒待っても 200 にならないのでそのまま落ちる
+# （#479 で塞いだ事故をここでまた通さない）。
+#
+# ページの取得（`/callback` 等）側にはリトライを足していない。**今回の
+# 伝播の窓は「ページが返したハッシュのアセットがまだ無い」という、
+# アセット側だけの時間差**で、ページを引き直しても別の Edge に
+# 当たるだけで同じ問題を再現しうる——待つべきはアセットの伝播であって、
+# ページの再取得ではない。
+ASSET_RETRY_DELAYS=(2 4 8 16)
+
 # 1 本のアセット URL を本番から引き、ハッシュが入っていること・
 # immutable が付いていることを見る（#211）。呼ぶ側（ページの参照を
 # 読む側／`/health` の宣言を読む側、#479）が共通して必要とするので、
@@ -141,7 +163,8 @@ verify_asset_url() {
   local context="$2"
 
   # 内容ハッシュが入っていること（#211）。入っていなければ immutable を
-  # 付けてはいけないので、キャッシュの検査より先に見る。
+  # 付けてはいけないので、キャッシュの検査より先に見る。リトライしても
+  # 変わらない種類の失敗なので、ここだけはリトライの外に置く。
   if ! printf '%s' "$url" | grep -qE '\.[0-9a-f]{16}\.'; then
     echo "::error::${url} に内容ハッシュが入っていません（#211）。参照元: ${context}"
     failures=$((failures + 1))
@@ -149,27 +172,38 @@ verify_asset_url() {
   fi
 
   local asset_url="${base}${url}"
-  local head_file status
-  head_file="$(mktemp)"
-  # **ページの取得と同じ理由で `-f` を使わない（かつステータス行を読む）。**
-  # `-f` は 4xx/5xx でしか空応答にならない——302 は `-f` にとって
-  # エラーではなく、`-L` も無いのでリダイレクト先を追わないぶん
-  # そのヘッダがそのまま返る。それを下の immutable の検査だけに
-  # 食わせると、「アセットが配られていない」のに「immutable が
-  # 付いていません」という**的外れな理由**で落ちる（#479、302 を
-  # 実際に引いて実測）。
-  #
-  # **`|| echo 000` を使わない。** curl は失敗時にも `-w` で `000` を
-  # 出すので、連結されて `000000` になり得る（このファイルのページ取得側
-  # と同じ事情）。
-  if status="$(curl -sS -o /dev/null -D "$head_file" -w '%{http_code}' --max-time 20 "$asset_url" 2>/dev/null)"; then
-    :
-  else
-    status="unreachable"
-  fi
-  local headers
-  headers="$(cat "$head_file")"
-  rm -f "$head_file"
+  local head_file status headers attempt
+  attempt=0
+
+  while :; do
+    head_file="$(mktemp)"
+    # **ページの取得と同じ理由で `-f` を使わない（かつステータス行を読む）。**
+    # `-f` は 4xx/5xx でしか空応答にならない——302 は `-f` にとって
+    # エラーではなく、`-L` も無いのでリダイレクト先を追わないぶん
+    # そのヘッダがそのまま返る。それを下の immutable の検査だけに
+    # 食わせると、「アセットが配られていない」のに「immutable が
+    # 付いていません」という**的外れな理由**で落ちる（#479、302 を
+    # 実際に引いて実測）。
+    #
+    # **`|| echo 000` を使わない。** curl は失敗時にも `-w` で `000` を
+    # 出すので、連結されて `000000` になり得る（このファイルのページ取得側
+    # と同じ事情）。
+    if status="$(curl -sS -o /dev/null -D "$head_file" -w '%{http_code}' --max-time 20 "$asset_url" 2>/dev/null)"; then
+      :
+    else
+      status="unreachable"
+    fi
+    headers="$(cat "$head_file")"
+    rm -f "$head_file"
+
+    [ "$status" = "200" ] && break
+    [ "$attempt" -ge "${#ASSET_RETRY_DELAYS[@]}" ] && break
+
+    echo "  ${asset_url} が ${status}（デプロイ直後の伝播待ちの可能性）。" \
+      "${ASSET_RETRY_DELAYS[$attempt]}s 後に再試行します（参照元: ${context}）。"
+    sleep "${ASSET_RETRY_DELAYS[$attempt]}"
+    attempt=$((attempt + 1))
+  done
 
   if [ "$status" = "unreachable" ] || [ -z "$headers" ]; then
     echo "::error::${asset_url} を取得できませんでした（${context} が参照しています）。"
