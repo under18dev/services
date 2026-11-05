@@ -364,10 +364,18 @@ describe("承認リスト", () => {
     expect(html).toContain("admin-approval.mjs grant");
     expect(html).toContain("--sub usr_waiting");
     expect(html).toContain("--super");
-    // **コピーできるように `<textarea readonly>` にしてある**（#443）。
-    // `<pre><code>` のままだとドラッグでしかコピーできない。
-    expect(html).toMatch(/<textarea[^>]*readonly[^>]*>/);
+    // **コピーボタンで持ち出せる**（#488）。`data-copy` の値そのものに
+    // sub とコマンド全体が乗っている——`<textarea readonly>` は #470 より
+    // 前の、まだ島の仕組みが無かった頃の代替だった（削除済み）。
+    expect(html).toContain('data-copy="usr_waiting"');
+    expect(html).toContain('data-copy="node apps/admin-worker/scripts/admin-approval.mjs grant');
+    expect(html).not.toMatch(/<textarea/);
     expect(html).toContain(`<link rel="stylesheet" href="${KIWA_STYLESHEET_PATH}"/>`);
+    // **`/pending` は `NAV_PAGE_ROUTES` の外にある**ので、
+    // `test/asset-coverage.test.ts` の「`data-*` を使う画面は
+    // `ISLAND_PATH` も読む」という検査がここを見ない（#488 で発覚）。
+    // ここで直接確かめる。
+    expect(html).toContain(ISLAND_PATH);
   });
 
   it("承認済みが /pending を開くと / へ戻される（ループにしない）", async () => {
