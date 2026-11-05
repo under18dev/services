@@ -52,6 +52,7 @@ import { DelegatedGetUsersByIdsUseCase } from "../application/use-cases/delegate
 import { DelegatedListUsersUseCase } from "../application/use-cases/delegated-list-users.use-case";
 import { DelegatedManageUserUseCase } from "../application/use-cases/delegated-manage-user.use-case";
 import { DelegatedCountOAuthClientsUseCase } from "../application/use-cases/delegated-count-oauth-clients.use-case";
+import { DelegatedGetOAuthClientUseCase } from "../application/use-cases/delegated-get-oauth-client.use-case";
 import { DelegatedListOAuthClientsUseCase } from "../application/use-cases/delegated-list-oauth-clients.use-case";
 import { DelegatedCreateOAuthClientUseCase } from "../application/use-cases/delegated-create-oauth-client.use-case";
 import { DelegatedDisableOAuthClientUseCase } from "../application/use-cases/delegated-disable-oauth-client.use-case";
@@ -189,6 +190,7 @@ export type Container = {
     readonly delegatedGetUsersByIds: DelegatedGetUsersByIdsUseCase;
     readonly delegatedManageUser: DelegatedManageUserUseCase;
     readonly delegatedListOAuthClients: DelegatedListOAuthClientsUseCase;
+    readonly delegatedGetOAuthClient: DelegatedGetOAuthClientUseCase;
     readonly delegatedCountOAuthClients: DelegatedCountOAuthClientsUseCase;
     readonly delegatedCreateOAuthClient: DelegatedCreateOAuthClientUseCase;
     readonly delegatedDisableOAuthClient: DelegatedDisableOAuthClientUseCase;
@@ -529,6 +531,7 @@ export function createContainer(
       delegatedGetUsersByIds: new DelegatedGetUsersByIdsUseCase({ users }),
       delegatedManageUser: new DelegatedManageUserUseCase({ users, sessions, clock, audit }),
       delegatedListOAuthClients: new DelegatedListOAuthClientsUseCase({ clients: oauthClients }),
+      delegatedGetOAuthClient: new DelegatedGetOAuthClientUseCase({ clients: oauthClients }),
       delegatedCountOAuthClients: new DelegatedCountOAuthClientsUseCase({ clients: oauthClients }),
       delegatedCreateOAuthClient: new DelegatedCreateOAuthClientUseCase({
         users,

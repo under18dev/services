@@ -101,6 +101,8 @@ export const NAV_PAGE_ROUTES: readonly Route[] = [
   /** NFC の解析画面（#454）。 */
   { method: "GET", path: "/nfc/analytics" },
   { method: "GET", path: "/clients" },
+  /** クライアント詳細（#473）。`/users/:userId` と同じ理由で並びには出さない。 */
+  { method: "GET", path: "/clients/:clientId" },
   { method: "GET", path: "/users" },
   { method: "GET", path: "/users/:userId" },
   { method: "GET", path: "/audit" },

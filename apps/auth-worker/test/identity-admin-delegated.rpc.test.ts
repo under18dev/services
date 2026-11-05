@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { IdentityAdminDelegatedRPC } from "../src/presentation/rpc/identity-admin-delegated.entrypoint";
 import { resetDatabase } from "./helpers";
-import { appEnv, db, seedLoggedInUser, type SeededUser } from "./helpers.oauth";
+import { appEnv, db, seedClient, seedLoggedInUser, type SeededUser } from "./helpers.oauth";
 
 /**
  * `IdentityAdminDelegatedRPC`（#390 決定 16 ③）。
@@ -287,6 +287,64 @@ describe("getUsersByIds", () => {
     await seedPlainUser({ id: "usr_taro", username: "taro", email: "taro@example.com" });
 
     await rpc.getUsersByIds({ actorUserId: "usr_admin", userIds: ["usr_taro"] });
+
+    const rows = await db().select().from(auditLogs).all();
+    expect(rows).toHaveLength(0);
+  });
+});
+
+describe("getOAuthClient（#473）", () => {
+  it("clientId 1 本で 1 件を返す（一覧を経由しない）", async () => {
+    await seedClient({ clientId: "app_detail", clientType: "confidential", isFirstParty: false });
+
+    const result = await rpc.getOAuthClient({ actorUserId: "usr_admin", clientId: "app_detail" });
+
+    expect(result.ok, "getOAuthClient が失敗した").toBe(true);
+    if (!result.ok) return;
+    expect(result.value.clientId).toBe("app_detail");
+    expect(result.value.clientType).toBe("confidential");
+  });
+
+  it("存在しない clientId は not_found", async () => {
+    const result = await rpc.getOAuthClient({
+      actorUserId: "usr_admin",
+      clientId: "app_missing",
+    });
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("失効済みクライアントも返す（存在しないのと失効しているのを区別する）", async () => {
+    await seedClient({
+      clientId: "app_disabled",
+      clientType: "confidential",
+      isFirstParty: false,
+      disabledAt: new Date(),
+    });
+
+    const result = await rpc.getOAuthClient({
+      actorUserId: "usr_admin",
+      clientId: "app_disabled",
+    });
+
+    expect(result.ok && result.value.disabledAt).not.toBeNull();
+  });
+
+  it("読み取りなので、実在しない actorUserId でも通る（listOAuthClients と同じ扱い）", async () => {
+    await seedClient({ clientId: "app_detail", clientType: "public", isFirstParty: false });
+
+    const result = await rpc.getOAuthClient({
+      actorUserId: "usr_does_not_exist",
+      clientId: "app_detail",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("監査ログに 1 行も書かない", async () => {
+    await seedClient({ clientId: "app_detail", clientType: "public", isFirstParty: false });
+
+    await rpc.getOAuthClient({ actorUserId: "usr_admin", clientId: "app_detail" });
 
     const rows = await db().select().from(auditLogs).all();
     expect(rows).toHaveLength(0);

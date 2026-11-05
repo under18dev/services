@@ -6,6 +6,7 @@ import type {
   CreateOAuthClientDelegatedResult,
   DisableOAuthClientDelegatedInput,
   DisableOAuthClientDelegatedResult,
+  GetOAuthClientDelegatedResult,
   IdentityAdminDelegatedRpcContract,
   ListOAuthClientsDelegatedResult,
   OAuthClientSummary,
@@ -70,6 +71,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     reinstateUser: async () => rpcOk({}),
     revokeUserSessions: async () => rpcOk({ revokedSessions: 0 }),
     listOAuthClients: async (): Promise<ListOAuthClientsDelegatedResult> => rpcOk([client()]),
+    getOAuthClient: async () => rpcOk(client()),
     countOAuthClients: async () => rpcOk(1),
     createOAuthClient: async (input): Promise<CreateOAuthClientDelegatedResult> => {
       calls.createOAuthClient.push(input);
@@ -155,6 +157,390 @@ describe("GET /clients", () => {
     );
 
     expect(response.status).toBe(503);
+  });
+});
+
+describe("GET /clients/:clientId（#473）", () => {
+  it("概要・redirect_uri・scope・操作をまとめて描く", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(
+          client({
+            clientId: "app_0001",
+            name: "My App",
+            redirectUris: ["https://example.com/callback", "https://example.com/other"],
+            scopes: ["openid", "profile"],
+          }),
+        ),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain("My App");
+    expect(html).toContain("https://example.com/callback");
+    expect(html).toContain("https://example.com/other");
+    expect(html).toContain("openid");
+    expect(html).toContain("profile");
+    expect(html).toContain('data-panel="overview"');
+    expect(html).toContain('data-panel="redirect-uris"');
+    expect(html).toContain('data-panel="audit"');
+    expect(html).toContain('data-panel="operations"');
+  });
+
+  it("client_id と redirect_uri にコピー用の目印（data-copy）を付ける", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", redirectUris: ["https://example.com/cb"] })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('data-copy="app_0001" hidden');
+    expect(html).toContain('data-copy="https://example.com/cb" hidden');
+  });
+
+  it("一次パーティは失効フォームを出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_dashboard", isFirstParty: true })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_dashboard`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain('action="/clients/disable"');
+    expect(html).toContain("この画面からは失効させられません");
+  });
+
+  /**
+   * **一覧（`clients-page.tsx`）には 3 つの操作フォームがあり、この画面は
+   * 2 つしか無かった**（3b のレビュー）。「一覧と同じ操作です」と言い切る
+   * 説明文があるのに app_url だけ変えられないのは、表示だけで操作できない
+   * 中途半端な詳細ページになる——説明文を弱めるのではなく、フォームを足す。
+   */
+  it("表示用 URL（app_url）を変更するフォームも持つ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", appUrl: "https://app.example/" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('action="/clients/app-url"');
+    expect(html).toContain('value="https://app.example/"');
+    expect(html).toContain('name="from" value="detail"');
+  });
+
+  it("appUrl があれば target=_blank と rel=noopener noreferrer 付きでリンクにする", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", appUrl: "https://app.example/" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toMatch(
+      /<a href="https:\/\/app\.example\/" target="_blank" rel="noopener noreferrer"/,
+    );
+  });
+
+  it("appUrl が無ければリンクを出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", appUrl: null })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toMatch(/<a href="[^"]*" target="_blank"/);
+  });
+
+  it("持ち主が居なければ — を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", ownerUserId: null })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("/users/usr_");
+  });
+
+  it("持ち主が居れば名前で /users/<id> へリンクする（getUsersByIds 経由）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", ownerUserId: "usr_alice" })),
+      getUsersByIds: async () =>
+        rpcOk([{ id: "usr_alice", username: "alice", displayName: "Alice", status: "active" }]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('<a href="/users/usr_alice"');
+    expect(html).toContain("Alice");
+  });
+
+  it("持ち主の名前が引けなければ、リンクにせず短縮 ID を出す（「不明」とは書かない）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", ownerUserId: "usr_does_not_exist" })),
+      // **見つからなかった ID は結果から黙って落ちる**（`GetUsersByIdsDelegatedResult` の契約）。
+      getUsersByIds: async () => rpcOk([]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain('<a href="/users/usr_does_not_exist"');
+    expect(html).not.toContain("不明");
+    expect(html).toContain('title="usr_does_not_exist"');
+    expect(html).toContain("usr_does…");
+  });
+
+  it("監査ログが全滅したら「いま取得できません」を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001" })),
+      listAuditLogs: async () => rpcErr(RpcErrorCode.Internal, "boom"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("いま監査ログを取得できません");
+  });
+
+  it("監査ログが一部しか取れなくても、取れた分は出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    let call = 0;
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001" })),
+      listAuditLogs: async (input) => {
+        call += 1;
+        if (input.event === "oauth.client.created") {
+          return rpcOk({
+            entries: [
+              {
+                id: "aud_1",
+                event: "oauth.client.created",
+                userId: "usr_admin",
+                actor: "admin-worker",
+                outcome: "success",
+                reason: null,
+                metadata: null,
+                ipHash: null,
+                userAgent: null,
+                createdAt: "2026-10-01T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          });
+        }
+        return rpcErr(RpcErrorCode.Internal, "boom");
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(call).toBe(4);
+    expect(html).toContain("oauth.client.created");
+    expect(html).not.toContain("いま監査ログを取得できません");
+  });
+
+  it("存在しない clientId は 404 で一覧へ戻す道を示す（行き止まりにしない）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcErr(RpcErrorCode.NotFound, "no such client"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_missing`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(404);
+    const html = await response.text();
+    expect(html).toContain("見つかりません");
+    expect(html).toContain('href="/clients"');
+  });
+
+  it("invalid_input も見つからない扱いにする", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcErr(RpcErrorCode.InvalidInput, "malformed"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_missing`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("それ以外のエラーは 503", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcErr(RpcErrorCode.Internal, "boom"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_missing`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(503);
+  });
+
+  /**
+   * **登録順の実測**（issue #473 / `users.routes.tsx:308` と同じ罠の確認）。
+   * `GET /clients/:clientId` と `POST /clients/disable` / `POST /clients/owner`
+   * はメソッドが違うので、どちらを先に登録しても食い合わない——それを
+   * 「たぶんそう」ではなく実際に両方叩いて確かめる。
+   */
+  it("POST /clients/disable・/clients/owner を GET /clients/:clientId が食わない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const disableResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+    expect(disableResponse.status).toBe(200);
+    expect(calls.disableOAuthClient).toHaveLength(1);
+
+    const ownerResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/owner`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", owner_user_id: "usr_x", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+    expect(ownerResponse.status).toBe(200);
+    expect(calls.setOAuthClientOwner).toHaveLength(1);
+
+    // 逆方向——`GET /clients/owner` は「owner という clientId」の詳細として
+    // 扱われ、見つからず 404 になる（`POST` 専用の操作ルートを吸ってはいない）。
+    const { rpc: notFoundRpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcErr(RpcErrorCode.NotFound, "no such client"),
+    });
+    const notFoundApp = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: notFoundRpc });
+    const getOwnerAsDetail = await notFoundApp.fetch(
+      new Request(`${ORIGIN}/clients/owner`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    expect(getOwnerAsDetail.status).toBe(404);
   });
 });
 
@@ -572,6 +958,45 @@ describe("POST /clients/disable", () => {
     const html = await response.text();
     expect(html).toContain("既に失効しています");
   });
+
+  it("from=detail なら一覧ではなく詳細画面を描き直す（#473）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", name: "Detail Target" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", from: "detail", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    // **詳細画面が描き直されたことの証拠。** 一覧（`clients-page.tsx`）には
+    // 出ない `data-panel` が出ていること、一覧の見出しではなく詳細の
+    // 見出しが出ていることの両方で確かめる。
+    expect(html).toContain('data-panel="overview"');
+    expect(html).toContain("Detail Target");
+  });
 });
 
 describe("GET /clients（持ち主の表示）", () => {
@@ -727,6 +1152,47 @@ describe("POST /clients/owner", () => {
     expect(html).not.toContain("does not exist");
     expect(html).toContain("見つかりません");
   });
+
+  it("from=detail なら一覧ではなく詳細画面を描き直す（#473）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", name: "Detail Target" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/owner`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          owner_user_id: "usr_alice",
+          from: "detail",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('data-panel="overview"');
+    expect(html).toContain("Detail Target");
+  });
 });
 
 describe("GET /clients（表示用 URL の表示）", () => {
@@ -881,6 +1347,47 @@ describe("POST /clients/app-url", () => {
     const html = await response.text();
     expect(html).not.toContain("usable https URL");
     expect(html).toContain("https で始まる");
+  });
+
+  it("from=detail なら一覧ではなく詳細画面を描き直す（#473）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", name: "Detail Target" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app-url`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          app_url: "https://app.example/",
+          from: "detail",
+          csrf_token,
+        }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('data-panel="overview"');
+    expect(html).toContain("Detail Target");
   });
 });
 

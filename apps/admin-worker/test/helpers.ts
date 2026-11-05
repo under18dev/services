@@ -56,6 +56,7 @@ export function minimalIdentityAdmin(): IdentityAdminDelegatedRpcContract {
     reinstateUser: unused("reinstateUser"),
     revokeUserSessions: unused("revokeUserSessions"),
     listOAuthClients: unused("listOAuthClients"),
+    getOAuthClient: unused("getOAuthClient"),
     createOAuthClient: unused("createOAuthClient"),
     disableOAuthClient: unused("disableOAuthClient"),
     setOAuthClientOwner: unused("setOAuthClientOwner"),
