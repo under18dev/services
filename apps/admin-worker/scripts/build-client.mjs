@@ -1,18 +1,22 @@
 // @ts-check
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { build } from "esbuild";
 import postcss from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 
 /**
- * admin-worker が配信する生成物を作る（#390 決定 16 ③）。
+ * admin-worker が配信する生成物を作る（#390 決定 16 ③ / #470）。
  *
- * **nfc-worker / dashboard-worker の同名スクリプトと同じ形。** いま作る
- * のはスタイルシート（Tailwind v4）だけで、**アイランドは無い** ——
- * 最初の画面（NFC 管理）は画面ごと form POST + JS 無しで完結する想定
- * なので、無い実体へ `buildIsland()` を空けておかない
- * （nfc-worker の同スクリプトが「宣言はあるが繋がっていない」経路を
- * 自分から作らないと書いているのと同じ判断）。
+ * **nfc-worker / dashboard-worker の同名スクリプトと同じ形。** 2 つある
+ * ——ブラウザ向けのアイランド（esbuild）と、画面のスタイルシート
+ * （Tailwind v4）。
+ *
+ * **アイランドは #470 で足した。** それまでは「最初の画面は form POST +
+ * JS 無しで完結する」という理由で `buildIsland()` を持たなかった
+ * （このコメントの直前の版を参照）。並べ替え・絞り込み・コピー・通知の
+ * トーストは、サーバーの form POST では作れない後付けの便利さなので、
+ * アイランドが要るようになった。
  *
  * ## このスクリプトが `dev` / `build` / `typecheck` / `test` の前段にいる
  *
@@ -39,6 +43,36 @@ async function emit(fileName, exportName, content) {
 }
 
 /**
+ * 並べ替え・絞り込み・コピー・タブ・通知のアイランドをブラウザ向けに
+ * バンドルする（#470）。
+ *
+ * **`.test.ts` を巻き込まない。** `ui/client/` には `admin-island.test.ts`
+ * も置いてあるが、エントリポイントに指定していないので esbuild が辿る
+ * ことはない（`vitest` を import しており、束ねると壊れる）。
+ */
+async function buildIsland() {
+  const result = await build({
+    entryPoints: [join(root, "src/presentation/http/ui/client/admin-island.ts")],
+    bundle: true,
+    format: "esm",
+    // Workers ではなくブラウザ向け。
+    platform: "browser",
+    target: ["es2022"],
+    minify: true,
+    // 配信しないので .map への参照は 404 を生むだけ。
+    sourcemap: false,
+    write: false,
+    logLevel: "warning",
+  });
+
+  const [output] = result.outputFiles ?? [];
+  if (output === undefined) throw new Error("esbuild produced no output");
+
+  await emit("admin-island.bundle.ts", "ADMIN_ISLAND_JS", output.text);
+  return output.text;
+}
+
+/**
  * Kiwa UI のスタイルシートを Tailwind v4 で組む。
  *
  * ハッシュはここで計算していない。`@u18/web-ui` の `asset-hash.ts` が
@@ -55,6 +89,7 @@ async function buildStylesheet() {
   return result.css;
 }
 
-const stylesheet = await buildStylesheet();
+const [island, stylesheet] = await Promise.all([buildIsland(), buildStylesheet()]);
 
+console.log(`built admin island: ${(island.length / 1024).toFixed(1)} KiB`);
 console.log(`built kiwa stylesheet: ${(stylesheet.length / 1024).toFixed(1)} KiB`);

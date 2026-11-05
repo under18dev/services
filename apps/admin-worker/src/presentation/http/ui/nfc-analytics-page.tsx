@@ -28,20 +28,23 @@ import type {
 } from "@u18/contracts";
 import type { FC } from "hono/jsx";
 import { ADMIN_NAV_GROUPS } from "./nav";
-import { KIWA_STYLESHEET_PATH } from "./asset-paths";
+import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
 
 /**
- * NFC の解析画面（`/nfc/analytics`、#454）。
+ * NFC の解析画面（`/nfc/analytics`、#454 / #470）。
  *
  * **6 区画とも、取得に失敗していれば `null`。** `null` と「0 件（本当に
  * 無い）」を区別する——`home-page.tsx` の `HomePageProps` と同じ判断。
  *
- * **グラフはサーバ側の inline SVG だけ。** admin-worker にはまだ
- * アイランド（クライアント JS）が無く、この画面でも導入しない
- * （issue #454 の明示的な指示）。軸・目盛り・凡例は作らず、数値は
- * テキストで併記する——運用者から「デザインに AI 味が強い」
+ * **グラフはサーバ側の inline SVG だけ。** 軸・目盛り・凡例は作らず、
+ * 数値はテキストで併記する——運用者から「デザインに AI 味が強い」
  * 「Vercel っぽく」と繰り返し言われているため、Kiwa の色トークン
  * （`text-primary` など）をそのまま使い、自前の配色を作らない。
+ *
+ * **6 区画をタブにしない（#470）。** `admin-island.ts` はタブの primitive
+ * （`data-tabs`）を持つが、ここでは使わない——運用者は「解析はガッチガチに
+ * 見たい」と言っており、半分をタブの裏に隠すのは逆行する。足すのは
+ * グラフの吹き出し（`data-tip`）だけ。
  */
 export type DayWindow = 30 | 90 | 180;
 
@@ -101,6 +104,7 @@ const TapChart: FC<{ readonly timeseries: TapTimeseriesAnalytics }> = ({ timeser
               width={barWidth}
               height={barHeight}
               fill="currentColor"
+              data-tip={`${day.date} · ${day.total} タップ`}
             />
           );
         })}
@@ -444,6 +448,7 @@ export const NfcAnalyticsPage: FC<NfcAnalyticsPageProps> = ({
     heading="NFC 解析"
     lead="発行・引き取り・使用のされ方です。期間は右上のリンクで切り替えられます。"
     maxWidth="max-w-6xl"
+    scripts={[ISLAND_PATH]}
   >
     <TapTimeseriesSection days={days} timeseries={timeseries} />
     <UsageFunnelSection funnel={funnel} />

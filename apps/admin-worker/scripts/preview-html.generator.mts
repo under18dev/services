@@ -20,6 +20,7 @@ import type { ContainerOverrides } from "../src/composition/container";
 import type { ApprovalRepository } from "../src/application/ports/approval.repository";
 import { ALL_DEFINED_PERMISSIONS, effectivePermissions } from "../src/domain/permissions";
 import { createFakeIdp } from "../test/fake-idp";
+import { ADMIN_ISLAND_JS } from "../src/presentation/http/ui/generated/admin-island.bundle";
 import { KIWA_STYLESHEET } from "../src/presentation/http/ui/generated/kiwa-stylesheet";
 
 /**
@@ -570,6 +571,15 @@ function withLocalStylesheet(html: string): string {
   return html.replace(/href="\/ui\/kiwa\.[0-9a-f]+\.css"/, 'href="./kiwa.css"');
 }
 
+/**
+ * `<script type="module" src="/ui/admin-island.<hash>.js">` を相対パスへ
+ * 書き換える（#470）。**JS も書き出さないと、プレビューで並べ替え・
+ * 絞り込み・コピー・タブ・通知の動きを確かめられない**（issue の絶対条件）。
+ */
+function withLocalIsland(html: string): string {
+  return html.replace(/src="\/ui\/admin-island\.[0-9a-f]+\.js"/, 'src="./admin-island.js"');
+}
+
 async function main(): Promise<void> {
   await mkdir(OUTPUT_DIR, { recursive: true });
 
@@ -584,7 +594,7 @@ async function main(): Promise<void> {
     path: string,
     cookie?: string,
   ): Promise<void> {
-    const html = withLocalStylesheet(await fetchHtml(path, cookie));
+    const html = withLocalIsland(withLocalStylesheet(await fetchHtml(path, cookie)));
     pages.push({ name, title, html });
   }
 
@@ -614,7 +624,63 @@ async function main(): Promise<void> {
     "/callback",
   );
 
+  /**
+   * `data-tabs` の見本（#470）。**実在するルートではない。** この issue の
+   * 3 画面はどれもタブを使わない（#454 の 6 区画を縦一列のままにする判断
+   * のため）ので、どのページを引いても `data-tabs` が動いている様子を
+   * 確かめられない。#471〜#473 が最初の利用者になる前に、架空データで
+   * 1 枚だけ動く見本を出しておく（3b の指示）。
+   */
+  const tabsSampleHtml = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>data-tabs の見本 | u18 Identity</title>
+<link rel="stylesheet" href="./kiwa.css" />
+<script type="module" src="./admin-island.js" defer></script>
+</head>
+<body>
+<main class="px-5 py-8 md:px-10 md:py-12">
+<div class="mx-auto flex w-full max-w-3xl flex-col gap-6">
+<div class="flex flex-col gap-2">
+<h1 class="text-2xl">data-tabs の見本（架空データ）</h1>
+<p class="text-sm/relaxed text-foreground-muted">
+JS が無効なら、下の 3 枚は見出し付きで縦に並んだまま読めます。
+JS が有効なら、タブで切り替えられます。
+</p>
+</div>
+<div data-tabs class="flex flex-col gap-4">
+<div role="tablist" class="flex gap-2 border-b border-border" aria-label="見本のタブ">
+<button type="button" data-tab="apple" class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground">りんご</button>
+<button type="button" data-tab="banana" class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground">ばなな</button>
+<button type="button" data-tab="cherry" class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground">さくらんぼ</button>
+</div>
+<section data-panel="apple" class="flex flex-col gap-2">
+<h2 class="text-lg">りんご</h2>
+<p class="text-sm/relaxed text-foreground-muted">1 枚目の中身（架空）。</p>
+</section>
+<section data-panel="banana" class="flex flex-col gap-2">
+<h2 class="text-lg">ばなな</h2>
+<p class="text-sm/relaxed text-foreground-muted">2 枚目の中身（架空）。</p>
+</section>
+<section data-panel="cherry" class="flex flex-col gap-2">
+<h2 class="text-lg">さくらんぼ</h2>
+<p class="text-sm/relaxed text-foreground-muted">3 枚目の中身（架空）。</p>
+</section>
+</div>
+</div>
+</main>
+</body>
+</html>
+`;
+  pages.push({
+    name: "tabs-sample",
+    title: "data-tabs の見本（#470、架空データ）",
+    html: tabsSampleHtml,
+  });
+
   await writeFile(`${OUTPUT_DIR}/kiwa.css`, KIWA_STYLESHEET, "utf8");
+  await writeFile(`${OUTPUT_DIR}/admin-island.js`, ADMIN_ISLAND_JS, "utf8");
   for (const page of pages) {
     await writeFile(`${OUTPUT_DIR}/${page.name}.html`, page.html, "utf8");
   }

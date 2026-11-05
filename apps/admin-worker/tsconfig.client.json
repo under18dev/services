@@ -1,0 +1,23 @@
+{
+  // ブラウザで動くアイランドだけの型検査。
+  //
+  // 本体の tsconfig.json から分けているのは **DOM の型を Worker 側のコードへ
+  // 持ち込まないため**。本体に lib: ["DOM"] を足すと、workerd には存在しない
+  // `document` や `window` が Domain 層からも見えてしまい、動かないコードが
+  // 型検査を通る（dashboard-worker / auth-worker の同名ファイルと同じ理由）。
+  //
+  // **binding の型は要らない。** `account-island.ts` と違い、このアイランドは
+  // `hc<AppType>` を使わない（Service Binding への RPC は無い、form POST +
+  // サーバー描画だけ）ので、`worker-names.d.ts` のような複製も不要。
+  "extends": "../../packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "types": []
+  },
+  "include": [
+    "src/presentation/http/ui/client/**/*.ts",
+    "src/presentation/http/ui/client/**/*.d.ts"
+  ]
+}
