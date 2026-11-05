@@ -392,7 +392,9 @@ export const NfcPage: FC<NfcPageProps> = ({
               <strong>見つからない＝存在しない、ではありません。</strong>
             </>
           )}{" "}
-          <strong>ここに無いカードは、上の「カード ID で直接開く」で ID を指定して開いてください。</strong>
+          <strong>
+            ここに無いカードは、上の「カード ID で直接開く」で ID を指定して開いてください。
+          </strong>
         </AlertDescription>
       </Alert>
     )}
@@ -403,8 +405,8 @@ export const NfcPage: FC<NfcPageProps> = ({
         <CardDescription>
           下の一覧でチェックを入れたカードだけをまとめて操作します。
           <strong>いま画面に出ている行だけが対象です</strong>
-          ——絞り込みで隠れている行・打ち切りの外にある行は選べません。
-          遷移先の変更・手放すは 1 枚ずつ、カードの詳細から行ってください。
+          ——絞り込みで隠れている行・打ち切りの外にある行は選べません。 遷移先の変更・手放すは 1
+          枚ずつ、カードの詳細から行ってください。
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -687,8 +689,8 @@ export const NfcPage: FC<NfcPageProps> = ({
               </p>
             )}
             <p class={ITEM_META_CLASS} role="status">
-              <strong>ロット名による一括無効化です（表示中の選択とは無関係）。</strong>{" "}
-              バッチ「{batchDisable.batch}」には、未紐づけのカードが{" "}
+              <strong>ロット名による一括無効化です（表示中の選択とは無関係）。</strong> バッチ「
+              {batchDisable.batch}」には、未紐づけのカードが{" "}
               <strong>{batchDisable.count} 枚</strong>あります。
               本当に無効化する場合は、下にバッチ名をもう一度入力してください。
             </p>
@@ -777,8 +779,8 @@ export const NfcPage: FC<NfcPageProps> = ({
               </p>
             )}
             <p class={ITEM_META_CLASS} role="status">
-              <strong>ロット名による一括復帰です（表示中の選択とは無関係）。</strong>{" "}
-              バッチ「{batchReinstate.batch}」の一括無効化で止めたカードが{" "}
+              <strong>ロット名による一括復帰です（表示中の選択とは無関係）。</strong> バッチ「
+              {batchReinstate.batch}」の一括無効化で止めたカードが{" "}
               <strong>{batchReinstate.count} 枚</strong>あります。
               本当に戻す場合は、下にバッチ名をもう一度入力してください。
             </p>
@@ -827,7 +829,11 @@ export const NfcPage: FC<NfcPageProps> = ({
           <strong>紐づけ済みのカードは入っていません</strong>
           —— 混ぜると、誰かの手元にあるタグを上書きする形になり、焼いたあとで区別できません。
           {batch === null ? (
-            <> 絞り込み（<code class="font-mono text-xs">?batch=</code>）とは無関係に、全件が対象です。</>
+            <>
+              {" "}
+              絞り込み（<code class="font-mono text-xs">?batch=</code>
+              ）とは無関係に、全件が対象です。
+            </>
           ) : (
             <>
               {" "}

@@ -147,9 +147,7 @@ async function loadCardsForRender(
 } | null> {
   const container = c.get("container");
   const session = c.get("session");
-  const result = await container.nfcCards.listAllCards(
-    batch === null ? undefined : { batch },
-  );
+  const result = await container.nfcCards.listAllCards(batch === null ? undefined : { batch });
   if (!result.ok) return null;
 
   const tapUrls = result.value.cards
@@ -274,7 +272,10 @@ function uniqueCardIdsFrom(form: FormData): string[] {
 function categorizeForDisable(
   selected: readonly string[],
   cardsById: ReadonlyMap<string, AdminCardListViewDelegated>,
-): { readonly eligibleCardIds: readonly string[]; readonly ineligible: readonly BulkIneligibleRow[] } {
+): {
+  readonly eligibleCardIds: readonly string[];
+  readonly ineligible: readonly BulkIneligibleRow[];
+} {
   const eligibleCardIds: string[] = [];
   const ineligible: BulkIneligibleRow[] = [];
   for (const cardId of selected) {
@@ -296,7 +297,10 @@ function categorizeForDisable(
 function categorizeForReinstate(
   selected: readonly string[],
   cardsById: ReadonlyMap<string, AdminCardListViewDelegated>,
-): { readonly eligibleCardIds: readonly string[]; readonly ineligible: readonly BulkIneligibleRow[] } {
+): {
+  readonly eligibleCardIds: readonly string[];
+  readonly ineligible: readonly BulkIneligibleRow[];
+} {
   const eligibleCardIds: string[] = [];
   const ineligible: BulkIneligibleRow[] = [];
   for (const cardId of selected) {
@@ -609,7 +613,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (targetBatch === "") {
       if (typed === "") {
-        return renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: "バッチ名を入力してください。" }, 400);
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "バッチ名を入力してください。" },
+          400,
+        );
       }
 
       const counted = await container.nfcCards.countBatchIssuedCards({
@@ -620,7 +629,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         return serviceUnavailable(c);
       }
       if (counted.value.count === 0) {
-        return renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: "そのバッチには未紐づけのカードがありません。" }, 400);
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "そのバッチには未紐づけのカードがありません。" },
+          400,
+        );
       }
 
       return renderNfcPage(c, batchFromQuery(c.req.query("batch")), {
@@ -652,7 +666,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       batch: targetBatch,
     });
     if (!result.ok) {
-      return renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: "しばらくしてからもう一度お試しください。" }, 400);
+      return renderNfcPage(
+        c,
+        batchFromQuery(c.req.query("batch")),
+        { error: "しばらくしてからもう一度お試しください。" },
+        400,
+      );
     }
 
     c.header("Cache-Control", "no-store");
@@ -684,7 +703,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (targetBatch === "") {
       if (typed === "") {
-        return renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: "バッチ名を入力してください。" }, 400);
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "バッチ名を入力してください。" },
+          400,
+        );
       }
 
       const counted = await container.nfcCards.countDisabledInBatch({
@@ -695,7 +719,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         return serviceUnavailable(c);
       }
       if (counted.value.count === 0) {
-        return renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: "そのバッチには、一括無効化で止めたカードがありません。" }, 400);
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "そのバッチには、一括無効化で止めたカードがありません。" },
+          400,
+        );
       }
 
       return renderNfcPage(c, batchFromQuery(c.req.query("batch")), {
@@ -727,7 +756,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       batch: targetBatch,
     });
     if (!result.ok) {
-      return renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: "しばらくしてからもう一度お試しください。" }, 400);
+      return renderNfcPage(
+        c,
+        batchFromQuery(c.req.query("batch")),
+        { error: "しばらくしてからもう一度お試しください。" },
+        400,
+      );
     }
 
     c.header("Cache-Control", "no-store");
@@ -806,7 +840,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     const confirmed = form.get("confirmed")?.toString() === "1";
     if (!confirmed) {
       if (eligibleCardIds.length === 0) {
-        return renderNfcPage(c, batch, { error: "選んだ中に無効化できるカードがありません。" }, 400);
+        return renderNfcPage(
+          c,
+          batch,
+          { error: "選んだ中に無効化できるカードがありません。" },
+          400,
+        );
       }
       return renderNfcPage(c, batch, {
         bulkConfirm: {

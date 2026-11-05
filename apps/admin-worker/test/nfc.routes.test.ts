@@ -2085,9 +2085,16 @@ describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", ()
     const csrfToken = csrfTokenFrom(csrfCookie);
 
     const tooMany = Array.from({ length: 101 }, (_, i) => `nfc_${i}`);
-    const response = await postBulk(app, "/nfc/bulk-disable", sessionCookie, csrfCookie, csrfToken, {
-      card_id: tooMany,
-    });
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: tooMany,
+      },
+    );
 
     expect(response.status).toBe(400);
     expect(calls.disableCard).toHaveLength(0);
@@ -2118,9 +2125,16 @@ describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", ()
     const csrfCookie = cookieHeaderFrom(getResponse);
     const csrfToken = csrfTokenFrom(csrfCookie);
 
-    const response = await postBulk(app, "/nfc/bulk-disable", sessionCookie, csrfCookie, csrfToken, {
-      card_id: ["nfc_a", "nfc_b", "nfc_c", "nfc_missing"],
-    });
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: ["nfc_a", "nfc_b", "nfc_c", "nfc_missing"],
+      },
+    );
 
     expect(response.status).toBe(200);
     expect(calls.disableCard).toHaveLength(0);
@@ -2151,9 +2165,16 @@ describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", ()
     const csrfCookie = cookieHeaderFrom(getResponse);
     const csrfToken = csrfTokenFrom(csrfCookie);
 
-    const response = await postBulk(app, "/nfc/bulk-disable", sessionCookie, csrfCookie, csrfToken, {
-      card_id: "nfc_a",
-    });
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: "nfc_a",
+      },
+    );
 
     expect(response.status).toBe(400);
     const html = await response.text();
@@ -2188,10 +2209,17 @@ describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", ()
     const csrfCookie = cookieHeaderFrom(getResponse);
     const csrfToken = csrfTokenFrom(csrfCookie);
 
-    const response = await postBulk(app, "/nfc/bulk-disable", sessionCookie, csrfCookie, csrfToken, {
-      card_id: ["nfc_a", "nfc_b", "nfc_c"],
-      confirmed: "1",
-    });
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: ["nfc_a", "nfc_b", "nfc_c"],
+        confirmed: "1",
+      },
+    );
 
     expect(response.status).toBe(200);
     // `nfc_c`（既に disabled）は対象外なので呼ばれない。
