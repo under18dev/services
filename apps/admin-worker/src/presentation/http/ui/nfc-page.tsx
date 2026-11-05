@@ -27,8 +27,8 @@ import {
   LABEL_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
 import type {
+  AdminCardListViewDelegated,
   AdminCardStatusDelegated,
-  AdminCardViewDelegated,
   UserRefAdmin,
 } from "@u18/contracts";
 import type { FC } from "hono/jsx";
@@ -41,9 +41,17 @@ import { UserRef } from "./user-ref";
  * NFC カードの管理画面（`admin.under18.dev/nfc`、#382 / #390 決定 16 ③）。
  *
  * **`/account/nfc/admin`（nfc-worker、#377）から移した。** 画面の中身
- * （一覧・発行・コピペ用 URL 一覧・無効化・遷移先の書き換え）はそのまま
- * 持ってきている。変わったのは呼び方（セッション Cookie 経由の UseCase
- * → `NfcAdminDelegatedRPC` 経由）と置き場所だけ。
+ * （一覧・発行・コピペ用 URL 一覧）はそのまま持ってきている。変わったのは
+ * 呼び方（セッション Cookie 経由の UseCase → `NfcAdminDelegatedRPC` 経由）
+ * と置き場所だけ。
+ *
+ * ## 1 枚ずつの操作はこの画面から消した（#481）
+ *
+ * 運用者の指示「カード一覧からは 1 枚ずつ操作できなくていい。詳細ページ
+ * からやる。代わりにソート・検索・選択 and 一括操作を」。カード ID は
+ * `/nfc/:cardId`（#472）へのリンクになり、無効化・復帰・手放す・遷移先
+ * の書き換えはあちらで行う。**`POST /nfc/:cardId/*` のルート自体は消して
+ * いない**——詳細ページが使う。
  *
  * ## この画面は「未紐づけカードの鍵束」である（移行元と同じ理由）
  *
@@ -72,6 +80,14 @@ import { UserRef } from "./user-ref";
  * 表示は `ui/user-ref.tsx` の `UserRef` 1 つに集約してある——#472/#473 も
  * これを使う。
  *
+ * ## `?batch=` は打ち切りの前に効く（#481）
+ *
+ * `/nfc/analytics` のバッチ別の表から「このロットの N 枚を見る」に
+ * 辿り着く経路。クライアント側の絞り込み（`data-filter`）と違い、
+ * `MAX_ADMIN_LIST`（500 枚）で打ち切られる前に絞るので、500 枚より後ろに
+ * 並んでいたロットも見える。`truncated` の意味も「そのロットの中で」に
+ * 変わる——画面の文言を書き分けている。
+ *
  * ## インラインの `style` を書かない
  *
  * 本番の CSP は `style-src 'self'`。`style="..."` は破棄され、
@@ -96,8 +112,37 @@ function toDate(iso: string): string {
   return iso.split("T")[0] ?? iso;
 }
 
+/** いま絞り込んでいるロットがあれば、フォームの宛先にそのまま引き継ぐ（#481）。 */
+function withBatchQuery(path: string, batch: string | null): string {
+  return batch === null ? path : `${path}?batch=${encodeURIComponent(batch)}`;
+}
+
+export type BulkActionKind = "disable" | "reinstate";
+
+export type BulkIneligibleRow = { readonly cardId: string; readonly reason: string };
+
+/**
+ * 選択による一括操作の 2 段階確認（#481）。**非 null なら確認待ちの状態。**
+ * `selectedCardIds` はチェックを入れた全部、`eligibleCardIds` はそのうち
+ * 実際に効くもの——差分が `ineligible`（理由つき）。
+ */
+export type BulkConfirmState = {
+  readonly action: BulkActionKind;
+  readonly selectedCardIds: readonly string[];
+  readonly eligibleCardIds: readonly string[];
+  readonly ineligible: readonly BulkIneligibleRow[];
+} | null;
+
+/** 選択による一括操作の実行結果（#481）。**部分失敗を正直に出す**——成功のリダイレクトに畳まない。 */
+export type BulkResultState = {
+  readonly action: BulkActionKind;
+  readonly succeeded: readonly string[];
+  readonly failed: readonly BulkIneligibleRow[];
+  readonly ineligible: readonly BulkIneligibleRow[];
+} | null;
+
 export type NfcPageProps = {
-  readonly cards: readonly AdminCardViewDelegated[];
+  readonly cards: readonly AdminCardListViewDelegated[];
   readonly truncated: boolean;
   /** 焼く用の URL 一覧（`issued` のカードだけ、1 行に 1 本）。組み立てるのはルート側。 */
   readonly tapUrls: readonly string[];
@@ -127,144 +172,115 @@ export type NfcPageProps = {
   readonly batchReinstateError: string | null;
   /** 直前の一括復帰で実際に戻した枚数（PRG で戻ってきたとき）。 */
   readonly batchReinstatedCount: number | null;
+  /** `?batch=` で絞り込んでいれば、そのロット名（#481）。トリム済み。 */
+  readonly batch: string | null;
+  readonly bulkConfirm: BulkConfirmState;
+  readonly bulkResult: BulkResultState;
 };
 
-/**
- * カード 1 行ぶんの操作（Actions 列）。
- *
- * **`active` のカードにだけ無効化・遷移先の書き換え・手放させるを出す。**
- * 出しても必ず失敗する入口を描かない（移行元と同じ判断）。
- *
- * ## 「手放させる」であって「付け替える」ではない（#422）
- *
- * 直接別の利用者へ付け替える入口は無い。押すと `issued`（未紐づけ）へ
- * 戻るだけで、次にタップした人のものになる——理由は delegated RPC 側の
- * `DelegatedReleaseCardUseCase` の冒頭を参照（NFC カードのセキュリティ
- * モデルがタップ＝物理的占有の証明であることを壊さないため）。
- *
- * **押す前に本人へ連絡すること。** 止める（無効化）と違い、本人の画面
- * からカードが消える操作で、本人には説明の付かない消え方をする
- * （`docs/nfc-cards-operations.md` §4 を参照）。
- *
- * ## `disabled` のカードは、所有者の有無でボタンを分ける（#427 / #436）
- *
- * **所有者がいれば「復帰させる」（→ active）。** 手放す・遷移先を変える
- * とはまとめない——「戻したい」と「渡したい」は運営側の判断が違う場面で、
- * 1 操作に混ぜると復帰のつもりが次の拾得者へ渡る事故を作れる
- * （delegated RPC 側の `DelegatedReinstateCardUseCase` の冒頭を参照）。
- * 渡したい場合は、復帰させたあとであらためて「手放させる」を押す——
- * 弱い操作を 2 つ並べるほうが、強い操作を 1 つ作るより安全という #422
- * と同じ判断。
- *
- * **所有者が無ければ「未紐づけへ戻す」（→ issued）。** batch 一括無効化
- * （または単発の運営操作）で止めた `issued` 由来のカードがこちら。
- * **「復帰させる」を出さない** —— 押しても `reinstateAsAdmin` の
- * `owner_user_id is not null` という WHERE 句（#450 のレビューで追加）
- * に弾かれて何も起きない（「そのカードは見つかりませんでした。」に
- * 落ちる）ので、そもそも出す意味が無い。元々は「出すと所有者の無い
- * まま `active` になる」壊れた行ができる経路だった——
- * `docs/nfc-cards-operations.md` §6 が警告する形そのもの。いまは
- * Repository 側の不変条件が守るので UI はユーザー体験の問題になった。
- * `DelegatedReinstateCardToIssuedUseCase` の冒頭を参照。
- *
- * ## `issued` のカードにも単発の「無効化する」を出す（#427）
- *
- * **一括無効化（下のバッチ無効化フォーム）だけに「`issued` を無効化する」
- * 能力を持たせると、押し間違いで 1 枚だけ盗まれたカードを単発で止める
- * 口が無いまま、一括のほうが危ない操作になる。** `disableCard` の
- * WHERE 句を `active | issued` へ広げたのに合わせ、単発の行にも出す。
- */
-const CardActions: FC<{ readonly card: AdminCardViewDelegated; readonly csrfToken: string }> = ({
-  card,
-  csrfToken,
-}) => {
-  if (card.status === "disabled") {
-    if (card.ownerUserId === null) {
-      return (
-        <form method="post" action={`/nfc/${card.cardId}/reinstate-to-issued`}>
-          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-          <button
-            type="submit"
-            class={getButtonClasses("outline", "sm")}
-            aria-label={`${card.cardId} を未紐づけへ戻す`}
-          >
-            未紐づけへ戻す
-          </button>
-        </form>
-      );
-    }
-
-    return (
-      <form method="post" action={`/nfc/${card.cardId}/reinstate`}>
-        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-        <button
-          type="submit"
-          class={getButtonClasses("outline", "sm")}
-          aria-label={`${card.cardId} を復帰させる`}
-        >
-          復帰させる
-        </button>
-      </form>
-    );
-  }
-
-  if (card.status === "issued") {
-    return (
-      <form method="post" action={`/nfc/${card.cardId}/disable`}>
-        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-        <button
-          type="submit"
-          class={DANGER_BUTTON_CLASS}
-          aria-label={`${card.cardId} を無効化する`}
-        >
-          無効化する
-        </button>
-      </form>
-    );
-  }
-
-  if (card.status !== "active") return null;
+const BulkConfirmView: FC<{
+  readonly confirm: NonNullable<BulkConfirmState>;
+  readonly csrfToken: string;
+  readonly batch: string | null;
+  readonly truncated: boolean;
+}> = ({ confirm, csrfToken, batch, truncated }) => {
+  const actionPath = confirm.action === "disable" ? "/nfc/bulk-disable" : "/nfc/bulk-reinstate";
+  const actionLabel = confirm.action === "disable" ? "無効化する" : "復帰させる";
 
   return (
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-4">
+      <p class={ITEM_META_CLASS} role="status">
+        選択 <strong>{confirm.selectedCardIds.length} 枚</strong>のうち、
+        <strong>{confirm.eligibleCardIds.length} 枚</strong>に「{actionLabel}」が効きます。
+      </p>
+
+      {confirm.ineligible.length > 0 && (
+        <div>
+          <p class={ITEM_META_CLASS}>対象外 {confirm.ineligible.length} 枚（理由つき）:</p>
+          <ul class="flex flex-col gap-0.5 pl-1 text-sm text-foreground-muted">
+            {confirm.ineligible.map((row) => (
+              <li key={row.cardId}>
+                <code class="font-mono text-xs">{row.cardId}</code> — {row.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {batch !== null && truncated && (
+        <p
+          class="rounded-lg border border-destructive/40 bg-background-subtle px-3 py-2.5 text-sm text-destructive"
+          role="alert"
+        >
+          このロットには他にも読み込めていないカードがあります。
+          選択できるのは、いま画面に出ている分だけです。
+        </p>
+      )}
+
       <form
         method="post"
-        action={`/nfc/${card.cardId}/target`}
-        class="flex flex-wrap items-center gap-1.5"
+        action={withBatchQuery(actionPath, batch)}
+        class="flex flex-wrap items-center gap-3"
       >
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-        <input
-          type="url"
-          name="targetUrl"
-          value={card.targetUrl ?? ""}
-          class={`${INPUT_CLASS} w-56`}
-          aria-label={`${card.cardId} の遷移先`}
-          placeholder="https://example.com/"
-        />
-        <button type="submit" class={getButtonClasses("outline", "sm")}>
-          書き換える
-        </button>
-      </form>
-      <form method="post" action={`/nfc/${card.cardId}/release`}>
-        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <input type="hidden" name="confirmed" value="1" />
+        {confirm.selectedCardIds.map((cardId) => (
+          <input type="hidden" name="card_id" value={cardId} key={cardId} />
+        ))}
         <button
           type="submit"
-          class={DANGER_BUTTON_CLASS}
-          aria-label={`${card.cardId} を所有者から手放させる`}
+          class={confirm.action === "disable" ? DANGER_BUTTON_CLASS : getButtonClasses("outline")}
         >
-          手放させる
+          本当に {confirm.eligibleCardIds.length} 枚を{actionLabel}
         </button>
+        <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
+          キャンセルする
+        </a>
       </form>
-      <form method="post" action={`/nfc/${card.cardId}/disable`}>
-        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-        <button
-          type="submit"
-          class={DANGER_BUTTON_CLASS}
-          aria-label={`${card.cardId} を無効化する`}
-        >
-          無効化する
-        </button>
-      </form>
+    </div>
+  );
+};
+
+const BulkResultView: FC<{ readonly result: NonNullable<BulkResultState> }> = ({ result }) => {
+  const actionLabel = result.action === "disable" ? "無効化" : "復帰";
+
+  return (
+    <div class="flex flex-col gap-3">
+      <p class={ITEM_META_CLASS} role="status">
+        {actionLabel}: <strong>{result.succeeded.length} 件成功</strong> /{" "}
+        <strong>{result.failed.length} 件失敗</strong>
+        {result.ineligible.length > 0 && <> / 対象外 {result.ineligible.length} 件</>}
+      </p>
+
+      {result.failed.length > 0 && (
+        <div>
+          <p class={ITEM_META_CLASS}>失敗した内訳:</p>
+          <ul class="flex flex-col gap-0.5 pl-1 text-sm text-destructive">
+            {result.failed.map((row) => (
+              <li key={row.cardId}>
+                <code class="font-mono text-xs">{row.cardId}</code> — {row.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {result.ineligible.length > 0 && (
+        <div>
+          <p class={ITEM_META_CLASS}>最初から対象外だった内訳:</p>
+          <ul class="flex flex-col gap-0.5 pl-1 text-sm text-foreground-muted">
+            {result.ineligible.map((row) => (
+              <li key={row.cardId}>
+                <code class="font-mono text-xs">{row.cardId}</code> — {row.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
+        一覧へ戻る
+      </a>
     </div>
   );
 };
@@ -283,6 +299,9 @@ export const NfcPage: FC<NfcPageProps> = ({
   batchReinstate,
   batchReinstateError,
   batchReinstatedCount,
+  batch,
+  bulkConfirm,
+  bulkResult,
 }) => (
   <KiwaShell
     title="NFC カード"
@@ -291,7 +310,7 @@ export const NfcPage: FC<NfcPageProps> = ({
     brandHref="/"
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="NFC カード"
-    lead="発行したカードの一覧と、タグに焼く URL を確認できます。他人のカードも無効化・遷移先の書き換えができます。"
+    lead="カード ID を押すと詳細が開き、無効化・復帰・遷移先の変更はそこから行います。この画面は検索・並べ替え・選択しての一括操作が主な役目です。"
     maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
@@ -301,6 +320,19 @@ export const NfcPage: FC<NfcPageProps> = ({
       </a>
       （タップの時系列・バッチ別の集計・死蔵の検出など）
     </p>
+
+    {batch !== null && (
+      <Alert>
+        <AlertDescription>
+          <strong>
+            絞り込み中: 「{batch}」の {cards.length} 枚だけを表示しています。
+          </strong>{" "}
+          <a href="/nfc" class="underline underline-offset-4">
+            絞り込みを解除する
+          </a>
+        </AlertDescription>
+      </Alert>
+    )}
 
     <Alert>
       <AlertDescription>
@@ -312,6 +344,227 @@ export const NfcPage: FC<NfcPageProps> = ({
       </AlertDescription>
     </Alert>
 
+    {/*
+      **探しに来た人がすぐ辿り着けるよう、一覧（検索・絞り込み・選択・
+      一括操作）をここに置く。** 発行・バッチ名での一括操作は下へ下げた
+      ——件数が増えるほど、そちらを全部スクロールしてからでないと一覧へ
+      辿り着けない形になっていた（3b のレビュー）。
+    */}
+    <Card>
+      <CardHeader>
+        <CardTitle>カード ID で直接開く</CardTitle>
+        <CardDescription>
+          下の一覧が打ち切られている・絞り込みで隠れている場合でも、
+          <strong>ID が分かっているカードを 1 枚だけ開きます。</strong>
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form method="get" action="/nfc/open" class="flex flex-wrap gap-2">
+          <input
+            type="text"
+            name="cardId"
+            required
+            maxlength={64}
+            placeholder="nfc_xxxxxxxxxxxxxxxx"
+            aria-label="開くカードの ID"
+            autocapitalize="off"
+            class={`${INPUT_CLASS} w-64`}
+          />
+          <button type="submit" class={getButtonClasses("outline")}>
+            開く
+          </button>
+        </form>
+      </CardContent>
+    </Card>
+
+    {truncated && (
+      <Alert>
+        <AlertDescription>
+          {batch === null ? (
+            <>
+              <strong>一覧は上限で打ち切られています。</strong>
+              表示しているのは新しいほうから 500 枚で、これより古いカードは出ていません。
+            </>
+          ) : (
+            <>
+              <strong>「{batch}」のカードは 500 枚で打ち切られています。</strong>
+              このロットには他にも読み込めていないカードがあります——
+              <strong>見つからない＝存在しない、ではありません。</strong>
+            </>
+          )}{" "}
+          <strong>
+            ここに無いカードは、上の「カード ID で直接開く」で ID を指定して開いてください。
+          </strong>
+        </AlertDescription>
+      </Alert>
+    )}
+
+    <Card>
+      <CardHeader>
+        <CardTitle>選択して一括操作する</CardTitle>
+        <CardDescription>
+          下の一覧でチェックを入れたカードだけをまとめて操作します。
+          <strong>いま画面に出ている行だけが対象です</strong>
+          ——絞り込みで隠れている行・打ち切りの外にある行は選べません。 遷移先の変更・手放すは 1
+          枚ずつ、カードの詳細から行ってください。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {bulkResult !== null ? (
+          <BulkResultView result={bulkResult} />
+        ) : bulkConfirm !== null ? (
+          <BulkConfirmView
+            confirm={bulkConfirm}
+            csrfToken={csrfToken}
+            batch={batch}
+            truncated={truncated}
+          />
+        ) : (
+          <form
+            id="nfc-bulk-form"
+            method="post"
+            action={withBatchQuery("/nfc/bulk-disable", batch)}
+            class="flex flex-col gap-3"
+          >
+            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+            <output data-select-count="nfc-cards" class={ITEM_META_CLASS}>
+              選択したカードに対して操作します。
+            </output>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                formaction={withBatchQuery("/nfc/bulk-disable", batch)}
+                class={DANGER_BUTTON_CLASS}
+              >
+                選択したカードを無効化する
+              </button>
+              <button
+                type="submit"
+                formaction={withBatchQuery("/nfc/bulk-reinstate", batch)}
+                class={getButtonClasses("outline")}
+              >
+                選択したカードを復帰させる
+              </button>
+            </div>
+          </form>
+        )}
+      </CardContent>
+    </Card>
+
+    {cards.length === 0 ? (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>発行されたカードはありません。</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    ) : (
+      <Card>
+        <CardHeader>
+          <CardTitle>すべてのカード</CardTitle>
+          <CardDescription>{cards.length} 枚。発行の新しい順です。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {/*
+            絞り込み欄（#470）。**`hidden` で描く——JS が無ければ存在しない
+            ものとして読める。JS がこれを外して使えるようにする。
+          */}
+          <input
+            type="text"
+            data-filter="nfc-cards-table"
+            hidden
+            placeholder="この一覧から絞り込み"
+            aria-label="カードの一覧を絞り込む"
+            class={`${INPUT_CLASS} mb-2`}
+          />
+          <Table id="nfc-cards-table" data-sortable>
+            <TableHeader>
+              <TableRow>
+                <TableHead>
+                  {/*
+                    全選択（#481）。**`hidden` で描く**——素のチェックボックスは
+                    連動して切り替える機能を持たず、JS が無ければ押しても
+                    自分自身が on/off になるだけで何も起きない
+                    （`ui/client/README.md` の「選択と一括操作」を参照）。
+                  */}
+                  <input
+                    type="checkbox"
+                    data-select-all="nfc-cards"
+                    hidden
+                    form="nfc-bulk-form"
+                    aria-label="表示中を全選択"
+                  />
+                </TableHead>
+                <TableHead data-sort="text">カード ID</TableHead>
+                <TableHead data-sort="text">状態</TableHead>
+                <TableHead data-sort="text">所有者</TableHead>
+                <TableHead data-sort="text">遷移先</TableHead>
+                <TableHead data-sort="text">ロット</TableHead>
+                <TableHead data-sort="number">タップ数</TableHead>
+                <TableHead data-sort="date">引き取り</TableHead>
+                <TableHead data-sort="date">発行</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cards.map((card) => (
+                <TableRow key={card.cardId}>
+                  <TableCell>
+                    {/*
+                      選択そのものは JS を要求しない（#481）。チェックを
+                      入れて上の送信ボタンを押せば、JS が無くても一括操作は
+                      成立する——`form="nfc-bulk-form"` で、この行の外に
+                      ある `<form>` と結びつける（テーブルの構造を崩さずに
+                      選択の送信先をまとめるため）。
+                    */}
+                    <input
+                      type="checkbox"
+                      data-select="nfc-cards"
+                      name="card_id"
+                      value={card.cardId}
+                      form="nfc-bulk-form"
+                      aria-label={`${card.cardId} を選択`}
+                    />
+                  </TableCell>
+                  <TableCell class="font-mono text-xs">
+                    <a
+                      href={`/nfc/${encodeURIComponent(card.cardId)}`}
+                      class="underline underline-offset-4"
+                    >
+                      {card.cardId}
+                    </a>{" "}
+                    {/* コピー用（#470）。JS が外すまでは存在しない。 */}
+                    <button type="button" data-copy={card.cardId} hidden class="text-xs underline">
+                      コピー
+                    </button>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_VARIANT[card.status]}>{STATUS_LABEL[card.status]}</Badge>
+                  </TableCell>
+                  <TableCell class="whitespace-normal">
+                    <UserRef id={card.ownerUserId} refs={userRefs} />
+                  </TableCell>
+                  <TableCell class="max-w-xs font-mono text-xs break-all whitespace-normal">
+                    {/* **リンクにしない**（冒頭を参照）。 */}
+                    {card.targetUrl ?? "未設定"}
+                  </TableCell>
+                  <TableCell>{card.batch ?? "—"}</TableCell>
+                  <TableCell>{card.tapCount}</TableCell>
+                  <TableCell class={ITEM_META_CLASS}>
+                    {card.claimedAt === null ? "—" : toDate(card.claimedAt)}
+                  </TableCell>
+                  <TableCell class={ITEM_META_CLASS}>{toDate(card.issuedAt)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    )}
+
+    {/*
+      **ここから下は、出番の少ない操作**（発行・ロット名での一括操作・
+      焼く URL の書き出し）。探しに来た人が真っ先に見る一覧より後ろに
+      下げてある（3b のレビュー）。
+    */}
     <Card>
       <CardHeader>
         <CardTitle>カードを発行する</CardTitle>
@@ -323,7 +576,7 @@ export const NfcPage: FC<NfcPageProps> = ({
       <CardContent>
         {issuedCount === null ? null : (
           <p class={`${ITEM_META_CLASS} mb-4`} role="status">
-            {issuedCount} 枚発行しました。下の一覧に入っています。
+            {issuedCount} 枚発行しました。上の一覧に入っています。
           </p>
         )}
         {error === null ? null : (
@@ -389,6 +642,8 @@ export const NfcPage: FC<NfcPageProps> = ({
         <CardDescription>
           配布前の箱ごと盗難など、<strong>未紐づけ（まだ誰のものでもない）のカードだけ</strong>
           をバッチ単位で止めます。<strong>誰かのカードは対象になりません。</strong>
+          <strong>入力したロット全体に効きます——いま画面に出ていない分も含みます。</strong>
+          上の「選択して一括操作する」（チェックを入れた行だけが対象）とは効く範囲が違います。
           戻すときは下の「バッチを一括で復帰させる」を使ってください ——
           <strong>このバッチの一括無効化で止めたカードだけ</strong>が対象です。
         </CardDescription>
@@ -400,7 +655,11 @@ export const NfcPage: FC<NfcPageProps> = ({
           </p>
         )}
         {batchDisable === null ? (
-          <form method="post" action="/nfc/batch-disable" class="flex flex-col gap-4">
+          <form
+            method="post"
+            action={withBatchQuery("/nfc/batch-disable", batch)}
+            class="flex flex-col gap-4"
+          >
             <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
             <label class={FIELD_CLASS} for="batch-disable-name">
               <span class={LABEL_CLASS}>バッチ名</span>
@@ -412,6 +671,7 @@ export const NfcPage: FC<NfcPageProps> = ({
                 required
                 maxlength={64}
                 autocapitalize="off"
+                value={batch ?? undefined}
               />
             </label>
             <button type="submit" class={getButtonClasses("outline")}>
@@ -429,11 +689,16 @@ export const NfcPage: FC<NfcPageProps> = ({
               </p>
             )}
             <p class={ITEM_META_CLASS} role="status">
-              バッチ「{batchDisable.batch}」には、未紐づけのカードが{" "}
+              <strong>ロット名による一括無効化です（表示中の選択とは無関係）。</strong> バッチ「
+              {batchDisable.batch}」には、未紐づけのカードが{" "}
               <strong>{batchDisable.count} 枚</strong>あります。
               本当に無効化する場合は、下にバッチ名をもう一度入力してください。
             </p>
-            <form method="post" action="/nfc/batch-disable" class="flex flex-col gap-4">
+            <form
+              method="post"
+              action={withBatchQuery("/nfc/batch-disable", batch)}
+              class="flex flex-col gap-4"
+            >
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="target_batch" value={batchDisable.batch} />
               <label class={FIELD_CLASS} for="batch-disable-confirm">
@@ -453,7 +718,10 @@ export const NfcPage: FC<NfcPageProps> = ({
                 {batchDisable.count} 枚を無効化する
               </button>
             </form>
-            <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
+            <a
+              href={withBatchQuery("/nfc", batch)}
+              class="text-sm text-foreground-muted underline underline-offset-4"
+            >
               キャンセルする
             </a>
           </div>
@@ -467,6 +735,7 @@ export const NfcPage: FC<NfcPageProps> = ({
         <CardDescription>
           上の一括無効化で止めたカードを、<strong>同じバッチ単位</strong>で未紐づけへ戻します。
           <strong>単発の操作で個別に止めたカードは対象になりません。</strong>
+          こちらも<strong>入力したロット全体</strong>に効きます——表示中の選択とは無関係です。
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -476,7 +745,11 @@ export const NfcPage: FC<NfcPageProps> = ({
           </p>
         )}
         {batchReinstate === null ? (
-          <form method="post" action="/nfc/batch-reinstate" class="flex flex-col gap-4">
+          <form
+            method="post"
+            action={withBatchQuery("/nfc/batch-reinstate", batch)}
+            class="flex flex-col gap-4"
+          >
             <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
             <label class={FIELD_CLASS} for="batch-reinstate-name">
               <span class={LABEL_CLASS}>バッチ名</span>
@@ -488,6 +761,7 @@ export const NfcPage: FC<NfcPageProps> = ({
                 required
                 maxlength={64}
                 autocapitalize="off"
+                value={batch ?? undefined}
               />
             </label>
             <button type="submit" class={getButtonClasses("outline")}>
@@ -505,11 +779,16 @@ export const NfcPage: FC<NfcPageProps> = ({
               </p>
             )}
             <p class={ITEM_META_CLASS} role="status">
-              バッチ「{batchReinstate.batch}」の一括無効化で止めたカードが{" "}
+              <strong>ロット名による一括復帰です（表示中の選択とは無関係）。</strong> バッチ「
+              {batchReinstate.batch}」の一括無効化で止めたカードが{" "}
               <strong>{batchReinstate.count} 枚</strong>あります。
               本当に戻す場合は、下にバッチ名をもう一度入力してください。
             </p>
-            <form method="post" action="/nfc/batch-reinstate" class="flex flex-col gap-4">
+            <form
+              method="post"
+              action={withBatchQuery("/nfc/batch-reinstate", batch)}
+              class="flex flex-col gap-4"
+            >
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="target_batch" value={batchReinstate.batch} />
               <label class={FIELD_CLASS} for="batch-reinstate-confirm">
@@ -529,7 +808,10 @@ export const NfcPage: FC<NfcPageProps> = ({
                 {batchReinstate.count} 枚を未紐づけへ戻す
               </button>
             </form>
-            <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
+            <a
+              href={withBatchQuery("/nfc", batch)}
+              class="text-sm text-foreground-muted underline underline-offset-4"
+            >
               キャンセルする
             </a>
           </div>
@@ -546,6 +828,19 @@ export const NfcPage: FC<NfcPageProps> = ({
             : `未紐づけ ${tapUrls.length} 枚ぶん。1 行に 1 枚です。`}
           <strong>紐づけ済みのカードは入っていません</strong>
           —— 混ぜると、誰かの手元にあるタグを上書きする形になり、焼いたあとで区別できません。
+          {batch === null ? (
+            <>
+              {" "}
+              絞り込み（<code class="font-mono text-xs">?batch=</code>
+              ）とは無関係に、全件が対象です。
+            </>
+          ) : (
+            <>
+              {" "}
+              <strong>いまの絞り込み「{batch}」のカードだけが対象です。</strong>
+              他のロットぶんは、絞り込みを解除してから開いてください。
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -568,91 +863,5 @@ export const NfcPage: FC<NfcPageProps> = ({
         )}
       </CardContent>
     </Card>
-
-    {truncated && (
-      <Alert>
-        <AlertDescription>
-          <strong>一覧は上限で打ち切られています。</strong>
-          表示しているのは新しいほうから 500 枚で、これより古いカードは出ていません。
-          <strong>上の URL 一覧も、表示できた範囲のものだけです。</strong>
-        </AlertDescription>
-      </Alert>
-    )}
-
-    {cards.length === 0 ? (
-      <Empty>
-        <EmptyHeader>
-          <EmptyTitle>発行されたカードはありません。</EmptyTitle>
-        </EmptyHeader>
-      </Empty>
-    ) : (
-      <Card>
-        <CardHeader>
-          <CardTitle>すべてのカード</CardTitle>
-          <CardDescription>{cards.length} 枚。発行の新しい順です。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/*
-            絞り込み欄（#470）。**`hidden` で描く——JS が無ければ存在しない
-            ものとして読める。JS がこれを外して使えるようにする。
-          */}
-          <input
-            type="text"
-            data-filter="nfc-cards-table"
-            hidden
-            placeholder="絞り込む"
-            aria-label="カードの一覧を絞り込む"
-            class={`${INPUT_CLASS} mb-2`}
-          />
-          <Table id="nfc-cards-table" data-sortable>
-            <TableHeader>
-              <TableRow>
-                <TableHead data-sort="text">カード ID</TableHead>
-                <TableHead data-sort="text">状態</TableHead>
-                <TableHead data-sort="text">所有者</TableHead>
-                <TableHead data-sort="text">遷移先</TableHead>
-                <TableHead data-sort="text">ロット</TableHead>
-                <TableHead data-sort="date">発行</TableHead>
-                <TableHead>操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {cards.map((card) => (
-                /*
-                  **`id` を持たせる**（#455）。利用者の詳細ページ
-                  （`/users/:userId`）の「持っているカード」から
-                  `/nfc#card-<cardId>` で該当行へ飛ぶ先がこれ。
-                  **上限（500 枚）で打ち切られた先のカードには飛べない**
-                  ——その場合もページ自体は開くので、行き止まりにはならない。
-                */
-                <TableRow key={card.cardId} id={`card-${card.cardId}`}>
-                  <TableCell class="font-mono text-xs">
-                    {card.cardId} {/* コピー用（#470）。JS が外すまでは存在しない。 */}
-                    <button type="button" data-copy={card.cardId} hidden class="text-xs underline">
-                      コピー
-                    </button>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={STATUS_VARIANT[card.status]}>{STATUS_LABEL[card.status]}</Badge>
-                  </TableCell>
-                  <TableCell class="whitespace-normal">
-                    <UserRef id={card.ownerUserId} refs={userRefs} />
-                  </TableCell>
-                  <TableCell class="max-w-xs font-mono text-xs break-all whitespace-normal">
-                    {/* **リンクにしない**（冒頭を参照）。 */}
-                    {card.targetUrl ?? "未設定"}
-                  </TableCell>
-                  <TableCell>{card.batch ?? "—"}</TableCell>
-                  <TableCell class={ITEM_META_CLASS}>{toDate(card.issuedAt)}</TableCell>
-                  <TableCell>
-                    <CardActions card={card} csrfToken={csrfToken} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    )}
   </KiwaShell>
 );

@@ -1,5 +1,5 @@
 import { pageSecurityHeaders } from "@u18/web-ui";
-import type { AdminCardViewDelegated, RpcErrorCode, UserRefAdmin } from "@u18/contracts";
+import type { AdminCardListViewDelegated, RpcErrorCode, UserRefAdmin } from "@u18/contracts";
 import type { Context, Hono } from "hono";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { isAllowedOrigin, isJsonRequest } from "./origin";
@@ -7,7 +7,13 @@ import { csrfRejected, MessagePage, serviceUnavailable } from "./ui/message-page
 import { cardTapUrl } from "./nfc-tap-url";
 import { resolveUserRefs } from "./user-refs";
 import { CardDetailPage, type DayWindow } from "./ui/card-detail-page";
-import { NfcPage } from "./ui/nfc-page";
+import {
+  NfcPage,
+  type BulkActionKind,
+  type BulkConfirmState,
+  type BulkIneligibleRow,
+  type BulkResultState,
+} from "./ui/nfc-page";
 import type { AppBindings } from "./types";
 
 /**
@@ -98,24 +104,50 @@ function batchReinstatedCountFromQuery(raw: string | undefined): number | null {
 }
 
 /**
- * 一覧の再取得＋所有者の名前解決（#471）。4 箇所の描き直し
- * （通常表示・エラー・batch 無効化／復帰の確認）が同じ形で必要とするので、
- * ここへまとめる——**バラバラに書くと、どれか 1 箇所だけ `userRefs` を
- * 渡し忘れた行が「—」のまま残る**（他は名前が出るのにここだけ出ない、
- * という気づきにくい崩れ方をする）。
+ * `?batch=` をトリムする。**空文字は「絞り込み無し」に畳む。** `?batch=`
+ * だけ付いた URL を「空文字という名前のロット」として扱わないため
+ * （issue #481「バッチ名なしの行はリンクにしない」と同じ線引き）。
+ */
+function batchFromQuery(raw: string | undefined): string | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * `?batch=` を付けた戻り先を組み立てる。`ui/nfc-page.tsx` の
+ * `withBatchQuery` と同じ考え方——フォームの `action` 側とルート側の
+ * 両方が必要とするので、どちらも素の文字列を直書きせずこの形にする。
+ */
+function withBatchQueryParam(path: string, batch: string | null): string {
+  return batch === null ? path : `${path}?batch=${encodeURIComponent(batch)}`;
+}
+
+/**
+ * 一覧の再取得＋所有者の名前解決（#471）。何箇所もの描き直し
+ * （通常表示・エラー・batch 無効化／復帰の確認・選択一括の確認／結果）が
+ * 同じ形で必要とするので、ここへまとめる——**バラバラに書くと、どれか
+ * 1 箇所だけ `userRefs` を渡し忘れた行が「—」のまま残る**（他は名前が
+ * 出るのにここだけ出ない、という気づきにくい崩れ方をする）。
+ *
+ * **`batch` は打ち切りの前に効く（#481）。** `listAllCards` に素通しする
+ * だけで、`MAX_ADMIN_LIST` の 500 枚より後ろに並んでいたロットも見える。
  *
  * **取得できなければ `null`。** `serviceUnavailable` を返すかどうかは
  * 呼ぶ側が決める——ここでは判定しない。
  */
-async function loadCardsForRender(c: Context<AppBindings>): Promise<{
-  readonly cards: readonly AdminCardViewDelegated[];
+async function loadCardsForRender(
+  c: Context<AppBindings>,
+  batch: string | null,
+): Promise<{
+  readonly cards: readonly AdminCardListViewDelegated[];
   readonly truncated: boolean;
   readonly tapUrls: readonly string[];
   readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
 } | null> {
   const container = c.get("container");
   const session = c.get("session");
-  const result = await container.nfcCards.listAllCards();
+  const result = await container.nfcCards.listAllCards(batch === null ? undefined : { batch });
   if (!result.ok) return null;
 
   const tapUrls = result.value.cards
@@ -213,6 +245,96 @@ function redirectTargetOf(form: FormData, cardId: string): string {
 }
 
 /**
+ * 1 回の選択一括操作で受け付ける上限（#481）。**`getUsersByIdsDelegatedInputSchema`
+ * の `userIds`（最大 100）と同じ理由**——「選べるだけ選んで 1 リクエストで
+ * 流し込む」口にしないため。超えたら拒否して、そう言う。
+ */
+const BULK_SELECT_LIMIT = 100;
+
+/** `card_id` を重複・空文字を除いて取り出す。 */
+function uniqueCardIdsFrom(form: FormData): string[] {
+  const seen = new Set<string>();
+  for (const value of form.getAll("card_id")) {
+    const id = value.toString().trim();
+    if (id !== "") seen.add(id);
+  }
+  return [...seen];
+}
+
+/**
+ * 選択の中身を「効くもの」と「効かないもの（理由つき）」へ分ける。
+ *
+ * **確認画面を描くときと、実行する直前の 2 回、同じ関数で分け直す**
+ * （issue #481 への追記と同じ設計）。確認してから実行するまでの間に
+ * 誰か（運営自身の別タブも含む）が状態を変えていても、実行直前の
+ * もう 1 回が追従する——確認画面の内訳をそのまま信用しない。
+ */
+function categorizeForDisable(
+  selected: readonly string[],
+  cardsById: ReadonlyMap<string, AdminCardListViewDelegated>,
+): {
+  readonly eligibleCardIds: readonly string[];
+  readonly ineligible: readonly BulkIneligibleRow[];
+} {
+  const eligibleCardIds: string[] = [];
+  const ineligible: BulkIneligibleRow[] = [];
+  for (const cardId of selected) {
+    const card = cardsById.get(cardId);
+    if (card === undefined) {
+      ineligible.push({ cardId, reason: "見つかりません（絞り込みの外、または既に削除済み）" });
+      continue;
+    }
+    if (card.status === "disabled") {
+      ineligible.push({ cardId, reason: "既に無効化済みです" });
+      continue;
+    }
+    eligibleCardIds.push(cardId);
+  }
+  return { eligibleCardIds, ineligible };
+}
+
+/**
+ * 一括操作 1 件ぶんの失敗を文言へ訳す（#481）。**`not_found` とそれ以外を
+ * 区別する。** 両方を「そのカードは見つかりませんでした。」に畳むと、
+ * Service Binding の一時的な障害や `conflict` まで「もう無い（＝対処済み）」
+ * と読める——運用者が「箱ごと盗まれたので 40 枚止める」を押した直後に、
+ * **止まっていないカードを止まったと思って帰ることになる**（3b のレビュー）。
+ *
+ * **「残りだけもう一度」と書けるのは `succeeded` を既に出しているから。**
+ * 失敗した分だけ選び直して再送信すれば、成功済みの分を二重に処理しない。
+ */
+function bulkFailureReason(code: RpcErrorCode): string {
+  return code === "not_found"
+    ? "そのカードは見つかりませんでした。"
+    : "いま処理できませんでした。時間をおいて、残りだけもう一度お試しください。";
+}
+
+/** `categorizeForDisable` の対（#481）。`disabled` のカードだけが対象。 */
+function categorizeForReinstate(
+  selected: readonly string[],
+  cardsById: ReadonlyMap<string, AdminCardListViewDelegated>,
+): {
+  readonly eligibleCardIds: readonly string[];
+  readonly ineligible: readonly BulkIneligibleRow[];
+} {
+  const eligibleCardIds: string[] = [];
+  const ineligible: BulkIneligibleRow[] = [];
+  for (const cardId of selected) {
+    const card = cardsById.get(cardId);
+    if (card === undefined) {
+      ineligible.push({ cardId, reason: "見つかりません（絞り込みの外、または既に削除済み）" });
+      continue;
+    }
+    if (card.status !== "disabled") {
+      ineligible.push({ cardId, reason: "無効化されていません" });
+      continue;
+    }
+    eligibleCardIds.push(cardId);
+  }
+  return { eligibleCardIds, ineligible };
+}
+
+/**
  * カード 1 枚の詳細（`admin.under18.dev/nfc/:cardId`、#472）。
  *
  * **`registerNfcAnalyticsRoutes`（`/nfc/analytics`）より後に登録すること。**
@@ -231,29 +353,14 @@ export function registerNfcCardDetailRoutes(app: Hono<AppBindings>): void {
 
 export function registerNfcRoutes(app: Hono<AppBindings>): void {
   app.get("/nfc", pageSecurityHeaders, async (c) => {
-    const loaded = await loadCardsForRender(c);
-    if (loaded === null) return serviceUnavailable(c);
-
-    c.header("Cache-Control", "no-store");
-    return c.html(
-      <NfcPage
-        cards={loaded.cards}
-        truncated={loaded.truncated}
-        tapUrls={loaded.tapUrls}
-        userRefs={loaded.userRefs}
-        csrfToken={ensureCsrfToken(c)}
-        issuedCount={issuedCountFromQuery(c.req.query(ISSUED_COUNT_PARAM))}
-        error={null}
-        batchDisable={null}
-        batchDisableError={null}
-        batchDisabledCount={batchDisabledCountFromQuery(c.req.query(BATCH_DISABLED_COUNT_PARAM))}
-        batchReinstate={null}
-        batchReinstateError={null}
-        batchReinstatedCount={batchReinstatedCountFromQuery(
-          c.req.query(BATCH_REINSTATED_COUNT_PARAM),
-        )}
-      />,
-    );
+    const batch = batchFromQuery(c.req.query("batch"));
+    return renderNfcPage(c, batch, {
+      issuedCount: issuedCountFromQuery(c.req.query(ISSUED_COUNT_PARAM)),
+      batchDisabledCount: batchDisabledCountFromQuery(c.req.query(BATCH_DISABLED_COUNT_PARAM)),
+      batchReinstatedCount: batchReinstatedCountFromQuery(
+        c.req.query(BATCH_REINSTATED_COUNT_PARAM),
+      ),
+    });
   });
 
   app.post("/nfc", pageSecurityHeaders, async (c) => {
@@ -276,7 +383,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     });
 
     if (!result.ok) {
-      return renderNfcPageWithError(c, "枚数は 1〜200 の数で指定してください。");
+      return renderNfcPage(
+        c,
+        batchFromQuery(c.req.query("batch")),
+        { error: "枚数は 1〜200 の数で指定してください。" },
+        400,
+      );
     }
 
     c.header("Cache-Control", "no-store");
@@ -347,7 +459,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       const message = "そのカードは見つかりませんでした。";
       return cameFromDetail(form)
         ? fetchAndRenderCardDetail(c, cardId, 30, message)
-        : renderNfcPageWithError(c, message);
+        : renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: message }, 400);
     }
 
     c.header("Cache-Control", "no-store");
@@ -371,7 +483,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       const message = "そのカードは見つかりませんでした。";
       return cameFromDetail(form)
         ? fetchAndRenderCardDetail(c, cardId, 30, message)
-        : renderNfcPageWithError(c, message);
+        : renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: message }, 400);
     }
 
     c.header("Cache-Control", "no-store");
@@ -401,7 +513,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       const message = "そのカードは見つかりませんでした。";
       return cameFromDetail(form)
         ? fetchAndRenderCardDetail(c, cardId, 30, message)
-        : renderNfcPageWithError(c, message);
+        : renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: message }, 400);
     }
 
     c.header("Cache-Control", "no-store");
@@ -445,7 +557,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       const message = "そのカードは見つかりませんでした。";
       return cameFromDetail(form)
         ? fetchAndRenderCardDetail(c, cardId, 30, message)
-        : renderNfcPageWithError(c, message);
+        : renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: message }, 400);
     }
 
     c.header("Cache-Control", "no-store");
@@ -476,7 +588,7 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         TARGET_URL_REASON_LABEL[result.error.message] ?? "そのカードは見つかりませんでした。";
       return cameFromDetail(form)
         ? fetchAndRenderCardDetail(c, cardId, 30, message)
-        : renderNfcPageWithError(c, message);
+        : renderNfcPage(c, batchFromQuery(c.req.query("batch")), { error: message }, 400);
     }
 
     c.header("Cache-Control", "no-store");
@@ -517,7 +629,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (targetBatch === "") {
       if (typed === "") {
-        return renderNfcPageWithError(c, "バッチ名を入力してください。");
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "バッチ名を入力してください。" },
+          400,
+        );
       }
 
       const counted = await container.nfcCards.countBatchIssuedCards({
@@ -528,10 +645,17 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         return serviceUnavailable(c);
       }
       if (counted.value.count === 0) {
-        return renderNfcPageWithError(c, "そのバッチには未紐づけのカードがありません。");
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "そのバッチには未紐づけのカードがありません。" },
+          400,
+        );
       }
 
-      return renderNfcPageWithBatchConfirm(c, { batch: typed, count: counted.value.count });
+      return renderNfcPage(c, batchFromQuery(c.req.query("batch")), {
+        batchDisable: { batch: typed, count: counted.value.count },
+      });
     }
 
     if (typed !== targetBatch) {
@@ -542,10 +666,14 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       if (!counted.ok) {
         return serviceUnavailable(c);
       }
-      return renderNfcPageWithBatchConfirm(
+      return renderNfcPage(
         c,
-        { batch: targetBatch, count: counted.value.count },
-        "入力が一致しません。もう一度バッチ名を入力してください。",
+        batchFromQuery(c.req.query("batch")),
+        {
+          batchDisable: { batch: targetBatch, count: counted.value.count },
+          batchDisableError: "入力が一致しません。もう一度バッチ名を入力してください。",
+        },
+        400,
       );
     }
 
@@ -554,7 +682,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       batch: targetBatch,
     });
     if (!result.ok) {
-      return renderNfcPageWithError(c, "しばらくしてからもう一度お試しください。");
+      return renderNfcPage(
+        c,
+        batchFromQuery(c.req.query("batch")),
+        { error: "しばらくしてからもう一度お試しください。" },
+        400,
+      );
     }
 
     c.header("Cache-Control", "no-store");
@@ -586,7 +719,12 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
 
     if (targetBatch === "") {
       if (typed === "") {
-        return renderNfcPageWithError(c, "バッチ名を入力してください。");
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "バッチ名を入力してください。" },
+          400,
+        );
       }
 
       const counted = await container.nfcCards.countDisabledInBatch({
@@ -597,12 +735,16 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
         return serviceUnavailable(c);
       }
       if (counted.value.count === 0) {
-        return renderNfcPageWithError(c, "そのバッチには、一括無効化で止めたカードがありません。");
+        return renderNfcPage(
+          c,
+          batchFromQuery(c.req.query("batch")),
+          { error: "そのバッチには、一括無効化で止めたカードがありません。" },
+          400,
+        );
       }
 
-      return renderNfcPageWithBatchReinstateConfirm(c, {
-        batch: typed,
-        count: counted.value.count,
+      return renderNfcPage(c, batchFromQuery(c.req.query("batch")), {
+        batchReinstate: { batch: typed, count: counted.value.count },
       });
     }
 
@@ -614,10 +756,14 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       if (!counted.ok) {
         return serviceUnavailable(c);
       }
-      return renderNfcPageWithBatchReinstateConfirm(
+      return renderNfcPage(
         c,
-        { batch: targetBatch, count: counted.value.count },
-        "入力が一致しません。もう一度バッチ名を入力してください。",
+        batchFromQuery(c.req.query("batch")),
+        {
+          batchReinstate: { batch: targetBatch, count: counted.value.count },
+          batchReinstateError: "入力が一致しません。もう一度バッチ名を入力してください。",
+        },
+        400,
       );
     }
 
@@ -626,57 +772,246 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
       batch: targetBatch,
     });
     if (!result.ok) {
-      return renderNfcPageWithError(c, "しばらくしてからもう一度お試しください。");
+      return renderNfcPage(
+        c,
+        batchFromQuery(c.req.query("batch")),
+        { error: "しばらくしてからもう一度お試しください。" },
+        400,
+      );
     }
 
     c.header("Cache-Control", "no-store");
     return c.redirect(`/nfc?${BATCH_REINSTATED_COUNT_PARAM}=${result.value.cardIds.length}`, 303);
   });
+
+  /**
+   * ID で 1 枚を直接開く（#481「打ち切りの外のカードに辿り着く経路」）。
+   *
+   * **`registerNfcRoutes`（ここ）の中で登録すること。** `/nfc/:cardId`
+   * （`registerNfcCardDetailRoutes`）より前に登録しないと、`:cardId` が
+   * `"open"` を吸ってしまう——`/nfc/analytics` と同じ登録順の罠
+   * （`registerNfcCardDetailRoutes` の JSDoc、`app.tsx` の登録順を参照）。
+   */
+  app.get("/nfc/open", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.query("cardId")?.trim() ?? "";
+    if (cardId === "") {
+      return renderNfcPage(
+        c,
+        batchFromQuery(c.req.query("batch")),
+        { error: "カード ID を入力してください。" },
+        400,
+      );
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect(`/nfc/${encodeURIComponent(cardId)}`, 303);
+  });
+
+  /**
+   * 選択による一括無効化（#481 の本体）。**新しい一括 RPC を作らず、
+   * 既存の 1 枚ずつの口（`disableCard`）をここで回す。** 1 枚ごとに
+   * 監査ログが残り、#450 で入れた持ち主の確認などの守りもそのまま効く
+   * ——一括用の口を新しく作ると、同じ守りをもう一度書くことになる
+   * （issue #481 の指示）。
+   *
+   * ## 2 段階確認
+   *
+   * `confirmed` が無ければ 1 段階目——**書き込まず**、選択の内訳（効く・
+   * 効かない、理由つき）だけを見せる。`confirmed=1` が付いていれば
+   * 2 段階目——ただし**確認画面の内訳をそのまま信用せず、ここでもう一度
+   * `categorizeForDisable` を呼ぶ**（状態が変わっていれば追従する）。
+   *
+   * ## 部分失敗を正直に出す
+   *
+   * 成功のリダイレクトに畳まない。`succeeded` / `failed`（理由つき）/
+   * 最初から対象外だった `ineligible` を、すべて 200 のその場描画で返す。
+   */
+  app.post("/nfc/bulk-disable", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+    const batch = batchFromQuery(c.req.query("batch"));
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, withBatchQueryParam("/nfc", batch));
+    }
+
+    const selected = uniqueCardIdsFrom(form);
+    if (selected.length === 0) {
+      return renderNfcPage(c, batch, { error: "カードを選んでください。" }, 400);
+    }
+    if (selected.length > BULK_SELECT_LIMIT) {
+      return renderNfcPage(
+        c,
+        batch,
+        { error: `一度に選べるのは ${BULK_SELECT_LIMIT} 枚までです。` },
+        400,
+      );
+    }
+
+    const loaded = await loadCardsForRender(c, batch);
+    if (loaded === null) return serviceUnavailable(c);
+    const cardsById = new Map(loaded.cards.map((card) => [card.cardId, card]));
+    const { eligibleCardIds, ineligible } = categorizeForDisable(selected, cardsById);
+
+    const confirmed = form.get("confirmed")?.toString() === "1";
+    if (!confirmed) {
+      if (eligibleCardIds.length === 0) {
+        return renderNfcPage(
+          c,
+          batch,
+          { error: "選んだ中に無効化できるカードがありません。" },
+          400,
+        );
+      }
+      return renderNfcPage(c, batch, {
+        bulkConfirm: {
+          action: "disable" satisfies BulkActionKind,
+          selectedCardIds: selected,
+          eligibleCardIds,
+          ineligible,
+        },
+      });
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const succeeded: string[] = [];
+    const failed: BulkIneligibleRow[] = [];
+    for (const cardId of eligibleCardIds) {
+      const result = await container.nfcCards.disableCard({ actorUserId: session.sub, cardId });
+      if (result.ok) {
+        succeeded.push(cardId);
+      } else {
+        failed.push({ cardId, reason: bulkFailureReason(result.error.code) });
+      }
+    }
+
+    return renderNfcPage(c, batch, {
+      bulkResult: { action: "disable", succeeded, failed, ineligible },
+    });
+  });
+
+  /**
+   * 選択による一括復帰（#481）。`categorizeForDisable` の対で、
+   * `disabled` のカードだけが対象。
+   *
+   * **復帰は 1 つの操作ではない。** 持ち主がいるカードは `reinstateCard`
+   * （`active` へ）、いないカードは `reinstateCardToIssued`（`issued`
+   * へ）——契約が「まとめて 1 つの強い操作にしない」と明示している
+   * （#422 / #436、`reinstateCard` の JSDoc を参照）。**選択の中身
+   * （`card.ownerUserId`）を見てカードごとに呼び分ける。**
+   */
+  app.post("/nfc/bulk-reinstate", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+    const batch = batchFromQuery(c.req.query("batch"));
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, withBatchQueryParam("/nfc", batch));
+    }
+
+    const selected = uniqueCardIdsFrom(form);
+    if (selected.length === 0) {
+      return renderNfcPage(c, batch, { error: "カードを選んでください。" }, 400);
+    }
+    if (selected.length > BULK_SELECT_LIMIT) {
+      return renderNfcPage(
+        c,
+        batch,
+        { error: `一度に選べるのは ${BULK_SELECT_LIMIT} 枚までです。` },
+        400,
+      );
+    }
+
+    const loaded = await loadCardsForRender(c, batch);
+    if (loaded === null) return serviceUnavailable(c);
+    const cardsById = new Map(loaded.cards.map((card) => [card.cardId, card]));
+    const { eligibleCardIds, ineligible } = categorizeForReinstate(selected, cardsById);
+
+    const confirmed = form.get("confirmed")?.toString() === "1";
+    if (!confirmed) {
+      if (eligibleCardIds.length === 0) {
+        return renderNfcPage(c, batch, { error: "選んだ中に復帰できるカードがありません。" }, 400);
+      }
+      return renderNfcPage(c, batch, {
+        bulkConfirm: {
+          action: "reinstate" satisfies BulkActionKind,
+          selectedCardIds: selected,
+          eligibleCardIds,
+          ineligible,
+        },
+      });
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+    const succeeded: string[] = [];
+    const failed: BulkIneligibleRow[] = [];
+    for (const cardId of eligibleCardIds) {
+      // **持ち主の有無でカードごとに呼び分ける。** `categorizeForReinstate`
+      // の時点では `disabled` であることしか見ていない——実行直前の
+      // `cardsById` が持つ `ownerUserId` を見て、1 枚ごとに正しい口を選ぶ。
+      //
+      // **`card?.ownerUserId === null` と書かない。** `eligibleCardIds` は
+      // `cardsById` 自身から作っているので `card` が無いことは無いはずだが、
+      // もし無ければ `?.` は `undefined === null` で false になり、**持ち主
+      // ありの口（`reinstateCard`）へ落ちる**——`reinstateCard` を所有者の
+      // 無いカードへ呼ぶと「所有者の無いまま `active` になる」契約が名指し
+      // で警告する壊れた行ができる（3b のレビュー）。「起こらないはず」を
+      // `?.` で黙って流さず、無ければ明示的に失敗として扱う。
+      const card = cardsById.get(cardId);
+      if (card === undefined) {
+        failed.push({ cardId, reason: "そのカードは見つかりませんでした。" });
+        continue;
+      }
+      const result =
+        card.ownerUserId === null
+          ? await container.nfcCards.reinstateCardToIssued({ actorUserId: session.sub, cardId })
+          : await container.nfcCards.reinstateCard({ actorUserId: session.sub, cardId });
+      if (result.ok) {
+        succeeded.push(cardId);
+      } else {
+        failed.push({ cardId, reason: bulkFailureReason(result.error.code) });
+      }
+    }
+
+    return renderNfcPage(c, batch, {
+      bulkResult: { action: "reinstate", succeeded, failed, ineligible },
+    });
+  });
 }
 
 /**
- * 操作に失敗したときに画面を描き直す。
+ * `NfcPage` の描き直しをまとめる入口。
  *
- * **303 で戻さない。** PRG は成功した操作のためのもので、失敗をクエリへ
- * 載せると文言を URL から差し替えられる（`issuedCountFromQuery` と
- * 同じ理由）。ここは 400 で描く。
+ * **6 状態（通常・エラー・batch 無効化／復帰の確認・選択一括の確認／結果）
+ * がそれぞれ別関数で一覧をもう一度引いていた形だと、状態が増えるたびに
+ * `cards` / `truncated` / `tapUrls` / `userRefs` / `batch` を渡し忘れる行が
+ * 増える**（#481 で選択一括の 2 状態を足すときに実際に踏んだ）。ここへ
+ * まとめ、呼び出し側は変わる値だけを渡す。
+ *
+ * **303 で戻さない呼び出しのためにある。** PRG は成功した操作のためのもの
+ * で、失敗をクエリへ載せると文言を URL から差し替えられる
+ * （`issuedCountFromQuery` と同じ理由）。
  */
-async function renderNfcPageWithError(c: Context<AppBindings>, message: string): Promise<Response> {
-  const loaded = await loadCardsForRender(c);
-  if (loaded === null) return serviceUnavailable(c);
-
-  c.header("Cache-Control", "no-store");
-  return c.html(
-    <NfcPage
-      cards={loaded.cards}
-      truncated={loaded.truncated}
-      tapUrls={loaded.tapUrls}
-      userRefs={loaded.userRefs}
-      csrfToken={ensureCsrfToken(c)}
-      issuedCount={null}
-      error={message}
-      batchDisable={null}
-      batchDisableError={null}
-      batchDisabledCount={null}
-      batchReinstate={null}
-      batchReinstateError={null}
-      batchReinstatedCount={null}
-    />,
-    400,
-  );
-}
-
-/**
- * batch 一括無効化の確認画面を描き直す（#427）。**一覧をもう一度引く**
- * のは `renderNfcPageWithError` と同じ理由——直前の操作の結果を手で
- * 足すと、食い違いを作れる。
- */
-async function renderNfcPageWithBatchConfirm(
+async function renderNfcPage(
   c: Context<AppBindings>,
-  batchDisable: { readonly batch: string; readonly count: number },
-  error: string | null = null,
+  batch: string | null,
+  options: {
+    readonly issuedCount?: number | null;
+    readonly error?: string | null;
+    readonly batchDisable?: { readonly batch: string; readonly count: number } | null;
+    readonly batchDisableError?: string | null;
+    readonly batchDisabledCount?: number | null;
+    readonly batchReinstate?: { readonly batch: string; readonly count: number } | null;
+    readonly batchReinstateError?: string | null;
+    readonly batchReinstatedCount?: number | null;
+    readonly bulkConfirm?: BulkConfirmState;
+    readonly bulkResult?: BulkResultState;
+  },
+  status: 200 | 400 = 200,
 ): Promise<Response> {
-  const loaded = await loadCardsForRender(c);
+  const loaded = await loadCardsForRender(c, batch);
   if (loaded === null) return serviceUnavailable(c);
 
   c.header("Cache-Control", "no-store");
@@ -687,49 +1022,18 @@ async function renderNfcPageWithBatchConfirm(
       tapUrls={loaded.tapUrls}
       userRefs={loaded.userRefs}
       csrfToken={ensureCsrfToken(c)}
-      issuedCount={null}
-      error={null}
-      batchDisable={batchDisable}
-      batchDisableError={error}
-      batchDisabledCount={null}
-      batchReinstate={null}
-      batchReinstateError={null}
-      batchReinstatedCount={null}
+      batch={batch}
+      issuedCount={options.issuedCount ?? null}
+      error={options.error ?? null}
+      batchDisable={options.batchDisable ?? null}
+      batchDisableError={options.batchDisableError ?? null}
+      batchDisabledCount={options.batchDisabledCount ?? null}
+      batchReinstate={options.batchReinstate ?? null}
+      batchReinstateError={options.batchReinstateError ?? null}
+      batchReinstatedCount={options.batchReinstatedCount ?? null}
+      bulkConfirm={options.bulkConfirm ?? null}
+      bulkResult={options.bulkResult ?? null}
     />,
-    error === null ? 200 : 400,
-  );
-}
-
-/**
- * batch 一括復帰の確認画面を描き直す（#436）。**一覧をもう一度引く**
- * のは `renderNfcPageWithBatchConfirm` と同じ理由——直前の操作の結果を
- * 手で足すと、食い違いを作れる。
- */
-async function renderNfcPageWithBatchReinstateConfirm(
-  c: Context<AppBindings>,
-  batchReinstate: { readonly batch: string; readonly count: number },
-  error: string | null = null,
-): Promise<Response> {
-  const loaded = await loadCardsForRender(c);
-  if (loaded === null) return serviceUnavailable(c);
-
-  c.header("Cache-Control", "no-store");
-  return c.html(
-    <NfcPage
-      cards={loaded.cards}
-      truncated={loaded.truncated}
-      tapUrls={loaded.tapUrls}
-      userRefs={loaded.userRefs}
-      csrfToken={ensureCsrfToken(c)}
-      issuedCount={null}
-      error={null}
-      batchDisable={null}
-      batchDisableError={null}
-      batchDisabledCount={null}
-      batchReinstate={batchReinstate}
-      batchReinstateError={error}
-      batchReinstatedCount={null}
-    />,
-    error === null ? 200 : 400,
+    status,
   );
 }

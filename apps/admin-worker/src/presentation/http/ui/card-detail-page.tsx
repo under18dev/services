@@ -88,8 +88,12 @@ const STATUS_VARIANT: Readonly<Record<AdminCardStatusDelegated, "secondary" | "d
 
 /**
  * 無効化の理由と日時。**`disabled` ならこの画面でいちばん上に出す**
- * （issue #472 の指示）。理由が空なら「理由が記録されていません」と
+ * （issue #472 の指示）。理由が空なら「理由は記録されていません」と
  * 書く——空欄にすると、詰め忘れと記録が無いことの区別がつかなくなる。
+ *
+ * **鉤括弧は実際に記録された文字列を出すときだけ。** 「理由が記録されて
+ * いません」まで鉤括弧に入れると、その文字列自体が理由として記録されて
+ * いるように読める（3b のレビュー）。
  */
 const DisabledBanner: FC<{ readonly card: AdminCardDetailDelegated }> = ({ card }) => {
   if (card.status !== "disabled") return null;
@@ -98,12 +102,11 @@ const DisabledBanner: FC<{ readonly card: AdminCardDetailDelegated }> = ({ card 
     <Alert>
       <AlertDescription>
         <strong>無効化されています。</strong>
-        理由は
         {card.disabledReason === null || card.disabledReason === "" ? (
-          <strong>「理由が記録されていません」</strong>
+          <>理由は記録されていません</>
         ) : (
           <>
-            「<code class={ITEM_RAW_CLASS}>{card.disabledReason}</code>」
+            理由は「<code class={ITEM_RAW_CLASS}>{card.disabledReason}</code>」
           </>
         )}
         。{card.disabledAt === null ? null : <>（{formatDateTime(card.disabledAt)}）</>}
@@ -258,14 +261,24 @@ function comparisonText(label: string, comparison: CardTapHistoryAnalytics["last
 
 const TapHistorySection: FC<{
   readonly cardId: string;
+  readonly status: AdminCardStatusDelegated;
   readonly claimedAt: string | null;
   readonly days: DayWindow;
   readonly tapHistory: CardTapHistoryAnalytics | null;
-}> = ({ cardId, claimedAt, days, tapHistory }) => {
+}> = ({ cardId, status, claimedAt, days, tapHistory }) => {
   // **引き取り済みでタップ 0 件なら、はっきり出す**（issue #472「死蔵の
   // 1 枚ごとの顔」）。`lastTappedAt` は保持期間を跨いだ全期間の判定—— 選んだ
   // `days` の窓の中だけを見る `totalTaps` と違う（use case 側の冒頭を参照）。
-  const isDormant = claimedAt !== null && tapHistory !== null && tapHistory.lastTappedAt === null;
+  //
+  // **`disabled` では出さない。** 無効化されたカードがタップされないのは
+  // 当たり前で、この指摘は「有効なのに使われていない」死蔵を見つけるため
+  // のもの——無効化済みに出すと意味が反転する（問題は無効化したこと自体
+  // で、タップ 0 件はその結果でしかない。3b のレビュー）。
+  const isDormant =
+    status !== "disabled" &&
+    claimedAt !== null &&
+    tapHistory !== null &&
+    tapHistory.lastTappedAt === null;
 
   return (
     <Card>
@@ -472,6 +485,7 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
       <section data-panel="taps" class="flex flex-col gap-4">
         <TapHistorySection
           cardId={card.cardId}
+          status={card.status}
           claimedAt={card.claimedAt}
           days={days}
           tapHistory={tapHistory}

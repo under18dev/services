@@ -12,6 +12,7 @@ import {
   resetDatabase,
   seedActiveCard,
   seedIssuedCard,
+  tapRecorder,
 } from "./helpers";
 
 /**
@@ -464,6 +465,42 @@ describe("listAllCards", () => {
 
     expect(result.ok).toBe(true);
     expect(!result.ok ? undefined : result.value.truncated).toBe(false);
+  });
+
+  it("タップ回数を含む（#481）", async () => {
+    const cardId = await seedIssuedCard();
+    await tapRecorder().recordTap(cardId, new Date().toISOString().slice(0, 10));
+
+    const result = await rpc.listAllCards();
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cards.find((card) => card.cardId === cardId)?.tapCount).toBe(1);
+  });
+
+  /**
+   * **`batch` は打ち切りの前に効く**（#481、`/nfc/analytics` のバッチ別の
+   * 表から辿り着く経路）。`invalid_input` にならないことと、他のロットの
+   * カードを返さないことの両方を見る。
+   */
+  describe("batch で絞り込む", () => {
+    it("そのロットのカードだけを返す", async () => {
+      const target = await seedIssuedCard("2026-bunkasai");
+      await seedIssuedCard("other-lot");
+
+      const result = await rpc.listAllCards({ batch: "2026-bunkasai" });
+
+      expect(result.ok, "listAllCards が失敗した").toBe(true);
+      if (!result.ok) return;
+      expect(result.value.cards.map((card) => card.cardId)).toEqual([target]);
+    });
+
+    it("空文字は invalid_input", async () => {
+      const result = await rpc.listAllCards({ batch: "" });
+
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.error.code).toBe("invalid_input");
+    });
   });
 });
 

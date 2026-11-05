@@ -42,6 +42,11 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   "POST /nfc/cards": "NFC_WRITE",
   "POST /nfc/batch-disable": "NFC_WRITE",
   "POST /nfc/batch-reinstate": "NFC_WRITE",
+  // 選択による一括操作（#481）。読み取り専用の `GET /nfc/open`（ID で
+  // 直接開くだけ）は一覧と同じ NFC_READ。
+  "GET /nfc/open": "NFC_READ",
+  "POST /nfc/bulk-disable": "NFC_WRITE",
+  "POST /nfc/bulk-reinstate": "NFC_WRITE",
   "POST /nfc/:cardId/disable": "NFC_WRITE",
   "POST /nfc/:cardId/release": "NFC_WRITE",
   "POST /nfc/:cardId/reinstate": "NFC_WRITE",

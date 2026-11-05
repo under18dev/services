@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
-  AdminCardViewDelegated,
+  AdminCardListViewDelegated,
   BatchDisableCardsDelegatedInput,
   CardTapHistoryDelegatedInput,
   CountBatchIssuedCardsDelegatedInput,
@@ -12,6 +12,7 @@ import type {
   IdentityAdminDelegatedRpcContract,
   IssueCardsDelegatedInput,
   IssueCardsDelegatedResult,
+  ListAllCardsDelegatedInput,
   ListAllCardsDelegatedResult,
   NfcAdminDelegatedRpcContract,
   ReinstateBatchToIssuedCardsDelegatedInput,
@@ -42,7 +43,7 @@ import {
 
 const SUB = "usr_admin_nfc";
 
-function card(overrides: Partial<AdminCardViewDelegated> = {}): AdminCardViewDelegated {
+function card(overrides: Partial<AdminCardListViewDelegated> = {}): AdminCardListViewDelegated {
   return {
     cardId: "nfc_0001",
     status: "issued",
@@ -52,6 +53,7 @@ function card(overrides: Partial<AdminCardViewDelegated> = {}): AdminCardViewDel
     issuedAt: "2026-10-01T00:00:00.000Z",
     claimedAt: null,
     disabledAt: null,
+    tapCount: 0,
     ...overrides,
   };
 }
@@ -310,7 +312,7 @@ describe("GET /nfc", () => {
     expect(html).toContain("—");
   });
 
-  it("所有者のいる disabled には復帰フォームだけを出す。active には出さない", async () => {
+  it("1 枚ずつの操作フォームは出さない（#481、カードの詳細から行う）", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeNfcCards({
       listAllCards: async () =>
@@ -331,42 +333,20 @@ describe("GET /nfc", () => {
     );
 
     const html = await response.text();
-    expect(html).toContain('action="/nfc/nfc_disabled/reinstate"');
-    // **「未紐づけへ戻す」は出さない。** 所有者がいるので reinstate（→
-    // active）側だけで足りる（#436）。
+    // **カード 1 枚への 1 枚ずつの操作フォームが一覧から消えた。**
+    // 無効化・復帰・手放す・遷移先の変更はカードの詳細（/nfc/:cardId）から。
+    expect(html).not.toContain('action="/nfc/nfc_disabled/reinstate"');
     expect(html).not.toContain('action="/nfc/nfc_disabled/reinstate-to-issued"');
-    // **復帰フォームには無効化・遷移先の書き換え・手放させるを出さない。**
-    // 「戻したい」と「渡したい」は別の操作（nfc-page.tsx の CardActions）。
     expect(html).not.toContain('action="/nfc/nfc_disabled/disable"');
     expect(html).not.toContain('action="/nfc/nfc_disabled/release"');
     expect(html).not.toContain('action="/nfc/nfc_disabled/target"');
-    // active には復帰フォームを出さない。
     expect(html).not.toContain('action="/nfc/nfc_active/reinstate"');
-  });
-
-  it("所有者の無い disabled（issued 由来）には「未紐づけへ戻す」だけを出す（#436）", async () => {
-    // **これが #450 レビューの本体。** reinstate（→ active）は押しても
-    // Repository 側の owner_user_id is not null で弾かれるだけだが、
-    // そもそも誘導しない——正しい遷移先（issued）のボタンを出す。
-    const sessionCookie = await loginAsApproved();
-    const { rpc } = fakeNfcCards({
-      listAllCards: async () =>
-        rpcOk({
-          cards: [card({ cardId: "nfc_disabled", status: "disabled", ownerUserId: null })],
-          truncated: false,
-        }),
-    });
-    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
-
-    const response = await app.fetch(
-      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
-      env,
-      executionContext(),
-    );
-
-    const html = await response.text();
-    expect(html).toContain('action="/nfc/nfc_disabled/reinstate-to-issued"');
-    expect(html).not.toContain('action="/nfc/nfc_disabled/reinstate"');
+    // **カード ID がカード詳細へのリンクになっている。**
+    expect(html).toContain('href="/nfc/nfc_disabled"');
+    expect(html).toContain('href="/nfc/nfc_active"');
+    // **選択のチェックボックスが出ている（#481 の一括操作用）。**
+    expect(html).toContain('data-select="nfc-cards"');
+    expect(html).toContain('value="nfc_disabled"');
   });
 
   it("truncated が true なら打ち切りの注記を出す", async () => {
@@ -530,6 +510,78 @@ describe("GET /nfc/:cardId（カード詳細、#472）", () => {
     expect(html).toContain("未設定");
   });
 
+  /**
+   * #481 で一覧（`nfc-page.tsx`）から消した、状態ごとの操作の出し分けを
+   * カード詳細（`card-detail-page.tsx` の `CardDetailActions`）側で確かめる。
+   * 一覧側の同等のテストは #481 で削除した——機能そのものがここへ移った。
+   */
+  it("所有者のいる disabled には復帰フォームだけを出す。無効化・手放す・遷移先の変更は出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async (input) =>
+        rpcOk({
+          cardId: input.cardId,
+          status: "disabled",
+          ownerUserId: "usr_taro",
+          targetUrl: null,
+          batch: null,
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: "2026-10-02T00:00:00.000Z",
+          transferCount: 0,
+          disabledAt: "2026-10-05T00:00:00.000Z",
+          disabledReason: "lost",
+          tapCount: 0,
+          lastTappedAt: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_disabled`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('action="/nfc/nfc_disabled/reinstate"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/reinstate-to-issued"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/disable"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/release"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/target"');
+  });
+
+  it("所有者の無い disabled（issued 由来）には「未紐づけへ戻す」だけを出す（#436）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      getCard: async (input) =>
+        rpcOk({
+          cardId: input.cardId,
+          status: "disabled",
+          ownerUserId: null,
+          targetUrl: null,
+          batch: null,
+          issuedAt: "2026-10-01T00:00:00.000Z",
+          claimedAt: null,
+          transferCount: 0,
+          disabledAt: "2026-10-05T00:00:00.000Z",
+          disabledReason: "admin_batch",
+          tapCount: 0,
+          lastTappedAt: null,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/nfc_disabled`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('action="/nfc/nfc_disabled/reinstate-to-issued"');
+    expect(html).not.toContain('action="/nfc/nfc_disabled/reinstate"');
+  });
+
   it("disabled なら理由と日時を上に出す。理由が空なら「記録されていません」", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeNfcCards({
@@ -558,7 +610,7 @@ describe("GET /nfc/:cardId（カード詳細、#472）", () => {
     );
 
     const html = await response.text();
-    expect(html).toContain("理由が記録されていません");
+    expect(html).toContain("理由は記録されていません");
   });
 
   it("引き取り済みでタップ 0 件なら、死蔵をはっきり出す", async () => {
@@ -1949,6 +2001,446 @@ describe("POST /nfc/batch-reinstate", () => {
 
     expect(response.status).toBe(403);
     expect(calls.reinstateBatchToIssuedCards).toHaveLength(0);
+  });
+});
+
+describe("GET /nfc/open（#481、ID で直接開く）", () => {
+  it("cardId を指定すると /nfc/<cardId> へ 303 で飛ぶ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/open?cardId=nfc_0099`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/nfc/nfc_0099");
+  });
+
+  it("cardId が空なら一覧をエラーつきで描き直す（303 にしない）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/open`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("カード ID を入力してください。");
+  });
+
+  it("/nfc/analytics には吸われない（登録順の罠と同じ確認）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/open?cardId=nfc_0099`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    // `getCard` が呼ばれていれば、`:cardId` に "open" が吸われている証拠。
+    expect(calls.getCard).toHaveLength(0);
+  });
+});
+
+/** 選択による一括操作（#481）の共通セットアップ。 */
+async function postBulk(
+  app: ReturnType<typeof createApp>,
+  path: "/nfc/bulk-disable" | "/nfc/bulk-reinstate",
+  sessionCookie: string,
+  csrfCookie: string,
+  csrfToken: string,
+  fields: Record<string, string | string[]>,
+): Promise<Response> {
+  const body = new URLSearchParams();
+  body.set(CSRF_FIELD_NAME_FOR_TEST, csrfToken);
+  for (const [key, value] of Object.entries(fields)) {
+    if (Array.isArray(value)) {
+      for (const v of value) body.append(key, v);
+    } else {
+      body.set(key, value);
+    }
+  }
+  return app.fetch(
+    new Request(`${ORIGIN}${path}`, {
+      method: "POST",
+      headers: {
+        Cookie: `${sessionCookie}; ${csrfCookie}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: ORIGIN,
+      },
+      body,
+    }),
+    env,
+    executionContext(),
+  );
+}
+
+const CSRF_FIELD_NAME_FOR_TEST = "csrf_token";
+
+describe("POST /nfc/bulk-disable（選択による一括無効化、#481）", () => {
+  it("CSRF トークンが無ければ 403 で、disableCard を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/bulk-disable`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ card_id: "nfc_0001" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.disableCard).toHaveLength(0);
+  });
+
+  it("1 枚も選んでいなければ 400 でエラーを出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {},
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls.disableCard).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("カードを選んでください。");
+  });
+
+  it("上限（100 枚）を超えたら拒否し、disableCard を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const tooMany = Array.from({ length: 101 }, (_, i) => `nfc_${i}`);
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: tooMany,
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls.disableCard).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("100 枚までです。");
+  });
+
+  it("1 段階目: 内訳（効く・既に無効化済み）を見せるだけで、disableCard は呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_a", status: "issued" }),
+            card({ cardId: "nfc_b", status: "active" }),
+            card({ cardId: "nfc_c", status: "disabled" }),
+          ],
+          truncated: false,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: ["nfc_a", "nfc_b", "nfc_c", "nfc_missing"],
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.disableCard).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("選択");
+    expect(html).toContain("4 枚");
+    expect(html).toContain("2 枚");
+    expect(html).toContain("既に無効化済みです");
+    expect(html).toContain("見つかりません");
+    // 再送信用に、選択した全件（対象外も含む）が hidden で積まれていること。
+    expect(html).toMatch(/name="card_id" value="nfc_a"/);
+    expect(html).toMatch(/name="card_id" value="nfc_missing"/);
+  });
+
+  it("選んだ中に効くものが無ければ、確認画面を出さずエラーにする", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({ cards: [card({ cardId: "nfc_a", status: "disabled" })], truncated: false }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: "nfc_a",
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("選んだ中に無効化できるカードがありません。");
+  });
+
+  it("2 段階目（confirmed=1）: 効くものだけ disableCard を呼び、部分失敗を正直に出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_a", status: "issued" }),
+            card({ cardId: "nfc_b", status: "active" }),
+            card({ cardId: "nfc_c", status: "disabled" }),
+            card({ cardId: "nfc_d", status: "issued" }),
+          ],
+          truncated: false,
+        }),
+      disableCard: async (input) => {
+        calls.disableCard.push(input);
+        if (input.cardId === "nfc_b") return rpcErr(RpcErrorCode.NotFound, "not_found");
+        // **`not_found` 以外の失敗も区別して文言に出ること**（3b のレビュー）。
+        // 「そのカードは見つかりませんでした」に畳むと、Service Binding の
+        // 一時的な障害まで「もう対処済み」と読める。
+        if (input.cardId === "nfc_d") return rpcErr(RpcErrorCode.Internal, "boom");
+        return rpcOk(null);
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-disable",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      {
+        card_id: ["nfc_a", "nfc_b", "nfc_c", "nfc_d"],
+        confirmed: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    // `nfc_c`（既に disabled）は対象外なので呼ばれない。
+    expect(calls.disableCard.map((input) => input.cardId).sort()).toEqual([
+      "nfc_a",
+      "nfc_b",
+      "nfc_d",
+    ]);
+    expect(calls.disableCard.every((input) => input.actorUserId === SUB)).toBe(true);
+    const html = await response.text();
+    expect(html).toContain("1 件成功");
+    expect(html).toContain("2 件失敗");
+    expect(html).toContain("対象外 1 件");
+    // `not_found` とそれ以外を区別した文言になっていること。
+    expect(html).toContain("そのカードは見つかりませんでした。");
+    expect(html).toContain(
+      "いま処理できませんでした。時間をおいて、残りだけもう一度お試しください。",
+    );
+  });
+});
+
+describe("POST /nfc/bulk-reinstate（選択による一括復帰、#481）", () => {
+  it("持ち主の有無でカードごとに reinstateCard / reinstateCardToIssued を呼び分ける", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({
+          cards: [
+            card({ cardId: "nfc_owned", status: "disabled", ownerUserId: "usr_taro" }),
+            card({ cardId: "nfc_unowned", status: "disabled", ownerUserId: null }),
+          ],
+          truncated: false,
+        }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-reinstate",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      { card_id: ["nfc_owned", "nfc_unowned"], confirmed: "1" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.reinstateCard).toEqual([{ actorUserId: SUB, cardId: "nfc_owned" }]);
+    expect(calls.reinstateCardToIssued).toEqual([{ actorUserId: SUB, cardId: "nfc_unowned" }]);
+    const html = await response.text();
+    expect(html).toContain("2 件成功");
+  });
+
+  it("issued・active は対象外（理由つき）で、reinstateCard 系は呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({ cards: [card({ cardId: "nfc_a", status: "active" })], truncated: false }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const response = await postBulk(
+      app,
+      "/nfc/bulk-reinstate",
+      sessionCookie,
+      csrfCookie,
+      csrfToken,
+      { card_id: "nfc_a" },
+    );
+
+    expect(response.status).toBe(400);
+    expect(calls.reinstateCard).toHaveLength(0);
+    expect(calls.reinstateCardToIssued).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("選んだ中に復帰できるカードがありません。");
+  });
+});
+
+describe("?batch= によるサーバー側の絞り込み（#481）", () => {
+  it("GET /nfc が ?batch= を listAllCards へ渡し、絞り込み中だと画面に出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const receivedInputs: (ListAllCardsDelegatedInput | undefined)[] = [];
+    const { rpc } = fakeNfcCards({
+      listAllCards: async (input) => {
+        receivedInputs.push(input);
+        return rpcOk({
+          cards: [card({ cardId: "nfc_a", batch: "2026-bunkasai" })],
+          truncated: false,
+        });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc?batch=2026-bunkasai`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(receivedInputs).toEqual([{ batch: "2026-bunkasai" }]);
+    const html = await response.text();
+    expect(html).toContain("絞り込み中");
+    expect(html).toContain("2026-bunkasai");
+  });
+
+  it("打ち切り + 絞り込み中なら、専用の文言を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () =>
+        rpcOk({ cards: [card({ batch: "2026-bunkasai" })], truncated: true }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc?batch=2026-bunkasai`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("このロットには他にも読み込めていないカードがあります");
+  });
+
+  it("空文字の ?batch= は絞り込み無しとして扱う", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc?batch=`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("絞り込み中");
   });
 });
 

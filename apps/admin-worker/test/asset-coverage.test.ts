@@ -206,6 +206,7 @@ describe("data-sortable / data-filter / data-copy / data-tabs を使う画面は
       issuedAt: "2026-01-01T00:00:00.000Z",
       claimedAt: "2026-01-02T00:00:00.000Z",
       disabledAt: null,
+      tapCount: 0,
     };
     const user = {
       id: TARGET_USER_ID,

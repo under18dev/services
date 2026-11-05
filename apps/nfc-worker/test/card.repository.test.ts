@@ -44,6 +44,28 @@ describe("listAll", () => {
     // なると、2 枚しか無いのに `truncated` が立つ。
     expect(await repository().listAll(2)).toHaveLength(2);
   });
+
+  /**
+   * **`batch` は打ち切り（`limit + 1`）の前に効くこと**（#481）。
+   * 絞ったあとの件数で `limit + 1` を取るので、対象のロットが
+   * 全体では 500 枚より後ろに並んでいても、ちゃんと見える。
+   */
+  it("batch を渡すと、そのロットだけに絞ってから limit + 1 件を取る", async () => {
+    await seedIssuedCard("2026-bunkasai");
+    await seedIssuedCard("2026-bunkasai");
+    await seedIssuedCard("other-lot");
+
+    const rows = await repository().listAll(10, { batch: "2026-bunkasai" });
+    expect(rows).toHaveLength(2);
+    expect(rows.every((card) => card.batch === "2026-bunkasai")).toBe(true);
+  });
+
+  it("batch を渡さなければ、これまでどおり全件を見る", async () => {
+    await seedIssuedCard("2026-bunkasai");
+    await seedIssuedCard("other-lot");
+
+    expect(await repository().listAll(10)).toHaveLength(2);
+  });
 });
 
 describe("updateTarget", () => {
