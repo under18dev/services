@@ -467,6 +467,34 @@ export interface CardTapRecorder {
    * 書かない（`domain/services/retention-policy.ts` を参照）。
    */
   countDistinctWithTaps(): Promise<number>;
+
+  /**
+   * 1 枚のカードの、タップの合計・初回・最終（#472「カード 1 枚の詳細」）。
+   *
+   * **1 回も無ければ `null`。** `0` や空文字で埋めない——`claimedAt` は
+   * あるのに `null` が返る行は「引き取り済みだが 1 回もタップされていない
+   * （死蔵）」そのものであり、画面はこれを明示する約束になっている
+   * （issue #472）。
+   *
+   * 「初回」「最終」は時刻までは持たない（`date` 列の粒度）。
+   */
+  summaryFor(cardId: string): Promise<{
+    readonly total: number;
+    readonly firstTappedAt: string;
+    readonly lastTappedAt: string;
+  } | null>;
+
+  /**
+   * 1 枚のカードの日ごとの合計（#472）。`dailyTotals`（全カード横断、#454）
+   * の単一カード版——**タップが無かった日の行は返らない**ので、0 件の日を
+   * 埋めるのは呼び出し側（UseCase）の仕事にしてある。同じ役割分担。
+   *
+   * @param sinceDate UTC の日付文字列（`YYYY-MM-DD`）。これ以降の日だけ。
+   */
+  cardDailyTotals(
+    cardId: string,
+    sinceDate: string,
+  ): Promise<readonly { readonly date: string; readonly total: number }[]>;
 }
 
 /**

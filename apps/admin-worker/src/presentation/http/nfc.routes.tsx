@@ -3,9 +3,10 @@ import type { AdminCardViewDelegated, RpcErrorCode, UserRefAdmin } from "@u18/co
 import type { Context, Hono } from "hono";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { isAllowedOrigin, isJsonRequest } from "./origin";
-import { csrfRejected, serviceUnavailable } from "./ui/message-page";
+import { csrfRejected, MessagePage, serviceUnavailable } from "./ui/message-page";
 import { cardTapUrl } from "./nfc-tap-url";
 import { resolveUserRefs } from "./user-refs";
+import { CardDetailPage, type DayWindow } from "./ui/card-detail-page";
 import { NfcPage } from "./ui/nfc-page";
 import type { AppBindings } from "./types";
 
@@ -130,6 +131,104 @@ async function loadCardsForRender(c: Context<AppBindings>): Promise<{
   return { cards: result.value.cards, truncated: result.value.truncated, tapUrls, userRefs };
 }
 
+/** `?days=` を 3 択へ丸める。不正値・未指定は既定の 30（`nfc-analytics.routes.tsx` と同じ形）。 */
+function resolveDays(raw: string | undefined): DayWindow {
+  if (raw === "90") return 90;
+  if (raw === "180") return 180;
+  return 30;
+}
+
+/** 存在しない `cardId` を行き止まりにしない（`users.routes.tsx` の `userNotFound` と同じ形）。 */
+function cardNotFound(c: Context<AppBindings>): Response | Promise<Response> {
+  return c.html(
+    <MessagePage
+      title="そのカードは見つかりません"
+      message="ID が違うか、すでにありません。一覧から探し直してください。"
+      actionHref="/nfc"
+      actionLabel="NFC カードの一覧へ戻る"
+    />,
+    404,
+  );
+}
+
+/**
+ * カード 1 枚の詳細・タップ履歴を取ってページを描く。GET 本体
+ * （`registerNfcCardDetailRoutes`）と、操作失敗後の描き直し
+ * （`renderCardDetailPageWithError`）が共有する。
+ */
+async function fetchAndRenderCardDetail(
+  c: Context<AppBindings>,
+  cardId: string,
+  days: DayWindow,
+  error: string | undefined,
+): Promise<Response> {
+  const session = c.get("session");
+  const container = c.get("container");
+
+  const cardResult = await container.nfcCards.getCard({ actorUserId: session.sub, cardId });
+  if (!cardResult.ok) {
+    c.header("Cache-Control", "no-store");
+    return cardResult.error.code === "not_found" ? cardNotFound(c) : serviceUnavailable(c);
+  }
+
+  // `cardTapHistory`（Service Binding 越しの呼び出し）は reject しうる
+  // ——`ok: false` と違い、通信そのものが落ちる経路（`app.tsx` の `/` が
+  // `Promise.allSettled` を使う理由と同じ）。`resolveUserRefs` は reject
+  // しない（3b の指摘）が、`Promise.all` に混ぜると `cardTapHistory` の
+  // reject がこちらごと巻き込む——`.catch` で先に畳んでおく。
+  const [tapHistoryResult, ownerRefs] = await Promise.all([
+    container.nfcCards
+      .cardTapHistory({ actorUserId: session.sub, cardId, days })
+      .catch((): null => null),
+    resolveUserRefs(container.identityAdmin, session.sub, [cardResult.value.ownerUserId]),
+  ]);
+  const tapHistory =
+    tapHistoryResult !== null && tapHistoryResult.ok ? tapHistoryResult.value : null;
+
+  c.header("Cache-Control", "no-store");
+  return c.html(
+    <CardDetailPage
+      csrfToken={ensureCsrfToken(c)}
+      card={cardResult.value}
+      days={days}
+      tapHistory={tapHistory}
+      ownerRefs={ownerRefs}
+      {...(error === undefined ? {} : { error })}
+    />,
+    error === undefined ? 200 : 400,
+  );
+}
+
+/**
+ * 操作のフォームが「詳細から来た」と申告しているか
+ * （`users.routes.tsx` の `cameFromDetail` と同じ形）。
+ */
+function cameFromDetail(form: FormData): boolean {
+  return form.get("from")?.toString() === "detail";
+}
+
+/** 操作のあとの戻り先。詳細から来たときだけ詳細へ戻す。 */
+function redirectTargetOf(form: FormData, cardId: string): string {
+  return cameFromDetail(form) ? `/nfc/${encodeURIComponent(cardId)}` : "/nfc";
+}
+
+/**
+ * カード 1 枚の詳細（`admin.under18.dev/nfc/:cardId`、#472）。
+ *
+ * **`registerNfcAnalyticsRoutes`（`/nfc/analytics`）より後に登録すること。**
+ * 先に登録すると `:cardId` が `analytics` を吸ってしまい、解析画面が
+ * 「カードが見つかりません」になる——Hono は登録順に照合する
+ * （`users.routes.tsx:310` 付近に同じ罠の記述がある。`app.tsx` の
+ * 登録順と `nfc.routes.test.ts` の「吸われていないこと」のテストを参照）。
+ */
+export function registerNfcCardDetailRoutes(app: Hono<AppBindings>): void {
+  app.get("/nfc/:cardId", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.param("cardId");
+    const days = resolveDays(c.req.query("days"));
+    return fetchAndRenderCardDetail(c, cardId, days, undefined);
+  });
+}
+
 export function registerNfcRoutes(app: Hono<AppBindings>): void {
   app.get("/nfc", pageSecurityHeaders, async (c) => {
     const loaded = await loadCardsForRender(c);
@@ -232,47 +331,51 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
   });
 
   app.post("/nfc/:cardId/disable", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.param("cardId");
     const form = await c.req.formData().catch(() => null);
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
-    const cardId = c.req.param("cardId");
-
     const container = c.get("container");
     const result = await container.nfcCards.disableCard({ actorUserId: session.sub, cardId });
 
     if (!result.ok) {
-      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+      const message = "そのカードは見つかりませんでした。";
+      return cameFromDetail(form)
+        ? fetchAndRenderCardDetail(c, cardId, 30, message)
+        : renderNfcPageWithError(c, message);
     }
 
     c.header("Cache-Control", "no-store");
-    return c.redirect("/nfc", 303);
+    return c.redirect(redirectTargetOf(form, cardId), 303);
   });
 
   app.post("/nfc/:cardId/release", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.param("cardId");
     const form = await c.req.formData().catch(() => null);
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
-    const cardId = c.req.param("cardId");
-
     const container = c.get("container");
     const result = await container.nfcCards.releaseCard({ actorUserId: session.sub, cardId });
 
     if (!result.ok) {
-      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+      const message = "そのカードは見つかりませんでした。";
+      return cameFromDetail(form)
+        ? fetchAndRenderCardDetail(c, cardId, 30, message)
+        : renderNfcPageWithError(c, message);
     }
 
     c.header("Cache-Control", "no-store");
-    return c.redirect("/nfc", 303);
+    return c.redirect(redirectTargetOf(form, cardId), 303);
   });
 
   /**
@@ -282,25 +385,27 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
    * （`nfc-page.tsx` の `CardActions` を参照）。
    */
   app.post("/nfc/:cardId/reinstate", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.param("cardId");
     const form = await c.req.formData().catch(() => null);
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
-    const cardId = c.req.param("cardId");
-
     const container = c.get("container");
     const result = await container.nfcCards.reinstateCard({ actorUserId: session.sub, cardId });
 
     if (!result.ok) {
-      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+      const message = "そのカードは見つかりませんでした。";
+      return cameFromDetail(form)
+        ? fetchAndRenderCardDetail(c, cardId, 30, message)
+        : renderNfcPageWithError(c, message);
     }
 
     c.header("Cache-Control", "no-store");
-    return c.redirect("/nfc", 303);
+    return c.redirect(redirectTargetOf(form, cardId), 303);
   });
 
   /**
@@ -321,16 +426,15 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
    * と書いていたが、データ層を直さない限り成り立っていなかった）。
    */
   app.post("/nfc/:cardId/reinstate-to-issued", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.param("cardId");
     const form = await c.req.formData().catch(() => null);
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
-    const cardId = c.req.param("cardId");
-
     const container = c.get("container");
     const result = await container.nfcCards.reinstateCardToIssued({
       actorUserId: session.sub,
@@ -338,23 +442,26 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     });
 
     if (!result.ok) {
-      return renderNfcPageWithError(c, "そのカードは見つかりませんでした。");
+      const message = "そのカードは見つかりませんでした。";
+      return cameFromDetail(form)
+        ? fetchAndRenderCardDetail(c, cardId, 30, message)
+        : renderNfcPageWithError(c, message);
     }
 
     c.header("Cache-Control", "no-store");
-    return c.redirect("/nfc", 303);
+    return c.redirect(redirectTargetOf(form, cardId), 303);
   });
 
   app.post("/nfc/:cardId/target", pageSecurityHeaders, async (c) => {
+    const cardId = c.req.param("cardId");
     const form = await c.req.formData().catch(() => null);
 
     if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
       c.header("Cache-Control", "no-store");
-      return csrfRejected(c, "/nfc");
+      return csrfRejected(c, form === null ? "/nfc" : redirectTargetOf(form, cardId));
     }
 
     const session = c.get("session");
-    const cardId = c.req.param("cardId");
     const targetUrl = form.get("targetUrl")?.toString().trim() ?? "";
 
     const container = c.get("container");
@@ -367,11 +474,13 @@ export function registerNfcRoutes(app: Hono<AppBindings>): void {
     if (!result.ok) {
       const message =
         TARGET_URL_REASON_LABEL[result.error.message] ?? "そのカードは見つかりませんでした。";
-      return renderNfcPageWithError(c, message);
+      return cameFromDetail(form)
+        ? fetchAndRenderCardDetail(c, cardId, 30, message)
+        : renderNfcPageWithError(c, message);
     }
 
     c.header("Cache-Control", "no-store");
-    return c.redirect("/nfc", 303);
+    return c.redirect(redirectTargetOf(form, cardId), 303);
   });
 
   /**

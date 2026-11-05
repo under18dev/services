@@ -170,6 +170,84 @@ export type IssueCardsDelegatedResult = RpcResult<{
   readonly cards: readonly { readonly cardId: string }[];
 }>;
 
+export const getCardDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  cardId: z.string().min(1),
+});
+
+export type GetCardDelegatedInput = z.infer<typeof getCardDelegatedInputSchema>;
+
+/**
+ * カード 1 枚の詳細（admin-worker のカード詳細ページ用、#472）。
+ *
+ * **`AdminCardViewDelegated` を使い回さない。** あちらは一覧用で、1 枚を
+ * 名指しで見る画面が要る `transferCount` / `disabledReason` /
+ * `tapCount` / `lastTappedAt` を持たない——一覧の行にこれを全部足すと、
+ * 列が増えすぎて `/nfc` の表が読みにくくなる（1 枚ずつ詳細で見る理由
+ * そのもの）。
+ */
+export type AdminCardDetailDelegated = {
+  readonly cardId: string;
+  readonly status: AdminCardStatusDelegated;
+  readonly ownerUserId: string | null;
+  readonly targetUrl: string | null;
+  readonly batch: string | null;
+  readonly issuedAt: string;
+  readonly claimedAt: string | null;
+  readonly transferCount: number;
+  readonly disabledAt: string | null;
+  readonly disabledReason: string | null;
+  /** タップされた回数の合計（#394）。カードが現存する限り全期間ぶん。 */
+  readonly tapCount: number;
+  /** 最後にタップされた日（UTC の日付文字列）。1 度も無ければ `null`。 */
+  readonly lastTappedAt: string | null;
+};
+
+/** `not_found` ならそのカードは存在しない（`users.routes.tsx` の `userNotFound` と同じ扱い）。 */
+export type GetCardDelegatedResult = RpcResult<AdminCardDetailDelegated>;
+
+export const cardTapHistoryDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  cardId: z.string().min(1),
+  days: z.union([z.literal(30), z.literal(90), z.literal(180)]),
+});
+
+export type CardTapHistoryDelegatedInput = z.infer<typeof cardTapHistoryDelegatedInputSchema>;
+
+export type CardTapPeriodComparison = {
+  readonly total: number;
+  readonly previousTotal: number;
+};
+
+/**
+ * カード 1 枚のタップ履歴（#472）。
+ *
+ * **時間帯（0-23 時）別は持たない。** `nfc_card_taps` は日付までしか
+ * 持たない集計テーブルで（`packages/nfc-db/src/schema/taps.ts`）、
+ * 理由は `DelegatedCardTapHistoryUseCase`（nfc-worker）の冒頭を参照
+ * ——日次集計である設計そのものが意図的で、1 枚のカードの時間帯別は
+ * 所有者 1 人の生活パターンそのものになるため作らないと判断した。
+ *
+ * **生のタップログ（1 件ずつの時刻・UA・IP）も持たない。** 1 枚のカードは
+ * 1 人の持ち物なので、生ログはその人の行動履歴そのものになる。
+ */
+export type CardTapHistoryAnalytics = {
+  /** `days` 件、古い日から新しい日の順。タップが無い日も `0` で埋まる。 */
+  readonly dailyTotals: readonly { readonly date: string; readonly total: number }[];
+  /** 表示した期間（`days` 日ぶん）の合計。 */
+  readonly totalTaps: number;
+  readonly retentionDays: number;
+  readonly lastTappedAt: string | null;
+  /** 最終タップから何日経ったか。`lastTappedAt` が `null` なら `null`。 */
+  readonly daysSinceLastTap: number | null;
+  /** 直近 7 日と、その直前 7 日の比較。 */
+  readonly last7d: CardTapPeriodComparison;
+  /** 直近 30 日と、その直前 30 日の比較。 */
+  readonly last30d: CardTapPeriodComparison;
+};
+
+export type CardTapHistoryDelegatedResult = RpcResult<CardTapHistoryAnalytics>;
+
 export const listCardsByOwnerDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   /** 持ち主の userId。**カード側の `owner_user_id` と突き合わせる。** */
@@ -373,6 +451,20 @@ export interface NfcAdminDelegatedRpcContract {
    */
   listCardsByOwner(input: ListCardsByOwnerDelegatedInput): Promise<ListCardsByOwnerDelegatedResult>;
   issueCards(input: IssueCardsDelegatedInput): Promise<IssueCardsDelegatedResult>;
+
+  /**
+   * カード 1 枚の詳細（#472）。**`listAllCards` を引いて絞らない**——
+   * 理由は `ListCardsByOwnerDelegatedResult` の冒頭と同じ（上限打ち切りで
+   * 一覧の外に出たカードが「見つからない」ように見える）。1 枚を名指しで
+   * 引くので打ち切りは起こらない。
+   */
+  getCard(input: GetCardDelegatedInput): Promise<GetCardDelegatedResult>;
+  /**
+   * カード 1 枚のタップ履歴（#472）。`days` は `30 | 90 | 180` の 3 択——
+   * 画面はここで検証に落ちることが無いよう、呼ぶ前に不正値を 30 へ丸める
+   * こと（`tapTimeseries` と同じ約束）。
+   */
+  cardTapHistory(input: CardTapHistoryDelegatedInput): Promise<CardTapHistoryDelegatedResult>;
 
   /**
    * NFC の解析画面（#454）。6 本とも読み取り専用。

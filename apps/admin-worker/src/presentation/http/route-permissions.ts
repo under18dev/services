@@ -33,6 +33,8 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   // 利用者詳細（#455）。ADMIN_NAV_GROUPS には出ないが、操作ではなく
   // 読み取りなので一覧と同じ USER_READ。
   "GET /users/:userId": "USER_READ",
+  // カード詳細（#472）。同じ理由で、一覧と同じ NFC_READ。
+  "GET /nfc/:cardId": "NFC_READ",
   "GET /audit": "AUDIT_READ",
 
   "POST /nfc": "NFC_WRITE",
