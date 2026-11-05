@@ -122,7 +122,6 @@ async function renderUsersPage(
   c.header("Cache-Control", "no-store");
   return c.html(
     <UsersPage
-      actorUserId={session.sub}
       csrfToken={ensureCsrfToken(c)}
       users={page.value.users}
       nextCursor={page.value.nextCursor}
