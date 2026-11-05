@@ -37,6 +37,20 @@ export const disableCardDelegatedInputSchema = z.object({
   /** admin-worker が確認済みの、操作者（運営）の userId。検証しない。 */
   actorUserId: z.string().min(1),
   cardId: z.string().min(1),
+  /**
+   * `disabled_reason` に書く理由（#486）。**省略時は `"admin_action"`**
+   * （単発の運営操作、既定のまま）——既存の呼び出し元（`/nfc/:cardId/disable`、
+   * `/nfc/bulk-disable`）はこの項目を送らないので、挙動は変わらない。
+   *
+   * **閉じた集合にしてある。** 自由文字列にすると、新しい理由を足すたびに
+   * 綴りが増殖する——`apps/nfc-worker/src/domain/services/disabled-reason.ts`
+   * が「同じ概念に 2 つの綴りを残さない」ことを前提に判定を書いている。
+   * `"owner_suspended"` はアカウント凍結に連動した無効化（#486）。
+   * 理由は `disabled-reason.ts` の該当する定数の JSDoc を参照——contracts
+   * パッケージは nfc-worker 内部のドメイン層を import できないので、
+   * ここでは値をそのまま書き写し、ポインタだけを残す。
+   */
+  reason: z.enum(["admin_action", "owner_suspended"]).optional(),
 });
 
 export type DisableCardDelegatedInput = z.infer<typeof disableCardDelegatedInputSchema>;

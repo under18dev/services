@@ -103,6 +103,56 @@ describe("disableCard", () => {
     expect(!result.ok && result.error.code).toBe("invalid_input");
   });
 
+  it("reason を省略すると disabled_reason は admin_action のまま（#486）", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+
+    const result = await rpc.disableCard({ actorUserId: ACTOR, cardId });
+
+    expect(result.ok).toBe(true);
+    const card = await repository().findById(cardId);
+    expect(card?.disabledReason).toBe("admin_action");
+  });
+
+  /**
+   * **#486。** アカウント凍結に連動した無効化だけが別の理由コードを渡す
+   * ——理由は `domain/services/disabled-reason.ts` の
+   * `OWNER_SUSPENDED_DISABLED_REASON` を参照。
+   */
+  it("reason: owner_suspended を渡すと disabled_reason とイベントの metadata.reason の両方に反映される（#486）", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+
+    const result = await rpc.disableCard({ actorUserId: ACTOR, cardId, reason: "owner_suspended" });
+
+    expect(result.ok, "disableCard が失敗した").toBe(true);
+    const card = await repository().findById(cardId);
+    expect(card?.disabledReason).toBe("owner_suspended");
+
+    const rows = await db()
+      .select()
+      .from(nfcCardEvents)
+      .where(eq(nfcCardEvents.cardId, cardId))
+      .orderBy(desc(nfcCardEvents.id))
+      .all();
+    const disabledEvent = rows.find((row) => row.event === "card.disabled");
+    // **1 つの操作が 2 つの違う文字列で説明される状態を増やさない**
+    // （#436 と同じ判断）。disabled_reason と metadata.reason を揃える。
+    expect(disabledEvent?.metadata?.["reason"]).toBe("owner_suspended");
+  });
+
+  it("reason に閉じた集合の外の値を渡すと invalid_input で落ちる（#486）", async () => {
+    const cardId = await seedActiveCard("usr_taro");
+
+    const result = await rpc.disableCard({
+      actorUserId: ACTOR,
+      cardId,
+      // @ts-expect-error 閉じた集合の外の値を渡す
+      reason: "something_else",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe("invalid_input");
+  });
+
   /**
    * **#427 から。** それ以前は `active` だけが対象で、`issued`
    * （未紐づけ）のカードを無効化する経路が 1 つも無かった——単発でも

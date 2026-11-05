@@ -135,6 +135,7 @@ export class NfcAdminDelegatedRPC
     const result = await container.useCases.delegatedDisableCard.execute({
       actorUserId: parsed.data.actorUserId,
       cardId: parsed.data.cardId,
+      ...(parsed.data.reason === undefined ? {} : { reason: parsed.data.reason }),
     });
     if (!result.ok) return rpcErr(toRpcCode(result.failure.kind), result.failure.kind);
 
