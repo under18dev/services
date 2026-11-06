@@ -303,16 +303,78 @@ export type SetOAuthClientAppUrlDelegatedResult = RpcResult<null>;
 
 // ---------------------------------------------------------- listAuditLogs
 
+/**
+ * `category: "operator_action"` が実際にどの `event` 名を指すかの、唯一の
+ * 定義（ホームの「利用者・アプリの操作」用、#515）。
+ *
+ * ## ここに置く理由
+ *
+ * この定数は 2 か所から要る。
+ *
+ * 1. **auth-worker**（`IdentityAdminDelegatedRPC`、実際の絞り込み）
+ * 2. **admin-worker の `preview-html.generator.mts`**（auth-worker 全体を
+ *    fake する以上、同じ絞り込みを再現する必要がある）
+ *
+ * auth-worker の application 層（Port・UseCase）はこれまで `@u18/contracts`
+ * を import したことが無い——`presentation` 層だけが import する一貫した
+ * 分離があった。この定数を auth-worker 側に置くと、admin-worker の
+ * preview スクリプトがそれを import するために Worker 境界を越えて
+ * 別 Worker の `src` を読むことになり、両方の問題を一度に起こす
+ * （application 層の分離が壊れる上に、デプロイ単位をまたぐ import が増える）。
+ * **共有したい定数は、共有のための場所（contracts）に置く** —— 既存の
+ * `RPC_CALLERS`（`identity.ts`）と同じ判断。
+ *
+ * ## 中身
+ *
+ * - **`ops.*` は接頭辞でそのまま使える**（5 件）。`AUDIT_EVENTS` の
+ *   「運用者が wrangler 越しに書くもの」の節を参照——アプリが書くイベント
+ *   と混ざらないよう意図的に分けてある接頭辞。
+ * - **`oauth.client.*` は接頭辞で切れない。** `authenticate` / `resolve`
+ *   は RP が来るたびに書かれる、本番で最も量が多い部類のイベントで、
+ *   接頭辞で拾うと #515 で直した「ログインに流される」のと同じことが
+ *   `oauth.client.*` の中だけで起きる。管理者まで通った呼び出しだけが
+ *   書く 4 件（`created` / `disabled` / `owner_changed` /
+ *   `app_url_changed`）を明示的に列挙する。
+ * - **`ops.approval.*` / `ops.permission.*` を含まない。** あれは
+ *   admin-worker 自身の承認リスト（`admin_approval_events`、`u18-admin`
+ *   D1）の監査で、auth-worker の `audit_logs` には本番でも絶対に現れない
+ *   ——この一覧が読んでいるテーブル自体に存在しない値である。
+ * - **`admin.denied` / `admin.session_not_passkey` を含まない。**
+ *   `audit_logs` に行自体が無い（auth-worker 側で `sink: "log"` に
+ *   分類され、`AuditLogger.record()` に渡すこと自体が型で止まる）。
+ *
+ * ## 正本はここではない
+ *
+ * **この一覧だけを見て足し引きしないこと。** 正本は auth-worker の
+ * `AUDIT_EVENT_RETENTION`（`sink: "d1"` のもの）で、**両者が食い違って
+ * いないことは `test/audit-events.test.ts` のテストが見ている。** ここを
+ * 編集しただけでは、本番で記録されないイベント名を足せてしまう——
+ * `OPERATOR_ACTION_EVENTS` を contracts に置いたことで「イベント名の
+ * 知識を auth-worker に閉じ込める」という狙いが緩んだように見えるが、
+ * 緩んでいるのは配置だけで、正しさの検査はそのテストが引き続き持っている。
+ */
+export const OPERATOR_ACTION_EVENTS = [
+  "ops.admin.granted",
+  "ops.admin.revoked",
+  "ops.user.suspended",
+  "ops.user.reinstated",
+  "ops.user.sessions_revoked",
+  "oauth.client.created",
+  "oauth.client.disabled",
+  "oauth.client.owner_changed",
+  "oauth.client.app_url_changed",
+] as const;
+
 export const listAuditLogsDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   event: z.string().min(1).max(64).optional(),
   /**
-   * 区分での絞り込み（ホームの「利用者・アプリ・権限の操作」用、#515）。
+   * 区分での絞り込み（ホームの「利用者・アプリの操作」用、#515）。
    *
    * **呼ぶ側はイベント名を知らなくてよい。** `"operator_action"` が実際に
-   * どの `event` 名を指すかは auth-worker 側に閉じている
-   * （`OPERATOR_ACTION_EVENTS` の冒頭を参照）。admin-worker がイベント名を
-   * 書き写すと、auth-worker 側で増えたときに食い違う。
+   * どの `event` 名を指すかは `OPERATOR_ACTION_EVENTS`（この少し上）に
+   * 閉じている。admin-worker の実装（`app.tsx`）がイベント名を書き写す
+   * ことは無い——カテゴリ名だけを渡す。
    */
   category: z.enum(["operator_action"]).optional(),
   userId: z.string().min(1).max(64).optional(),

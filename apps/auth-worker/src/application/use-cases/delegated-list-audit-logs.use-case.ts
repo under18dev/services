@@ -1,20 +1,18 @@
-import {
-  OPERATOR_ACTION_EVENTS,
-  type AuditLogReader,
-  type PersistedAuditLogEntry,
-} from "../ports/audit-log.port";
+import type { AuditLogReader, PersistedAuditLogEntry } from "../ports/audit-log.port";
 import { decodeCursor, nextCursorOf } from "../../domain/services/keyset-cursor";
 import { err, ok, type UseCaseResult } from "./types";
 
 export type DelegatedListAuditLogsCommand = {
   readonly event?: string;
   /**
-   * 区分での絞り込み（#515）。**admin-worker は具体的なイベント名を
-   * 知らない。** `OPERATOR_ACTION_EVENTS` の実体（どの名前が「運営の
-   * 操作」か）は auth-worker 側に閉じる——admin-worker が 9 個のイベント
-   * 名を書き写すと、増えたときに 2 箇所が食い違う。
+   * 区分での絞り込み（#515）の実体——`IN` 相当の集合一致。**`category`
+   * という語はここには無い。** `"operator_action"` がどのイベント名の
+   * 集合を指すかは契約の DTO と entrypoint の層で解決済みで、ここには
+   * 素の名前の集合だけが渡る——application 層は `@u18/contracts` を
+   * import しない（`identity-admin-delegated.entrypoint.ts` の該当箇所を
+   * 参照）。
    */
-  readonly category?: "operator_action";
+  readonly events?: readonly string[];
   readonly userId?: string;
   readonly outcome?: "success" | "failure";
   readonly cursor?: string;
@@ -53,7 +51,7 @@ export class DelegatedListAuditLogsUseCase {
 
     const rows = await this.deps.auditLogs.listForAdmin({
       ...(command.event === undefined ? {} : { event: command.event }),
-      ...(command.category === undefined ? {} : { events: OPERATOR_ACTION_EVENTS }),
+      ...(command.events === undefined ? {} : { events: command.events }),
       ...(command.userId === undefined ? {} : { userId: command.userId }),
       ...(command.outcome === undefined ? {} : { outcome: command.outcome }),
       ...(after === undefined || after === null ? {} : { after }),

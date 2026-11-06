@@ -9,6 +9,7 @@ import {
   listAuditLogsDelegatedInputSchema,
   listOAuthClientsDelegatedInputSchema,
   listUsersDelegatedInputSchema,
+  OPERATOR_ACTION_EVENTS,
   reinstateUserDelegatedInputSchema,
   revokeUserSessionsDelegatedInputSchema,
   rpcErr,
@@ -353,10 +354,14 @@ export class IdentityAdminDelegatedRPC
     const parsed = listAuditLogsDelegatedInputSchema.safeParse(input);
     if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
 
+    // **`category` → `events` の解決はここで行う。** `OPERATOR_ACTION_EVENTS`
+    // は `@u18/contracts` のものを使う——application 層（UseCase・Port）は
+    // この語も契約の import も知らない（`audit-log.port.ts` の
+    // `AUDIT_EVENT_RETENTION` JSDoc を参照）。
     const container = createContainer(this.env, {}, this.context());
     const result = await container.useCases.delegatedListAuditLogs.execute({
       ...(parsed.data.event === undefined ? {} : { event: parsed.data.event }),
-      ...(parsed.data.category === undefined ? {} : { category: parsed.data.category }),
+      ...(parsed.data.category === undefined ? {} : { events: OPERATOR_ACTION_EVENTS }),
       ...(parsed.data.userId === undefined ? {} : { userId: parsed.data.userId }),
       ...(parsed.data.outcome === undefined ? {} : { outcome: parsed.data.outcome }),
       ...(parsed.data.cursor === undefined ? {} : { cursor: parsed.data.cursor }),
