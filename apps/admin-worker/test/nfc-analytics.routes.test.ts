@@ -116,6 +116,29 @@ describe("GET /nfc/analytics", () => {
   });
 
   /**
+   * **見つけたカードへ手を打ちに行けなかった穴**（#518）。「タップ上位」
+   * 「死蔵の検出」の両方の表で、カード ID を `/nfc/:cardId`（カード詳細、
+   * #472）へのリンクにする。説明文も、#481 で `/nfc` の一覧から行内操作が
+   * 外れたあとの行き先（カード詳細）を指すように直した。
+   */
+  it("タップ上位・死蔵の両方で、カード ID を /nfc/:cardId へのリンクにする", async () => {
+    const sessionCookie = await loginAsApproved();
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: fullNfcCards() });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc/analytics`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('href="/nfc/nfc_popular"');
+    expect(html).toContain('href="/nfc/nfc_dormant"');
+    // **古い「一覧から行ってください」の文を残さない**（#481 の前のまま、という指摘）。
+    expect(html).not.toContain("の一覧から行ってください");
+  });
+
+  /**
    * **既知の理由コードは日本語で、知らない値はコードのまま**（#496）。
    * 「不明」とは書かない——値が無いのか、知らない値が入っているのかを
    * 運用者が区別できなくなるため（#471 の `UserRef` と同じ理由）。

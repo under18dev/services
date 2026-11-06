@@ -286,11 +286,7 @@ const CardUsageSection: FC<{ readonly usage: CardUsageRankingAnalytics | null }>
       <CardTitle>カード別ランキングと死蔵の検出</CardTitle>
       <CardDescription>
         タップ上位と、引き取り済みでタップが 1 回も無いカード。所有者は出していません——
-        カードの操作は{" "}
-        <a class="underline underline-offset-4" href="/nfc">
-          NFC カード
-        </a>{" "}
-        の一覧から行ってください。
+        カードの操作は、カード ID を押して詳細から行ってください。
       </CardDescription>
     </CardHeader>
     <CardContent class="flex flex-col gap-6">
@@ -315,7 +311,28 @@ const CardUsageSection: FC<{ readonly usage: CardUsageRankingAnalytics | null }>
                 <TableBody>
                   {usage.ranking.map((row) => (
                     <TableRow key={row.cardId}>
-                      <TableCell class="font-mono text-xs">{row.cardId}</TableCell>
+                      <TableCell class="font-mono text-xs">
+                        {/*
+                          **カード詳細（#472）へのリンク**（#518、見つけた
+                          カードへ手を打ちに行けなかった穴）。`/nfc` の
+                          一覧（#481）と同じ規則——ID が人の見分けに使う
+                          ものなので、ID 自体をリンクにする。
+                        */}
+                        <a
+                          href={`/nfc/${encodeURIComponent(row.cardId)}`}
+                          class="underline underline-offset-4"
+                        >
+                          {row.cardId}
+                        </a>{" "}
+                        <button
+                          type="button"
+                          data-copy={row.cardId}
+                          hidden
+                          class="text-xs underline"
+                        >
+                          コピー
+                        </button>
+                      </TableCell>
                       <TableCell>{row.batch ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant="secondary">{STATUS_LABEL[row.status]}</Badge>
@@ -347,7 +364,22 @@ const CardUsageSection: FC<{ readonly usage: CardUsageRankingAnalytics | null }>
                   <TableBody>
                     {usage.dormant.rows.map((row) => (
                       <TableRow key={row.cardId}>
-                        <TableCell class="font-mono text-xs">{row.cardId}</TableCell>
+                        <TableCell class="font-mono text-xs">
+                          <a
+                            href={`/nfc/${encodeURIComponent(row.cardId)}`}
+                            class="underline underline-offset-4"
+                          >
+                            {row.cardId}
+                          </a>{" "}
+                          <button
+                            type="button"
+                            data-copy={row.cardId}
+                            hidden
+                            class="text-xs underline"
+                          >
+                            コピー
+                          </button>
+                        </TableCell>
                         <TableCell>{row.batch ?? "—"}</TableCell>
                         <TableCell class={ITEM_META_CLASS}>{row.claimedAt.split("T")[0]}</TableCell>
                       </TableRow>
