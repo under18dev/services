@@ -91,9 +91,9 @@ export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand, needsSupe
         <CardDescription>
           {needsSuperApprover ? (
             <>
-              上の ID を使って、次のコマンドを実行してください。いまはまだ super approver
-              が 1 人も居ないので、<code class={ITEM_RAW_CLASS}>--super</code> が要ります
-              （次に誰かが super approver になるまでの間だけ）。
+              上の ID を使って、次のコマンドを実行してください。いまはまだ super approver が 1
+              人も居ないので、<code class={ITEM_RAW_CLASS}>--super</code> が要ります （次に誰かが
+              super approver になるまでの間だけ）。
             </>
           ) : (
             "上の ID を使って、次のコマンドを実行してください。"
