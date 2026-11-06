@@ -4,6 +4,7 @@ import {
   AUDIT_EVENTS,
   AUDIT_EVENT_RETENTION,
   auditEventDeadlines,
+  OPERATOR_ACTION_EVENTS,
   type AuditEventName,
 } from "../src/application/ports/audit-log.port";
 import { AuditRetention } from "../src/domain/services/retention-policy";
@@ -170,6 +171,64 @@ describe('sink: "log"（audit_logs に書かないイベント、#381）', () =>
 
     for (const event of notPersisted) {
       expect(deadlines.has(event), `${event} に境界が計算されている`).toBe(false);
+    }
+  });
+});
+
+/**
+ * `OPERATOR_ACTION_EVENTS`（admin-worker のホーム「利用者・アプリ・権限の
+ * 操作」用、#515）のドリフト対策。
+ *
+ * `ops.*` は接頭辞で導出できるので、**導出した集合と比較することで
+ * 足し忘れを自動で検出する。** 新しい `ops.*` イベントを登録簿に足して
+ * `OPERATOR_ACTION_EVENTS` を更新し忘れると、このテストが落ちる。
+ *
+ * `oauth.client.*` は `authenticate` / `resolve`（RP が来るたび書かれる、
+ * 本番で最も量が多い部類）が混ざるため接頭辞で導出できない——こちらは
+ * 「入っていないこと」を明示で守る。導出できるものとできないものを
+ * 分けたうえで、できない側も黙って放置しない。
+ */
+describe("OPERATOR_ACTION_EVENTS（#515）", () => {
+  const persisted = (Object.entries(AUDIT_EVENT_RETENTION) as [AuditEventName, { sink: string }][])
+    .filter(([, classification]) => classification.sink === "d1")
+    .map(([event]) => event);
+
+  it("persisted な ops.* イベントを過不足なく含む", () => {
+    const opsEvents = persisted.filter((event) => event.startsWith("ops.")).sort();
+    const includedOpsEvents = OPERATOR_ACTION_EVENTS.filter((event) =>
+      event.startsWith("ops."),
+    ).sort();
+
+    expect(includedOpsEvents, "ops.* で登録簿にあるが OPERATOR_ACTION_EVENTS に無い").toEqual(
+      opsEvents,
+    );
+  });
+
+  it("量が多い oauth.client.authenticate / oauth.client.resolve を含まない", () => {
+    // **ここが本体。** 接頭辞で拾うと、#515 で直した「ログインに流される」
+    // のと同じことが oauth.client.* の中だけで起きる。
+    expect(OPERATOR_ACTION_EVENTS).not.toContain("oauth.client.authenticate");
+    expect(OPERATOR_ACTION_EVENTS).not.toContain("oauth.client.resolve");
+  });
+
+  it("oauth.client.* のうち、管理者まで通った呼び出しだけが書く 4 件を含む", () => {
+    const includedOAuthClientEvents = OPERATOR_ACTION_EVENTS.filter((event) =>
+      event.startsWith("oauth.client."),
+    ).sort();
+
+    expect(includedOAuthClientEvents).toEqual(
+      [
+        "oauth.client.app_url_changed",
+        "oauth.client.created",
+        "oauth.client.disabled",
+        "oauth.client.owner_changed",
+      ].sort(),
+    );
+  });
+
+  it("登録簿に無い名前・持続しない名前を含まない", () => {
+    for (const event of OPERATOR_ACTION_EVENTS) {
+      expect(persisted, `${event} は persisted ではない`).toContain(event);
     }
   });
 });

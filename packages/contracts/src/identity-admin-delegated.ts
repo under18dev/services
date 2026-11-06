@@ -306,6 +306,15 @@ export type SetOAuthClientAppUrlDelegatedResult = RpcResult<null>;
 export const listAuditLogsDelegatedInputSchema = z.object({
   actorUserId: z.string().min(1),
   event: z.string().min(1).max(64).optional(),
+  /**
+   * 区分での絞り込み（ホームの「利用者・アプリ・権限の操作」用、#515）。
+   *
+   * **呼ぶ側はイベント名を知らなくてよい。** `"operator_action"` が実際に
+   * どの `event` 名を指すかは auth-worker 側に閉じている
+   * （`OPERATOR_ACTION_EVENTS` の冒頭を参照）。admin-worker がイベント名を
+   * 書き写すと、auth-worker 側で増えたときに食い違う。
+   */
+  category: z.enum(["operator_action"]).optional(),
   userId: z.string().min(1).max(64).optional(),
   outcome: z.enum(["success", "failure"]).optional(),
   cursor: z.string().min(1).max(64).optional(),

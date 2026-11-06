@@ -478,6 +478,42 @@ describe("承認リスト", () => {
     // **承認待ちの人数は出さない**（admin-worker に「承認待ち」の行が
     // 存在しないため。`home-page.tsx` の冒頭を参照）。
     expect(html).not.toContain("承認待ちの人数");
+    // **見出しは出る範囲に合わせてある**（#515）。カードの操作はここに
+    // 出ないので、`/nfc` への導線を添えている。
+    expect(html).toContain("利用者・アプリ・権限の操作");
+    expect(html).not.toContain("直近の管理操作");
+    expect(html).toMatch(/カードの操作は[\s\S]*?href="\/nfc"[\s\S]*?側で見られます/);
+  });
+
+  it("「直近の管理操作」はログインに流されないよう、運営の操作だけに絞って取得する（#515）", async () => {
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+    const listAuditLogsCalls: unknown[] = [];
+
+    const app = createApp({
+      approvals,
+      nfcCards: minimalNfcCards(),
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        listAuditLogs: async (input) => {
+          listAuditLogsCalls.push(input);
+          return rpcOk({ entries: [], nextCursor: null });
+        },
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    // **`listUsers` のように全ページを舐めて JS 側で絞るのではなく、
+    // auth-worker 側に「運営の操作だけ」を指定する。** 具体的な event 名は
+    // admin-worker 側に書き写さない——`OPERATOR_ACTION_EVENTS` の冒頭を参照。
+    expect(listAuditLogsCalls).toEqual([
+      { actorUserId: "usr_ok", category: "operator_action", limit: 5 },
+    ]);
   });
 
   it("直近の管理操作の利用者を名前で出す（#482）", async () => {
