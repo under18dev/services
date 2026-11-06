@@ -37,13 +37,25 @@ import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./asset-paths";
  *
  * 運用者がこれを CLI へ書き写す。可変幅フォントだと `l`（エル）と
  * `1`（いち）のような字形が紛らわしい。
+ *
+ * ## `--super` は既定で付けない（#517）
+ *
+ * 以前は `grantCommand` が常に `--super` 付きで、承認待ちが何人目でも
+ * 同じコマンド（しかもコピーボタン付き）が出ていた——`/approvals` の
+ * 「新規の承認は権限 0 から始まる」と食い違う、本番のバグだった。
+ * いまは呼び出し側（`app.tsx`）が `countSuperApprovers()` で判定し、
+ * 必要なときだけ `grantCommand` に `--super` を混ぜて渡す。
+ * `needsSuperApprover` はその結果を説明文の出し分けに使うだけで、
+ * コマンド自体は `grantCommand` が持つ値をそのまま出す
+ * （画面側で `--super` を足し引きし直さない）。
  */
 export type PendingPageProps = {
   readonly sub: string;
   readonly grantCommand: string;
+  readonly needsSuperApprover: boolean;
 };
 
-export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand }) => (
+export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand, needsSuperApprover }) => (
   <KiwaShell
     title="承認待ち"
     nav={[]}
@@ -77,8 +89,15 @@ export const PendingPage: FC<PendingPageProps> = ({ sub, grantCommand }) => (
       <CardHeader>
         <CardTitle>承認する人へ</CardTitle>
         <CardDescription>
-          上の ID を使って、次のコマンドを実行してください。最初の 1 人を承認するには{" "}
-          <code class={ITEM_RAW_CLASS}>--super</code> が要ります。
+          {needsSuperApprover ? (
+            <>
+              上の ID を使って、次のコマンドを実行してください。いまはまだ super approver
+              が 1 人も居ないので、<code class={ITEM_RAW_CLASS}>--super</code> が要ります
+              （次に誰かが super approver になるまでの間だけ）。
+            </>
+          ) : (
+            "上の ID を使って、次のコマンドを実行してください。"
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
