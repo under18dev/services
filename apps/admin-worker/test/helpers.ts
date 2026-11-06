@@ -84,6 +84,7 @@ export type FakeAuditEvent = {
   readonly actor: string;
   readonly reason: string;
   readonly detail?: string;
+  readonly createdAt: Date;
 };
 
 /**
@@ -150,8 +151,21 @@ export function fakeApprovals(
       return true;
     },
     recordAuditEvent: async (input) => {
-      events.push(input);
+      // `events.length` を使った単調増加の時刻——同じミリ秒で複数件
+      // push されても、新しい順の並びが崩れない。
+      events.push({ ...input, createdAt: new Date(events.length) });
     },
+    listRecentAuditEvents: async (limit) =>
+      [...events]
+        .reverse()
+        .slice(0, limit)
+        .map((e) => ({
+          sub: e.sub,
+          event: e.event,
+          actor: e.actor,
+          detail: e.detail ?? null,
+          createdAt: e.createdAt,
+        })),
   };
 }
 

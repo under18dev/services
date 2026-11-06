@@ -2,6 +2,7 @@ import {
   Badge,
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
   KiwaShell,
@@ -20,7 +21,10 @@ import {
 } from "@u18/web-ui/kiwa/island-classes";
 import type { UserRefAdmin } from "@u18/contracts";
 import type { FC } from "hono/jsx";
-import type { ApprovalListRow } from "../../../application/ports/approval.repository";
+import type {
+  ApprovalAuditEventRow,
+  ApprovalListRow,
+} from "../../../application/ports/approval.repository";
 import { PERMISSION_BITS, type PermissionBitName } from "../../../domain/permissions";
 import { CSRF_FIELD_NAME } from "../csrf";
 import { ADMIN_NAV_GROUPS } from "./nav";
@@ -85,6 +89,24 @@ import { UserRef } from "./user-ref";
  * ——ここで言い回しを変えない。`APPROVAL_GRANT` だけ他の 7 つと節を
  * 分けている（「管理画面の中で何ができるか」ではなく「管理画面を使える
  * 人を増やせる」という実質的な昇格のため、重みが違う）。
+ *
+ * ## 履歴の節（#523）
+ *
+ * **いまの状態（上の一覧）と、変更の記録（この節）は別物。** 誰が
+ * super approver かは一覧で分かるが、**いつ・誰が・誰にそれを与えたか**
+ * は `admin_approval_events`（admin-worker 自身の D1）にしか残っておらず、
+ * 読む画面がどこにも無かった——#487 で剥奪に 2 段階確認を足しても、
+ * 押し間違えたことに後から気づく手段が無いままだった。
+ *
+ * - **`sub`（対象）は `UserRef` で名前に解決する。** 本物の sub だから。
+ * - **`actor`（実行者）は解決しない、生の文字列のまま出す。** CLI の
+ *   `--actor` に渡された自由文字列（GitHub のハンドル等）で、sub では
+ *   ない——`UserRef` に通すと「見つかりません」になる。
+ * - **`reason` は出さない。** CLI の既定値（`"manual_grant"` 等）が
+ *   そのまま入っていることが多く、画面に出すと #516 と同じ
+ *   「内部の言葉が漏れる」形になる。
+ * - **件数は絞る**（`approvals.routes.tsx` の `HISTORY_LIMIT`）。`/audit`
+ *   と同じ判断——これより古い記録が要る調査は、D1 を直接見ればよい。
  */
 
 const PERMISSION_ORDER = Object.keys(PERMISSION_BITS) as readonly PermissionBitName[];
@@ -137,9 +159,60 @@ const PERMISSION_LABELS: Readonly<
 /** `APPROVAL_GRANT` は他の 7 つと並びを分ける（#487）。 */
 const REGULAR_PERMISSION_ORDER = PERMISSION_ORDER.filter((name) => name !== "APPROVAL_GRANT");
 
+/**
+ * 履歴（#523）の `event` の日本語名。`domain/approval-audit-events.ts` の
+ * `APPROVAL_AUDIT_EVENTS` が唯一の正本——ここは表示用の対訳でしかない。
+ * 対応表に無い値（将来 event が増えたとき）は生のコードのまま出す。
+ * 「不明」とは書かない——#471 の `UserRef` / #496 の `disabled_reason` と
+ * 同じ理由。
+ */
+const AUDIT_EVENT_LABEL: Readonly<Record<string, string>> = {
+  "ops.approval.granted": "承認を付与",
+  "ops.approval.revoked": "承認を剥奪",
+  "ops.permission.granted": "権限を付与",
+  "ops.permission.revoked": "権限を剥奪",
+};
+
+function isPermissionBitName(value: string): value is PermissionBitName {
+  return value in PERMISSION_BITS;
+}
+
+function permissionLabelOf(name: string): string | undefined {
+  return isPermissionBitName(name) ? PERMISSION_LABELS[name].label : undefined;
+}
+
+/** 履歴 1 件ぶんの表示。既知の event は日本語、未知はコードのまま。 */
+const AuditEventHistoryRow: FC<{
+  readonly entry: ApprovalAuditEventRow;
+  readonly refs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ entry, refs }) => {
+  const label = AUDIT_EVENT_LABEL[entry.event];
+
+  return (
+    <li class={ITEM_META_CLASS}>
+      {formatDateTime(entry.createdAt.toISOString())}
+      {" ・ "}
+      {label === undefined ? <code class={ITEM_RAW_CLASS}>{entry.event}</code> : label}
+      {entry.detail === null ? null : (
+        <>
+          {"（"}
+          {permissionLabelOf(entry.detail) ?? entry.detail}
+          {"）"}
+        </>
+      )}
+      {" ・ 対象: "}
+      <UserRef id={entry.sub} refs={refs} />
+      {" ・ 実行者: "}
+      <span class={ITEM_RAW_CLASS}>{entry.actor}</span>
+    </li>
+  );
+};
+
 export type ApprovalsPageProps = {
   readonly csrfToken: string;
   readonly approvals: readonly ApprovalListRow[];
+  /** 承認・権限の変更履歴（#523）。新しい順、件数は呼び出し側で絞り済み。 */
+  readonly history: readonly ApprovalAuditEventRow[];
   /** いまログインしている人の sub。自分自身の行の操作を言葉で説明するために使う。 */
   readonly viewerSub: string;
   /** `sub` / `approvedBySub` の名前解決（#482、`resolveUserRefs` が束ねる）。 */
@@ -269,6 +342,7 @@ const ApprovalRow: FC<{
 export const ApprovalsPage: FC<ApprovalsPageProps> = ({
   csrfToken,
   approvals,
+  history,
   viewerSub,
   refs,
   error,
@@ -371,6 +445,27 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
                 viewerSub={viewerSub}
                 refs={refs}
               />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>履歴</CardTitle>
+        <CardDescription>
+          誰が・いつ・誰に承認や権限を与えたか・剥奪したかの記録です。直近 {history.length}{" "}
+          件まで出します。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {history.length === 0 ? (
+          <p class={ITEM_META_CLASS}>記録はまだありません。</p>
+        ) : (
+          <ul class="flex flex-col gap-2">
+            {history.map((entry, index) => (
+              <AuditEventHistoryRow key={index} entry={entry} refs={refs} />
             ))}
           </ul>
         )}

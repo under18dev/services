@@ -1,7 +1,8 @@
 import { adminApprovalEvents, adminApprovals, type AdminDatabase } from "@u18/admin-db";
 import { newId } from "@u18/domain";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import type {
+  ApprovalAuditEventRow,
   ApprovalListRow,
   ApprovalRepository,
 } from "../../application/ports/approval.repository";
@@ -140,5 +141,26 @@ export class DrizzleApprovalRepository implements ApprovalRepository {
       reason: input.reason,
       detail: input.detail ?? null,
     });
+  }
+
+  async listRecentAuditEvents(limit: number): Promise<readonly ApprovalAuditEventRow[]> {
+    return (
+      this.db
+        .select({
+          sub: adminApprovalEvents.sub,
+          event: adminApprovalEvents.event,
+          actor: adminApprovalEvents.actor,
+          detail: adminApprovalEvents.detail,
+          createdAt: adminApprovalEvents.createdAt,
+        })
+        .from(adminApprovalEvents)
+        // `id` は乱数（`newId`）なので挿入順を表さない。`created_at` は
+        // ミリ秒精度しか無く、短時間に複数件書くと同値になりうる——暗黙の
+        // `rowid`（単調増加）を第 2 キーにして、同じミリ秒内でも挿入順
+        // （新しいものが先）を保証する。
+        .orderBy(desc(adminApprovalEvents.createdAt), desc(sql`rowid`))
+        .limit(limit)
+        .all()
+    );
   }
 }

@@ -23,7 +23,10 @@ import type {
 } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { ContainerOverrides } from "../src/composition/container";
-import type { ApprovalRepository } from "../src/application/ports/approval.repository";
+import type {
+  ApprovalAuditEventRow,
+  ApprovalRepository,
+} from "../src/application/ports/approval.repository";
 import { ALL_DEFINED_PERMISSIONS, effectivePermissions } from "../src/domain/permissions";
 import { createFakeIdp } from "../test/fake-idp";
 import { ADMIN_ISLAND_JS } from "../src/presentation/http/ui/generated/admin-island.bundle";
@@ -699,6 +702,44 @@ const approvalRows = new Map<string, FakeApprovalRow>([
   ],
 ]);
 
+/**
+ * 履歴（#523）のプレビュー用データ。既知の event・既知のビット名・未知の
+ * event・未知のビット名・対象なし（`detail: null`）を一通り混ぜ、ラベルと
+ * 生コードの出し分けを確認できるようにする。
+ */
+const historyRows: readonly ApprovalAuditEventRow[] = [
+  {
+    sub: "usr_preview09",
+    event: "ops.approval.granted",
+    actor: "tanahiro2010",
+    detail: null,
+    createdAt: new Date(isoDaysAgo(20)),
+  },
+  {
+    sub: "usr_preview09",
+    event: "ops.permission.granted",
+    actor: "tanahiro2010",
+    detail: "NFC_READ",
+    createdAt: new Date(isoDaysAgo(19)),
+  },
+  {
+    sub: "usr_preview02",
+    event: "ops.permission.revoked",
+    actor: SUB,
+    // 将来ビットが増えて、まだラベルを足していない場合のデモ。
+    detail: "LEGACY_BIT",
+    createdAt: new Date(isoDaysAgo(5)),
+  },
+  {
+    sub: "usr_preview02",
+    // 将来 event が増えて、まだラベルを足していない場合のデモ。
+    event: "ops.admin.demoted",
+    actor: "ops-reviewer",
+    detail: null,
+    createdAt: new Date(isoDaysAgo(1)),
+  },
+];
+
 const approvals: ApprovalRepository = {
   isApproved: async (sub) => approvalRows.has(sub),
   isSuperApprover: async (sub) => approvalRows.get(sub)?.isSuperApprover ?? false,
@@ -734,6 +775,9 @@ const approvals: ApprovalRepository = {
     return true;
   },
   recordAuditEvent: async () => undefined,
+  // 実装（`DrizzleApprovalRepository`）と同じく新しい順で返す。
+  listRecentAuditEvents: async () =>
+    [...historyRows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
 };
 
 // ------------------------------------------------------------------- ログイン

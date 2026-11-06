@@ -31,6 +31,15 @@ function isValidPermissionBitName(value: string): value is PermissionBitName {
   return value in PERMISSION_BITS;
 }
 
+/**
+ * 履歴（#523）に出す件数。`/audit` の既定値（`DEFAULT_LIMIT`、
+ * `delegated-list-audit-logs.use-case.ts`）と揃える。**続きを読む手段は
+ * 作らない**——ここより古い記録が要るのは稀な調査のときだけで、そのときは
+ * D1 を直接見ればよい（#486 で消したのは日常の操作であって、調査用の
+ * 直接アクセスまでは禁じていない）。
+ */
+const HISTORY_LIMIT = 50;
+
 export function registerApprovalsRoutes(app: Hono<AppBindings>): void {
   app.get("/approvals", (c) => renderApprovalsPage(c, {}));
 
@@ -246,19 +255,22 @@ async function renderApprovalsPage(
   const container = c.get("container");
   const session = c.get("session");
   const approvals = await container.approvals.listAll();
+  const history = await container.approvals.listRecentAuditEvents(HISTORY_LIMIT);
   // **`sub` と `approvedBySub` を 1 回でまとめて解決する**（#482）。
   // `resolveUserRefs` 自身が null と重複を落とすので、ここで選り分けない。
-  const refs = await resolveUserRefs(
-    container.identityAdmin,
-    session.sub,
-    approvals.flatMap((approval) => [approval.sub, approval.approvedBySub]),
-  );
+  // **履歴の `actor` はここに混ぜない**（#523）——CLI の `--actor` に渡された
+  // 自由文字列で、u18 Identity の sub ではないため解決できない。
+  const refs = await resolveUserRefs(container.identityAdmin, session.sub, [
+    ...approvals.flatMap((approval) => [approval.sub, approval.approvedBySub]),
+    ...history.map((entry) => entry.sub),
+  ]);
 
   c.header("Cache-Control", "no-store");
   return c.html(
     <ApprovalsPage
       csrfToken={ensureCsrfToken(c)}
       approvals={approvals}
+      history={history}
       viewerSub={session.sub}
       refs={refs}
       {...(extra.error === undefined ? {} : { error: extra.error })}
