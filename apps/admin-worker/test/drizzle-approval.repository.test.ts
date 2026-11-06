@@ -122,3 +122,63 @@ describe("recordAuditEvent", () => {
     expect(rows[0]?.detail).toBeNull();
   });
 });
+
+describe("listRecentAuditEvents", () => {
+  it("新しい順に返す（#523）", async () => {
+    const repo = new DrizzleApprovalRepository(db());
+    await repo.recordAuditEvent({
+      event: "ops.approval.granted",
+      sub: "usr_1",
+      actor: "actor_1",
+      reason: "r",
+    });
+    await repo.recordAuditEvent({
+      event: "ops.approval.revoked",
+      sub: "usr_2",
+      actor: "actor_2",
+      reason: "r",
+    });
+
+    const rows = await repo.listRecentAuditEvents(10);
+    expect(rows.map((row) => row.sub)).toEqual(["usr_2", "usr_1"]);
+  });
+
+  it("件数を limit で絞る", async () => {
+    const repo = new DrizzleApprovalRepository(db());
+    for (let i = 0; i < 5; i++) {
+      await repo.recordAuditEvent({
+        event: "ops.approval.granted",
+        sub: `usr_${i}`,
+        actor: "actor",
+        reason: "r",
+      });
+    }
+
+    expect(await repo.listRecentAuditEvents(2)).toHaveLength(2);
+  });
+
+  it("reason は運ばない。actor はそのまま、detail は null も含めて返す", async () => {
+    const repo = new DrizzleApprovalRepository(db());
+    await repo.recordAuditEvent({
+      event: "ops.permission.granted",
+      sub: "usr_a",
+      actor: "github-handle",
+      reason: "機微な自由文（画面には出さない）",
+      detail: "NFC_WRITE",
+    });
+
+    const rows = await repo.listRecentAuditEvents(10);
+    expect(rows[0]).toMatchObject({
+      sub: "usr_a",
+      event: "ops.permission.granted",
+      actor: "github-handle",
+      detail: "NFC_WRITE",
+    });
+    expect(rows[0]).not.toHaveProperty("reason");
+  });
+
+  it("誰も居なければ 0 件", async () => {
+    const repo = new DrizzleApprovalRepository(db());
+    expect(await repo.listRecentAuditEvents(10)).toEqual([]);
+  });
+});

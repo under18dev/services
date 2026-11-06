@@ -157,6 +157,109 @@ describe("GET /approvals", () => {
     expect(html).toContain(ISLAND_PATH);
   });
 
+  /**
+   * 履歴の節（#523）。「誰が・いつ・誰に」を読めるようにする。
+   *
+   * **`sub`（対象）は名前に解決し、`actor`（実行者）は生のまま出す。**
+   * `actor` は CLI の `--actor` に渡された自由文字列で u18 Identity の
+   * sub ではないため、`UserRef` に通すと「見つかりません」になる——
+   * そのまま出すのが正しい（issue のコメント）。
+   */
+  it("履歴に、対象は名前で・実行者は生のまま・権限ビットは日本語で出す（#523）", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    await approvals.recordAuditEvent({
+      event: "ops.permission.granted",
+      sub: "usr_other",
+      actor: "github-handle-not-a-sub",
+      reason: "UI から付与",
+      detail: "NFC_READ",
+    });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const identityAdmin = {
+      ...minimalIdentityAdmin(),
+      getUsersByIds: async () =>
+        rpcOk([
+          {
+            id: "usr_other",
+            username: "other",
+            displayName: "別の承認者",
+            status: "active" as const,
+          },
+        ]),
+    };
+    const app = createApp({ approvals, identityAdmin });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("権限を付与");
+    expect(html).toContain("カードを見る");
+    // 対象（sub）は名前に解決される。
+    expect(html).toContain("別の承認者 (@other)");
+    // 実行者（actor）は生のまま——名前解決も「見つかりません」もしない。
+    expect(html).toContain("github-handle-not-a-sub");
+  });
+
+  it("対応表に無い event・権限ビットは生のコードのまま出す。「不明」とは書かない（#523）", async () => {
+    const approvals = fakeApprovals([SUB]);
+    // `recordAuditEvent` の `event` は書き込み側の型で既知の 4 つに閉じて
+    // いる（アプリが未知の event を書くことはない）ので、読み出し側の
+    // 「未知の値が実在する」場合は `events` へ直接押し込んでシミュレートする。
+    approvals.events.push({
+      event: "ops.admin.demoted",
+      sub: SUB,
+      actor: "actor",
+      reason: "r",
+      createdAt: new Date(0),
+    });
+    await approvals.recordAuditEvent({
+      event: "ops.permission.revoked",
+      sub: SUB,
+      actor: "actor",
+      reason: "r",
+      detail: "LEGACY_BIT",
+    });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("<code");
+    expect(html).toContain(">ops.admin.demoted</code>");
+    expect(html).toContain("LEGACY_BIT");
+    expect(html).not.toContain("不明");
+  });
+
+  it("履歴に reason は出さない（内部の既定値が漏れるのを防ぐ、#516 と同じ理由）", async () => {
+    const approvals = fakeApprovals([SUB]);
+    await approvals.recordAuditEvent({
+      event: "ops.approval.granted",
+      sub: SUB,
+      actor: "actor",
+      reason: "manual_grant",
+    });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain("manual_grant");
+  });
+
   it("権限の定数名ではなく日本語名と説明を出す（#487）", async () => {
     // `usr_other` は super approver ではないので、権限のチェックボックスが出る。
     const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);

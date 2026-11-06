@@ -10,6 +10,30 @@ export type ApprovalListRow = {
 };
 
 /**
+ * 承認・権限の変更履歴 1 件（#523）。
+ *
+ * **`reason` は運ばない。** CLI の既定値（`"manual_grant"` 等）や
+ * `"granted_via_ui"` がそのまま入っていることが多く、画面に出すと #516 と
+ * 同じ「内部の言葉が漏れる」形になる。運ぶのは `event` / `sub` / `actor` /
+ * `detail` だけ。
+ */
+export type ApprovalAuditEventRow = {
+  /** 対象の sub。本物の sub なので `UserRef` で名前に解決してよい。 */
+  readonly sub: string;
+  /** 例: `"ops.approval.granted"`。 */
+  readonly event: string;
+  /**
+   * 実行者。**CLI の `--actor` にそのまま渡された自由文字列**（sub では
+   * ない）。`UserRef` では解決できない——解決しようとして「見つかりません」
+   * を出すほうが悪い。そのまま出すこと。
+   */
+  readonly actor: string;
+  /** 権限ビットの変更のときだけ、ビットの記号名（例: `"NFC_WRITE"`）。 */
+  readonly detail: string | null;
+  readonly createdAt: Date;
+};
+
+/**
  * 「誰が admin.under18.dev を使ってよいか」を確かめる Port。
  *
  * u18 Identity には何も足さないので、ここで言う「承認されている」は
@@ -65,4 +89,7 @@ export interface ApprovalRepository {
     readonly reason: string;
     readonly detail?: string;
   }): Promise<void>;
+
+  /** 承認・権限の変更履歴（#523）。新しい順、最大 `limit` 件。 */
+  listRecentAuditEvents(limit: number): Promise<readonly ApprovalAuditEventRow[]>;
 }
