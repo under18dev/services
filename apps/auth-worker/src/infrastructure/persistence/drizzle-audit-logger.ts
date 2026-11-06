@@ -1,6 +1,6 @@
 import { auditLogs, type IdentityDatabase } from "@u18/db";
 import { newId } from "@u18/domain";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import type {
   AuditEvent,
   AuditLogger,
@@ -79,6 +79,7 @@ export class DrizzleAuditLogReader implements AuditLogReader {
 
   async listForAdmin(criteria: {
     readonly event?: string;
+    readonly events?: readonly string[];
     readonly userId?: string;
     readonly outcome?: "success" | "failure";
     readonly after?: { readonly createdAt: Date; readonly id: string };
@@ -87,6 +88,7 @@ export class DrizzleAuditLogReader implements AuditLogReader {
     const conditions = [];
 
     if (criteria.event !== undefined) conditions.push(eq(auditLogs.event, criteria.event));
+    if (criteria.events !== undefined) conditions.push(inArray(auditLogs.event, criteria.events));
     if (criteria.userId !== undefined) conditions.push(eq(auditLogs.userId, criteria.userId));
     if (criteria.outcome !== undefined) conditions.push(eq(auditLogs.outcome, criteria.outcome));
 

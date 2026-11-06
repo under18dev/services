@@ -488,6 +488,49 @@ export type NotPersistedAuditEventName = {
 }[AuditEventName];
 
 /**
+ * 運営が行った操作だけを指す事件名の集合（admin-worker のホーム「利用者・
+ * アプリ・権限の操作」用、#515）。
+ *
+ * ## `ops.` 接頭辞はそのまま使える
+ *
+ * コメント冒頭（`AUDIT_EVENTS` の「運用者が wrangler 越しに書くもの」の節）
+ * のとおり、`ops.` は「アプリが書くイベントと混ざらないよう」意図的に
+ * 分けてある接頭辞——`ops.admin.*` / `ops.user.*` の 5 件を機械的に拾える。
+ * `test/audit-events.test.ts` に、新しい `ops.*` が増えたらここへ足し忘れを
+ * 検出するテストを置いてある。
+ *
+ * ## `oauth.client.*` は接頭辞で切れない
+ *
+ * `oauth.client.authenticate` / `oauth.client.resolve` は RP が来るたびに
+ * 書かれる、本番で最も量が多い部類のイベントである。**接頭辞で拾うと、
+ * #515 で直そうとしている「ログインに流される」のとまったく同じことが
+ * `oauth.client.*` の中だけで起きる。** 4 件（`created` / `disabled` /
+ * `owner_changed` / `app_url_changed`）を明示的に列挙する——いずれも
+ * 「管理者まで通った呼び出しだけで書かれる」（各コメントを参照）。
+ *
+ * ## ここに入らないもの
+ *
+ * - `admin.denied` / `admin.session_not_passkey`：`sink: "log"` で
+ *   `audit_logs` に行が無い（`AuditLogger.record()` に渡すこと自体が型で
+ *   止まる）。「運営の操作」ではなく「運営の失敗」でもあり、二重の理由で
+ *   対象外。
+ * - `ops.approval.*` / `ops.permission.*`：admin-worker 自身の承認リスト
+ *   （`ADMIN_DB`）の監査で、auth-worker の `audit_logs` には現れない
+ *   —— この一覧が読んでいるテーブル自体に存在しない。
+ */
+export const OPERATOR_ACTION_EVENTS = [
+  "ops.admin.granted",
+  "ops.admin.revoked",
+  "ops.user.suspended",
+  "ops.user.reinstated",
+  "ops.user.sessions_revoked",
+  "oauth.client.created",
+  "oauth.client.disabled",
+  "oauth.client.owner_changed",
+  "oauth.client.app_url_changed",
+] as const satisfies readonly PersistedAuditEventName[];
+
+/**
  * 既定（`RetentionPolicy.audit_logs`）より長く残すイベントの境界時刻。
  *
  * **`standard` のものは入れない。** 既定の境界がそのまま使われるので、
@@ -579,9 +622,15 @@ export interface AuditLogReader {
    * `event` と `userId` は**両方指定すれば AND**。`outcome` も同様。
    * いずれも完全一致で、`audit_logs_event_idx` / `audit_logs_user_idx` /
    * `audit_logs_created_idx` のどれかに乗る。
+   *
+   * `events`（複数形）は `event`（単数形、完全一致 1 つ）とは別物——
+   * **`IN` での集合一致**（#515、`OPERATOR_ACTION_EVENTS` のような区分を
+   * 読み出し側で絞るため）。`event` と同時に指定することは今のところ
+   * 無いが、両方渡せば AND になる。
    */
   listForAdmin(criteria: {
     readonly event?: string;
+    readonly events?: readonly string[];
     readonly userId?: string;
     readonly outcome?: "success" | "failure";
     readonly after?: { readonly createdAt: Date; readonly id: string };

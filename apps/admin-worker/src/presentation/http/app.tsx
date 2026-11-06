@@ -557,7 +557,11 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       container.nfcCards.countCards(),
       container.identityAdmin.countOAuthClients({ actorUserId: session.sub }),
       container.identityAdmin.countUsers({ actorUserId: session.sub }),
-      container.identityAdmin.listAuditLogs({ actorUserId: session.sub, limit: 5 }),
+      container.identityAdmin.listAuditLogs({
+        actorUserId: session.sub,
+        category: "operator_action",
+        limit: 5,
+      }),
     ]);
 
     const recentAuditEntries =

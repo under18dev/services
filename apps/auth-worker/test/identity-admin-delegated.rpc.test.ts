@@ -791,6 +791,88 @@ describe("setOAuthClientAppUrl", () => {
   });
 });
 
+describe("listAuditLogs の category 絞り込み（#515）", () => {
+  async function seedAuditRow(fields: {
+    id: string;
+    event: string;
+    createdAt: Date;
+  }): Promise<void> {
+    await db()
+      .insert(auditLogs)
+      .values({
+        id: fields.id,
+        event: fields.event,
+        outcome: "success",
+        createdAt: fields.createdAt,
+      })
+      .run();
+  }
+
+  it("ログイン等の量が多いイベントに流されず、運営の操作だけを返す", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    // **ログインの方が新しい。** 絞り込みが無ければ、こちらが先頭に来て
+    // `ops.user.suspended` は limit 5 から押し出される——#515 そのものの
+    // 再現。
+    await seedAuditRow({
+      id: "aud_ops_1",
+      event: "ops.user.suspended",
+      createdAt: new Date("2026-11-01T00:00:00.000Z"),
+    });
+    for (let i = 0; i < 5; i++) {
+      await seedAuditRow({
+        id: `aud_login_${i}`,
+        event: "passkey.login",
+        createdAt: new Date(`2026-11-0${2 + i}T00:00:00.000Z`),
+      });
+    }
+
+    const unfiltered = await rpc.listAuditLogs({ actorUserId: admin.userId, limit: 5 });
+    expect(unfiltered.ok).toBe(true);
+    if (unfiltered.ok) {
+      // **絞り込み無しだと実際に流される**ことを先に固定する——このテストの
+      // 前提（#515 の再現）が崩れていないことの確認。
+      expect(unfiltered.value.entries.some((e) => e.event === "ops.user.suspended")).toBe(false);
+    }
+
+    const filtered = await rpc.listAuditLogs({
+      actorUserId: admin.userId,
+      category: "operator_action",
+      limit: 5,
+    });
+    expect(filtered.ok).toBe(true);
+    if (!filtered.ok) return;
+    expect(filtered.value.entries.map((e) => e.event)).toEqual(["ops.user.suspended"]);
+  });
+
+  it("oauth.client.authenticate / oauth.client.resolve は量が多くても絞り込みに混ざらない", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    await seedAuditRow({
+      id: "aud_owner_changed",
+      event: "oauth.client.owner_changed",
+      createdAt: new Date("2026-11-01T00:00:00.000Z"),
+    });
+    for (let i = 0; i < 5; i++) {
+      await seedAuditRow({
+        id: `aud_authn_${i}`,
+        event: "oauth.client.authenticate",
+        createdAt: new Date(`2026-11-0${2 + i}T00:00:00.000Z`),
+      });
+    }
+
+    const result = await rpc.listAuditLogs({
+      actorUserId: admin.userId,
+      category: "operator_action",
+      limit: 5,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entries.map((e) => e.event)).toEqual(["oauth.client.owner_changed"]);
+  });
+});
+
 describe("IdentityAdminRpcContract（dashboard 向け）は影響を受けない", () => {
   it("sessionToken 必須のままである（delegated 契約が型で混ざっていない）", async () => {
     const { IdentityAdminRPC } = await import("../src/presentation/rpc/identity-admin.entrypoint");

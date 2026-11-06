@@ -1,9 +1,20 @@
-import type { AuditLogReader, PersistedAuditLogEntry } from "../ports/audit-log.port";
+import {
+  OPERATOR_ACTION_EVENTS,
+  type AuditLogReader,
+  type PersistedAuditLogEntry,
+} from "../ports/audit-log.port";
 import { decodeCursor, nextCursorOf } from "../../domain/services/keyset-cursor";
 import { err, ok, type UseCaseResult } from "./types";
 
 export type DelegatedListAuditLogsCommand = {
   readonly event?: string;
+  /**
+   * 区分での絞り込み（#515）。**admin-worker は具体的なイベント名を
+   * 知らない。** `OPERATOR_ACTION_EVENTS` の実体（どの名前が「運営の
+   * 操作」か）は auth-worker 側に閉じる——admin-worker が 9 個のイベント
+   * 名を書き写すと、増えたときに 2 箇所が食い違う。
+   */
+  readonly category?: "operator_action";
   readonly userId?: string;
   readonly outcome?: "success" | "failure";
   readonly cursor?: string;
@@ -42,6 +53,7 @@ export class DelegatedListAuditLogsUseCase {
 
     const rows = await this.deps.auditLogs.listForAdmin({
       ...(command.event === undefined ? {} : { event: command.event }),
+      ...(command.category === undefined ? {} : { events: OPERATOR_ACTION_EVENTS }),
       ...(command.userId === undefined ? {} : { userId: command.userId }),
       ...(command.outcome === undefined ? {} : { outcome: command.outcome }),
       ...(after === undefined || after === null ? {} : { after }),

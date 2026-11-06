@@ -356,6 +356,7 @@ export class IdentityAdminDelegatedRPC
     const container = createContainer(this.env, {}, this.context());
     const result = await container.useCases.delegatedListAuditLogs.execute({
       ...(parsed.data.event === undefined ? {} : { event: parsed.data.event }),
+      ...(parsed.data.category === undefined ? {} : { category: parsed.data.category }),
       ...(parsed.data.userId === undefined ? {} : { userId: parsed.data.userId }),
       ...(parsed.data.outcome === undefined ? {} : { outcome: parsed.data.outcome }),
       ...(parsed.data.cursor === undefined ? {} : { cursor: parsed.data.cursor }),
