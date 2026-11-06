@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
+import { OPERATOR_ACTION_EVENTS, RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
   AdminCardDetailDelegated,
   AdminCardStatusDelegated,
@@ -293,9 +293,16 @@ function cardDetailFor(card: AdminCardViewDelegated): AdminCardDetailDelegated {
 
 // --------------------------------------------------------------------- 監査ログ
 //
-// 20 行。`DETAIL_USER_ID` には ops.user.suspended を 1 行、
+// 21 行。`DETAIL_USER_ID` には ops.user.suspended を 1 行、
 // `SELF_CLOSED_USER_ID` には account.closed を 1 行——どちらも
 // `suspension-origin.ts` が引く専用クエリで実際に引っかかる形にする。
+//
+// **`ops.approval.*` / `ops.permission.*` はここに無い。** あれは
+// admin-worker 自身の `admin_approval_events`（`u18-admin` D1）の事実で、
+// auth-worker の `audit_logs`（この fixture が模している側）には本番でも
+// 絶対に現れない——混ぜると、このプレビューにしか出ない行ができる
+// （#515）。`admin_approval_events` を読む画面ができたら（#523）、
+// そちらの fixture に積む。
 const AUDIT_LOG: AuditLogEntryAdmin[] = [];
 let auditSeq = 0;
 function pushAudit(
@@ -346,7 +353,6 @@ pushAudit("oauth.client.app_url_changed", "usr_preview01", 6, "success", {
 });
 pushAudit("ops.user.sessions_revoked", "usr_preview09", 6, "success", { revokedSessions: 1 });
 pushAudit("ops.user.reinstated", "usr_preview10", 30);
-pushAudit("ops.approval.granted", "usr_preview01", 100);
 pushAudit("passkey.login", "usr_preview02", 0);
 pushAudit("session.issue", "usr_preview04", 0);
 pushAudit("otp.verify", "usr_preview11", 0, "failure");
@@ -469,6 +475,13 @@ function filterAuditLog(input: ListAuditLogsDelegatedInput): readonly AuditLogEn
   if (input.userId !== undefined) rows = rows.filter((e) => e.userId === input.userId);
   if (input.event !== undefined) rows = rows.filter((e) => e.event === input.event);
   if (input.outcome !== undefined) rows = rows.filter((e) => e.outcome === input.outcome);
+  if (input.category === "operator_action") {
+    // **イベント名を書き写さない。** `OPERATOR_ACTION_EVENTS` は
+    // `@u18/contracts` から import する——auth-worker の本物の絞り込みと
+    // 同じ定数（#515、偽物がこの分岐を欠いたまま入っていた反省）。
+    const operatorActionEvents: readonly string[] = OPERATOR_ACTION_EVENTS;
+    rows = rows.filter((e) => operatorActionEvents.includes(e.event));
+  }
   return rows.slice(0, input.limit ?? 50);
 }
 

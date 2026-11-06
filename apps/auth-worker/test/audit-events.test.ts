@@ -1,10 +1,10 @@
 import { env } from "cloudflare:test";
+import { OPERATOR_ACTION_EVENTS } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_EVENTS,
   AUDIT_EVENT_RETENTION,
   auditEventDeadlines,
-  OPERATOR_ACTION_EVENTS,
   type AuditEventName,
 } from "../src/application/ports/audit-log.port";
 import { AuditRetention } from "../src/domain/services/retention-policy";
@@ -176,8 +176,13 @@ describe('sink: "log"（audit_logs に書かないイベント、#381）', () =>
 });
 
 /**
- * `OPERATOR_ACTION_EVENTS`（admin-worker のホーム「利用者・アプリ・権限の
- * 操作」用、#515）のドリフト対策。
+ * `OPERATOR_ACTION_EVENTS`（`@u18/contracts`、admin-worker のホーム
+ * 「利用者・アプリの操作」用、#515）のドリフト対策。
+ *
+ * **正本はここ（`AUDIT_EVENT_RETENTION`）である。** `OPERATOR_ACTION_EVENTS`
+ * は admin-worker の `preview-html.generator.mts` も同じ絞り込みを fake
+ * できるよう contracts 側に置いてあるが、「何が本当に `audit_logs` に
+ * 書かれるか」の判定権は渡していない——このテストがそれを見る。
  *
  * `ops.*` は接頭辞で導出できるので、**導出した集合と比較することで
  * 足し忘れを自動で検出する。** 新しい `ops.*` イベントを登録簿に足して

@@ -330,6 +330,24 @@ export type AuditClassification =
  * `PersistedAuditEventName` / `NotPersistedAuditEventName`（下）が
  * この値から `sink` ごとにイベント名を抜き出すには、型注釈で
  * `AuditClassification` へ広げてしまわずリテラルのまま保つ必要がある。
+ *
+ * ## 「運営の操作」区分（`@u18/contracts` の `OPERATOR_ACTION_EVENTS`）の正本でもある
+ *
+ * admin-worker のホーム「利用者・アプリの操作」（#515）が使う
+ * `category: "operator_action"` は、どの `event` 名を指すかを
+ * `OPERATOR_ACTION_EVENTS` という定数に持つ。**その定数自体は
+ * `@u18/contracts` に置いてある**——admin-worker の
+ * `preview-html.generator.mts` も同じ絞り込みを fake する必要があり、
+ * Worker 境界を越えて auth-worker の `src` を import させたくないのと、
+ * auth-worker の application 層（Port・UseCase）はこれまで
+ * `@u18/contracts` を import したことが無い（`presentation` 層だけが
+ * import する一貫した分離がある）ため。
+ *
+ * **だが「何が本当に `audit_logs` に書かれるか」の判定権はこちら
+ * （`sink: "d1"` のもの）にある。** `test/audit-events.test.ts` が
+ * `OPERATOR_ACTION_EVENTS` とここを突き合わせ、`ops.*` の persisted
+ * イベントが増えて contracts 側に足し忘れたら落ちる。契約に定数を
+ * 移しても、正本を移したわけではない。
  */
 export const AUDIT_EVENT_RETENTION = {
   // --- 支配権が変わる操作（2 年） ---
@@ -486,49 +504,6 @@ export type PersistedAuditEventName = {
 export type NotPersistedAuditEventName = {
   [K in AuditEventName]: (typeof AUDIT_EVENT_RETENTION)[K]["sink"] extends "log" ? K : never;
 }[AuditEventName];
-
-/**
- * 運営が行った操作だけを指す事件名の集合（admin-worker のホーム「利用者・
- * アプリ・権限の操作」用、#515）。
- *
- * ## `ops.` 接頭辞はそのまま使える
- *
- * コメント冒頭（`AUDIT_EVENTS` の「運用者が wrangler 越しに書くもの」の節）
- * のとおり、`ops.` は「アプリが書くイベントと混ざらないよう」意図的に
- * 分けてある接頭辞——`ops.admin.*` / `ops.user.*` の 5 件を機械的に拾える。
- * `test/audit-events.test.ts` に、新しい `ops.*` が増えたらここへ足し忘れを
- * 検出するテストを置いてある。
- *
- * ## `oauth.client.*` は接頭辞で切れない
- *
- * `oauth.client.authenticate` / `oauth.client.resolve` は RP が来るたびに
- * 書かれる、本番で最も量が多い部類のイベントである。**接頭辞で拾うと、
- * #515 で直そうとしている「ログインに流される」のとまったく同じことが
- * `oauth.client.*` の中だけで起きる。** 4 件（`created` / `disabled` /
- * `owner_changed` / `app_url_changed`）を明示的に列挙する——いずれも
- * 「管理者まで通った呼び出しだけで書かれる」（各コメントを参照）。
- *
- * ## ここに入らないもの
- *
- * - `admin.denied` / `admin.session_not_passkey`：`sink: "log"` で
- *   `audit_logs` に行が無い（`AuditLogger.record()` に渡すこと自体が型で
- *   止まる）。「運営の操作」ではなく「運営の失敗」でもあり、二重の理由で
- *   対象外。
- * - `ops.approval.*` / `ops.permission.*`：admin-worker 自身の承認リスト
- *   （`ADMIN_DB`）の監査で、auth-worker の `audit_logs` には現れない
- *   —— この一覧が読んでいるテーブル自体に存在しない。
- */
-export const OPERATOR_ACTION_EVENTS = [
-  "ops.admin.granted",
-  "ops.admin.revoked",
-  "ops.user.suspended",
-  "ops.user.reinstated",
-  "ops.user.sessions_revoked",
-  "oauth.client.created",
-  "oauth.client.disabled",
-  "oauth.client.owner_changed",
-  "oauth.client.app_url_changed",
-] as const satisfies readonly PersistedAuditEventName[];
 
 /**
  * 既定（`RetentionPolicy.audit_logs`）より長く残すイベントの境界時刻。
