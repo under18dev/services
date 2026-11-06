@@ -126,7 +126,9 @@ const PERMISSION_LABELS: Readonly<
   },
   NFC_WRITE: {
     label: "カードを操作する",
-    description: "発行・無効化・復帰・所有権の剥奪・遷移先の書き換えができます。",
+    description:
+      "発行・無効化・復帰・所有権の剥奪・遷移先の書き換えができます。" +
+      "利用者の詳細画面から、その人のカードをまとめて止めることもできます。",
   },
   USER_READ: {
     label: "利用者を見る",

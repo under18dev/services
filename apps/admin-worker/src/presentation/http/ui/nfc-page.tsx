@@ -310,7 +310,7 @@ export const NfcPage: FC<NfcPageProps> = ({
     brandHref="/"
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="NFC カード"
-    lead="カード ID を押すと詳細が開き、無効化・復帰・遷移先の変更はそこから行います。この画面は検索・並べ替え・選択しての一括操作が主な役目です。"
+    lead="カード ID を押すと詳細が開き、無効化・復帰・手放す・遷移先の変更はそこから行います。この画面は検索・並べ替え・選択しての一括操作が主な役目です。"
     maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >

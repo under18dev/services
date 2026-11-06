@@ -881,7 +881,8 @@ describe("POST /users/:userId/disable-cards（#486）", () => {
     const response = await getDetail(identity.rpc, fakeNfcCards().rpc);
 
     const html = await response.text();
-    expect(html).not.toContain("この人のカードをまとめて止める");
+    expect(html).not.toContain("この人のカードをまとめて止められます");
+    expect(html).not.toContain("対象を確認する");
   });
 
   it("停止中の利用者には、カードを止めるボタンを出す", async () => {
@@ -891,7 +892,10 @@ describe("POST /users/:userId/disable-cards（#486）", () => {
     const response = await getDetail(identity.rpc, fakeNfcCards().rpc);
 
     const html = await response.text();
-    expect(html).toContain("この人のカードをまとめて止める");
+    expect(html).toContain("この人のカードをまとめて止められます");
+    // **#528**: 押した瞬間に実行されるように読めないこと。/nfc のバッチ
+    // 一括無効化と同じ「対象を確認する」で、2 段階確認だと分かる。
+    expect(html).toContain("対象を確認する");
   });
 
   it("CSRF トークンが無ければ 403 で、disableCard を呼ばない", async () => {
