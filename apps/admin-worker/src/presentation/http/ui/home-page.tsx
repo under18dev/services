@@ -46,16 +46,27 @@ import { UserRef } from "./user-ref";
  *
  * ## 塊ごとに失敗を受け止める
  *
- * 3 つの塊（NFC・クライアント・監査ログ）はそれぞれ独立に取得し、
+ * 4 つの塊（NFC・クライアント・利用者・監査ログ）はそれぞれ独立に取得し、
  * 失敗した塊だけ「いま取れません」に差し替える——`serviceUnavailable`
  * は画面全体を潰すので、ここでは使わない。管理画面のホームが
  * 行き止まりになるのが一番まずい（運用者の立っている指示）。
+ *
+ * ## 利用者数は `deleted` も出す（#512）
+ *
+ * NFC カードの塊が「未紐づけ / 有効 / 無効化済み」の 3 状態を並べて
+ * 出しているのに揃えた。1 つの状態だけ隠すと、カードの行と並んだときに
+ * 「合計が合わない」と運用者を混乱させる——`countUsers` の JSDoc を参照。
  */
 export type HomePageProps = {
   readonly sub: string;
   /** `null` は取得に失敗したことを表す。0 件（本当に無い）とは区別する。 */
   readonly nfcCounts: Readonly<Record<AdminCardStatusDelegated, number>> | null;
   readonly clientCount: number | null;
+  readonly userCounts: Readonly<{
+    readonly active: number;
+    readonly suspended: number;
+    readonly deleted: number;
+  }> | null;
   readonly recentAuditEntries: readonly AuditLogEntryAdmin[] | null;
   /**
    * `recentAuditEntries` の `userId` の名前解決（#482）。
@@ -110,6 +121,33 @@ const OAuthClientCountTile: FC<{ readonly count: number | null }> = ({ count }) 
   </a>
 );
 
+const UserCountTile: FC<{
+  readonly counts: Readonly<{
+    readonly active: number;
+    readonly suspended: number;
+    readonly deleted: number;
+  }> | null;
+}> = ({ counts }) => (
+  <a href="/users" class={TILE_CLASS}>
+    <Card>
+      <CardHeader>
+        <CardTitle>利用者</CardTitle>
+        {counts === null ? (
+          <CardDescription>いま取れません。</CardDescription>
+        ) : (
+          <CardDescription>
+            有効 <span class={BIG_NUMBER_CLASS}>{counts.active}</span>
+            {" ・ "}
+            停止中 <span class={BIG_NUMBER_CLASS}>{counts.suspended}</span>
+            {" ・ "}
+            削除済み <span class={BIG_NUMBER_CLASS}>{counts.deleted}</span>
+          </CardDescription>
+        )}
+      </CardHeader>
+    </Card>
+  </a>
+);
+
 const RecentAuditEntry: FC<{
   readonly entry: AuditLogEntryAdmin;
   readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
@@ -131,6 +169,7 @@ export const HomePage: FC<HomePageProps> = ({
   sub,
   nfcCounts,
   clientCount,
+  userCounts,
   recentAuditEntries,
   userRefs,
 }) => (
@@ -143,9 +182,10 @@ export const HomePage: FC<HomePageProps> = ({
     heading="u18 Admin"
     lead="いまの状態です。押すとその一覧へ飛びます。"
   >
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <NfcCountTile counts={nfcCounts} />
       <OAuthClientCountTile count={clientCount} />
+      <UserCountTile counts={userCounts} />
     </div>
 
     <Card>

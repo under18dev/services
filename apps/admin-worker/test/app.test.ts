@@ -432,6 +432,7 @@ describe("承認リスト", () => {
       identityAdmin: {
         ...minimalIdentityAdmin(),
         countOAuthClients: async () => rpcOk(2),
+        countUsers: async () => rpcOk({ active: 10, suspended: 4, deleted: 2 }),
         listAuditLogs: async () =>
           rpcOk({
             entries: [
@@ -460,13 +461,18 @@ describe("承認リスト", () => {
 
     expect(response.status).toBe(200);
     const html = await response.text();
-    // **一覧を全部引いて数えていない。** `countCards` / `countOAuthClients`
-    // が返した数字がそのまま出る。単独の数字（"3" 等）は CSS のハッシュや
-    // viewport のメタタグにも出るので、ラベルの直後に来ることまで見る。
+    // **一覧を全部引いて数えていない。** `countCards` / `countOAuthClients` /
+    // `countUsers` が返した数字がそのまま出る。単独の数字（"3" 等）は CSS の
+    // ハッシュや viewport のメタタグにも出るので、ラベルの直後に来ることまで見る。
     expect(html).toMatch(/未紐づけ[^<]*<span[^>]*>3<\/span>/);
     expect(html).toMatch(/有効[^<]*<span[^>]*>5<\/span>/);
     expect(html).toMatch(/無効化済み[^<]*<span[^>]*>1<\/span>/);
     expect(html).toMatch(/OAuth クライアント[\s\S]*?<span[^>]*>2<\/span>/);
+    // **`/users` への導線を持ち、状態ごとに分けて出す**（#512）。
+    expect(html).toContain('href="/users"');
+    expect(html).toMatch(/有効[^<]*<span[^>]*>10<\/span>/);
+    expect(html).toMatch(/停止中[^<]*<span[^>]*>4<\/span>/);
+    expect(html).toMatch(/削除済み[^<]*<span[^>]*>2<\/span>/);
     expect(html).toContain("ops.user.suspended");
     expect(html).toContain("usr_taro");
     // **承認待ちの人数は出さない**（admin-worker に「承認待ち」の行が
@@ -623,6 +629,38 @@ describe("承認リスト", () => {
     expect(html).toContain("usr_ok");
     expect(html).toMatch(/OAuth クライアント[\s\S]*?<span[^>]*>7<\/span>/);
     expect(html).toContain("いま取れません");
+  });
+
+  it("利用者数の集計だけが落ちても、他の塊とサインイン情報は出す（#512）", async () => {
+    const approvals = fakeApprovals(["usr_ok"]);
+    const sessionCookie = await loginAs("usr_ok", approvals);
+
+    const app = createApp({
+      approvals,
+      nfcCards: {
+        ...minimalNfcCards(),
+        countCards: async () => rpcOk({ issued: 1, active: 1, disabled: 1 }),
+      },
+      identityAdmin: {
+        ...minimalIdentityAdmin(),
+        countOAuthClients: async () => rpcOk(7),
+        countUsers: () => Promise.reject(new Error("binding unavailable")),
+      },
+    });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("usr_ok");
+    expect(html).toMatch(/OAuth クライアント[\s\S]*?<span[^>]*>7<\/span>/);
+    expect(html).toContain("いま取れません");
+    // **カードとクライアントは出ている。** 利用者の塊だけが
+    // 「いま取れません」に落ちたことを、他の数字が出ていることで示す。
+    expect(html).toMatch(/未紐づけ[^<]*<span[^>]*>1<\/span>/);
   });
 
   it("未ログインで /pending を開くとログインへ送る", async () => {

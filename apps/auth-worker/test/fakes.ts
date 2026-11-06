@@ -172,6 +172,13 @@ export class InMemoryUserRepository implements UserRepository {
 
     return matches.map((props) => User.fromPersistence(props));
   }
+
+  /** #512。本物と同じく `group by` 相当の集計で、0 件の状態も 0 で返す。 */
+  async countByStatus(): Promise<{ active: number; suspended: number; deleted: number }> {
+    const result = { active: 0, suspended: 0, deleted: 0 };
+    for (const props of this.store.values()) result[props.status]++;
+    return result;
+  }
 }
 
 export class InMemorySessionRepository implements SessionRepository {

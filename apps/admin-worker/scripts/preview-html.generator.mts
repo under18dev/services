@@ -629,6 +629,12 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
     return found === undefined ? rpcErr(RpcErrorCode.NotFound, "client not found") : rpcOk(found);
   },
   countOAuthClients: async () => rpcOk(CLIENTS.length),
+  countUsers: async () =>
+    rpcOk({
+      active: USERS.filter((u) => u.status === "active").length,
+      suspended: USERS.filter((u) => u.status === "suspended").length,
+      deleted: USERS.filter((u) => u.status === "deleted").length,
+    }),
   listAuditLogs: async (input: ListAuditLogsDelegatedInput) =>
     rpcOk({ entries: filterAuditLog(input), nextCursor: null }),
 };

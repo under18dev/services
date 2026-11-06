@@ -113,4 +113,14 @@ export interface UserRepository {
     readonly after?: { readonly createdAt: Date; readonly id: string };
     readonly limit: number;
   }): Promise<readonly User[]>;
+  /**
+   * 状態ごとの件数（admin-worker のホーム用、#512）。**`listForAdmin` を
+   * 全ページ舐めて数えないこと** —— `OAuthClientRepository.count()`
+   * （#449）と同じ判断で、`count(*) ... group by status` 1 本で集計する。
+   */
+  countByStatus(): Promise<{
+    readonly active: number;
+    readonly suspended: number;
+    readonly deleted: number;
+  }>;
 }

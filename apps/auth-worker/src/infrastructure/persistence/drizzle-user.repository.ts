@@ -361,4 +361,24 @@ export class DrizzleUserRepository implements UserRepository {
 
     return rows.map(toDomain);
   }
+
+  /**
+   * 状態ごとの件数（#512）。**`count(*) ... group by status` 1 本。**
+   * `count()`（`DrizzleOAuthClientRepository`）と同じく、`listForAdmin`
+   * のような全件読み込みは要らない。
+   *
+   * 行が無い状態（例えば `deleted` が 1 件も無い）は `group by` の結果に
+   * 現れないので、0 埋めしてから足し込む。
+   */
+  async countByStatus(): Promise<{ active: number; suspended: number; deleted: number }> {
+    const rows = await this.db
+      .select({ status: users.status, count: sql<number>`count(*)` })
+      .from(users)
+      .groupBy(users.status)
+      .all();
+
+    const result = { active: 0, suspended: 0, deleted: 0 };
+    for (const row of rows) result[row.status] = row.count;
+    return result;
+  }
 }

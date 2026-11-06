@@ -83,17 +83,19 @@ describe("actorUserId は検証しない。実在だけ確かめる", () => {
     expect(!result.ok && result.error.code).toBe("invalid_input");
   });
 
-  it("読み取り（listUsers / listOAuthClients / countOAuthClients / listAuditLogs）は実在確認すら求めない", async () => {
+  it("読み取り（listUsers / listOAuthClients / countOAuthClients / countUsers / listAuditLogs）は実在確認すら求めない", async () => {
     // 読み取りは `actorUserId` を監査へ書かないので、確かめる理由も無い
     // （書く操作とは非対称。`DelegatedListUsersUseCase` の JSDoc 参照）。
     const users1 = await rpc.listUsers({ actorUserId: "usr_does_not_exist" });
     const clients1 = await rpc.listOAuthClients({ actorUserId: "usr_does_not_exist" });
     const count1 = await rpc.countOAuthClients({ actorUserId: "usr_does_not_exist" });
+    const userCount1 = await rpc.countUsers({ actorUserId: "usr_does_not_exist" });
     const logs1 = await rpc.listAuditLogs({ actorUserId: "usr_does_not_exist" });
 
     expect(users1.ok).toBe(true);
     expect(clients1.ok).toBe(true);
     expect(count1.ok).toBe(true);
+    expect(userCount1.ok).toBe(true);
     expect(logs1.ok).toBe(true);
   });
 });
@@ -144,6 +146,39 @@ describe("countOAuthClients", () => {
 
     const after = await rpc.countOAuthClients({ actorUserId: admin.userId });
     expect(after.ok && after.value).toBe(beforeCount + 1);
+  });
+});
+
+describe("countUsers（#512）", () => {
+  it("状態ごとに分けて数える。既存の件数には依存しない", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const before = await rpc.countUsers({ actorUserId: admin.userId });
+    expect(before.ok, "countUsers が失敗した").toBe(true);
+    if (!before.ok) return;
+
+    await seedPlainUser({ id: "usr_active_1", username: "active1", email: "a1@example.com" });
+    await seedPlainUser({
+      id: "usr_suspended_1",
+      username: "suspended1",
+      email: "s1@example.com",
+      status: "suspended",
+    });
+    await seedPlainUser({
+      id: "usr_deleted_1",
+      username: "deleted1",
+      email: "d1@example.com",
+      status: "deleted",
+    });
+
+    const after = await rpc.countUsers({ actorUserId: admin.userId });
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+
+    // admin 自身（seedLoggedInUser）も active の1人として数えられている
+    // ので、「増えた分」だけを見る——既存件数には依存しない。
+    expect(after.value.active).toBe(before.value.active + 1);
+    expect(after.value.suspended).toBe(before.value.suspended + 1);
+    expect(after.value.deleted).toBe(before.value.deleted + 1);
   });
 });
 
