@@ -286,7 +286,7 @@ const CardUsageSection: FC<{ readonly usage: CardUsageRankingAnalytics | null }>
       <CardTitle>カード別ランキングと死蔵の検出</CardTitle>
       <CardDescription>
         タップ上位と、引き取り済みでタップが 1 回も無いカード。所有者は出していません——
-        カードの操作は、カード ID を押して詳細（#472）から行ってください。
+        カードの操作は、カード ID を押して詳細から行ってください。
       </CardDescription>
     </CardHeader>
     <CardContent class="flex flex-col gap-6">
