@@ -49,13 +49,19 @@ import { KIWA_STYLESHEET } from "../src/presentation/http/ui/generated/kiwa-styl
  * 出力先は `process.env.PREVIEW_OUTPUT_DIR`——esbuild でバンドルすると
  * `import.meta.url` は一時ファイルの場所を指してしまうので、呼び出し元
  * から環境変数で絶対パスを渡してもらう。
+ *
+ * ## `buildPreviewPages()` を分けてある理由（#524）
+ *
+ * ページの HTML を組み立てる部分と、ファイルへ書き出す部分（`main()`）を
+ * 分離した——`test/preview-invariants.test.mts` が**この関数を直接呼んで、
+ * 実際に書き出されるのと同じ HTML**に対して不変条件（行が 1 行以上ある、
+ * タップ履歴のあるカードには実際にグラフが出る、等）を検査する。
+ *
+ * **架空データを検査のために作り直さない。** 検査は `buildPreviewPages()`
+ * が返す本物の出力だけを見る——別の縮小版フィクスチャを検査専用に
+ * 用意すると、検査は通るのに運用者が見る画面は直っていない、という
+ * 今日 3 回起きた形をまた作ってしまう。
  */
-
-const OUTPUT_DIR_ENV = process.env.PREVIEW_OUTPUT_DIR;
-if (OUTPUT_DIR_ENV === undefined || OUTPUT_DIR_ENV === "") {
-  throw new Error("PREVIEW_OUTPUT_DIR が設定されていません（preview-html.mjs から渡す）");
-}
-const OUTPUT_DIR: string = OUTPUT_DIR_ENV;
 
 const env = {
   AUTH_ISSUER: "http://localhost:8787",
@@ -806,13 +812,17 @@ function withLocalIsland(html: string): string {
   return html.replace(/src="\/ui\/admin-island\.[0-9a-f]+\.js"/, 'src="./admin-island.js"');
 }
 
-async function main(): Promise<void> {
-  await mkdir(OUTPUT_DIR, { recursive: true });
+export type PreviewPage = {
+  readonly name: string;
+  readonly title: string;
+  readonly html: string;
+};
 
+export async function buildPreviewPages(): Promise<readonly PreviewPage[]> {
   const sessionCookie = await loginAs(SUB, overrides);
   const pendingCookie = await loginAs(PENDING_SUB, overrides);
 
-  const pages: { readonly name: string; readonly title: string; readonly html: string }[] = [];
+  const pages: PreviewPage[] = [];
 
   async function addPage(
     name: string,
@@ -1000,10 +1010,29 @@ JS が無効でも、チェックして下のボタンを押せば一括操作�
     html: bulkSelectSampleHtml,
   });
 
-  await writeFile(`${OUTPUT_DIR}/kiwa.css`, KIWA_STYLESHEET, "utf8");
-  await writeFile(`${OUTPUT_DIR}/admin-island.js`, ADMIN_ISLAND_JS, "utf8");
+  return pages;
+}
+
+/**
+ * `pnpm preview:html` の本体。`buildPreviewPages()` をファイルへ書き出す
+ * だけに留める——出力先（`OUTPUT_DIR`）を要るのはここだけなので、
+ * `buildPreviewPages()` 単体を呼ぶテストは `PREVIEW_OUTPUT_DIR` を
+ * 用意しなくてよい。
+ */
+export async function main(): Promise<void> {
+  const outputDirEnv = process.env.PREVIEW_OUTPUT_DIR;
+  if (outputDirEnv === undefined || outputDirEnv === "") {
+    throw new Error("PREVIEW_OUTPUT_DIR が設定されていません（preview-html.mjs から渡す）");
+  }
+  const outputDir: string = outputDirEnv;
+
+  await mkdir(outputDir, { recursive: true });
+  const pages = await buildPreviewPages();
+
+  await writeFile(`${outputDir}/kiwa.css`, KIWA_STYLESHEET, "utf8");
+  await writeFile(`${outputDir}/admin-island.js`, ADMIN_ISLAND_JS, "utf8");
   for (const page of pages) {
-    await writeFile(`${OUTPUT_DIR}/${page.name}.html`, page.html, "utf8");
+    await writeFile(`${outputDir}/${page.name}.html`, page.html, "utf8");
   }
 
   const indexHtml = `<!doctype html>
@@ -1022,9 +1051,7 @@ ${pages.map((p) => `  <li><a href="./${p.name}.html">${p.title}</a></li>`).join(
 </body>
 </html>
 `;
-  await writeFile(`${OUTPUT_DIR}/index.html`, indexHtml, "utf8");
+  await writeFile(`${outputDir}/index.html`, indexHtml, "utf8");
 
-  console.log(`書き出し完了: ${OUTPUT_DIR}/index.html を開いてください（${pages.length} 画面）。`);
+  console.log(`書き出し完了: ${outputDir}/index.html を開いてください（${pages.length} 画面）。`);
 }
-
-await main();

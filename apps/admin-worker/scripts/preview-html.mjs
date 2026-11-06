@@ -60,7 +60,8 @@ await writeFile(tempFile, output.text, "utf8");
 process.env.PREVIEW_OUTPUT_DIR = outputDir;
 
 try {
-  await import(tempFile);
+  const generator = await import(tempFile);
+  await generator.main();
 } finally {
   await rm(tempDir, { recursive: true, force: true });
 }
