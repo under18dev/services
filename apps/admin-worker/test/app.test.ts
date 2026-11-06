@@ -186,6 +186,13 @@ describe("/callback — 全体の往復", () => {
     expect(html).toContain('href="/login"');
     // **内部の理由（state_mismatch 等）は画面に出さない。** `fail()` の方針。
     expect(html).not.toContain("state_mismatch");
+    // **見出しと本文で同じ文を 2 回言わない（#517）。** 以前は
+    // `title`/`message` が共に「ログインをやり直してください」で、
+    // 句点の有無しか違わなかった——本文は次の一手だけを言う。
+    expect(html).toContain("ログインをやり直してください");
+    expect(html).toContain("下のボタンから、もう一度お試しください。");
+    // 以前の本文（見出しと同じ文に句点だけ足したもの）が残っていないこと。
+    expect(html).not.toContain("ログインをやり直してください。");
   });
 
   it("login-state Cookie が無ければ 400（CSRF/リプレイ対策）", async () => {
@@ -341,13 +348,17 @@ describe("承認リスト", () => {
     expect(response.headers.get("Location")).toBe("/pending");
   });
 
-  it("/pending は自分の sub と、承認する人へ渡す grant コマンドを表示する", async () => {
+  it("super approver が 1 人も居なければ、grant コマンドに --super を付ける", async () => {
     // **最初の 1 人は、ここでしか自分の sub を知れない。** 承認リストが
     // 空の状態では `/` へ辿り着けず、CLI（admin-approval.mjs）に渡す
     // 値を他で見る手段が無い（運用者表を直接引くか、別の管理者になって
     // 入るかしか無く、どちらも筋が悪い）。以前はここを「実装の語は
     // 出さない」として sub を隠していたが、隠すべきは逆の側だった。
-    const approvals = fakeApprovals([]);
+    //
+    // **super approver が 0 人のときだけ `--super` を付ける（#517）。**
+    // `/approvals` 自体が `APPROVAL_GRANT` を持つ人からしか開けないので、
+    // super approver が 1 人も居ない間は、CLI 以外に先へ進む経路が無い。
+    const approvals = fakeApprovals([]); // 誰も承認されていない＝super approver も 0 人
     const sessionCookie = await loginAs("usr_waiting", approvals);
 
     const app = createApp({ approvals });
@@ -376,6 +387,29 @@ describe("承認リスト", () => {
     // `ISLAND_PATH` も読む」という検査がここを見ない（#488 で発覚）。
     // ここで直接確かめる。
     expect(html).toContain(ISLAND_PATH);
+  });
+
+  it("super approver が既に居れば、grant コマンドから --super を外す（#517）", async () => {
+    // **本番のバグだった側。** 以前はここが常に `--super` 付きで、
+    // 2 人目以降の承認待ちの画面にもコピーボタン付きで出ていた
+    // ——貼って実行すると、新しい承認が無条件に全操作できる
+    // super approver になってしまう（`/approvals` の「新規の承認は
+    // 権限 0（最小権限）から始まる」と食い違う）。
+    const approvals = fakeApprovals(["usr_existing_admin"], ["usr_existing_admin"]);
+    const sessionCookie = await loginAs("usr_waiting_2nd", approvals);
+
+    const app = createApp({ approvals });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/pending`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("admin-approval.mjs grant");
+    expect(html).toContain("--sub usr_waiting_2nd");
+    expect(html).not.toContain("--super");
   });
 
   it("承認済みが /pending を開くと / へ戻される（ループにしない）", async () => {

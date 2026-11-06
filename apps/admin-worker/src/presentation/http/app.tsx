@@ -369,10 +369,15 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
       console.warn(JSON.stringify({ event: "admin.callback_rejected", reason }));
       c.header("Set-Cookie", clearLoginStateCookie(env.ENVIRONMENT), { append: true });
       c.header("Cache-Control", "no-store");
+      // **見出しと本文で同じ文を 2 回言わない（#517）。** `title` が
+      // 見出しとして出て、`message` は Card の中にもう一度大きく出る
+      // ——本文側は「次の一手」だけを言う。理由を出さない方針（直後の
+      // コメントの通り）はそのまま、#487 で `/approvals` の見出しと
+      // ラベルの重複を消したのと同じ形。
       return c.html(
         <MessagePage
           title="ログインをやり直してください"
-          message="ログインをやり直してください。"
+          message="下のボタンから、もう一度お試しください。"
           actionHref="/login"
           actionLabel="ログイン画面へ"
         />,
@@ -501,10 +506,33 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
     // 管理画面に入るかの 2 択しか残らず、どちらも筋が悪い。承認済みの
     // ホーム（下の `/` ハンドラ）が `sub` を出しているのに、未承認の
     // ここだけ出していなかった（出すべきなのは逆の側だった）。
+    //
+    // **`--super` は既定で付けない（#517）。** 以前はここの画面が、
+    // 待っている人が何人目かに関わらず常に `--super` 付きのコマンドを
+    // コピーボタン（#491）ごと出していた——2 人目以降の承認待ちの画面にも
+    // 同じコマンドが出て、貼って実行すると super approver（全操作を
+    // 無条件に行える `isSuperApprover`、`checkSuperApproverChange` が
+    // バイパスの対象にする側）を渡してしまう。`/approvals` の「新規の
+    // 承認は権限 0 から始まる」と食い違う、本番のバグだった。
+    //
+    // **「いま super approver が 1 人も居ないか」で判定する。**
+    // `countSuperApprovers()` は締め出し防止（#190）のために元々ある
+    // 読み取りで、ここでもそのまま使える——意味もちょうど合う。
+    // super approver が 1 人も居なければ、`/approvals` 画面そのものが
+    // 誰からも開けない（`APPROVAL_GRANT` を持つ人がまだ居ない）ので、
+    // いま承認する相手を super approver にする以外に、この先 CLI を
+    // 使わずに運用を続ける経路が無い。逆に 1 人でも居れば、その人が
+    // `/approvals` から後続の権限を配れるので、既定は付けない。
+    const needsSuperApprover = (await container.approvals.countSuperApprovers()) === 0;
+    const superFlag = needsSuperApprover ? " --super" : "";
+    const grantCommand =
+      `node apps/admin-worker/scripts/admin-approval.mjs grant ` +
+      `--sub ${session.sub} --actor <実行者>${superFlag} --remote`;
     return c.html(
       <PendingPage
         sub={session.sub}
-        grantCommand={`node apps/admin-worker/scripts/admin-approval.mjs grant --sub ${session.sub} --actor <実行者> --super --remote`}
+        grantCommand={grantCommand}
+        needsSuperApprover={needsSuperApprover}
       />,
     );
   });
