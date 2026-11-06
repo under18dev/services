@@ -479,9 +479,12 @@ describe("承認リスト", () => {
     // 存在しないため。`home-page.tsx` の冒頭を参照）。
     expect(html).not.toContain("承認待ちの人数");
     // **見出しは出る範囲に合わせてある**（#515）。カードの操作はここに
-    // 出ないので、`/nfc` への導線を添えている。
-    expect(html).toContain("利用者・アプリ・権限の操作");
+    // 出ないので、`/nfc` への導線を添えている。「権限」は見出しに入れて
+    // いない——`/approvals` の履歴を見る画面がどこにも無く、「別の場所で
+    // 見られます」と書ける行き先が無いため（3b のレビュー指摘）。
+    expect(html).toContain("利用者・アプリの操作");
     expect(html).not.toContain("直近の管理操作");
+    expect(html).not.toContain("利用者・アプリ・権限の操作");
     expect(html).toMatch(/カードの操作は[\s\S]*?href="\/nfc"[\s\S]*?側で見られます/);
   });
 

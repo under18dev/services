@@ -21,7 +21,7 @@ import { UserRef } from "./user-ref";
  * しました」とリンク列挙を並べただけだった——**枠には入ったが、
  * ダッシュボードではなかった。** ここでは「いま何が起きているか」が
  * 開いた瞬間に分かるよう、**いまの状態を表す数**（押すとその一覧へ飛ぶ）と
- * **利用者・アプリ・権限の操作**を最初に出す。
+ * **利用者・アプリの操作**を最初に出す。
  *
  * ## 承認待ちの人数は出さない（運用者の優先度 ① だが、出せない）
  *
@@ -75,8 +75,22 @@ import { UserRef } from "./user-ref";
  * 無効化・復帰も含まれると誤読される——しかし NFC カードの操作は
  * `nfc_card_events`（別 D1）に入り、ここにはそもそも現れない
  * （ランブックの「別の D1 にあるため、片方しか見ない事故」と同じ構図）。
- * 「利用者・アプリ・権限の操作」という、実際に出る 3 系統を指す見出しに
- * 変え、カードの操作を探す人のために `/nfc` への導線を添えた。
+ * 「利用者・アプリの操作」という、実際に出る系統を指す見出しに変え、
+ * カードの操作を探す人のために `/nfc` への導線を添えた。
+ *
+ * **「権限」は見出しに入れていない。** `ops.admin.*`（`users.is_admin`
+ * の付与・剥奪）は利用者に対する操作として出るが、**運用者が「権限」と
+ * 聞いて最初に思い浮かべるのはおそらく `/approvals` での承認・権限の
+ * 変更** であり、あれは `ops.approval.*` / `ops.permission.*` として
+ * `admin_approval_events`（admin-worker 自身の D1）に入る——**この一覧
+ * （auth-worker の `audit_logs`）にはそもそも現れない。**
+ *
+ * カードと違い、`/approvals` の履歴を見る画面はどこにも無い
+ * （`approvals-page.tsx` は現在の状態だけを出し、
+ * `admin_approval_events` を読まない）——「別の場所で見られます」と
+ * 書ける行き先が無いので、見出しから「権限」を外す側（いちばん正直で
+ * いちばん小さい変更）を選んだ。`ops.admin.*` は出続けるので、情報が
+ * 減るわけではない。
  */
 export type HomePageProps = {
   readonly sub: string;
@@ -211,7 +225,7 @@ export const HomePage: FC<HomePageProps> = ({
 
     <Card>
       <CardHeader>
-        <CardTitle>利用者・アプリ・権限の操作</CardTitle>
+        <CardTitle>利用者・アプリの操作</CardTitle>
         <CardDescription>
           カードの操作は{" "}
           <a href="/nfc" class="underline underline-offset-4">
