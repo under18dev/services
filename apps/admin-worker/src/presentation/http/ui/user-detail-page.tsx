@@ -704,8 +704,7 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
       <CardHeader>
         <CardTitle>操作</CardTitle>
         <CardDescription>
-          停止・停止の解除・ログイン中の端末を全部切るは、ここでまとめて行います
-          （#489、一覧からは行内の操作を外しました）。
+          停止・停止の解除・ログイン中の端末を全部切るは、この画面で行います。
         </CardDescription>
       </CardHeader>
       <CardContent>
