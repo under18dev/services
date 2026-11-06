@@ -289,6 +289,42 @@ describe("GET /approvals", () => {
       "super approver は全操作を無条件に行えます。個別の権限ビットは意味を持ちません。",
     );
   });
+
+  /**
+   * **`NFC_WRITE` が `/users/:userId` まで届くことを、説明文に明記する**
+   * （#528）。`route-permissions.ts` の `"POST /users/:userId/disable-cards":
+   * "NFC_WRITE"` は正しい割り当てだが、権限を配る人がこの画面の説明文
+   * だけを読んで想定できるようにする。
+   *
+   * **チェックボックス横の説明と、履歴に出る権限名が食い違わないことも
+   * 一緒に確かめる**（3b の指摘）——どちらも `PERMISSION_LABELS` の同じ
+   * `label` を読んでいるので、同じ値であるはず。
+   */
+  it("NFC_WRITE の説明が /users/:userId まで届くことに触れ、履歴の表記と食い違わない（#528）", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    await approvals.recordAuditEvent({
+      event: "ops.permission.granted",
+      sub: "usr_other",
+      actor: SUB,
+      reason: "UI から付与",
+      detail: "NFC_WRITE",
+    });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("利用者の詳細画面から、その人のカードをまとめて止めることもできます。");
+    // チェックボックス横の label（1 箇所）と履歴の表記（1 箇所）で、
+    // 「カードを操作する」が同じ文字列として 2 回出る——別の言い方に
+    // なっていない。
+    expect(html.split("カードを操作する").length - 1).toBe(2);
+  });
 });
 
 describe("POST /approvals（新規承認）", () => {

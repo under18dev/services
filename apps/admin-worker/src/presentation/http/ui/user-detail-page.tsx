@@ -490,12 +490,17 @@ const DisableCardsSection: FC<{
   }
 
   return (
-    <form method="post" action={actionPath} class="border-t border-border pt-4">
-      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-      <button type="submit" class={getButtonClasses("outline")}>
-        この人のカードをまとめて止める
-      </button>
-    </form>
+    <div class="flex flex-col gap-2 border-t border-border pt-4">
+      <p class={ITEM_META_CLASS}>
+        この人のカードをまとめて止められます。押しても止まりません——まず対象の枚数を確認します。
+      </p>
+      <form method="post" action={actionPath}>
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <button type="submit" class={getButtonClasses("outline")}>
+          対象を確認する
+        </button>
+      </form>
+    </div>
   );
 };
 

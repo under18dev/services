@@ -189,6 +189,29 @@ async function loginAsApproved(): Promise<string> {
 }
 
 describe("GET /nfc", () => {
+  /**
+   * **lead が列挙する詳細専用の操作から「手放す」が抜けていた**（#528）。
+   * 下の「選択して一括操作する」節の注記は「遷移先の変更・手放すは 1 枚
+   * ずつ、カードの詳細から行ってください」と書いており、冒頭の lead だけ
+   * 読んだ人が「手放す」の場所に気づけなかった。
+   */
+  it("lead に、詳細専用の操作として「手放す」も挙げる（#528）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeNfcCards({
+      listAllCards: async () => rpcOk({ cards: [], truncated: false }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), nfcCards: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/nfc`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("無効化・復帰・手放す・遷移先の変更はそこから行います");
+  });
+
   it("一覧・コピペ用 URL・CSRF トークンを描く", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeNfcCards({
