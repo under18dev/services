@@ -1,5 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildPreviewPages, type PreviewPage } from "./preview-html.generator";
+// **`.mjs` 指定が要る。** 実体は `.mts` だが、`allowImportingTsExtensions`
+// が false なので `.mts` のまま import できない。拡張子無しだと
+// `moduleResolution: "Bundler"` が `.mts` の相手を見つけられなかった
+// （実測）——`.js`/`.mjs` 宛ての import を実ソースへ読み替える仕組みは
+// `.ts` → `.js` 宛てと同じ形で `.mts` → `.mjs` 宛てにも効く。
+import { buildPreviewPages, type PreviewPage } from "./preview-html.generator.mjs";
 
 /**
  * プレビュー出力の不変条件（#524）。
