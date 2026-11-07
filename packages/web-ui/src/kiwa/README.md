@@ -82,6 +82,33 @@ diff に出る。** CSP は `style-src 'self'` で、インライン `style=` �
 **上流から取り直すときは、この 1 語を当て直すこと。** 当て直さなくても
 落ちるのは、その class を使うページがある場合だけである。
 
+### `table.tsx` —— selected 状態の背景色ユーティリティを外す（#534）
+
+**1 つの Tailwind arbitrary variant を外してある。** 上流はテーブル
+ライブラリ側（TanStack Table 相当）が行の選択状態に応じて
+`<tr data-state="selected">` を付け外す前提だが、**その属性をセットする
+コードがこのリポジトリのどこにも無い**（各 Worker のクライアント島を
+含めて確認済み）。一括操作（#481）はチェックボックスと件数表示
+（`attachSelection`、`apps/admin-worker/src/presentation/http/ui/client/admin-island.ts`）で
+完結していて、行のハイライトは元から持っていない。
+
+**外した class 文字列は、この README にもコメントにも地の文では書かない
+こと。** Tailwind の走査はコメントも区別せず読むため、書いた時点で
+「生きた候補」として扱われ、CSS が復活する——最初の実装でこれに
+引っかかった（`build-client.mjs` を回して実測するまで気づかなかった）。
+
+`badge.tsx`（#338）とは原因が逆である。あちらは**class が HTML に
+出るのに CSS が無い**事故、こちらは**CSS は正しく生成されるのに、
+発火させる属性を誰もセットしない**——見た目にも検査にも出ない
+（「選択できていない」のではなく、「ハイライトという機能自体が
+元から無い」）。だから当て直す token も無く、外す以外の直し方が無い。
+
+行のハイライトを要るようにしたくなったら、`attachSelection` が
+チェックボックスの `change` で `tr` に `data-state="selected"` を
+付け外すところから作ることになる——この class を足し戻すだけでは
+足りない（`attachSelection` の絶対条件にハイライトは入っていない。
+`apps/admin-worker/src/presentation/http/ui/client/admin-island.ts` 参照）。
+
 ### それ以外
 
 `*.tsx` は import の書き方以外に手を入れていない。見た目を変えたくなったら、
