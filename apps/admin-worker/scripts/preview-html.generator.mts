@@ -21,6 +21,7 @@ import type {
   TapTimeseriesDelegatedInput,
   UserAdminSummary,
 } from "@u18/contracts";
+import { buildPreviewIndexHtml, type PreviewPage } from "./lib/preview-index.mjs";
 import { createApp } from "../src/presentation/http/app";
 import type { ContainerOverrides } from "../src/composition/container";
 import type {
@@ -856,11 +857,11 @@ function withLocalIsland(html: string): string {
   return html.replace(/src="\/ui\/admin-island\.[0-9a-f]+\.js"/, 'src="./admin-island.js"');
 }
 
-export type PreviewPage = {
-  readonly name: string;
-  readonly title: string;
-  readonly html: string;
-};
+// `PreviewPage` の正本は `./lib/preview-index.mjs`（index.html のライト/
+// ダーク切り替えを組み立てる側）に置いた。ここでの再 export は、既存の
+// `import type { PreviewPage } from "./preview-html.generator.mjs"` を
+// 壊さないため。
+export type { PreviewPage };
 
 export async function buildPreviewPages(): Promise<readonly PreviewPage[]> {
   const sessionCookie = await loginAs(SUB, overrides);
@@ -1079,23 +1080,11 @@ export async function main(): Promise<void> {
     await writeFile(`${outputDir}/${page.name}.html`, page.html, "utf8");
   }
 
-  const indexHtml = `<!doctype html>
-<html lang="ja">
-<head>
-<meta charset="utf-8" />
-<title>admin-worker HTML プレビュー</title>
-<link rel="stylesheet" href="./kiwa.css" />
-</head>
-<body style="padding: 2rem; max-width: 40rem; margin: 0 auto;">
-<h1>admin-worker HTML プレビュー</h1>
-<p><strong>すべて架空のデータです。本番には一切繋がっていません。</strong></p>
-<ul>
-${pages.map((p) => `  <li><a href="./${p.name}.html">${p.title}</a></li>`).join("\n")}
-</ul>
-</body>
-</html>
-`;
-  await writeFile(`${outputDir}/index.html`, indexHtml, "utf8");
+  // `index.html` だけがライト/ダーク切り替えのボタンを持つ（services-3b の
+  // 依頼、PR1 の受け入れ条件「17 画面をライト/ダーク両方で目視」のため）。
+  // 各ページ（1 つ上の `writeFile` で書き出した `page.html` そのもの）は
+  // 1 バイトも変えていない——`buildPreviewIndexHtml` の JSDoc を参照。
+  await writeFile(`${outputDir}/index.html`, buildPreviewIndexHtml(pages), "utf8");
 
   console.log(`書き出し完了: ${outputDir}/index.html を開いてください（${pages.length} 画面）。`);
 }
