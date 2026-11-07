@@ -12,7 +12,7 @@
     "./google-sans-font": "./src/google-sans-font.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scripts.json",
     "test": "vitest run",
     "build:font": "node scripts/subset-google-sans.mjs"
   },
@@ -24,6 +24,8 @@
   },
   "devDependencies": {
     "@types/fontkit": "2.0.9",
+    "@types/node": "26.6.5",
+    "@types/subset-font": "2.3.0",
     "esbuild": "0.28.2",
     "fontkit": "2.0.4",
     "prettier": "3.9.10",

@@ -63,7 +63,14 @@ const OUTPUT_MODULE_PATH = join(root, "src/generated/google-sans-font.ts");
  * （`files/google-sans-latin-wght-normal.woff2` の `unicode-range`）と
  * 同じ範囲を直接書き写している——u18 では英数字・ID・日時・件数にしか
  * 出てこないので、この範囲で足りる。
+ *
+ * **`@type` で固定長 2 のタプルとして宣言する。** 書かないと各要素が
+ * ただの `number[]` に推論され、`[lo, hi]` の分割代入が
+ * `number | undefined` になる（#535）。ここはサブセット範囲そのものを
+ * 決めている箇所なので、誤って 3 要素以上の行を足したときに検査で
+ * 気づけることが要る——`number[]` のままだと、何要素でも黙って通る。
  */
+/** @type {ReadonlyArray<readonly [number, number]>} */
 const CODEPOINT_RANGES = [
   [0x0000, 0x00ff],
   [0x0131, 0x0131],
@@ -94,6 +101,7 @@ function subsetText() {
   return text;
 }
 
+/** @param {Buffer} buffer */
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
