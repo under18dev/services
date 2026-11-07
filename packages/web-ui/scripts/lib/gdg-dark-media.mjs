@@ -123,3 +123,39 @@ ${indentedBody}
 
   return { ok: true, varNames, content };
 }
+
+/**
+ * `.dark` の変数名の集合を、ふつうの TS モジュールとして書き出す
+ * （GDG デザイン移行 PR1）。
+ *
+ * ## なぜ要るのか
+ *
+ * 各 Worker の `kiwa-stylesheet.test.ts` は、**配信される CSS**（実際に
+ * fetch した応答本文）が持つ `@media (prefers-color-scheme: dark)` の
+ * 変数名の集合と、`tokens.css` の `.dark` が持つ集合を突き合わせたい。
+ * だが Worker のテストは `@cloudflare/vitest-pool-workers`（workerd）の
+ * 中で動き、**素の `node:fs` でディスク上の任意のファイルを読めない**
+ * ——`readFileSync` で `tokens.css` を直接読もうとすると
+ * `ENOENT: no such file or directory` になる（実測済み）。
+ *
+ * そこで `tokens.css` の中身ではなく、**ビルド時に確定した変数名の配列**
+ * を ES モジュールとして書き出し、Worker 側は `@u18/web-ui` から
+ * ふつうに import する——モジュールの import 解決は bundler が行うので、
+ * workerd のファイルシステム制限を受けない。
+ *
+ * @param {string[]} varNames
+ * @returns {string}
+ */
+export function buildVarNamesModule(varNames) {
+  return `/*
+ * 自動生成——手で編集しない（GDG デザイン移行 PR1）。
+ * \`node packages/web-ui/scripts/generate-gdg-dark-media.mjs\` で作り直す。
+ *
+ * vendored \`../gdg/tokens.css\` の \`.dark { ... }\` が宣言する変数名の
+ * 集合。各 Worker の \`kiwa-stylesheet.test.ts\` が、配信 CSS の
+ * \`@media (prefers-color-scheme: dark)\` と突き合わせるために読む
+ * （workerd の中では \`tokens.css\` を直接 \`readFileSync\` できないため）。
+ */
+export const GDG_DARK_CLASS_VAR_NAMES = ${JSON.stringify(varNames, null, 2)};
+`;
+}

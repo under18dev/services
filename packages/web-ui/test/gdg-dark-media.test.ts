@@ -1,10 +1,18 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDarkMedia } from "../scripts/lib/gdg-dark-media.mjs";
+import { buildDarkMedia, buildVarNamesModule } from "../scripts/lib/gdg-dark-media.mjs";
 
 const TOKENS_CSS = join(import.meta.dirname, "..", "src", "gdg", "tokens.css");
 const GENERATED = join(import.meta.dirname, "..", "src", "gdg", "generated", "dark-media.css");
+const GENERATED_VAR_NAMES = join(
+  import.meta.dirname,
+  "..",
+  "src",
+  "gdg",
+  "generated",
+  "dark-media-var-names.ts",
+);
 
 /**
  * `.dark { ... }` が宣言する変数名の集合と、生成済みの
@@ -42,5 +50,23 @@ describe("gdg-dark-media", () => {
 
     const committed = readFileSync(GENERATED, "utf8");
     expect(committed).toBe(built.content);
+  });
+
+  /**
+   * `dark-media-var-names.ts` も生成物。Worker のテストは workerd の中で
+   * 動き、`tokens.css` を直接読めないため、この配列を `@u18/web-ui` 経由で
+   * 読んでいる（`kiwa-stylesheet.test.ts` 各ファイルを参照）。こちらが
+   * 古いままだと、Worker 側の比較が黙って正しくない期待値と突き合わせる
+   * ことになる——生成物どうしの整合も、CSS と同じ強さで見る。
+   */
+  it("generated/dark-media-var-names.ts が最新である", () => {
+    const tokensCssText = readFileSync(TOKENS_CSS, "utf8");
+    const built = buildDarkMedia(tokensCssText);
+    if (!built.ok) {
+      throw new Error(`tokens.css の .dark ブロックが読めません: ${built.errors.join(" / ")}`);
+    }
+
+    const committed = readFileSync(GENERATED_VAR_NAMES, "utf8");
+    expect(committed).toBe(buildVarNamesModule(built.varNames));
   });
 });

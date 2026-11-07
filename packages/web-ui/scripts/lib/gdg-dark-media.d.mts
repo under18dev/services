@@ -12,3 +12,5 @@
 export function buildDarkMedia(
   tokensCssText: string,
 ): { ok: true; varNames: string[]; content: string } | { ok: false; errors: string[] };
+
+export function buildVarNamesModule(varNames: string[]): string;
