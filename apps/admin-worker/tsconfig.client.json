@@ -18,6 +18,10 @@
   },
   "include": [
     "src/presentation/http/ui/client/**/*.ts",
-    "src/presentation/http/ui/client/**/*.d.ts"
+    "src/presentation/http/ui/client/**/*.d.ts",
+    // プレビューの index.html 切り替えテストだけ、同じ理由（DOM の型が要る）
+    // でここに同居させている。`scripts/lib/preview-index.mjs` 自体は
+    // Node 専用の tsconfig.scripts.json 側（DOM を持ち込まない）で見る。
+    "scripts/lib/preview-index.test.ts"
   ]
 }
