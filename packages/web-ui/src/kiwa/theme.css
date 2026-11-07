@@ -327,6 +327,44 @@
     border-color: var(--border);
   }
 
+  /*
+   * GDG の `corner-shape: squircle` を全要素へ広げる overlay（GDG デザイン
+   * 移行 PR1）。
+   *
+   * **上流（`../gdg/components.css` の `@layer gdg-base`）は
+   * `[class^="gdg-"]` とその子孫にだけスコープを切っている。** 意図は
+   * 読める——「クラスを足さずに角丸だけ変えた」ときに squircle が
+   * 黙って付いてくる事故を避けるため、対応するクラスを足した要素だけに
+   * 限っている。
+   *
+   * **この PR はその `.gdg-*` クラスを 1 つも使っていない**（`.tsx` を
+   * 変えないのが PR1 の制約——`--radius-*` 等のトークンだけ借りている）。
+   * 上流のスコープのままだと、角丸の値は GDG のものに変わるのに
+   * squircle という署名だけが画面のどこにも出ない。運用者はこの PR の
+   * プレビューを見て GDG 化の採否を判断するため、値だけでなく署名も
+   * 込みで見せる必要がある——そこでここだけ u18 側の overlay として
+   * 全要素へ広げている。**`.gdg-*` クラスへ実際に移る PR3 が来たら、
+   * 上流のスコープで足りるようになるのでこのルールは不要になる。**
+   *
+   * 丸・ピル型であるべき要素（アバター・スイッチ・ラジオ等）は上流が
+   * `corner-shape: round` で個別に戻しているが（`components.css` の
+   * `.gdg-badge, .gdg-avatar, .gdg-radio, ...` のブロック）、
+   * **このリポジトリには現時点でそれに当たる要素が無い**
+   * （`rounded-full` の使用を全文検索して 0 件——調べ済み。ネイティブの
+   * `<input type="radio">` は素の未装飾で、`corner-shape` は
+   * ブラウザの内部描画には効かない）。将来そうした要素を足すときは、
+   * 上流と同じ形でここに `corner-shape: round` の戻しを足すこと。
+   *
+   * 上流と同じく `:where()` で詳細度 0 にしてある——呼び出し側が
+   * 個別に `corner-shape` を変えたくなったとき、詳細度で負けないため。
+   */
+  :where(*) {
+    /* corner-shape は CSS Borders 4 の仕様で、Chrome 139+ のみ対応。
+       非対応ブラウザ（Safari / Firefox）では border-radius の標準形状へ
+       フォールバックする——このプロパティを足す前と同じ見え方になる。 */
+    corner-shape: var(--gdg-corner-shape);
+  }
+
   body {
     background-color: var(--background);
     color: var(--foreground);
