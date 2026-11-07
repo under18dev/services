@@ -25,7 +25,21 @@
  *
  *  - この Worker の画面（`./`）
  *  - `@u18/web-ui` が持つ Kiwa の primitives（`packages/web-ui/src/kiwa/`）
+ *
+ * ## GDG のレイヤー順（GDG デザイン移行 PR1）
+ *
+ * `theme.css` が import する `../gdg/tokens.css` / `../gdg/generated/
+ * dark-media.css` は `@layer gdg-tokens` を使い、`../gdg/components.css`
+ * （下の import）は `@layer gdg-base, gdg-components` を使う。レイヤーの
+ * 優先順位はどこで最初に名前が出たかで決まるため、**Tailwind 本体より前に
+ * このファイルの先頭で明示しておく**（GDG の README が指定する
+ * `theme, base, gdg-tokens, gdg-base, gdg-components, utilities` の順）。
+ * ここを 4 つの Worker のどれか 1 つで忘れると、その Worker だけレイヤー順が
+ * 既定（`theme, base, components, utilities`）に戻り、GDG のトークンが
+ * 思わぬ優先度で解決される。
  */
+
+@layer theme, base, gdg-tokens, gdg-base, gdg-components, utilities;
 
 @import "tailwindcss" source(none);
 
@@ -33,3 +47,4 @@
 @source "../../../../../../packages/web-ui/src/kiwa/";
 
 @import "../../../../../../packages/web-ui/src/kiwa/theme.css";
+@import "../../../../../../packages/web-ui/src/gdg/components.css";

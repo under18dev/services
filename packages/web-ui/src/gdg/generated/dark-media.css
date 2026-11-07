@@ -1,0 +1,60 @@
+/*
+ * 自動生成——手で編集しない（GDG デザイン移行 PR1）。
+ * `node packages/web-ui/scripts/generate-gdg-dark-media.mjs` で作り直す。
+ *
+ * vendored `../tokens.css` の `.dark { ... }` ブロックを、
+ * `prefers-color-scheme: dark` の @media へ複製したもの。
+ *
+ * `:root:not(.light)` にしているのは、将来 `.light` クラスで明示的に
+ * ライトへ固定したときに、この @media 側の上書きを無効にするため。
+ * `.dark` クラスによる明示的なダーク固定は、同じ `gdg-tokens` レイヤー内の
+ * 通常の詳細度・出現順により、この @media の有無に関わらず効き続ける。
+ */
+@layer gdg-tokens {
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) {
+      --gdg-background: var(--gdg-black-2);
+      --gdg-surface: var(--gdg-black);
+      --gdg-text: var(--gdg-white-2);
+      --gdg-muted: #b0b0b0;
+      --gdg-border: rgb(240 240 240 / 12%);
+      --gdg-input-border: #777777;
+      --gdg-shadow-sm:
+      0 4px 8px -5px rgb(0 0 0 / 58%), 0 2px 4px rgb(0 0 0 / 45%),
+      inset 2px 2px 4px rgb(255 255 255 / 6%), inset -2px -3px 5px rgb(0 0 0 / 26%);
+      --gdg-shadow-md:
+      0 12px 20px -12px rgb(0 0 0 / 70%), 0 4px 8px -4px rgb(0 0 0 / 48%),
+      inset 2px 3px 6px rgb(255 255 255 / 6%), inset -3px -4px 7px rgb(0 0 0 / 28%);
+      --gdg-shadow-lg:
+      0 18px 34px -18px rgb(0 0 0 / 78%), 0 7px 14px -6px rgb(0 0 0 / 54%),
+      inset 3px 4px 8px rgb(255 255 255 / 7%), inset -4px -5px 9px rgb(0 0 0 / 30%);
+      --gdg-shadow-hover:
+      0 16px 26px -14px rgb(0 0 0 / 78%), 0 5px 10px -5px rgb(0 0 0 / 52%),
+      inset 2px 3px 6px rgb(255 255 255 / 7%), inset -3px -4px 7px rgb(0 0 0 / 28%);
+      --gdg-shadow-pressed: inset 3px 3px 7px rgb(0 0 0 / 38%), inset -2px -2px 5px
+      rgb(255 255 255 / 5%), 0 1px 2px rgb(0 0 0 / 38%);
+      --gdg-shadow-inset: inset 3px 3px 7px rgb(0 0 0 / 34%), inset -2px -2px 5px
+      rgb(255 255 255 / 5%);
+      --gdg-shadow-right: 8px 0 22px -10px rgb(0 0 0 / 72%);
+      --gdg-shadow-left: -8px 0 22px -10px rgb(0 0 0 / 72%);
+      --gdg-shadow-bottom: 0 8px 22px -12px rgb(0 0 0 / 72%);
+      --gdg-edge-highlight: rgb(255 255 255 / 7%);
+      --gdg-link: #8ab4f8;
+      --gdg-focus: #8ab4f8;
+      --gdg-selected: #253655;
+      --gdg-secondary: #5d899d;
+      --gdg-on-secondary: var(--gdg-white);
+      --gdg-secondary-hover: #6b9aae;
+      --gdg-neutral: #303030;
+      --gdg-hover: #292929;
+      --gdg-danger: #ffb4ab;
+      --gdg-on-danger: #601410;
+      --gdg-danger-surface: #3c2020;
+      --gdg-success: #81c995;
+      --gdg-success-surface: #183323;
+      --gdg-warning: #fdd663;
+      --gdg-warning-surface: #382e17;
+      color-scheme: dark;
+    }
+  }
+}
