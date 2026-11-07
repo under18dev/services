@@ -1,9 +1,30 @@
 /**
  * Kiwa UI の `registry/ui/table.tsx` を取り込んだもの（#375、MIT）。
  *
- * **上流のまま置いている。** 変えたのは import の書き方だけで、
- * `@/lib/utils` -> `./utils` へ直している。クラスの中身には手を
- * 入れていない。
+ * **上流のまま置いている。** 変えたのは import の書き方と、下の
+ * selected 状態の背景色ユーティリティ（#534 で外した）だけ。
+ *
+ * ## selected 状態の背景色ユーティリティを外した（#534）
+ *
+ * 上流はテーブルライブラリ側（TanStack Table 相当）が行の選択状態に
+ * 応じて `<tr data-state="selected">` を付け外す前提だが、**その属性を
+ * セットするコードがこのリポジトリのどこにも無い**（各 Worker の
+ * クライアント島を含めて確認済み）。一括操作（#481）はチェックボックスと
+ * 件数表示（`attachSelection`、admin-worker の `client/admin-island.ts`）
+ * で完結していて、行のハイライトは元から持っていない。
+ *
+ * `badge.tsx`（#338）とは原因が逆である。あちらは **class が HTML に
+ * 出るのに CSS が無い** 事故、こちらは **CSS は正しく生成されるのに、
+ * 発火させる属性を誰もセットしない**——どちらも「効いていない class」
+ * だが、原因が逆なので同じ直し方（token を当て直す）はできない。
+ *
+ * **外した class 文字列をこのコメントにそのまま書かないこと。**
+ * Tailwind の走査はソースの地の文もコメントも区別せず読むので、
+ * 書いた瞬間に「生きた候補」として扱われ、消したはずの CSS が
+ * 復活する——実際に一度これで見落とし、`build-client.mjs` を回して
+ * 出力を実測するまで気づかなかった。
+ *
+ * 由来と判断の詳細は `./README.md` を参照。
  *
  * ## #341 が外していたものである
  *
@@ -26,8 +47,6 @@
  * ## JS を要求しない
  *
  * `tabs` / `dialog` と違い、ただの `<table>` である。JS が落ちても読める。
- *
- * 由来と更新の仕方は `./README.md` を参照。
  */
 
 import type { FC, JSX } from "hono/jsx";
@@ -113,7 +132,7 @@ export const TableRow: FC<TableRowProps> = ({
     data-slot="table-row"
     class={cn(
       "border-b border-border transition-colors",
-      "hover:bg-muted/50 data-[state=selected]:bg-background",
+      "hover:bg-muted/50",
       className,
     )}
     {...props}
