@@ -10,10 +10,15 @@ import { defineConfig } from "vitest/config";
  *
  * `happy-dom` を選んだのは `jsdom` より軽く、ここで要る範囲
  * （`querySelector` / `classList` / イベント）で足りるため。
+ *
+ * `scripts/lib/preview-index.test.ts` もここに含めている——プレビューの
+ * `index.html`（ライト/ダーク切り替え）は `ui/client/**` の一部ではないが、
+ * 同じ理由（`document` が要る）でこちらの DOM 環境が要る。あちらは
+ * `environment: "node"`（`vitest.preview.config.ts`）で `document` が無い。
  */
 export default defineConfig({
   test: {
     environment: "happy-dom",
-    include: ["src/presentation/http/ui/client/**/*.test.ts"],
+    include: ["src/presentation/http/ui/client/**/*.test.ts", "scripts/lib/**/*.test.ts"],
   },
 });
