@@ -37,6 +37,11 @@ import { secureHeaders } from "hono/secure-headers";
  * - `img-src 'self' data:`: クライアントの `logo_url` は**表示しない**ので
  *   外部ホストを許していない。許すと、同意画面を開いた事実が第三者のサーバーに
  *   伝わる（誰がどのアプリを認可しようとしたかが漏れる）。
+ * - `font-src 'self'`: 自前配信する Google Sans（サブセット済み、
+ *   `google-sans-font.ts`）のため。**無かった頃は `default-src 'none'` に
+ *   落ちていた**——CSS の `@font-face` 自体は読み込めるので画面は壊れず、
+ *   コンソールの CSP 違反とフォールバックフォントでの描画だけが起きる
+ *   （見た目で気づけない）。`img-src` と同じ理由で `'self'` だけに絞る。
  *
  * CSP に引っかかったら、ここを緩めるのではなく外部ファイルへ出すこと。
  *
@@ -74,6 +79,7 @@ export const pageSecurityHeaders = secureHeaders({
     scriptSrc: ["'self'"],
     styleSrc: ["'self'"],
     imgSrc: ["'self'", "data:"],
+    fontSrc: ["'self'"],
     connectSrc: ["'self'"],
     formAction: ["'self'"],
     frameAncestors: ["'none'"],
