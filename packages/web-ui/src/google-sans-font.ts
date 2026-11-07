@@ -14,6 +14,16 @@ import { GOOGLE_SANS_FONT_BASE64 } from "./generated/google-sans-font";
  * **モジュールのトップレベルで 1 回だけデコードする。** 各 Worker の配信
  * ルートはこの `Uint8Array` をそのまま使い回すこと（`binary-asset.ts` の
  * JSDoc を参照）。
+ *
+ * ## `@u18/web-ui`（barrel）からは import しない
+ *
+ * **必ず `@u18/web-ui/google-sans-font` をサブパスで import すること。**
+ * barrel（`src/index.ts`）は意図的にこのファイルを re-export していない
+ * ——57,576 文字の base64 を `bytesFromBase64()` でデコードする呼び出しが
+ * トップレベルにあり、esbuild は tree-shaking でこれを落とせない。barrel
+ * 経由で 1 つでも import すると、フォントを配信していない Worker にまで
+ * 57KB 強が巻き込まれる（`island-classes.ts` が `getButtonClasses()` で
+ * 踏んだのと同じ形）。戻さないことを `test/bundle-size.test.ts` が検査する。
  */
 export const GOOGLE_SANS_FONT_BYTES = bytesFromBase64(GOOGLE_SANS_FONT_BASE64);
 
