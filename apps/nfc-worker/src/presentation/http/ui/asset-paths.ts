@@ -1,7 +1,25 @@
 import { hashedFileName } from "@u18/web-ui";
+import {
+  GOOGLE_SANS_FONT_FACE_CSS,
+  GOOGLE_SANS_FONT_HASHED_NAME,
+} from "@u18/web-ui/google-sans-font";
 import { CARDS_UI_PATH, DOCS_PATH } from "../base-path";
 import { CARDS_ISLAND_JS } from "./generated/cards-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
+
+/**
+ * Kiwa のスタイルシートに Google Sans の `@font-face` を足したもの
+ * （design-system 連携）。`@u18/web-ui` の `google-sans-font.ts` の
+ * JSDoc を参照——ハッシュは TS 側でしか計算できないので、連結もここで行う。
+ *
+ * **カード画面・案内ページの両方がこれを使う。** 中身は同じでも、2 つの
+ * スタイルシートは別の URL で配信する（下の `KIWA_STYLESHEET_ROUTE` /
+ * `DOCS_STYLESHEET_ROUTE` の節、#310 の理由）。フォント側も同じ理由で
+ * 2 つの URL を持つ（下の `GOOGLE_SANS_FONT_ROUTE` /
+ * `DOCS_GOOGLE_SANS_FONT_ROUTE`）——`@font-face` は相対パスなので、
+ * スタイルシートと同じ接頭辞にフォントが無いと 404 になる。
+ */
+export const KIWA_STYLESHEET_WITH_FONTS = `${KIWA_STYLESHEET}\n${GOOGLE_SANS_FONT_FACE_CSS}`;
 
 /**
  * この Worker が配信する静的アセットのパス。
@@ -58,8 +76,16 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
  * ハッシュが偶然一致することはあっても、**それに依って借りないこと。**
  * 上の #211 がその形で壊れている。
  */
-export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
+export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET_WITH_FONTS)}`;
 export const KIWA_STYLESHEET_PATH = `${CARDS_UI_PATH}${KIWA_STYLESHEET_ROUTE}`;
+
+/**
+ * サブセット済み Google Sans（カード画面側）。`KIWA_STYLESHEET_ROUTE` と
+ * 同じ接頭辞（`CARDS_UI_PATH` の下の `/ui/`）に置く——相対 URL で参照する
+ * ため（`google-sans-font.ts` を参照）。
+ */
+export const GOOGLE_SANS_FONT_ROUTE = `/ui/${GOOGLE_SANS_FONT_HASHED_NAME}`;
+export const GOOGLE_SANS_FONT_PATH = `${CARDS_UI_PATH}${GOOGLE_SANS_FONT_ROUTE}`;
 
 /**
  * カード画面のアイランド（#338）。
@@ -91,5 +117,9 @@ export const ISLAND_PATH = `${CARDS_UI_PATH}${ISLAND_ROUTE}`;
  * —— あちらはログインが要る画面の接頭辞である。公開のページが
  * その下のものを読むと、**公開面の数え方が接頭辞で読めなくなる。**
  */
-export const DOCS_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
+export const DOCS_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET_WITH_FONTS)}`;
 export const DOCS_STYLESHEET_PATH = `${DOCS_PATH}${DOCS_STYLESHEET_ROUTE}`;
+
+/** サブセット済み Google Sans（案内ページ側）。上の `GOOGLE_SANS_FONT_ROUTE` と同じ理由。 */
+export const DOCS_GOOGLE_SANS_FONT_ROUTE = `/ui/${GOOGLE_SANS_FONT_HASHED_NAME}`;
+export const DOCS_GOOGLE_SANS_FONT_PATH = `${DOCS_PATH}${DOCS_GOOGLE_SANS_FONT_ROUTE}`;

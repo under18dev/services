@@ -19,10 +19,17 @@
  *
  * ## 旧版からの変更点（#332 時点の決定を踏まえた更新）
  *
- * 1. **フォントは変えていない。** Google Sans の自前配信は別 PR（PR2）の
- *    範囲で、ここではまだ `--gdg-font-sans` を使わない。`--font-sans-stack`
- *    は引き続きシステムフォント列のまま（第三者ホストから読まない、という
- *    #332 の決定はそのまま生きている）。
+ * 1. **フォント（PR2 で対応）。** PR1 の時点ではまだ Google Sans を自前
+ *    配信しておらず、`--font-sans` と `body` の `font-family` はシステム
+ *    フォント列（`--font-sans-stack`）のまま据え置いていた。PR2 で
+ *    `@u18/web-ui/google-sans-font`（サブセット済み、自前配信）が
+ *    使えるようになったので、両方を `--gdg-font-sans` へ揃えた——
+ *    #332 の「第三者ホストから読まない」という決定は、自前配信である
+ *    限り破っていない。`--font-sans-stack` は参照元が無くなったので
+ *    削除した。和文は `--gdg-font-sans` 自身が持つ
+ *    `"Noto Sans JP", system-ui` 等へそのまま委ねる（u18 側で独自の
+ *    フォールバックを足すと、GDG から見た「欧文だけ差し替わった」という
+ *    前提が崩れる）。
  *
  * 2. **ライト側を持つようになった。** `:root` は固定のダークではなく
  *    `--gdg-*` への別名になり、ライト/ダークの切り替えは
@@ -58,8 +65,9 @@
 @import "../gdg/generated/dark-media.css";
 
 @theme inline {
-  /* `styles.ts` と同じシステムフォント列。第三者ホストから読まない（PR2 まで）。 */
-  --font-sans: var(--font-sans-stack);
+  /* 自前配信する Google Sans（サブセット済み）へ揃える（PR2、冒頭の
+     「旧版からの変更点 1」を参照）。 */
+  --font-sans: var(--gdg-font-sans);
   --font-mono: var(--font-mono-stack);
 
   /*
@@ -168,12 +176,10 @@
    * 4 つの Worker が別々に Tailwind を走らせているので、ここが唯一の
    * 出どころでなくなった瞬間に、画面ごとに別のサイトに見える。
    *
-   * フォントは GDG 化の対象外（冒頭「旧版からの変更点 1」）。PR2 で
-   * `--gdg-font-sans` に揃えるまで、システムフォント列のまま据え置く。
+   * `--font-sans-stack`（システムフォント列）は PR2 で削除した——`--font-sans`
+   * も `body` の `font-family`（下）も `--gdg-font-sans` へ揃えたので、
+   * 参照元が無くなったため（冒頭「旧版からの変更点 1」を参照）。
    */
-  --font-sans-stack:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP",
-    sans-serif;
   --font-mono-stack: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   /*
@@ -371,9 +377,11 @@
     /*
      * **`var(--font-sans)` と書かない。** `@theme inline` のトークンは
      * ユーティリティへ値を埋め込む形で、`:root` に同名の変数が出るとは
-     * 限らない。素の CSS から読むのは `:root` に自分で置いた側にする。
+     * 限らない。素の CSS から読むのは `:root` に実在するカスタム
+     * プロパティ（`--gdg-font-sans`、`../gdg/tokens.css` 由来）にする
+     * ——`h1`〜`h6` の `font-weight`（下）と同じ注意。
      */
-    font-family: var(--font-sans-stack);
+    font-family: var(--gdg-font-sans);
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

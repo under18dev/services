@@ -1,7 +1,7 @@
 import { sessionCookieName } from "@u18/contracts";
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
+import { GOOGLE_SANS_FONT_BYTES } from "@u18/web-ui/google-sans-font";
 import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
-import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
@@ -10,9 +10,11 @@ import type { IdentityOutcome } from "../../../application/ports";
 import { HomePage } from "./home-page";
 import {
   APPS_ROUTE,
+  GOOGLE_SANS_FONT_ROUTE,
   GRANTS_ROUTE,
   ISLAND_ROUTE,
   KIWA_STYLESHEET_ROUTE,
+  KIWA_STYLESHEET_WITH_FONTS,
   OVERVIEW_ROUTE,
   PASSKEYS_ROUTE,
   PROFILE_ROUTE,
@@ -195,8 +197,19 @@ export const accountUiRoutes = new Hono<AppBindings>()
    * CSS と JS と同じく全利用者に同じ中身で、個人情報を含まない。
    */
   .get(KIWA_STYLESHEET_ROUTE, (c) =>
-    c.body(KIWA_STYLESHEET, 200, {
+    c.body(KIWA_STYLESHEET_WITH_FONTS, 200, {
       "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": ASSET_CACHE_CONTROL,
+    }),
+  )
+
+  /**
+   * サブセット済み Google Sans（design-system 連携）。上の CSS が
+   * `@font-face` の相対 URL で参照する（`ui/asset-paths.ts`）。
+   */
+  .get(GOOGLE_SANS_FONT_ROUTE, (c) =>
+    c.body(GOOGLE_SANS_FONT_BYTES, 200, {
+      "Content-Type": "font/woff2",
       "Cache-Control": ASSET_CACHE_CONTROL,
     }),
   )

@@ -111,12 +111,22 @@ describe("カード画面が使うクラスは、配信する CSS に在る", ()
     expect(KIWA_STYLESHEET_PATH).toBe(`${CARDS_UI_PATH}/ui/${hashedFileName("kiwa.css", css)}`);
   });
 
-  it("フォントもアイコンも外から読まない", async () => {
+  it("フォントもアイコンも外から読まない（自前配信する Google Sans を除く）", async () => {
     // 仕様書 §14.1 決定 15。第三者ホストから読むと CSP に外部ホストを
     // 足すことになり、**画面を開いた事実がそのホストへ渡る。**
+    //
+    // **「0 個」ではなく「既知の 1 個が相対パスであること」を見る**
+    // （design-system 連携、PR2）。Google Sans の自前配信が
+    // `@font-face` の `url()` を 1 つ持ち込むようになったため——
+    // `.gdg-skeleton:after` のグラデーション検査（下）と同じ考え方で、
+    // 「無い」ではなく「知っている形から変わっていない」を見る。
     const css = await fetchText(KIWA_STYLESHEET_PATH);
 
-    expect([...css.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1])).toEqual([]);
+    const urls = [...css.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(urls).toHaveLength(1);
+    // 相対パス（`./` で始まる）であること——絶対 URL や `//` 始まりの
+    // protocol-relative は、どちらも外部ホストへ出られる形なので弾く。
+    expect(urls[0]).toMatch(/^"\.\/[^/"]+"$/);
   });
 
   /**

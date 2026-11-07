@@ -1,4 +1,8 @@
 import { hashedFileName } from "@u18/web-ui";
+import {
+  GOOGLE_SANS_FONT_FACE_CSS,
+  GOOGLE_SANS_FONT_HASHED_NAME,
+} from "@u18/web-ui/google-sans-font";
 import { ACCOUNT_BASE_PATH } from "../base-path";
 import { ACCOUNT_ISLAND_JS } from "./generated/account-island.bundle";
 import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
@@ -68,8 +72,23 @@ import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
  * いない** —— `hashedFileName` が**配信するのと同じ文字列**から出すので、
  * 生成が古くても URL が古いほうのハッシュになる（#211 / #132）。
  */
-export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET)}`;
+/**
+ * Kiwa のスタイルシートに Google Sans の `@font-face` を足したもの
+ * （design-system 連携）。`@u18/web-ui` の `google-sans-font.ts` の
+ * JSDoc を参照——ハッシュは TS 側でしか計算できないので、連結もここで行う。
+ */
+export const KIWA_STYLESHEET_WITH_FONTS = `${KIWA_STYLESHEET}\n${GOOGLE_SANS_FONT_FACE_CSS}`;
+
+export const KIWA_STYLESHEET_ROUTE = `/ui/${hashedFileName("kiwa.css", KIWA_STYLESHEET_WITH_FONTS)}`;
 export const KIWA_STYLESHEET_PATH = `${ACCOUNT_BASE_PATH}${KIWA_STYLESHEET_ROUTE}`;
+
+/**
+ * サブセット済み Google Sans（design-system 連携）。
+ * `KIWA_STYLESHEET_ROUTE` と同じ接頭辞（`ACCOUNT_BASE_PATH` の下の
+ * `/ui/`）に置く——相対 URL で参照するため（`google-sans-font.ts` を参照）。
+ */
+export const GOOGLE_SANS_FONT_ROUTE = `/ui/${GOOGLE_SANS_FONT_HASHED_NAME}`;
+export const GOOGLE_SANS_FONT_PATH = `${ACCOUNT_BASE_PATH}${GOOGLE_SANS_FONT_ROUTE}`;
 
 /**
  * 取り消し操作のアイランド（#9）。

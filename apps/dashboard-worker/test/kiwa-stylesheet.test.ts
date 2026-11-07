@@ -200,14 +200,20 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
     expect(classesMissingFrom(html, css)).toEqual([]);
   });
 
-  it("フォントもアイコンも外から読まない", async () => {
+  it("フォントもアイコンも外から読まない（自前配信する Google Sans を除く）", async () => {
     // 仕様書 §14.1 決定 15。第三者ホストから読むと CSP に外部ホストを
     // 足すことになり、**画面を開いた事実がそのホストへ渡る。** 上流の
     // `globals.css` は Inter を rsms.me から読んでいたので、落とし忘れが
     // ここで止まる。
+    //
+    // **「0 個」ではなく「既知の 1 個が相対パスであること」を見る**
+    // （design-system 連携、PR2）。Google Sans の自前配信が `@font-face`
+    // の `url()` を 1 つ持ち込むようになったため。
     const css = await fetchText(KIWA_STYLESHEET_PATH, false);
 
-    expect([...css.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1])).toEqual([]);
+    const urls = [...css.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toMatch(/^"\.\/[^/"]+"$/);
   });
 
   it("URL のハッシュが、配信した本文そのものから出ている", async () => {

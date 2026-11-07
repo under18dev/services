@@ -110,6 +110,8 @@ export const PAGE_ROUTES = [
   // スタイルシートである** —— 6 枚とも Kiwa へ移り、手書きの `u18.css` は
   // 誰も読まなくなったので消した。
   { method: "GET", path: "/account/ui/kiwa.<hash>.css" },
+  // サブセット済み Google Sans（design-system 連携）。上の CSS が参照する。
+  { method: "GET", path: "/account/ui/google-sans.<hash>.woff2" },
   { method: "GET", path: "/account/ui/account-island.<hash>.js" },
 ] as const;
 
@@ -173,7 +175,26 @@ export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = 
     "アイランドを読むのはログイン後の画面だけ。未認証では全ページが 401 で" +
     "ログイン導線を返し、参照するのは CSS だけである（本番で実測）。" +
     "ページの選び方では外から見えるようにできない。",
+  "/account/ui/google-sans.<hash>.woff2":
+    "collectAssetRefs は HTML の href/src 属性しか見ないが、このアセットは" +
+    "CSS の @font-face（kiwa.<hash>.css の中）からしか参照されない——" +
+    "@font-face の src は href でも src 属性でもなく、CSS の url() なので" +
+    "HTML の走査では見つからない（ログインの有無にも関係しない）。",
 };
+
+/**
+ * `collectAssetRefs`（HTML の href/src 属性しか見ない）では**ログインの
+ * 有無に関わらずどのページでも絶対に見つからない**アセット。
+ *
+ * `EXTERNALLY_UNVERIFIABLE_ASSETS` と似ているが別の一覧にしてある理由:
+ * `account-island.<hash>.js` は「未認証では見えないが、ログイン後の画面
+ * からは `<script src>` で実際に見える」——`asset-coverage.test.ts` の
+ * 「全画面を合わせると...覆う」がまさにそれを確かめている。一方この
+ * フォントは CSS の `url()` からしか参照されないので、ログインしているか
+ * どうかに関係なく、集合として永久に見えない。同じ一覧に混ぜると、
+ * アイランドが実際に見えている事実まで検査から除外してしまう。
+ */
+export const CSS_ONLY_ASSETS: readonly string[] = ["/account/ui/google-sans.<hash>.woff2"];
 
 export const EXPECTED_ROUTES = [...API_ROUTES, ...PAGE_ROUTES];
 

@@ -31,7 +31,8 @@ import type {
 import { ALL_DEFINED_PERMISSIONS, effectivePermissions } from "../src/domain/permissions";
 import { createFakeIdp } from "../test/fake-idp";
 import { ADMIN_ISLAND_JS } from "../src/presentation/http/ui/generated/admin-island.bundle";
-import { KIWA_STYLESHEET } from "../src/presentation/http/ui/generated/kiwa-stylesheet";
+import { KIWA_STYLESHEET_WITH_FONTS } from "../src/presentation/http/ui/asset-paths";
+import { GOOGLE_SANS_FONT_BYTES, GOOGLE_SANS_FONT_HASHED_NAME } from "@u18/web-ui/google-sans-font";
 
 /**
  * ログイン無しでブラウザ確認できる静的 HTML を書き出す（issue なし、
@@ -1074,7 +1075,13 @@ export async function main(): Promise<void> {
   await mkdir(outputDir, { recursive: true });
   const pages = await buildPreviewPages();
 
-  await writeFile(`${outputDir}/kiwa.css`, KIWA_STYLESHEET, "utf8");
+  await writeFile(`${outputDir}/kiwa.css`, KIWA_STYLESHEET_WITH_FONTS, "utf8");
+  // Google Sans 本体（design-system 連携）。`kiwa.css` の `@font-face` が
+  // 相対パス（`./<hash>.woff2`）で参照するので、**同じハッシュ付きの
+  // ファイル名**でこのディレクトリに置く——`withLocalStylesheet`（下）が
+  // 書き換えるのは `<link href>` の属性だけで、CSS 本文の中の `url()` は
+  // 実物のハッシュのまま変えないため。
+  await writeFile(`${outputDir}/${GOOGLE_SANS_FONT_HASHED_NAME}`, GOOGLE_SANS_FONT_BYTES);
   await writeFile(`${outputDir}/admin-island.js`, ADMIN_ISLAND_JS, "utf8");
   for (const page of pages) {
     await writeFile(`${outputDir}/${page.name}.html`, page.html, "utf8");
