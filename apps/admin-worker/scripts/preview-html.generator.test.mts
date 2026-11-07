@@ -1,10 +1,14 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { GOOGLE_SANS_FONT_BYTES, GOOGLE_SANS_FONT_HASHED_NAME } from "@u18/web-ui/google-sans-font";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // **`.mjs` 指定が要る。** 実体は `.mts` だが、`allowImportingTsExtensions`
 // が false なので `.mts` のまま import できない。拡張子無しだと
 // `moduleResolution: "Bundler"` が `.mts` の相手を見つけられなかった
 // （実測）——`.js`/`.mjs` 宛ての import を実ソースへ読み替える仕組みは
 // `.ts` → `.js` 宛てと同じ形で `.mts` → `.mjs` 宛てにも効く。
-import { buildPreviewPages, type PreviewPage } from "./preview-html.generator.mjs";
+import { buildPreviewPages, main, type PreviewPage } from "./preview-html.generator.mjs";
 
 /**
  * プレビュー出力の不変条件（#524）。
@@ -92,5 +96,46 @@ describe("カード詳細のタップ履歴グラフ（#512・#513）", () => {
     const html = pageHtml("nfc-card-detail-dormant");
     expect(html).toContain("この期間はタップがありません。");
     expect(countOccurrences(html, "<rect")).toBe(0);
+  });
+});
+
+/**
+ * Google Sans が実際にプレビュー出力へ書き出されること（design-system
+ * 連携、PR2）。
+ *
+ * **「`@font-face` が含まれること」だけでは足りない**（指摘:
+ * services-3b）。`kiwa.css` の `url()` が相対パスなので、**フォント本体の
+ * ファイルも同じディレクトリに実在しないと**、`font-display: swap` で
+ * 画面は普通に描かれたまま、フォントだけ静かに当たらない——これはここで
+ * 機械的に確かめられる（本当に読まれて `document.fonts` に載るところまで
+ * は実ブラウザでしか見られないので、そちらは別途確認した）。
+ */
+describe("Google Sans の書き出し（preview-html）", () => {
+  let outputDir: string;
+
+  beforeAll(async () => {
+    outputDir = await mkdtemp(join(tmpdir(), "admin-preview-html-font-"));
+    const original = process.env.PREVIEW_OUTPUT_DIR;
+    process.env.PREVIEW_OUTPUT_DIR = outputDir;
+    try {
+      await main();
+    } finally {
+      process.env.PREVIEW_OUTPUT_DIR = original;
+    }
+  }, 60_000);
+
+  afterAll(async () => {
+    await rm(outputDir, { recursive: true, force: true });
+  });
+
+  it("kiwa.css が Google Sans の @font-face を、実在するファイル名の相対パスで持つ", async () => {
+    const css = await readFile(join(outputDir, "kiwa.css"), "utf8");
+    expect(css).toContain('font-family: "Google Sans"');
+    expect(css).toContain(`url("./${GOOGLE_SANS_FONT_HASHED_NAME}")`);
+  });
+
+  it("フォント本体が同じディレクトリに書き出され、バイトが一致する", async () => {
+    const written = await readFile(join(outputDir, GOOGLE_SANS_FONT_HASHED_NAME));
+    expect(new Uint8Array(written)).toEqual(GOOGLE_SANS_FONT_BYTES);
   });
 });

@@ -2,7 +2,10 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { GOOGLE_SANS_FONT_BYTES } from "@u18/web-ui/google-sans-font";
 import { createApp } from "../src/presentation/http/app";
-import { GOOGLE_SANS_FONT_PATH, KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import {
+  GOOGLE_SANS_FONT_PATH,
+  KIWA_STYLESHEET_PATH,
+} from "../src/presentation/http/ui/asset-paths";
 import { executionContext, ORIGIN } from "./helpers";
 
 /**
