@@ -29,3 +29,15 @@ packages/web-ui/src/kiwa/empty.tsx
 packages/web-ui/src/kiwa/separator.tsx
 packages/web-ui/src/kiwa/sidebar-item.tsx
 packages/web-ui/src/kiwa/table.tsx
+
+# gdg-jp/design-system から取り込んだトークン・コンポーネント CSS（GDG デザイン
+# 移行 PR1）。**上流のまま置いてある。** 理由は上と同じ——整形すると上流から
+# 取り直したときに diff が効かなくなる。由来・無改変であることは
+# packages/web-ui/src/gdg/README.md を参照。
+packages/web-ui/src/gdg/tokens.css
+packages/web-ui/src/gdg/components.css
+
+# `.dark { ... }` を @media へ機械的に複製した生成物（GDG デザイン移行 PR1）。
+# コミットする運用で、整形は生成スクリプト側の出力に固定する——整形すると
+# `test/gdg-dark-media.test.ts` の「生成結果と一致するか」の比較がずれる。
+packages/web-ui/src/gdg/generated

@@ -119,10 +119,44 @@ describe("カード画面が使うクラスは、配信する CSS に在る", ()
     expect([...css.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1])).toEqual([]);
   });
 
-  it("グラデーションを使わない", async () => {
-    // design.md の "No gradients."。
+  /**
+   * design.md の "No gradients."。
+   *
+   * **「0 個」ではなく「既知の 1 個を除いて 0 個」を見る**（GDG デザイン
+   * 移行 PR1）。GDG の `../gdg/components.css` は無改変で置く約束
+   * （`packages/web-ui/src/gdg/README.md`）で、中身を書き換えてグラデー
+   * ションだけ消すことはできない。唯一のグラデーションは
+   * `.gdg-skeleton:after`（読み込み中のシマー演出——単色の半透明を
+   * 掃わせているだけで、design.md が禁じる "colorful" な演出とは別物）。
+   * **`.gdg-skeleton` はこの PR のどの画面からも使われていない**
+   * （`.tsx` を変えないのが PR1 の制約）ので、見た目には出ていない。
+   *
+   * `KNOWN_VENDORED_GRADIENT_SELECTORS` に無いセレクタでグラデーションが
+   * 見つかったら落ちる——新しいグラデーションは引き続き捕まる。
+   * `.gdg-skeleton` を実際に使い始めたら（PR3 以降）、ここを読み直して
+   * この演出が design.md に合うか判断すること。
+   */
+  it("グラデーションを使わない（GDG の vendored components.css にある既知の 1 件を除く）", async () => {
     const css = await fetchText(KIWA_STYLESHEET_PATH);
 
-    expect(css).not.toMatch(/(linear|radial|conic)-gradient\(/);
+    const KNOWN_VENDORED_GRADIENT_SELECTORS = [".gdg-skeleton:after"];
+
+    const selectorsWithGradient = [
+      ...css.matchAll(/([^{}]+)\{[^{}]*(?:linear|radial|conic)-gradient\([^{}]*\}/g),
+    ].map((m) => (m[1] ?? "").trim());
+
+    // 正規表現が壊れて 0 件のまま緑になる形を避ける——既知の 1 件は
+    // 必ず見つかる前提で、まずそれ自体を確かめる。
+    expect(
+      selectorsWithGradient,
+      "既知のグラデーション（.gdg-skeleton:after）が見つからない。" +
+        "components.css の構造が変わったか、正規表現が壊れている可能性がある。",
+    ).toContain(".gdg-skeleton:after");
+
+    const unexpected = selectorsWithGradient.filter(
+      (selector) => !KNOWN_VENDORED_GRADIENT_SELECTORS.includes(selector),
+    );
+
+    expect(unexpected, `想定外のグラデーション: ${unexpected.join(", ")}`).toEqual([]);
   });
 });
