@@ -64,6 +64,8 @@ export const HEALTH_ROUTES: readonly Route[] = [{ method: "GET", path: "/health"
 export const DOCS_ROUTES: readonly Route[] = [
   { method: "GET", path: "/docs" },
   { method: "GET", path: "/docs/ui/kiwa.<hash>.css" },
+  /** サブセット済み Google Sans（design-system 連携）。上の CSS が参照する。 */
+  { method: "GET", path: "/docs/ui/google-sans.<hash>.woff2" },
 ];
 
 /**
@@ -164,11 +166,23 @@ export const CARD_CLAIM_ROUTES: readonly Route[] = [
  */
 export const CARD_ASSET_ROUTES: readonly Route[] = [
   { method: "GET", path: "/account/nfc/ui/kiwa.<hash>.css" },
+  /** サブセット済み Google Sans（design-system 連携）。上の CSS が参照する。 */
+  { method: "GET", path: "/account/nfc/ui/google-sans.<hash>.woff2" },
   // 遷移先の変更のアイランド（#338）。CSS と同じく公開アセットで、
   // セッションを要求しない —— 中身は全利用者に同じスクリプトである
   // （カード ID は HTML 側の `data-card-id` から読む）。
   { method: "GET", path: "/account/nfc/ui/cards-island.<hash>.js" },
 ];
+
+/**
+ * `collectAssetRefs`（HTML の href/src 属性しか見ない）では**絶対に
+ * 見つからない**アセット（design-system 連携）。
+ *
+ * Google Sans は CSS の `@font-face` の `url()` からしか参照されない——
+ * `url()` は href でも src 属性でもないので、HTML をどれだけ走査しても
+ * 見つからない。`asset-coverage.test.ts` がこの一覧を使って除外する。
+ */
+export const CSS_ONLY_ASSETS: readonly string[] = ["/account/nfc/ui/google-sans.<hash>.woff2"];
 
 /** カード管理に属するもの全部。一覧の突き合わせに使う。 */
 /**

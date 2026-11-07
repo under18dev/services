@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
 import {
   ASSET_ROUTES,
+  CSS_ONLY_ASSETS,
   EXTERNALLY_UNVERIFIABLE_ASSETS,
   HTML_PAGE_ROUTES,
   PROBE_PAGES,
@@ -97,7 +98,13 @@ describe("アセットはどこかのページから参照されている", () =
 
     // 誰も参照しないアセットは、配信ルートだけが残った状態である。
     // 消し忘れか、参照を外したかのどちらか。
-    expect([...seen].sort()).toEqual(expect.arrayContaining(EXPECTED_ASSETS));
+    //
+    // **`CSS_ONLY_ASSETS` だけは除く。** Google Sans は CSS の
+    // `@font-face` からしか参照されないので、`collectAssetRefs`
+    // （HTML の href/src 属性しか見ない）ではどの画面を合わせても
+    // 見つからない——`CSS_ONLY_ASSETS` の JSDoc を参照。
+    const expectedViaHtml = EXPECTED_ASSETS.filter((asset) => !CSS_ONLY_ASSETS.includes(asset));
+    expect([...seen].sort()).toEqual(expect.arrayContaining(expectedViaHtml));
   });
 });
 

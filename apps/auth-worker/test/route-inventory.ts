@@ -54,6 +54,8 @@ export const PUBLIC_ROUTES: readonly Route[] = [
   // **この Worker のスタイルシートはこれ 1 本**（#332）。ログイン・
   // 新規登録・コード入力・ログイン済み・同意・認可エラーの全部が読む。
   { method: "GET", path: "/ui/kiwa.<hash>.css" },
+  // サブセット済み Google Sans（design-system 連携）。上の CSS が参照する。
+  { method: "GET", path: "/ui/google-sans.<hash>.woff2" },
   { method: "GET", path: "/ui/login-island.<hash>.js" },
 
   // form 経路（JS 無しで完結する）。CSRF トークンと Origin の二重で守る。
@@ -137,18 +139,27 @@ export const PROBE_PAGES: readonly string[] = ["/login"];
  * 書いてあれば、**その配信が壊れても本番検査は気づかない**ことが
  * 読んだ人に伝わる。
  *
- * ## いまは 0 件である（#332）
+ * ## #332 の時点では 0 件だった
  *
  * 唯一の住人だった `/ui/u18.<hash>.css` は、最後の持ち主（同意画面）が
- * Kiwa へ移ったあと**アセットごと消えた。** この Worker のアセットは
- * `/login` 1 枚から全部辿れる。
- *
- * **空のまま残しておく。** 仕組みごと消すと、次に「外から確かめられない
- * アセット」が出たときに**宣言する場所が無いので黙って外れる**。
+ * Kiwa へ移ったあと**アセットごと消えた。** 空のまま残していたのは、
+ * 仕組みごと消すと次に「外から確かめられないアセット」が出たときに
+ * **宣言する場所が無いので黙って外れる**ため——
  * `asset-coverage.test.ts` が「一覧に無い名前を宣言していないか」を
- * 見ているので、0 件でも検査の形は保たれる。
+ * 見ているので、0 件でも検査の形は保たれていた。
+ *
+ * PR2（design-system 連携）で Google Sans が増え、実際にこの一覧を使う
+ * 1 件目になった——CSS の `@font-face` の `url()` からしか参照されず、
+ * `collectAssetRefs`（HTML の href/src 属性しか見ない）では
+ * `/login` を含むどのページからも見つからない。
  */
-export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {};
+export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = {
+  "/ui/google-sans.<hash>.woff2":
+    "collectAssetRefs は HTML の href/src 属性しか見ないが、このアセットは" +
+    "CSS の @font-face（kiwa.<hash>.css の中）からしか参照されない——" +
+    "@font-face の src は href でも src 属性でもなく、CSS の url() なので" +
+    "HTML の走査では見つからない（design-system 連携、PR2）。",
+};
 
 export const EXPECTED_ROUTES: readonly Route[] = [
   ...PUBLIC_ROUTES,

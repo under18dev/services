@@ -44,6 +44,11 @@ export const ASSET_ROUTES: readonly Route[] = [
   { method: "GET", path: "/ui/kiwa.<hash>.css" },
   /** 並べ替え・絞り込み・コピー・タブ・通知のアイランド（#470）。 */
   { method: "GET", path: "/ui/admin-island.<hash>.js" },
+  /**
+   * サブセット済み Google Sans（design-system 連携）。`kiwa.<hash>.css` の
+   * `@font-face` が相対パスで参照する。
+   */
+  { method: "GET", path: "/ui/google-sans.<hash>.woff2" },
 ];
 
 /**
@@ -81,7 +86,28 @@ export const EXTERNALLY_UNVERIFIABLE_ASSETS: Readonly<Record<string, string>> = 
     "引ける /callback はログイン前の失敗画面で、並べ替え・絞り込み・" +
     "コピー・通知のどれも持たないため参照しない（本番での検査は " +
     "/health の assets 経由で別に行われている、#479）。",
+  "/ui/google-sans.<hash>.woff2":
+    "collectAssetRefs は HTML の href/src 属性しか見ないが、このアセットは" +
+    "CSS の @font-face（kiwa.<hash>.css の中）からしか参照されない——" +
+    "@font-face の src は href でも src 属性でもなく、CSS の url() なので" +
+    "HTML の走査では見つからない。本番での検査は /health の assets 経由で" +
+    "別に行われている（admin-island.<hash>.js と同じ仕組み、#479）。",
 };
+
+/**
+ * `collectAssetRefs`（HTML の href/src 属性しか見ない）では**ログインの
+ * 有無に関わらずどのページでも絶対に見つからない**アセット。
+ *
+ * `EXTERNALLY_UNVERIFIABLE_ASSETS` と似ているが別の一覧にしてある理由:
+ * `admin-island.<hash>.js` は「ログイン前の `/callback` からは見えないが、
+ * ログイン後の `/audit` 等からは `<script src>` で実際に見える」——
+ * `asset-coverage.test.ts` の 2 本目の `describe` がまさにそれを確かめている。
+ * 一方このフォントは CSS の `url()` からしか参照されないので、
+ * **ログインしているかどうかに関係なく、集合として永久に見えない。**
+ * 同じ一覧に混ぜると、アイランドが実際に見えている事実まで検査から
+ * 除外してしまう。
+ */
+export const CSS_ONLY_ASSETS: readonly string[] = ["/ui/google-sans.<hash>.woff2"];
 
 /**
  * 入口。セッションの有無・承認の有無で `/login` か `/pending` かへ

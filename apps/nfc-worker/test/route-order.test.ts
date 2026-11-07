@@ -42,6 +42,9 @@ describe("ルートの登録順", () => {
       "POST /account/nfc/cards/:cardId/disable",
       "POST /account/nfc/cards/:cardId/release",
       "GET /account/nfc/ui/kiwa.<hash>.css",
+      // サブセット済み Google Sans（design-system 連携）。上の CSS が
+      // 参照する。公開アセットなので順序に守りの意味は無いが、変わったら気づく。
+      "GET /account/nfc/ui/google-sans.<hash>.woff2",
       // 遷移先の変更のアイランド（#338）。**画面より前に居る。**
       // 公開アセットなので順序に守りの意味は無いが、変わったら気づく。
       "GET /account/nfc/ui/cards-island.<hash>.js",
@@ -60,6 +63,8 @@ describe("ルートの登録順", () => {
       // 案内のページ（#358）。**`go.under18.dev` 側の公開面。**
       // アセットが先、ページが後（`pageSecurityHeaders` で 2 回出る）。
       "GET /docs/ui/kiwa.<hash>.css",
+      // サブセット済み Google Sans（design-system 連携）。上の CSS が参照する。
+      "GET /docs/ui/google-sans.<hash>.woff2",
       "GET /docs",
       "GET /docs",
     ]);

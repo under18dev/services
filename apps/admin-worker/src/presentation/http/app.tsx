@@ -1,4 +1,5 @@
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
+import { GOOGLE_SANS_FONT_BYTES } from "@u18/web-ui/google-sans-font";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { routePath } from "hono/route";
@@ -28,9 +29,13 @@ import { registerNfcAnalyticsRoutes } from "./nfc-analytics.routes";
 import { registerNfcCardDetailRoutes, registerNfcRoutes } from "./nfc.routes";
 import { registerUsersRoutes } from "./users.routes";
 import { resolveUserRefs } from "./user-refs";
-import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "./ui/asset-paths";
+import {
+  GOOGLE_SANS_FONT_PATH,
+  ISLAND_PATH,
+  KIWA_STYLESHEET_PATH,
+  KIWA_STYLESHEET_WITH_FONTS,
+} from "./ui/asset-paths";
 import { ADMIN_ISLAND_JS } from "./ui/generated/admin-island.bundle";
-import { KIWA_STYLESHEET } from "./ui/generated/kiwa-stylesheet";
 import { HomePage } from "./ui/home-page";
 import { forbiddenPermission, MessagePage } from "./ui/message-page";
 import { PendingPage } from "./ui/pending-page";
@@ -120,6 +125,10 @@ const PUBLIC_PATHS = new Set([
   // 並べ替え・絞り込み・コピー・タブ・通知のアイランド（#470）。CSS と
   // 同じ理由——個人情報を含まず、全員に同じ中身を配る。
   ISLAND_PATH,
+  // Google Sans（design-system 連携）。CSS が `@font-face` で参照するので、
+  // CSS と同じ経路で読めないといけない——個人情報を含まず、全員に同じ
+  // 中身を配る点も同じ。
+  GOOGLE_SANS_FONT_PATH,
 ]);
 
 /** 承認待ちの画面。ログイン済みだが承認リストに無い人の行き先。ガードの対象外。 */
@@ -275,7 +284,11 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
    * CSS のほうは既に誰でも HTML から読める）。
    */
   app.get("/health", (c) =>
-    c.json({ status: "ok", service: "u18-admin", assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH] }),
+    c.json({
+      status: "ok",
+      service: "u18-admin",
+      assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH, GOOGLE_SANS_FONT_PATH],
+    }),
   );
 
   /**
@@ -291,8 +304,22 @@ export function createApp(overrides: ContainerOverrides = {}): Hono<AppBindings>
    * 失敗画面も、ログイン前の `/login` も、これを読む。
    */
   app.get(KIWA_STYLESHEET_PATH, (c) =>
-    c.body(KIWA_STYLESHEET, 200, {
+    c.body(KIWA_STYLESHEET_WITH_FONTS, 200, {
       "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
+    }),
+  );
+
+  /**
+   * サブセット済み Google Sans 本体（design-system 連携）。
+   *
+   * 上の CSS が `@font-face` の相対 URL で参照する（`ui/asset-paths.ts`）。
+   * `PUBLIC_PATHS` にも入れてある——CSS が読めるところでは常にこれも
+   * 読めないと、`font-display: swap` でフォールバックへ静かに落ちる。
+   */
+  app.get(GOOGLE_SANS_FONT_PATH, (c) =>
+    c.body(GOOGLE_SANS_FONT_BYTES, 200, {
+      "Content-Type": "font/woff2",
       "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
     }),
   );

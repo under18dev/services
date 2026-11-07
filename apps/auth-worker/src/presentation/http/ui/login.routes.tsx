@@ -1,4 +1,5 @@
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
+import { GOOGLE_SANS_FONT_BYTES } from "@u18/web-ui/google-sans-font";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Context } from "hono";
@@ -8,7 +9,12 @@ import {
   readSessionCookie,
 } from "../session-cookie";
 import type { AppBindings } from "../types";
-import { KIWA_STYLESHEET_PATH, LOGIN_ISLAND_PATH } from "./asset-paths";
+import {
+  GOOGLE_SANS_FONT_PATH,
+  KIWA_STYLESHEET_PATH,
+  KIWA_STYLESHEET_WITH_FONTS,
+  LOGIN_ISLAND_PATH,
+} from "./asset-paths";
 import { DEFAULT_LANDING_PATH } from "./landing";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf, rotateCsrfToken } from "./csrf";
 import {
@@ -19,7 +25,6 @@ import {
   type LoginView,
 } from "./login-page";
 import { LOGIN_ISLAND_JS } from "./generated/login-island.bundle";
-import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 import { enforceIpRateLimit } from "../rate-limit";
 import {
   loginUrlWithReturnTo,
@@ -521,8 +526,19 @@ const ASSET_CACHE_CONTROL = IMMUTABLE_ASSET_CACHE_CONTROL;
 
 /** この Worker の唯一のスタイルシート（#332）。全部の画面がこれを読む。 */
 uiRoutes.get(KIWA_STYLESHEET_PATH, (c) =>
-  c.body(KIWA_STYLESHEET, 200, {
+  c.body(KIWA_STYLESHEET_WITH_FONTS, 200, {
     "Content-Type": "text/css; charset=utf-8",
+    "Cache-Control": ASSET_CACHE_CONTROL,
+  }),
+);
+
+/**
+ * サブセット済み Google Sans（design-system 連携）。上の CSS が
+ * `@font-face` の相対 URL で参照する（`ui/asset-paths.ts`）。
+ */
+uiRoutes.get(GOOGLE_SANS_FONT_PATH, (c) =>
+  c.body(GOOGLE_SANS_FONT_BYTES, 200, {
+    "Content-Type": "font/woff2",
     "Cache-Control": ASSET_CACHE_CONTROL,
   }),
 );

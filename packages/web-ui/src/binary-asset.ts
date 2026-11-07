@@ -17,7 +17,7 @@
  * 複数リクエストにまたがって再利用されるので、リクエストのたびに
  * デコードし直すのは無駄な CPU 時間になる。
  */
-export function bytesFromBase64(base64: string): Uint8Array {
+export function bytesFromBase64(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {

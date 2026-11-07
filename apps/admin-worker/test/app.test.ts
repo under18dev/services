@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import { createApp } from "../src/presentation/http/app";
 import type { Clock } from "../src/composition/container";
-import { ISLAND_PATH, KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
+import {
+  GOOGLE_SANS_FONT_PATH,
+  ISLAND_PATH,
+  KIWA_STYLESHEET_PATH,
+} from "../src/presentation/http/ui/asset-paths";
 import { createFakeIdp } from "./fake-idp";
 import {
   ORIGIN,
@@ -37,7 +41,7 @@ describe("/health", () => {
     const response = await app.fetch(new Request(`${ORIGIN}/health`), env, executionContext());
     const body = await response.json();
     expect(body).toMatchObject({
-      assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH],
+      assets: [KIWA_STYLESHEET_PATH, ISLAND_PATH, GOOGLE_SANS_FONT_PATH],
     });
   });
 });

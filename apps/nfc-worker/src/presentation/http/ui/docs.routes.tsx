@@ -1,9 +1,9 @@
 import { IMMUTABLE_ASSET_CACHE_CONTROL, pageSecurityHeaders } from "@u18/web-ui";
+import { GOOGLE_SANS_FONT_BYTES } from "@u18/web-ui/google-sans-font";
 import type { Hono } from "hono";
 import type { AppBindings } from "../types";
-import { DOCS_STYLESHEET_PATH } from "./asset-paths";
+import { DOCS_GOOGLE_SANS_FONT_PATH, DOCS_STYLESHEET_PATH, KIWA_STYLESHEET_WITH_FONTS } from "./asset-paths";
 import { DocsPage } from "./docs-page";
-import { KIWA_STYLESHEET } from "./generated/kiwa-stylesheet";
 
 /**
  * カードを受け取った人向けの案内（#358）。
@@ -41,8 +41,20 @@ export function registerDocsRoutes(app: Hono<AppBindings>, path: string): void {
    * （`ui/asset-paths.ts` の `DOCS_STYLESHEET_ROUTE`）。
    */
   app.get(DOCS_STYLESHEET_PATH, (c) =>
-    c.body(KIWA_STYLESHEET, 200, {
+    c.body(KIWA_STYLESHEET_WITH_FONTS, 200, {
       "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
+    }),
+  );
+
+  /**
+   * サブセット済み Google Sans（design-system 連携、案内ページ側）。
+   * カード画面側（`cards-ui.routes.tsx`）と中身は同じだが、スタイルシート
+   * と同じ理由で URL を分けている（`ui/asset-paths.ts` の #310 の節）。
+   */
+  app.get(DOCS_GOOGLE_SANS_FONT_PATH, (c) =>
+    c.body(GOOGLE_SANS_FONT_BYTES, 200, {
+      "Content-Type": "font/woff2",
       "Cache-Control": IMMUTABLE_ASSET_CACHE_CONTROL,
     }),
   );

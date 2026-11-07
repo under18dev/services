@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { collectAssetRefs, normalizeAssetHash } from "@u18/web-ui";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CARDS_UI_PATH, createApp } from "../src/presentation/http/app";
-import { CARD_ASSET_ROUTES, CARD_PAGE_ROUTES } from "./route-inventory";
+import { CARD_ASSET_ROUTES, CARD_PAGE_ROUTES, CSS_ONLY_ASSETS } from "./route-inventory";
 import {
   ORIGIN,
   cookieFor,
@@ -33,7 +33,12 @@ import {
 const TARO = "token-taro-0123456789abcdefghijklmn";
 const identity = identityWith({ [TARO]: "usr_taro" });
 
-const EXPECTED_ASSETS = CARD_ASSET_ROUTES.map((route) => normalizeAssetHash(route.path)).sort();
+const EXPECTED_ASSETS = CARD_ASSET_ROUTES.map((route) => normalizeAssetHash(route.path))
+  // Google Sans は CSS の @font-face からしか参照されない。collectAssetRefs
+  // は HTML の href/src 属性しか見ないので、どのページを引いても永久に
+  // 見つからない（`CSS_ONLY_ASSETS` の JSDoc を参照）。
+  .filter((asset) => !CSS_ONLY_ASSETS.includes(asset))
+  .sort();
 
 beforeEach(resetDatabase);
 

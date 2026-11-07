@@ -6,6 +6,7 @@ import { createApp } from "../src/presentation/http/app";
 import { ISLAND_PATH } from "../src/presentation/http/ui/asset-paths";
 import {
   ASSET_ROUTES,
+  CSS_ONLY_ASSETS,
   EXTERNALLY_UNVERIFIABLE_ASSETS,
   NAV_PAGE_ROUTES,
   PENDING_ROUTES,
@@ -52,6 +53,25 @@ import {
 
 const EXPECTED_ASSETS = ASSET_ROUTES.map((route) => normalizeAssetHash(route.path)).sort();
 
+/** `PROBE_PAGES`（未認証）からは見えない前提で除外する一覧。 */
+const DECLARED_UNVERIFIABLE = Object.keys(EXTERNALLY_UNVERIFIABLE_ASSETS);
+const EXPECTED_VISIBLE_ASSETS = EXPECTED_ASSETS.filter(
+  (asset) => !DECLARED_UNVERIFIABLE.includes(asset),
+);
+
+/**
+ * ログイン後の画面（下の 2 つ目の `describe`）からも除外する一覧。
+ *
+ * **`DECLARED_UNVERIFIABLE` とは別物。** `admin-island.<hash>.js` は
+ * `DECLARED_UNVERIFIABLE` に入っているが、ログイン後の画面からは実際に
+ * 見える——下の `describe` はまさにそれを確かめているので、ここでは
+ * 除外しない。除外するのは `CSS_ONLY_ASSETS`（ログインの有無に関係なく
+ * 絶対に見えないもの）だけ。
+ */
+const EXPECTED_VISIBLE_AFTER_LOGIN = EXPECTED_ASSETS.filter(
+  (asset) => !CSS_ONLY_ASSETS.includes(asset),
+);
+
 describe("本番検査が引くページで、アセットを全部覆える", () => {
   it("一覧にアセットがある", () => {
     // 0 件だと下のテストが**何も確かめずに通る。**
@@ -83,16 +103,11 @@ describe("本番検査が引くページで、アセットを全部覆える", (
       for (const ref of collectAssetRefs(await response.text())) seen.add(ref);
     }
 
-    const declaredUnverifiable = Object.keys(EXTERNALLY_UNVERIFIABLE_ASSETS);
-    const expectedVisible = EXPECTED_ASSETS.filter(
-      (asset) => !declaredUnverifiable.includes(asset),
-    );
-
     expect(
       [...seen].sort(),
       `PROBE_PAGES（${PROBE_PAGES.join(" ")}）を引いたときに見えるアセットが、` +
         `EXTERNALLY_UNVERIFIABLE_ASSETS の宣言と噛み合っていません。`,
-    ).toEqual(expectedVisible);
+    ).toEqual(EXPECTED_VISIBLE_ASSETS);
   });
 });
 
@@ -154,7 +169,7 @@ describe("ログイン後の画面を合わせると、アイランドまで覆�
       for (const ref of collectAssetRefs(await response.text())) seen.add(ref);
     }
 
-    expect([...seen].sort()).toEqual(expect.arrayContaining(EXPECTED_ASSETS));
+    expect([...seen].sort()).toEqual(expect.arrayContaining(EXPECTED_VISIBLE_AFTER_LOGIN));
   });
 });
 
