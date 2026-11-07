@@ -2,8 +2,8 @@ import { DEV_SESSION_COOKIE_NAME, rpcOk } from "@u18/contracts";
 import type { GrantListItem, PasskeySummary, SessionListItem, UserProfile } from "@u18/contracts";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
-import { classesIn, classesMissingFrom } from "@u18/testing";
-import { hashedFileName } from "@u18/web-ui";
+import { classesIn, classesMissingFrom, darkMediaVarNames } from "@u18/testing";
+import { GDG_DARK_CLASS_VAR_NAMES, hashedFileName } from "@u18/web-ui";
 import { KIWA_STYLESHEET_PATH, OVERVIEW_PATH } from "../src/presentation/http/ui/asset-paths";
 import { PAGES } from "./pages";
 import { ORIGIN, envWith, executionContext } from "./helpers";
@@ -253,14 +253,83 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
     expect(mdFlexRule).toBe(".md\\:flex{display:flex}");
   });
 
-  it("グラデーションを使わない", async () => {
-    // design.md の "No gradients."。上流の `.bg-primary-mesh` は
-    // `linear-gradient` だったので持ってきていない。
-    //
-    // **`*-gradient(` で見る。** Tailwind は `bg-linear-to-r` のような
-    // ユーティリティ**の定義**を、使われていなければ出力しない。
+  /**
+   * design.md の "No gradients."。上流の `.bg-primary-mesh` は
+   * `linear-gradient` だったので持ってきていない（#332 からの決定）。
+   *
+   * **「0 個」ではなく「既知の 1 個を除いて 0 個」を見る**（GDG デザイン
+   * 移行 PR1）。GDG の `../gdg/components.css` は無改変で置く約束
+   * （`packages/web-ui/src/gdg/README.md`）で、中身を書き換えてグラデー
+   * ションだけ消すことはできない。唯一のグラデーションは
+   * `.gdg-skeleton:after`（読み込み中のシマー演出——単色の半透明を
+   * 掃わせているだけで、design.md が禁じる "colorful" な演出とは別物）。
+   * **`.gdg-skeleton` はこの PR のどの画面からも使われていない**
+   * （`.tsx` を変えないのが PR1 の制約）ので、見た目には出ていない。
+   *
+   * `KNOWN_VENDORED_GRADIENT_SELECTORS` に無いセレクタでグラデーションが
+   * 見つかったら落ちる——新しいグラデーションは引き続き捕まる。
+   * `.gdg-skeleton` を実際に使い始めたら（PR3 以降）、ここを読み直して
+   * この演出が design.md に合うか判断すること。
+   */
+  it("グラデーションを使わない（GDG の vendored components.css にある既知の 1 件を除く）", async () => {
     const css = await fetchText(KIWA_STYLESHEET_PATH, false);
 
-    expect(css).not.toMatch(/(linear|radial|conic)-gradient\(/);
+    const KNOWN_VENDORED_GRADIENT_SELECTORS = [".gdg-skeleton:after"];
+
+    const selectorsWithGradient = [
+      ...css.matchAll(/([^{}]+)\{[^{}]*(?:linear|radial|conic)-gradient\([^{}]*\}/g),
+    ].map((m) => (m[1] ?? "").trim());
+
+    // 正規表現が壊れて 0 件のまま緑になる形を避ける——既知の 1 件は
+    // 必ず見つかる前提で、まずそれ自体を確かめる。
+    expect(
+      selectorsWithGradient,
+      "既知のグラデーション（.gdg-skeleton:after）が見つからない。" +
+        "components.css の構造が変わったか、正規表現が壊れている可能性がある。",
+    ).toContain(".gdg-skeleton:after");
+
+    const unexpected = selectorsWithGradient.filter(
+      (selector) => !KNOWN_VENDORED_GRADIENT_SELECTORS.includes(selector),
+    );
+
+    expect(unexpected, `想定外のグラデーション: ${unexpected.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * OS 設定（`prefers-color-scheme`）に従うライト/ダークが、**実際に配信
+ * される CSS まで届いているか**（GDG デザイン移行 PR1、指摘: 3b）。
+ *
+ * `packages/web-ui/test/gdg-dark-media.test.ts` は `tokens.css` の `.dark`
+ * と生成物（`generated/dark-media.css`）の変数名の集合が一致することを
+ * 見ているが、それは**生成物の話**でしかない。`theme.css` の
+ * `@import "../gdg/generated/dark-media.css"` を 1 行消しても、あちらの
+ * テストは全部緑のまま通る——`@layer` の順序や Tailwind の
+ * `optimize: true`（Lightning CSS）をくぐり抜けて、実際に配信される
+ * バイト列に `@media (prefers-color-scheme: dark)` が残っているかは、
+ * ここでしか見ていない。
+ *
+ * 「`prefers-color-scheme` という文字列が含まれる」だけでは弱い——ブロック
+ * が残っていても中身が削られていたら気づけない。配信 CSS の @media が
+ * 持つ変数名の集合を、vendored `tokens.css` の `.dark` が持つ集合と
+ * 直接突き合わせる。
+ */
+describe("配信する CSS に、OS 設定に従うダークの @media が実際に届いている", () => {
+  it("@media (prefers-color-scheme: dark) の変数名の集合が tokens.css の .dark と一致する", async () => {
+    const css = await fetchText(KIWA_STYLESHEET_PATH, false);
+    const delivered = darkMediaVarNames(css);
+
+    // 0 件のまま下の比較へ進むと、空集合同士の一致で緑になりうる。
+    expect(
+      delivered.size,
+      "配信 CSS に @media (prefers-color-scheme: dark) が見つからない——" +
+        "theme.css の @import が外れたか、ビルドの途中で落ちている可能性がある。",
+    ).toBeGreaterThan(0);
+
+    // `tokens.css` を直接 readFileSync しない——workerd の中では読めない
+    // （実測済み）。ビルド時に確定した配列を `@u18/web-ui` から import する。
+    expect(GDG_DARK_CLASS_VAR_NAMES.length).toBeGreaterThan(0);
+
+    expect([...delivered].sort()).toEqual([...GDG_DARK_CLASS_VAR_NAMES].sort());
   });
 });
