@@ -11,10 +11,24 @@
   //
   // `tsconfig.json` の `include` に直接 `scripts/**/*.mjs` を足した
   // ところ、`generate-gdg-dark-media.mjs`（自分が持たないファイル）まで
-  // 検査対象に入り、`node:fs` 等が解決できずに落ちた——原因は `types` に
-  // `"node"` が無かっただけで、ここに `"node"` を足せば同じファイルが
-  // 問題なく通ることを確かめてある（#535）。**範囲を広げる変更をすると
-  // きは、自分が持たないファイルも含めて全部通るか先に測ること。**
+  // 検査対象に入って CI が落ちた。**原因は `types` に `"node"` が無かった
+  // ことではない**（最初そう診断して報告したが、誤りだった——
+  // services-11 が実測で指摘: `types: ["node"]` を外しても `node:fs` 等は
+  // import 指定子としての通常のモジュール解決で見つかり、
+  // `process`/`Buffer`/`console` は `@cloudflare/workers-types` が
+  // 既にグローバル宣言済みで、外してもエラー 0 件のまま通る）。
+  // **本当の原因は `subset-google-sans.mjs` 側にあった、この tsconfig
+  // とは無関係な 6 件の型エラー**（`CODEPOINT_RANGES` がタプルとして
+  // 推論されていなかった分と `subset-font` の型宣言が無かった分、
+  // #535 で直した）——それが合流結果で初めて検査に掛かり、
+  // `generate-gdg-dark-media.mjs` まで巻き添えで CI 全体が赤くなった
+  // ように見えた。
+  //
+  // `types: ["node"]` と `@types/node`（`package.json`）はここでは
+  // 必須ではないが、**予防として残してある**——将来 `__dirname` のような
+  // import 無しの Node グローバルを使うファイルが来たときに備えて。
+  // **範囲を広げる変更をするときは、自分が持たないファイルも含めて
+  // 全部通るか先に測ること。**
   "extends": "../config/tsconfig.lib.json",
   "compilerOptions": {
     "lib": ["ES2022"],
