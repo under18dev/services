@@ -2,12 +2,7 @@
   "extends": "../config/tsconfig.lib.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx",
-    // `scripts/lib/gdg-dark-media.mjs`（GDG デザイン移行 PR1）を
-    // `test/gdg-dark-media.test.ts` から読むため。`// @ts-check` を付けた
-    // ファイルだけ検査され、他の `.js`/`.mjs` 全部が対象になるわけではない
-    // （`checkJs` は立てていない）。
-    "allowJs": true
+    "jsxImportSource": "hono/jsx"
   },
   // **`src/client/**` は入れない。** あそこはブラウザでしか動かず DOM 型が要る。
   // この package は Worker 側からも読まれるので、DOM を lib に足すと
@@ -19,7 +14,6 @@
     "src/*.tsx",
     "src/kiwa/*.ts",
     "src/kiwa/*.tsx",
-    "scripts/**/*.mjs",
     "test/**/*.ts",
     "vitest.config.ts"
   ]
