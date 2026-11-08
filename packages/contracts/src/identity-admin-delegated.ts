@@ -90,6 +90,21 @@ export type RevokeUserSessionsDelegatedInput = z.infer<
 >;
 export type RevokeUserSessionsDelegatedResult = RpcResult<{ readonly revokedSessions: number }>;
 
+// ----------------------------------------------------------------- deleteUser
+
+/**
+ * 利用者の行を物理的に消す（運用者判断、2026-11-08。改訂の docs は #553）。
+ * **戻せない。** `suspendUser` 等と
+ * 同じく `actorUserId` の実在だけを確かめる——認可の境界は Service
+ * Binding そのもの（ファイル冒頭）。
+ */
+export const deleteUserDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  userId: z.string().min(1).max(64),
+});
+export type DeleteUserDelegatedInput = z.infer<typeof deleteUserDelegatedInputSchema>;
+export type DeleteUserDelegatedResult = RpcResult<Record<string, never>>;
+
 // ------------------------------------------------------------------ getUser
 
 /**
@@ -359,6 +374,7 @@ export const OPERATOR_ACTION_EVENTS = [
   "ops.user.suspended",
   "ops.user.reinstated",
   "ops.user.sessions_revoked",
+  "ops.user.deleted",
   "oauth.client.created",
   "oauth.client.disabled",
   "oauth.client.owner_changed",
@@ -413,6 +429,8 @@ export interface IdentityAdminDelegatedRpcContract {
   revokeUserSessions(
     input: RevokeUserSessionsDelegatedInput,
   ): Promise<RevokeUserSessionsDelegatedResult>;
+  /** 戻せない（運用者判断、2026-11-08）。`conflict` は自分自身を対象にしたとき。 */
+  deleteUser(input: DeleteUserDelegatedInput): Promise<DeleteUserDelegatedResult>;
   listOAuthClients(input: ListOAuthClientsDelegatedInput): Promise<ListOAuthClientsDelegatedResult>;
   /**
    * クライアント 1 件だけを引く（#473）。**`getUser` と同じ扱い**——

@@ -45,6 +45,29 @@ export async function expectUniqueViolation(run: () => Promise<unknown>): Promis
 }
 
 /**
+ * 外部キー違反で落ちたことを確かめる。**`expectUniqueViolation` と同じ
+ * 理由で `cause` を辿る。** 「`delete` が落ちた」ことだけを見ると、
+ * 無関係な理由（NOT NULL 違反など）で落ちていても通ってしまう。
+ */
+export async function expectForeignKeyViolation(run: () => Promise<unknown>): Promise<void> {
+  let thrown: unknown;
+  try {
+    await run();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown, "クエリが成功してしまった").toBeDefined();
+
+  const messages: string[] = [];
+  let current: unknown = thrown;
+  while (current instanceof Error) {
+    messages.push(current.message);
+    current = current.cause;
+  }
+  expect(messages.join(" / ")).toMatch(/FOREIGN KEY constraint failed/i);
+}
+
+/**
  * レート制限の窓の**境界を跨がない**位置から始める（#176）。
  *
  * ## なぜ要るのか

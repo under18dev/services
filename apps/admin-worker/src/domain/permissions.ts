@@ -44,6 +44,15 @@ export const PERMISSION_BITS = {
    * 無条件バイパス」までは持たない。
    */
   APPROVAL_GRANT: 1n << 7n,
+  /**
+   * 利用者の行を物理的に削除してよい（運用者判断、2026-11-08）。
+   *
+   * **`USER_SUSPEND` を再利用しない。** 凍結は可逆（`reinstateUser` で
+   * 戻せる）だが、物理削除は戻せない——決定 7（凍結で表現し、物理削除
+   * しない）を運用者が明示的に覆してまで作る操作である。同じビットに
+   * 載せると、「凍結だけ任せたつもり」の相手に削除まで渡ることになる。
+   */
+  USER_DELETE: 1n << 8n,
 } as const satisfies Record<string, bigint>;
 
 export type PermissionBitName = keyof typeof PERMISSION_BITS;

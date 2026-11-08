@@ -161,7 +161,7 @@ export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`
  * | --- | --- | --- |
  * | 一覧の各行に 1 つずつ並ぶ破壊的操作 | `DANGER_BUTTON_CLASS` | — |
  * | **戻せる操作**（やり直せば元に戻る） | `DANGER_BUTTON_CLASS` | `POST /users/:userId/revoke-sessions`（`user-detail-page.tsx`「ログイン中の端末を全部切る」）。セッションを切られた人はログインし直せば戻れる——不便だが失われるものが無い |
- * | **戻せない確定操作・確認カードの最終ボタン** | `getButtonClasses("destructive", ...)` | `approvals-page.tsx` の確認カードにある「本当に剥奪する」（`action="/approvals/:sub/revoke"`、`confirm=true` を携えた 2 段目）。`client-detail-page.tsx` の確認カードの「本当に失効させる」（`POST /clients/disable`、`confirm=true` を携えた 2 段目）も同じ |
+ * | **戻せない確定操作・確認カードの最終ボタン** | `getButtonClasses("destructive", ...)` | `approvals-page.tsx` の確認カードにある「本当に剥奪する」（`action="/approvals/:sub/revoke"`、`confirm=true` を携えた 2 段目）。`client-detail-page.tsx` の確認カードの「本当に失効させる」（`POST /clients/disable`、`confirm=true` を携えた 2 段目）も同じ。`user-detail-page.tsx` の確認カードの「本当に削除する」（`POST /users/:userId/delete`、`confirm=true` を携えた 2 段目、利用者の物理削除）も同じ |
  * | **戻せない確定操作・確認を挟まず 1 クリックで確定するもの** | `getButtonClasses("destructive", ...)` | いまのところ例は無い。`client-detail-page.tsx` の「失効させる」が以前ここにあったが、対になる enable ルートが無く元に戻せないことが分かり、確認段を挟む形に直した（指摘: 3b）——見つけたらここに足すこと |
  *
  * 「単独で出る確定操作だから塗り」という最初の案は、`revoke-sessions` で

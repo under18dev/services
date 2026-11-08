@@ -192,6 +192,8 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
    * 2 段階目: 実行）を兼ねる——`/nfc/batch-disable` と同じ形。
    */
   { method: "POST", path: "/users/:userId/disable-cards" },
+  /** 利用者の行を物理削除する（運用者判断、2026-11-08）。2 段階確認。 */
+  { method: "POST", path: "/users/:userId/delete" },
   { method: "POST", path: "/audit/search" },
   // 承認者・権限の管理（#190）。
   { method: "POST", path: "/approvals" },

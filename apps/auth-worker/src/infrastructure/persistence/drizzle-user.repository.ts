@@ -1,4 +1,16 @@
-import { type IdentityDatabase, userEmails, users } from "@u18/db";
+import {
+  emailChallenges,
+  type IdentityDatabase,
+  oauthAuthorizationCodes,
+  oauthClients,
+  oauthGrants,
+  oauthTokens,
+  passkeys,
+  sessions,
+  userEmails,
+  users,
+  webauthnChallenges,
+} from "@u18/db";
 import { newId, newUserId } from "@u18/domain";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type {
@@ -380,5 +392,105 @@ export class DrizzleUserRepository implements UserRepository {
     const result = { active: 0, suspended: 0, deleted: 0 };
     for (const row of rows) result[row.status] = row.count;
     return result;
+  }
+
+  /**
+   * 行そのものを消す（運用者判断、2026-11-08）。**CASCADE に頼らない。**
+   *
+   * `sessions` / `passkeys` / `oauth_tokens` / `oauth_grants` /
+   * `oauth_authorization_codes` / `webauthn_challenges` /
+   * `email_challenges` / `user_emails` はすべて `onDelete: "cascade"` を
+   * 持つが、**本番 D1 で `PRAGMA foreign_keys` が有効かどうかを実測する
+   * 手段が無い**（b6 の調査、2026-11-08。`src/` のどこにも pragma を
+   * 立てるコードが無く、立てているのはテストファイル 3 本だけで、しかも
+   * 毎回 delete の直前に明示している——黙っていると効かない前提で
+   * 書かれている）。CASCADE が発火しなければ、これらの行は `NEVER_SWEPT`
+   * （`passkeys` / `oauth_grants` 等、自動掃除の対象外）のまま**永久に
+   * 孤児として残る**——しかも `users` の行自体は消えているので、後から
+   * 洗い出す手段が無い。物理削除の目的そのものが達成されない。
+   *
+   * **なので `purge-user.sql.ts`（`revokeEverythingSql` /
+   * `deleteUserEmailsSql`）と同じ考え方で、CASCADE に頼らず全部を
+   * 明示的に消す。** `PRAGMA foreign_keys` の値に関係なく正しく動く形
+   * （どちらの実測が正しくても成り立つ）。
+   *
+   * `webauthn_challenges` / `email_challenges` は `purge-user.sql.ts` の
+   * 対象に入っていない——あちらは `users` の行を残すので、自動掃除
+   * （`RetentionPolicy`）に任せてよかった。**物理削除ではその前提が外れる**
+   * （行自体が無くなるので、残った challenge 行は誰のものか辿れなくなる）
+   * ので、ここでは対象に含める。
+   *
+   * ## `oauth_clients.owner_user_id` は別枠
+   *
+   * `onDelete` を持たない唯一の参照（schema の注釈を参照）。消さずに
+   * `null` へ戻す——持ち主が消えただけでログインの宛先を失わせる理由が
+   * 無いため。CASCADE の有無に関係なく、ここを先に手当てしないと
+   * `users` の削除自体が（FK が有効な環境では）失敗する。
+   *
+   * ## 1 つの batch にまとめる
+   *
+   * 子テーブルの削除・owner の null 化・本体の削除を 1 つの
+   * `d1.batch()` に入れる——implicit transaction なので、途中で失敗
+   * すれば全体が巻き戻る。「子テーブルだけ消えて本体が残る」中途半端な
+   * 状態を作らない。
+   *
+   * `returning` で実際に消えた行だけを見る。対象が無ければ 0 行で `false`。
+   *
+   * ## `active` な行には、どの文も当たらない
+   *
+   * 運用者の判断（2026-11-08）: 削除できるのは `suspended` / `deleted` の
+   * 行だけで、`active` はまず凍結（`setStatus`）を挟むこと。**`users` の
+   * DELETE だけを条件で縛ると、8 つの子テーブルは無条件のまま残り、
+   * `active` な利用者に対して呼んでも「本体は残るがセッション・Passkey・
+   * トークンは消える」という中途半端な破壊が起きる。** それを避けるため、
+   * `targetIsDeletable`（「この id の行が存在し、かつ `active` ではない」
+   * という相関の無いサブクエリ）を 10 文すべての条件に入れる——
+   * `active` なら batch 全体が 1 行も変えずに終わる。
+   */
+  async deletePermanently(id: string): Promise<boolean> {
+    // 10 文すべてで使い回す。`id` 自体は固定値なので、どの行を見ていても
+    // 結果は変わらない（相関サブクエリではない）。
+    const targetIsDeletable = sql`exists (
+      select 1 from ${users} where ${users.id} = ${id} and ${users.status} <> 'active'
+    )`;
+
+    // **名前を付けて取り出す。** カンマを数えて要素を飛ばす分割代入は、
+    // 文を 1 つ増減したときに数え間違えて違う結果を拾う事故につながる
+    // ——使わない結果にも `_` で始まる名前を付け、見るべきものが
+    // `deletedUserRows` だけだと分かるようにする。
+    const [
+      _deletedSessions,
+      _deletedPasskeys,
+      _deletedWebauthnChallenges,
+      _deletedEmailChallenges,
+      _deletedOauthTokens,
+      _deletedOauthGrants,
+      _deletedOauthAuthorizationCodes,
+      _deletedUserEmails,
+      _ownerNulled,
+      deletedUserRows,
+    ] = await this.db.batch([
+      this.db.delete(sessions).where(and(eq(sessions.userId, id), targetIsDeletable)),
+      this.db.delete(passkeys).where(and(eq(passkeys.userId, id), targetIsDeletable)),
+      this.db
+        .delete(webauthnChallenges)
+        .where(and(eq(webauthnChallenges.userId, id), targetIsDeletable)),
+      this.db.delete(emailChallenges).where(and(eq(emailChallenges.userId, id), targetIsDeletable)),
+      this.db.delete(oauthTokens).where(and(eq(oauthTokens.userId, id), targetIsDeletable)),
+      this.db.delete(oauthGrants).where(and(eq(oauthGrants.userId, id), targetIsDeletable)),
+      this.db
+        .delete(oauthAuthorizationCodes)
+        .where(and(eq(oauthAuthorizationCodes.userId, id), targetIsDeletable)),
+      this.db.delete(userEmails).where(and(eq(userEmails.userId, id), targetIsDeletable)),
+      this.db
+        .update(oauthClients)
+        .set({ ownerUserId: null })
+        .where(and(eq(oauthClients.ownerUserId, id), targetIsDeletable)),
+      this.db
+        .delete(users)
+        .where(and(eq(users.id, id), targetIsDeletable))
+        .returning({ id: users.id }),
+    ]);
+    return deletedUserRows.length > 0;
   }
 }

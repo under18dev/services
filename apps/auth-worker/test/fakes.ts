@@ -179,6 +179,20 @@ export class InMemoryUserRepository implements UserRepository {
     for (const props of this.store.values()) result[props.status]++;
     return result;
   }
+
+  /**
+   * 行そのものを消す（運用者判断、2026-11-08）。**`oauth_clients.owner_user_id` の
+   * 付け替えは、このフェイクの責務の外。** 本物は `UserRepository` 単体の
+   * batch で済ませているので、ここも行の有無だけを見れば UseCase の
+   * テスト（自分自身ガード・監査）には足りる。CASCADE と owner の付け替え
+   * そのものは実物の D1 でしか確かめられない
+   * （`user-repository.test.ts` を参照）。
+   */
+  async deletePermanently(id: string): Promise<boolean> {
+    const props = this.store.get(id);
+    if (props === undefined || props.status === "active") return false;
+    return this.store.delete(id);
+  }
 }
 
 export class InMemorySessionRepository implements SessionRepository {

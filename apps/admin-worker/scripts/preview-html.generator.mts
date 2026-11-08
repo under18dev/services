@@ -621,6 +621,7 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
   suspendUser: unused("suspendUser"),
   reinstateUser: unused("reinstateUser"),
   revokeUserSessions: unused("revokeUserSessions"),
+  deleteUser: unused("deleteUser"),
   createOAuthClient: unused("createOAuthClient"),
   disableOAuthClient: unused("disableOAuthClient"),
   setOAuthClientOwner: unused("setOAuthClientOwner"),
