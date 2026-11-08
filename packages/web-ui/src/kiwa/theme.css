@@ -59,6 +59,14 @@
  * 4. **`.bg-primary-mesh` を持ってきていないのは変わらない。** 中身が
  *    グラデーションで、design.md の "No gradients." に当たる。
  *
+ * 5. **角丸の対応表を直した（PR4、issue #535）。** PR1 で `--radius-lg` に
+ *    `--gdg-radius-card`（28px）を当てていたが、GDG 自身のボタン・入力欄
+ *    （vendored `../gdg/components.css` の `.gdg-button` / `.gdg-input`）
+ *    は 28px を使っていない——GDG 内部の命名（`tailwind.css`）をそのまま
+ *    踏襲したのが原因で、u18 のボタン・入力欄が 28px になり、高さ
+ *    36〜40px の要素がピル形に見える欠陥になっていた（b6 の 17 画面監査）。
+ *    詳細・根拠の行番号は `@theme inline` 側のコメントを参照。
+ *
  * ## `@source` はここに書かない
  *
  * どのファイルを走査するかは**使う側が決める**（`apps/dashboard-worker/
@@ -76,17 +84,48 @@
   --font-mono: var(--font-mono-stack);
 
   /*
-   * GDG の角丸スケール。4 段のうち 3 段（sm/md/card）は名前も意味も
-   * Tailwind の既定スケールと衝突しないため、GDG 自身の `tailwind.css` の
-   * 対応表（`--radius-lg: var(--gdg-radius-card)` 等）をそのまま踏襲した。
+   * GDG の角丸スケール（GDG 移行 PR4、issue #535 の続き）。
+   *
+   * **もとの対応表は間違っていた。** PR1 時点では GDG 自身の
+   * `tailwind.css`（u18 側には無い、GDG 内部のユーティリティ命名）が持つ
+   * 「`--radius-lg` は `--gdg-radius-card`」という対応をそのまま踏襲した
+   * ——だが GDG 側の `--radius-lg` という**名前**は、GDG の実コンポーネント
+   * が実際に使っている段とは別物だった。u18 の Kiwa は `card.tsx` が
+   * `rounded-xl`、ボタン・入力欄が `rounded-lg` を使う設計で、こちらの
+   * 「どの見た目の要素がどの段か」を、GDG の名前ではなく**GDG が実際に
+   * 使っている値**で揃える必要がある。
+   *
+   * 根拠は vendored `../gdg/components.css`（無改変）の実際の宣言:
+   *   - `.gdg-button`（L71）・`.gdg-input`（L322）: `var(--gdg-radius-md)` = 18px
+   *   - `.gdg-card`（L220）: `var(--gdg-radius-card)` = 28px
+   * つまり GDG 自身はボタンに 28px を使っていない。u18 のボタン/入力欄
+   * （`rounded-lg`）には `.gdg-button`/`.gdg-input` と同じ `radius-md`
+   * （18px）を、カード（`rounded-xl`）には `.gdg-card` と同じ `radius-card`
+   * （28px）を当てる。これで `md(18) ≤ lg(18) < xl(28) < 2xl(32)` になり、
+   * 両端が GDG の実値と一致する（旧対応表は `lg(28) > xl(24)` とスケールが
+   * 逆転していた）。
+   *
+   * **上の行番号は vendored ファイルの更新でズレる。** `../gdg/
+   * gdg-vendor-integrity.test.ts` が `components.css` を SHA-256 で固定
+   * しているので、ズレる更新は必ずそちらのテストが先に落ちる——行番号が
+   * 古くなっていたら、まずあのテストを通してから直すこと。
+   *
+   * `--radius-md` は据え置き（`var(--gdg-radius-md)`、18px のまま）。
+   * `rounded-md` の実使用箇所（`badge.tsx` / `button.tsx` の xs サイズ /
+   * admin-worker の tooltip、高さはどれも 20〜28px）は、半径が高さの半分を
+   * 超えると自動的に全周ピルへ丸められるため、14px に落としても 18px の
+   * ままでもレンダリング結果は変わらない——実際にブラウザで測って確認
+   * 済み。`rounded-md` と `rounded-lg` が同値になるが、同じ要素に両方が
+   * 同時使用される箇所は無い（ボタンは常に一方のサイズだけを使う）。
+   *
    * `xs` だけは GDG に下位の段が無いので、sm から 1 段引いた値を
    * こちら側で作っている（GDG 不在のぶん、値の由来はここにしか無い）。
    */
   --radius-xs: calc(var(--gdg-radius-sm) - 4px);
   --radius-sm: var(--gdg-radius-sm);
   --radius-md: var(--gdg-radius-md);
-  --radius-lg: var(--gdg-radius-card);
-  --radius-xl: calc(var(--gdg-space) * 6);
+  --radius-lg: var(--gdg-radius-md);
+  --radius-xl: var(--gdg-radius-card);
   --radius-2xl: var(--gdg-radius-dialog);
 
   --color-background: var(--background);
