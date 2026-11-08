@@ -59,11 +59,6 @@ import { UserRef } from "./user-ref";
  * その人のものになる。** 下の `<textarea>` はその ID を URL の形で
  * 並べたもので、配布物そのものと同じ扱いにしなければならない。
  *
- * ## 表が主役なので幅を広く取る（運用者の指摘）
- *
- * `maxWidth="max-w-6xl"` を渡す。`/account` 側の `max-w-3xl` に合わせる
- * 理由が無い——あちらは 1 カラムの設定画面、こちらは列の多い表である。
- *
  * ## 遷移先 URL をリンクにしない（移行元と同じ理由）
  *
  * `target_url` は**利用者が自由に入れた外部 URL** である。運営は
@@ -311,7 +306,6 @@ export const NfcPage: FC<NfcPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="NFC カード"
     lead="カード ID を押すと詳細が開き、無効化・復帰・手放す・遷移先の変更はそこから行います。この画面は検索・並べ替え・選択しての一括操作が主な役目です。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     <p class={ITEM_META_CLASS}>

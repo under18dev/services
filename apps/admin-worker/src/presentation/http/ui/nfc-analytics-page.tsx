@@ -554,7 +554,6 @@ export const NfcAnalyticsPage: FC<NfcAnalyticsPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="NFC 解析"
     lead="発行・引き取り・使用のされ方です。期間は右上のリンクで切り替えられます。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     <TapTimeseriesSection days={days} timeseries={timeseries} />

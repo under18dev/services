@@ -158,7 +158,6 @@ export const UsersPage: FC<UsersPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="利用者"
     lead="表示名を押すと詳細が開き、停止・停止の解除・ログイン中の端末を全部切るはそこから行います。この画面は検索・並べ替えが主な役目です。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (

@@ -616,7 +616,6 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="利用者の詳細"
     lead="状態と記録を確かめてから、同じ画面で操作できます。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     {/*
