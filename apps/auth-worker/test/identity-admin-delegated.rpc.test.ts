@@ -3,6 +3,7 @@ import { createExecutionContext, env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { IdentityAdminDelegatedRPC } from "../src/presentation/rpc/identity-admin-delegated.entrypoint";
+import { purgeUserSql } from "../src/infrastructure/persistence/purge-user.sql";
 import { resetDatabase } from "./helpers";
 import { appEnv, db, seedClient, seedLoggedInUser, type SeededUser } from "./helpers.oauth";
 
@@ -469,7 +470,34 @@ describe("suspendUser / reinstateUser / revokeUserSessions", () => {
 describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
   it("削除でき、行が実際に消える（レスポンスではなく DB で確認する）", async () => {
     const admin: SeededUser = await seedLoggedInUser();
+    // 凍結済みでなければ消せない（運用者判断、2026-11-08）。
+    const target: SeededUser = await seedLoggedInUser({ status: "suspended" });
+
+    const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
+
+    expect(result.ok).toBe(true);
+    const row = await db().select().from(users).where(eq(users.id, target.userId)).get();
+    expect(row).toBeUndefined();
+  });
+
+  it("active な利用者は削除できない。先に凍結が要る（conflict）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const target: SeededUser = await seedLoggedInUser(); // 既定は active。
+
+    const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
+
+    expect(!result.ok && result.error.code).toBe("conflict");
+    // 行は消えずに残る——子テーブルも含めて何も変わっていないこと。
+    const row = await db().select().from(users).where(eq(users.id, target.userId)).get();
+    expect(row).toBeDefined();
+  });
+
+  it("deleted（purge 済み）の利用者も削除できる", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
     const target: SeededUser = await seedLoggedInUser();
+    // purge は status を 'deleted' にする（`purgeUserSql`）。ガードは
+    // `status <> 'deleted'` だけなので active からでも直接 purge できる。
+    await env.IDENTITY_DB.prepare(purgeUserSql(target.userId)).run();
 
     const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
 
@@ -502,7 +530,7 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
 
   it("削除は監査に残る。userId は対象者本人、実行者は metadata", async () => {
     const admin: SeededUser = await seedLoggedInUser();
-    const target: SeededUser = await seedLoggedInUser();
+    const target: SeededUser = await seedLoggedInUser({ status: "suspended" });
 
     await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
 
@@ -536,7 +564,7 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
   it("クライアントを所有している利用者の削除が成功する（owner_user_id が null になり、クライアントは残る）", async () => {
     // **ここを測らないと、FK で落ちる経路が本番で初めて出る。**
     const admin: SeededUser = await seedLoggedInUser();
-    const target: SeededUser = await seedLoggedInUser();
+    const target: SeededUser = await seedLoggedInUser({ status: "suspended" });
     const client = await seedClient({
       clientId: "owned-by-target",
       clientType: "public",

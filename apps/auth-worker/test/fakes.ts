@@ -189,6 +189,8 @@ export class InMemoryUserRepository implements UserRepository {
    * （`user-repository.test.ts` を参照）。
    */
   async deletePermanently(id: string): Promise<boolean> {
+    const props = this.store.get(id);
+    if (props === undefined || props.status === "active") return false;
     return this.store.delete(id);
   }
 }

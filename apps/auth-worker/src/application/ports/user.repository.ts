@@ -140,16 +140,32 @@ export interface UserRepository {
    * `owner_user_id` は `users.id` を参照するが `onDelete` を持たない
    * （`packages/db/src/schema/oauth.ts` の注釈——決定 7 を前提に、参照先が
    * 消えて空振りする経路は無いはずだった）。そのままでは `delete from users`
-   * が FK 違反で落ちる。**クライアントの行は消さない**——持ち主が消えた
-   * だけでログインの宛先を失わせる理由が無いので、`owner_user_id` を
-   * `null` に戻してから本体を消す。2 文は `d1.batch()` でまとめ、
-   * 「owner だけ外れて user は残る」中途半端な状態を作らない。
+   * が FK 違反で落ちる（本番で FK が強制されている場合）。**クライアントの
+   * 行は消さない**——持ち主が消えただけでログインの宛先を失わせる理由が
+   * 無いので、`owner_user_id` を `null` に戻してから本体を消す。
    *
-   * ## 他のテーブルは CASCADE に任せる
+   * ## 他のテーブルは CASCADE に任せない
    *
-   * セッション・Passkey・`user_emails`・認可コード・同意・トークンは
-   * すべて `onDelete: "cascade"` を持つので、この 1 文で一緒に消える
-   * （`packages/db/src/schema` を参照）。
+   * `sessions` / `passkeys` / `oauth_tokens` / `oauth_grants` /
+   * `oauth_authorization_codes` / `webauthn_challenges` /
+   * `email_challenges` / `user_emails` はすべて `onDelete: "cascade"` を
+   * 持つが、**本番 D1 で `PRAGMA foreign_keys` が有効かどうかを実測する
+   * 手段が無い**（b6 の調査、2026-11-08）。`src/` のどこにも pragma を
+   * 立てるコードが無く、立てているのはテストファイルだけで、しかも毎回
+   * delete の直前に明示している——黙っていると効かない前提で書かれて
+   * いる。CASCADE が発火しなければ、これらの行は `NEVER_SWEPT` のまま
+   * 永久に孤児として残り、しかも `users` の行自体が消えるので後から
+   * 洗い出す手段が無い。**`purge-user.sql.ts`（`revokeEverythingSql`）
+   * と同じ考え方で、CASCADE に頼らず全部を明示的に消す。** `PRAGMA
+   * foreign_keys` の値に関係なく正しく動く形にする。
+   *
+   * `webauthn_challenges` / `email_challenges` は `purge-user.sql.ts` の
+   * 対象に入っていない——あちらは `users` の行を残すので自動掃除に
+   * 任せてよかった。物理削除ではその前提が外れるので、ここでは含める。
+   *
+   * 子テーブルの削除・owner の null 化・本体の削除は 1 つの
+   * `d1.batch()` にまとめる——implicit transaction なので、途中で失敗
+   * すれば全体が巻き戻り、中途半端な状態を作らない。
    *
    * ## 残るもの
    *
@@ -159,7 +175,19 @@ export interface UserRepository {
    * `admin_approvals.sub` も別 D1 で FK を持たず、ここからは触れない
    * （別の Worker・別のマイグレーションの範囲）。
    *
-   * 対象が存在しなければ `false`。呼ぶ側はそれを `not_found` に訳す。
+   * ## `active` は対象にしない
+   *
+   * 運用者の判断（2026-11-08）: 削除できるのは `suspended` /
+   * `deleted` の行だけ。`active` な行は、先に凍結（`setStatus`）を
+   * 挟むこと。**存在確認と同じ条件（1 文）で縛る**——`active` な
+   * 利用者に対して呼んでも、本体はおろか子テーブルの行も 1 つも
+   * 変わらない（中途半端にセッションだけ消える、という状態を作らない）。
+   *
+   * 対象が存在しない・または `active` なら `false`。呼ぶ側はそのどちらかを
+   * 区別する必要があれば、失敗したときだけ `findById` で引き直すこと
+   * （`updateProfile` が `username_taken` と `not_found` を区別するのと
+   * 同じ形——判定そのものは 1 文の原子性に任せ、読み直しはメッセージの
+   * ためだけに使う）。
    */
   deletePermanently(id: string): Promise<boolean>;
 }

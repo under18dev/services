@@ -279,6 +279,7 @@ describe("DrizzleUserRepository.deletePermanently", () => {
         displayName: fixture.displayName,
         primaryEmail: fixture.email,
         emailVerified: fixture.emailVerified,
+        status: fixture.status,
       })
       .run();
   }
@@ -287,8 +288,26 @@ describe("DrizzleUserRepository.deletePermanently", () => {
     expect(await repo.deletePermanently("usr_does_not_exist")).toBe(false);
   });
 
-  it("CASCADE が効く行はすべて消え、FK を持たない行は残る。oauth_clients は owner だけ外れて残る", async () => {
-    const victim = aUser({ username: "to_be_deleted" });
+  it("active な行には当たらない（運用者判断、2026-11-08: 先に凍結が要る）", async () => {
+    const victim = aUser({ username: "still_active" }); // 既定が active。
+    await insertUser(victim);
+
+    expect(await repo.deletePermanently(victim.id)).toBe(false);
+    // 行は手付かずで残る。
+    const row = await db().select().from(users).where(eq(users.id, victim.id)).get();
+    expect(row).toBeDefined();
+  });
+
+  it("deleted（purge 済み）な行にも当たる", async () => {
+    const victim = aUser({ username: "already_purged", status: "deleted" });
+    await insertUser(victim);
+
+    expect(await repo.deletePermanently(victim.id)).toBe(true);
+    expect(await db().select().from(users).where(eq(users.id, victim.id)).get()).toBeUndefined();
+  });
+
+  it("CASCADE に頼らず手で子テーブルを消す。FK を持たない行は残る。oauth_clients は owner だけ外れて残る", async () => {
+    const victim = aUser({ username: "to_be_deleted", status: "suspended" });
     await insertUser(victim);
 
     const client = "cli_owned_by_victim";
@@ -427,11 +446,14 @@ describe("DrizzleUserRepository.deletePermanently", () => {
       })
       .run();
 
-    // **外部キーを明示的に強制する。** `session-repository.test.ts` /
-    // `oauth-client.repository.test.ts` / `passkey-repository.test.ts` と
-    // 同じ理由——これが無いと CASCADE も FK 違反も起きず、この describe の
-    // 検査が土台から効かなくなる（3b の指摘、2026-11-08）。
-    await env.IDENTITY_DB.prepare("pragma foreign_keys = on").run();
+    // **このテストは「最終的に消えている」ことしか見ない。** `pragma
+    // foreign_keys = off` で CASCADE を止めて検査しようとしたが、実測した
+    // ところこの環境では `off` にしても `pragma foreign_keys` の読み戻しが
+    // `1`（有効）のままで、**外部キーを無効化する手段が無かった**
+    // （b6 の調査・3b の指摘、2026-11-08）。つまりこのテストは CASCADE が
+    // 黙って肩代わりしても緑になる——「手で消した」ことの決定的な証拠には
+    // ならない。その証拠は下の「子テーブルの DELETE は、親の users 行が
+    // 残っていても効く」が担う（親を消さないので CASCADE の出る幕が無い）。
 
     const deleted = await repo.deletePermanently(victim.id);
     expect(deleted).toBe(true);
@@ -439,7 +461,8 @@ describe("DrizzleUserRepository.deletePermanently", () => {
     // 本体が消える。
     expect(await db().select().from(users).where(eq(users.id, victim.id)).get()).toBeUndefined();
 
-    // CASCADE が効く範囲を 1 つずつ数える。「消えたはず」で済ませない。
+    // 子テーブルが消えたことを 1 つずつ数える。CASCADE は off にしてある
+    // ので、消えているなら手で消した証拠になる。「消えたはず」で済ませない。
     expect(
       await db().select().from(sessions).where(eq(sessions.userId, victim.id)).all(),
     ).toHaveLength(0);
@@ -495,6 +518,194 @@ describe("DrizzleUserRepository.deletePermanently", () => {
       .where(eq(auditLogs.userId, victim.id))
       .all();
     expect(auditRows.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **CASCADE に credit を奪わせない、決定的な検査。**
+   *
+   * 上のテストだけでは不十分だった——実測したところ、この環境では
+   * `pragma foreign_keys = off` を実行しても `pragma foreign_keys` の
+   * 読み戻しが `1`（有効）のままで、**明示的に無効化する手段が無い**
+   * （b6 / 3b への報告事項）。つまり CASCADE は常に効いており、
+   * `deletePermanently` から子テーブルの DELETE 文を 1 つ消しても、
+   * CASCADE が黙って肩代わりしてこのテストファイルの他のテストは
+   * 緑のまま通ってしまう（実際に確認した）。「検査は空でも緑になる」の
+   * 一段深い形——検査の土台そのものが、見たいもの以外の経路でも
+   * 同じ結果を作ってしまう。
+   *
+   * ここでは **`users` の行を消さずに**、`deletePermanently` が子テーブルを
+   * 消せることだけを確かめる。親の行が存在し続ける以上、CASCADE が
+   * 発火する余地は無い——消えたなら、それは `deletePermanently` 自身の
+   * 明示的な DELETE 文によるものだと言い切れる。
+   *
+   * `deletePermanently` を丸ごと呼ぶとどうしても `users` も一緒に消えて
+   * しまうので、ここだけは本体の実装と同じ 8 文を直接組み立てる
+   * （drizzle-user.repository.ts の `deletePermanently` と意図的に
+   * 重複させている——対象のテーブルが増減したら、この一覧も合わせて
+   * 直すこと。ずれたままになる心配があるなら、本体側を「子テーブルの
+   * 一覧」として外へ出す設計に変えること）。
+   *
+   * **`targetIsDeletable`（`active` を除外する条件）はここに写していない。**
+   * この一覧は「cascade に頼らず手で消しているか」だけを見るためのもので、
+   * `active` ガードは別のテスト（「active な行には当たらない」）が見る
+   * ——2 つの関心を 1 つのテストに混ぜない。victim の `status` は
+   * `aUser` の既定（`active`）のままで構わない。
+   */
+  it("子テーブルの DELETE は、親の users 行が残っていても効く（CASCADE では説明できない）", async () => {
+    const victim = aUser({ username: "attribution_check" });
+    await insertUser(victim);
+
+    await db()
+      .insert(sessions)
+      .values({
+        id: "ses_attr",
+        userId: victim.id,
+        tokenHash: "hash-attr",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        authMethod: "email_otp",
+        lastSeenAt: new Date(),
+      })
+      .run();
+    await db()
+      .insert(passkeys)
+      .values({
+        id: "pk_attr",
+        userId: victim.id,
+        credentialId: "cred-attr",
+        publicKey: "pub-attr",
+      })
+      .run();
+    await db()
+      .insert(webauthnChallenges)
+      .values({
+        id: "wch_attr",
+        userId: victim.id,
+        challenge: "challenge-attr",
+        purpose: "registration",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      })
+      .run();
+    await db()
+      .insert(emailChallenges)
+      .values({
+        id: "ech_attr",
+        userId: victim.id,
+        email: victim.email,
+        codeHash: "hash-otp-attr",
+        purpose: "login",
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      })
+      .run();
+    const client = "cli_attr";
+    await db()
+      .insert(oauthClients)
+      .values({
+        id: client,
+        clientId: "attr-client",
+        name: "attribution check",
+        clientType: "public",
+        allowedScopes: "openid",
+        isFirstParty: false,
+      })
+      .run();
+    await db()
+      .insert(oauthGrants)
+      .values({
+        id: "grt_attr",
+        userId: victim.id,
+        clientId: client,
+        grantedScopes: "openid",
+        grantedAt: new Date(),
+      })
+      .run();
+    await db()
+      .insert(oauthAuthorizationCodes)
+      .values({
+        id: "code_attr",
+        codeHash: "hash-code-attr",
+        clientId: client,
+        userId: victim.id,
+        redirectUri: "https://app.example/cb",
+        scope: "openid",
+        codeChallenge: "challenge",
+        codeChallengeMethod: "S256",
+        authTime: new Date(),
+        expiresAt: new Date(Date.now() + 60 * 1000),
+      })
+      .run();
+    await db()
+      .insert(oauthTokens)
+      .values({
+        id: "tok_attr",
+        tokenHash: "hash-token-attr",
+        grantId: "grt_attr",
+        clientId: client,
+        userId: victim.id,
+        scope: "openid",
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      })
+      .run();
+    await db()
+      .insert(userEmails)
+      .values({
+        id: "uem_attr",
+        userId: victim.id,
+        email: victim.email,
+        verifiedAt: new Date(),
+        isPrimary: true,
+      })
+      .run();
+
+    // **本体の `deletePermanently` と同じ 8 文を、`users` の DELETE だけ
+    // 外して流す。** 親の行は意図的に残す。
+    await db().batch([
+      db().delete(sessions).where(eq(sessions.userId, victim.id)),
+      db().delete(passkeys).where(eq(passkeys.userId, victim.id)),
+      db().delete(webauthnChallenges).where(eq(webauthnChallenges.userId, victim.id)),
+      db().delete(emailChallenges).where(eq(emailChallenges.userId, victim.id)),
+      db().delete(oauthTokens).where(eq(oauthTokens.userId, victim.id)),
+      db().delete(oauthGrants).where(eq(oauthGrants.userId, victim.id)),
+      db().delete(oauthAuthorizationCodes).where(eq(oauthAuthorizationCodes.userId, victim.id)),
+      db().delete(userEmails).where(eq(userEmails.userId, victim.id)),
+    ]);
+
+    // 親の行は手付かずで残っている——CASCADE が発火する前提（親の削除）
+    // がそもそも起きていない。
+    expect(await db().select().from(users).where(eq(users.id, victim.id)).get()).toBeDefined();
+
+    // それでも子テーブルは全部消えている。CASCADE では説明できない。
+    expect(
+      await db().select().from(sessions).where(eq(sessions.userId, victim.id)).all(),
+    ).toHaveLength(0);
+    expect(
+      await db().select().from(passkeys).where(eq(passkeys.userId, victim.id)).all(),
+    ).toHaveLength(0);
+    expect(
+      await db()
+        .select()
+        .from(webauthnChallenges)
+        .where(eq(webauthnChallenges.userId, victim.id))
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      await db().select().from(emailChallenges).where(eq(emailChallenges.userId, victim.id)).all(),
+    ).toHaveLength(0);
+    expect(
+      await db()
+        .select()
+        .from(oauthAuthorizationCodes)
+        .where(eq(oauthAuthorizationCodes.userId, victim.id))
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      await db().select().from(oauthGrants).where(eq(oauthGrants.userId, victim.id)).all(),
+    ).toHaveLength(0);
+    expect(
+      await db().select().from(oauthTokens).where(eq(oauthTokens.userId, victim.id)).all(),
+    ).toHaveLength(0);
+    expect(
+      await db().select().from(userEmails).where(eq(userEmails.userId, victim.id)).all(),
+    ).toHaveLength(0);
   });
 
   it("owner_user_id を先に外さないと FK 違反で落ちる（2 文に分けている理由そのもの）", async () => {
