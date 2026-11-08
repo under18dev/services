@@ -1,3 +1,4 @@
+export * from "./clay-shadow";
 export * from "./dark-media";
 export * from "./fixtures";
 export * from "./jsonc";

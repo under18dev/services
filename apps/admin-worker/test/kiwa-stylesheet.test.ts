@@ -1,6 +1,12 @@
 import { rpcOk } from "@u18/contracts";
 import { env } from "cloudflare:test";
-import { classesIn, classesMissingFrom, darkMediaVarNames } from "@u18/testing";
+import {
+  classesIn,
+  classesMissingFrom,
+  darkMediaVarNames,
+  gdgShadowTokenDefs,
+  shadowDeclsWithClay,
+} from "@u18/testing";
 import { GDG_DARK_CLASS_VAR_NAMES, hashedFileName } from "@u18/web-ui";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/presentation/http/app";
@@ -356,5 +362,68 @@ describe("配信する CSS に、OS 設定に従うダークの @media が実際
     expect(GDG_DARK_CLASS_VAR_NAMES.length).toBeGreaterThan(0);
 
     expect([...delivered].sort()).toEqual([...GDG_DARK_CLASS_VAR_NAMES].sort());
+  });
+});
+
+/**
+ * クレイモーフィズムの影を重ねても、輪郭のリングと GDG の inset ハイライトが
+ * 両方生きているか（GDG デザイン移行 PR3）。
+ *
+ * `theme.css` の `--shadow-sm` 等は `0 0 0 1px var(--border), var(--gdg-shadow-sm)`
+ * の形でリングとクレイを合成している。Tailwind v4 の `shadow-*` ユーティリティは
+ * 値の末尾の色を `--tw-shadow-color` へ静的に置き換えるため、多段 かつ inset を
+ * 含む値を渡したときにこの分解が崩れていないかは実測でしか分からない
+ * （`packages/testing/src/clay-shadow.ts` 参照）。
+ */
+describe("配信する CSS に、クレイの陰影とリングの輪郭が両方生きている", () => {
+  it("shadow-* ユーティリティが --gdg-shadow-* を合成してもリング (0 0 0 1px) を失っていない", async () => {
+    const css = await fetchCss();
+    const decls = shadowDeclsWithClay(css);
+
+    // 0 件のまま下の assert へ進むと、何も確かめずに緑になる。
+    expect(
+      decls.length,
+      "配信 CSS に --gdg-shadow-* を合成した shadow-* ユーティリティが見当たらない——" +
+        "theme.css の --shadow-* から var(--gdg-shadow-*) が外れたか、" +
+        "card.tsx / alert.tsx / empty.tsx の shadow-* クラスが @source の走査から漏れている可能性がある。",
+    ).toBeGreaterThan(0);
+
+    for (const decl of decls) {
+      expect(decl, `輪郭(0 0 0 1px)を失った shadow 合成: ${decl}`).toMatch(/0 0 0 1px/);
+    }
+  });
+
+  it("--gdg-shadow-sm/md/lg トークン自体に、クレイの inset ハイライトが残っている（ライト・ダーク両方）", async () => {
+    const css = await fetchCss();
+    const tokenDefs = gdgShadowTokenDefs(css);
+
+    // 0 件のまま下の assert へ進むと、何も確かめずに緑になる。
+    expect(
+      tokenDefs.length,
+      "配信 CSS に --gdg-shadow-sm/md/lg のトークン定義が見当たらない。",
+    ).toBeGreaterThan(0);
+
+    // `.some()` だと、ダーク側の inset が丸ごと消えてもライト側の 3 件が
+    // 残っていれば緑のまま通ってしまう（指摘: 3b）。全件を見る。
+    for (const decl of tokenDefs) {
+      expect(decl, `inset を失った --gdg-shadow-* トークン: ${decl}`).toContain("inset");
+    }
+  });
+
+  it("--gdg-shadow-sm/md/lg が、ダークの @media の中にも実際に出ている", async () => {
+    // #531 で一度踏んだ穴と同じ形——「count > 0」は何かを見つけたとしか
+    // 言わず、見るべきものを見つけたとは言わない。ダークの @media の中身を
+    // 直接見るのに、既に実績のある darkMediaVarNames を再利用する。
+    const css = await fetchCss();
+    const darkVars = darkMediaVarNames(css);
+
+    expect(
+      darkVars.size,
+      "配信 CSS に @media (prefers-color-scheme: dark) が見つからない。",
+    ).toBeGreaterThan(0);
+
+    for (const name of ["--gdg-shadow-sm", "--gdg-shadow-md", "--gdg-shadow-lg"]) {
+      expect(darkVars.has(name), `ダークの @media に ${name} が無い`).toBe(true);
+    }
   });
 });
