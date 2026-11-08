@@ -552,8 +552,6 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="承認者・権限"
     lead="admin.under18.dev を使ってよい人と、操作ごとの権限を管理します。"
-    // `/users` と同じ理由（users-page.tsx）——4 列の表は max-w-3xl（既定）だと窮屈。
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
