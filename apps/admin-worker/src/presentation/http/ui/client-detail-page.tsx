@@ -16,7 +16,6 @@ import {
   TableRow,
 } from "@u18/web-ui/kiwa";
 import {
-  DANGER_BUTTON_CLASS,
   EMPTY_CLASS,
   FIELD_CLASS,
   INPUT_CLASS,
@@ -365,11 +364,18 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
           </CardDescription>
         </CardHeader>
         {/*
-          3 つのボタンとも `getButtonClasses()` / `DANGER_BUTTON_CLASS` を
-          使う（指摘: 3b、services-11 の走査で素の下線テキストのまま
-          だったと判明）。`失効させる` は破壊的操作なので
-          `DANGER_BUTTON_CLASS`——`card-detail-page.tsx` の
-          `CardDetailActions` と同じ使い分け。
+          3 つのボタンとも `getButtonClasses()` を使う（指摘: 3b、
+          services-11 の走査で素の下線テキストのままだったと判明）。
+
+          `失効させる` は `variant="destructive"`（塗り）——`DANGER_
+          BUTTON_CLASS`（outline + 文字だけ赤）ではない。分かれ目は
+          「押した瞬間に戻れなくなるか」で、`DANGER_BUTTON_CLASS` は
+          一覧の各行に 1 つずつ並ぶ破壊的操作向け（`island-classes.ts`
+          の「塗ると赤い面が画面を占める」はそちら向けの判断）。ここは
+          詳細画面に 1 つだけ出て、確認の段を挟まず 1 クリックで
+          失効が確定するので、単独で出る確定操作として塗りを選ぶ
+          （指摘: 3b、根拠は vendored `components.css` の
+          `.gdg-button-danger`/`.gdg-tone-danger` の 2 段）。
         */}
         <CardContent class={ITEM_BODY_CLASS}>
           <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
@@ -424,7 +430,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="client_id" value={client.clientId} />
               <input type="hidden" name="from" value="detail" />
-              <button type="submit" class={DANGER_BUTTON_CLASS}>
+              <button type="submit" class={getButtonClasses("destructive", "sm")}>
                 失効させる
               </button>
             </form>
