@@ -35,9 +35,13 @@ export const oauthClients = sqliteTable(
      * （最初の CLI 登録など）に嘘の既定値を入れないため、分からないものは
      * `null` のままにする。管理画面は `—` で出す（`batch` と同じ扱い）。
      *
-     * **`onDelete` を指定しない。** `users` の行は凍結で表現し物理削除
-     * しない（仕様書 14.1 決定 7）ので、参照先が消えて空振りする経路が
-     * そもそも無い。
+     * **`onDelete` を指定していない。** 削除時は
+     * `DrizzleUserRepository.deletePermanently`（運用者判断、2026-11-08）
+     * が先に `owner_user_id` を `null` に戻してから `users` の行を消して
+     * いる——ここに `onDelete` を足さずにいるのは、その手当てが漏れると
+     * 本番の FK 制約（強制されている場合）で `delete from users` ごと
+     * 落ちるか、強制されていなければ黙って dangling な参照が残るかの
+     * どちらかになる、という圧力を直接受けさせるためである。
      */
     ownerUserId: text("owner_user_id").references(() => users.id),
     /**
