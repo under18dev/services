@@ -9,7 +9,8 @@ import {
 } from "@u18/testing";
 import { GDG_DARK_CLASS_VAR_NAMES, hashedFileName } from "@u18/web-ui";
 import { beforeEach, describe, expect, it } from "vitest";
-import { CARDS_UI_PATH, createApp } from "../src/presentation/http/app";
+import { CARDS_UI_PATH, createApp, DOCS_PATH } from "../src/presentation/http/app";
+import { CLAIM_UI_PATH } from "../src/presentation/http/base-path";
 import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import {
   ORIGIN,
@@ -175,6 +176,47 @@ describe("カード画面が使うクラスは、配信する CSS に在る", ()
     );
 
     expect(unexpected, `想定外のグラデーション: ${unexpected.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * 本文の幅をページごとに変えない（運用者の直接の要望）。
+ *
+ * `KiwaShell` はかつて `maxWidth` prop を持っていた（この Worker の
+ * 3 画面は全部既定の `max-w-3xl` のままだったが、admin の 7 画面が
+ * `max-w-6xl` を渡しており、**同じ `KiwaShell` なのに画面によって本文の
+ * 幅が違う**という指摘そのもの）。prop ごと外したので、ここでは
+ * **型だけの保証で終わっていないか**——実際に配信される HTML に
+ * `max-w-` が残っていないかを見る。
+ *
+ * `admin-worker/test/kiwa-stylesheet.test.ts` と同じ形。**この Worker は
+ * 3 画面しかない**（カード一覧・紐づけ・案内）ので、`route-inventory.ts`
+ * のような一覧から導かず、3 画面とも書き下す。
+ */
+describe("本文の幅はページごとに変えない（運用者の直接の要望）", () => {
+  /** `<main>` 直下の本文ラッパ div の class 属性。見つからなければ null。 */
+  function bodyWrapperClassOf(html: string): string | null {
+    return /<main[^>]*>\s*<div class="([^"]*)"/.exec(html)?.[1] ?? null;
+  }
+
+  it.each([
+    ["カード一覧", async () => fetchText(CARDS_UI_PATH, cookieFor(TARO))],
+    [
+      "紐づけ",
+      async () => {
+        const cardId = await seedIssuedCard();
+        return fetchText(`${CLAIM_UI_PATH}?card=${encodeURIComponent(cardId)}`, cookieFor(TARO));
+      },
+    ],
+    ["案内（go.under18.dev）", async () => fetchText(DOCS_PATH)],
+  ])("%s の本文ラッパに max-w- が無い", async (_label, fetchPage) => {
+    const html = await fetchPage();
+
+    const wrapperClass = bodyWrapperClassOf(html);
+    // null のまま下の not.toMatch へ進むと、ラッパが見つからなくても
+    // 「max-w- を含まない」側として緑になりうる。
+    expect(wrapperClass, "<main> 直下の本文ラッパが見つからない").not.toBeNull();
+    expect(wrapperClass, "本文ラッパに max-w- が付いている").not.toMatch(/max-w-/);
   });
 });
 

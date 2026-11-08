@@ -326,6 +326,66 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
 });
 
 /**
+ * 本文の幅をページごとに変えない（運用者の直接の要望）。
+ *
+ * `KiwaShell` はかつて `maxWidth` prop を持ち、画面によって
+ * `max-w-3xl`（768px）/`max-w-6xl`（1152px）が中央寄せで混在していた
+ * ——「コンテンツの横幅が自由すぎる」という指摘そのもの。prop ごと
+ * 外したので、ここでは**それが型だけの保証で終わっていないか**を見る。
+ * typecheck は呼び出し側のコンパイルエラーを拾うだけで、実際に配信
+ * される HTML に `max-w-` が残っていないかまでは見ない。
+ *
+ * **`<main>` 直下の本文ラッパ `<div>` だけを見る。** 画面の中身
+ * （`empty.tsx` の `max-w-sm`、入力欄の `max-w-xs` など）が独自に
+ * `max-w-*` を持つのは別の話で、ページ幅の話と混ぜると何を守りたい
+ * 検査なのかがぼやける。
+ */
+describe("本文の幅はページごとに変えない（運用者の直接の要望）", () => {
+  /** `<main>` 直下の本文ラッパ div の class 属性。見つからなければ null。 */
+  function bodyWrapperClassOf(html: string): string | null {
+    return /<main[^>]*>\s*<div class="([^"]*)"/.exec(html)?.[1] ?? null;
+  }
+
+  it.each(PAGES)("%s の本文ラッパに max-w- が無い", async (path) => {
+    const approvals = fakeApprovals([VIEWER_SUB, OTHER_APPROVER_SUB], [VIEWER_SUB]);
+    const overrides = overridesFor(approvals);
+    const cookie = await loginAs(VIEWER_SUB, approvals, overrides);
+
+    const response = await createApp(overrides).fetch(
+      new Request(`${ORIGIN}${path}`, { headers: { Cookie: cookie } }),
+      env,
+      executionContext(),
+    );
+    expect(response.status, `${path} が ${response.status} を返す`).toBe(200);
+    const html = await response.text();
+
+    const wrapperClass = bodyWrapperClassOf(html);
+    // null のまま下の not.toMatch へ進むと、ラッパが見つからなくても
+    // 「max-w- を含まない」側として緑になりうる。
+    expect(wrapperClass, `${path}: <main> 直下の本文ラッパが見つからない`).not.toBeNull();
+    expect(wrapperClass, `${path}: 本文ラッパに max-w- が付いている`).not.toMatch(/max-w-/);
+  });
+
+  it("/pending の本文ラッパにも max-w- が無い", async () => {
+    const sub = "usr_kiwa_stylesheet_pending_width";
+    const approvals = fakeApprovals([]);
+    const cookie = await loginAs(sub, approvals);
+
+    const response = await createApp().fetch(
+      new Request(`${ORIGIN}/pending`, { headers: { Cookie: cookie } }),
+      env,
+      executionContext(),
+    );
+    expect(response.status, `/pending が ${response.status} を返す`).toBe(200);
+    const html = await response.text();
+
+    const wrapperClass = bodyWrapperClassOf(html);
+    expect(wrapperClass, "/pending: <main> 直下の本文ラッパが見つからない").not.toBeNull();
+    expect(wrapperClass, "/pending: 本文ラッパに max-w- が付いている").not.toMatch(/max-w-/);
+  });
+});
+
+/**
  * OS 設定（`prefers-color-scheme`）に従うライト/ダークが、**実際に配信
  * される CSS まで届いているか**（GDG デザイン移行 PR1、#531、指摘: 3b）。
  * 元は `kiwa-dark-media.test.ts` という別ファイルだった——#531 の時点では

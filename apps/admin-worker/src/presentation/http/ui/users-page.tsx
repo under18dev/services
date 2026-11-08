@@ -12,6 +12,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  getButtonClasses,
 } from "@u18/web-ui/kiwa";
 import {
   EMPTY_CLASS,
@@ -158,7 +159,6 @@ export const UsersPage: FC<UsersPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="利用者"
     lead="表示名を押すと詳細が開き、停止・停止の解除・ログイン中の端末を全部切るはそこから行います。この画面は検索・並べ替えが主な役目です。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
@@ -203,7 +203,7 @@ export const UsersPage: FC<UsersPageProps> = ({
             完全に一致するものだけが出ます。空のまま押すと、新しい順に表示します。
           </p>
           <div>
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("outline")}>
               探す
             </button>
           </div>
@@ -265,7 +265,7 @@ export const UsersPage: FC<UsersPageProps> = ({
             <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
             <input type="hidden" name="cursor" value={nextCursor} />
             <input type="hidden" name="query" value={query ?? ""} />
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("ghost")}>
               続きを読む
             </button>
           </form>

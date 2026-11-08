@@ -409,6 +409,49 @@ describe("attachTabs", () => {
     attachTabs(root);
     expect(root.querySelector('[data-panel="a"]')).toHaveProperty("hidden", false);
   });
+
+  /**
+   * 選択中タブの視覚的な強調（指摘: 3b）。
+   *
+   * **`client-detail-page.tsx` / `card-detail-page.tsx` を import しない。**
+   * あの 2 つは Workers 本体の `tsconfig.json`（`Env` 等の ambient 型あり）
+   * 向けで、このファイル（`ui/client/**`）は DOM 型だけを持つ
+   * `tsconfig.client.json` 側——`../csrf` 経由で `composition/container.ts`
+   * （DI 本体、DB・RPC gateway を抱える）まで import グラフが伸び、
+   * `Env` / `Fetcher` / `D1Database` が解決できず型検査が落ちる（最初の
+   * 実装でこれをやって踏んだ、詳しくは `./README.md`）。**ここでは実在
+   * する画面と同じ class 文字列をそのまま埋め込んで**検査する——
+   * `TAB_BUTTON_CLASS` が実際の 2 画面と一致していることは
+   * `test/tab-highlight.test.ts`（workerd 側、実在のルートを fetch する）
+   * が別途見ている。
+   *
+   * **空でも緑になる形にしない。** `[aria-selected="true"]` が 1 つも
+   * 無ければ、その後の class の検査は何もしないまま通ってしまう
+   * ——件数を先に assert してから中身を見る。
+   */
+  it("選択中のタブに強調用の class が付く", () => {
+    const TAB_BUTTON_CLASS =
+      "px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 " +
+      "border-transparent -mb-px hover:text-foreground aria-selected:border-primary " +
+      "aria-selected:text-foreground";
+    document.body.innerHTML = `
+      <div data-tabs>
+        <button data-tab="a" class="${TAB_BUTTON_CLASS}">A</button>
+        <button data-tab="b" class="${TAB_BUTTON_CLASS}">B</button>
+        <section data-panel="a">panel A</section>
+        <section data-panel="b">panel B</section>
+      </div>
+    `;
+    const root = document.querySelector<HTMLElement>("[data-tabs]")!;
+    attachTabs(root);
+
+    const selected = root.querySelectorAll('[aria-selected="true"]');
+    expect(selected.length).toBeGreaterThan(0);
+    for (const button of selected) {
+      expect(button.className).toContain("aria-selected:border-primary");
+      expect(button.className).toContain("aria-selected:text-foreground");
+    }
+  });
 });
 
 describe("attachTooltips", () => {

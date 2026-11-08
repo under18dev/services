@@ -432,7 +432,6 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
     scripts={[ISLAND_PATH]}
     heading="カードの詳細"
     lead="誰のカードで、いつ発行され、何回タップされたかを 1 枚で確かめられます。"
-    maxWidth="max-w-6xl"
   >
     <div>
       <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">
@@ -452,27 +451,30 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
       形に揃えてある——書き方が画面ごとに分かれるのを避けるため。
       JS が無ければ `data-panel` の節は見出し付きで縦に並ぶ（絶対条件）。
       JS があれば既定で 1 枚目だけが見える。
+
+      選択中タブの強調は `client-detail-page.tsx` と同じ理由・同じ class
+      （指摘: 3b、`attachTabs` 自体は変えていない）。
     */}
     <div data-tabs>
       <div role="tablist" class="flex gap-2 border-b border-border" aria-label="カード詳細のタブ">
         <button
           type="button"
           data-tab="overview"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           概要
         </button>
         <button
           type="button"
           data-tab="taps"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           タップ
         </button>
         <button
           type="button"
           data-tab="actions"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           操作
         </button>
