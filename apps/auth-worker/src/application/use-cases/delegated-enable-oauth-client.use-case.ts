@@ -1,5 +1,4 @@
 import type { AuditLogger } from "../ports/audit-log.port";
-import type { Clock } from "../ports/clock.port";
 import type { OAuthClientRepository } from "../ports/oauth-client.repository";
 import type { UserRepository } from "../ports/user.repository";
 import { requireExistingActor } from "./admin-access";
@@ -18,7 +17,6 @@ export type DelegatedEnableOAuthClientOutput = {
 export type DelegatedEnableOAuthClientDeps = {
   readonly users: UserRepository;
   readonly clients: OAuthClientRepository;
-  readonly clock: Clock;
   readonly audit: AuditLogger;
 };
 

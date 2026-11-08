@@ -554,7 +554,6 @@ export function createContainer(
       delegatedEnableOAuthClient: new DelegatedEnableOAuthClientUseCase({
         users,
         clients: oauthClients,
-        clock,
         audit,
       }),
       delegatedSetOAuthClientOwner: new DelegatedSetOAuthClientOwnerUseCase({
