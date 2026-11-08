@@ -65,6 +65,18 @@ async function post(
   );
 }
 
+/**
+ * `>text<` を内側に持つ最初の `<button>`/`<a>` タグの `class` 属性の
+ * 中身を取り出す。variant・size の「段」が変わっても壊れない検査を
+ * 書くため——1 本の正規表現に class 文字列全体を埋め込むと、段を
+ * 変えるたびに検査側の文字列も書き直す必要が出る（指摘: 3b）。
+ */
+function classOf(html: string, text: string): string | null {
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`<(?:button|a)[^>]*class="([^"]*)"[^>]*>${escaped}<`).exec(html);
+  return match?.[1] ?? null;
+}
+
 describe("GET /approvals", () => {
   it("承認済みの一覧を描く", async () => {
     const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
@@ -417,8 +429,6 @@ describe("GET /approvals（承認済みの一覧、#542 で table 化）", () =>
     const outlineSm =
       "border-border bg-card hover:bg-secondary hover:text-foreground h-8 rounded-lg gap-1.5 px-3";
     const outlineDefault = "border-border bg-card hover:bg-secondary hover:text-foreground";
-    const destructiveSm =
-      "bg-destructive text-destructive-foreground hover:bg-destructive-hover h-8 rounded-lg gap-1.5 px-3";
     const destructiveDefault =
       "bg-destructive text-destructive-foreground hover:bg-destructive-hover h-9 px-4 py-2";
     const primaryDefault =
@@ -440,10 +450,21 @@ describe("GET /approvals（承認済みの一覧、#542 で table 化）", () =>
     expect(listHtml).toMatch(
       new RegExp(`<button[^>]*class="[^"]*${outlineSm}[^"]*"[^>]*>権限を更新する</button>`),
     );
-    // 3. 承認を剥奪する（承認済み行・操作セル、destructive/sm）
-    expect(listHtml).toMatch(
-      new RegExp(`<button[^>]*class="[^"]*${destructiveSm}[^"]*"[^>]*>承認を剥奪する</button>`),
-    );
+    // 3. 承認を剥奪する（承認済み行・操作セル）。
+    // **`getButtonClasses("destructive", ...)` ではなく
+    // `DANGER_BUTTON_CLASS`（outline の sm の土台 + 文字だけ赤）。** PR
+    // レビューで訂正（指摘: 3b）——押した瞬間に消えるのは確認カードの方
+    // だけで、行のボタンは確認画面への遷移でしかない。塗りの強さは
+    // 確認カードに残す。class 属性の中身を取り出して個別に確かめる形に
+    // してある——1 本の正規表現に土台ごと埋め込むと、3b の言う「段に
+    // 依存しすぎた検査」になる（塗りか否かを変えるたびに文字列全体を
+    // 書き直す必要が出る）。
+    const revokeRowButtonClass = classOf(listHtml, "承認を剥奪する");
+    expect(revokeRowButtonClass).not.toBeNull();
+    expect(revokeRowButtonClass).toContain(outlineSm);
+    expect(revokeRowButtonClass).toContain("text-destructive");
+    // 面は塗らない——`bg-destructive`（塗り）は付いていない。
+    expect(revokeRowButtonClass).not.toContain("bg-destructive");
     // 4. 本当に剥奪する（確認カード、destructive）
     expect(confirmHtml).toMatch(
       new RegExp(

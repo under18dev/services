@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@u18/web-ui/kiwa";
 import {
+  DANGER_BUTTON_CLASS,
   FIELD_CLASS,
   INPUT_CLASS,
   ITEM_ACTIONS_CLASS,
@@ -132,8 +133,8 @@ import { UserRef } from "./user-ref";
  *    | --- | --- | --- |
  *    | 承認済み行・操作セル | super approver にする/外す | outline |
  *    | 承認済み行・操作セル | 権限を更新する | outline |
- *    | 承認済み行・操作セル | 承認を剥奪する | **destructive** |
- *    | 剥奪の確認カード | 本当に剥奪する | **destructive** |
+ *    | 承認済み行・操作セル | 承認を剥奪する | `DANGER_BUTTON_CLASS`（面は塗らず文字だけ赤） |
+ *    | 剥奪の確認カード | 本当に剥奪する | **destructive**（塗り） |
  *    | 剥奪の確認カード | キャンセル | outline（**6 つ目、自分で見つけた**） |
  *    | 新しく承認するカード | 承認する | default |
  *
@@ -141,6 +142,19 @@ import { UserRef } from "./user-ref";
  *    赤にして隣の取り消しを下線テキストのまま残すと、2 択の片方だけが
  *    押せるボタンに見える非対称な見た目になる——確認ダイアログの確定・
  *    取り消しは対で扱うべき、という判断で追加した。
+ *
+ *    **行の「承認を剥奪する」と確認カードの「本当に剥奪する」は、どちらも
+ *    破壊的だが同じ強さにしなかった（指摘: 3b、PR レビューで訂正）。**
+ *    押した瞬間に実際に消えるのは確認カードの方だけで、行のボタンは
+ *    確認画面への遷移でしかない——両方を塗りの赤にすると、画面から
+ *    どちらが確定なのか読めなくなる。GDG 自身（`packages/web-ui/src/gdg/
+ *    components.css`）も `.gdg-button-danger`（塗り、L122）と
+ *    `.gdg-tone-danger`（淡い面 + 赤文字、L266）の 2 段を持っており、
+ *    `getButtonClasses("destructive")` が前者、`DANGER_BUTTON_CLASS` が
+ *    後者に対応する——段を使い分けろという意図だと読んだ。
+ *    `DANGER_BUTTON_CLASS`（`island-classes.ts`）自身のコメントが言う
+ *    「一覧の各行に 1 つずつ並ぶので、塗ると赤い面が画面を占める」も、
+ *    まさに今回の「承認済み行」のことである。
  *
  *    **`<Button>` という JSX コンポーネントは使わない。** `@u18/web-ui/kiwa`
  *    に実在はするが、このリポジトリの 35 箇所の実例は全部
@@ -497,9 +511,21 @@ const ApprovalRow: FC<{
           </button>
         )}
 
+        {/*
+          **ここは `getButtonClasses("destructive")` ではなく
+          `DANGER_BUTTON_CLASS`（面は塗らず文字だけ赤）にする（指摘:
+          3b）。** 押しても消えるのは確認カードの方で、この行のボタンは
+          確認画面への遷移でしかない——一番強い見た目は、本当に戻れない
+          操作（確認カードの「本当に剥奪する」）に取っておく。GDG 自身も
+          `.gdg-button-danger`（塗り）と `.gdg-tone-danger`（淡い面 +
+          赤文字）の 2 段を持っており、段を分けろという意図だと読める。
+          `DANGER_BUTTON_CLASS` のコメント（このファイルの冒頭にある
+          import 元、`island-classes.ts`）が言う「一覧の各行に 1 つずつ
+          並ぶので、塗ると赤い面が画面を占める」はまさにこの行のこと。
+        */}
         <form method="post" action={`/approvals/${approval.sub}/revoke`}>
           <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-          <button type="submit" class={getButtonClasses("destructive", "sm")}>
+          <button type="submit" class={DANGER_BUTTON_CLASS}>
             承認を剥奪する
           </button>
         </form>
