@@ -2655,11 +2655,28 @@ get isActive(): boolean {
 
 **`oauth_clients.owner_user_id` には外部キーがあるが `onDelete` を指定していない**（`packages/db/src/schema/oauth.ts`）。本番 D1 は外部キー制約を強制する（`scripts/lib/restore-rehearsal.mjs` のコメントに経緯がある。テスト環境の SQLite は既定で強制しないため、`apps/auth-worker/test/session-repository.test.ts` は `pragma foreign_keys = on` を明示している）。**物理削除しようとしている利用者が OAuth クライアントを持っている場合、持ち主を外してからでないと削除そのものが失敗する。** `/clients/owner` で持ち主を空にする経路は既にある（`apps/admin-worker/src/presentation/http/clients.routes.tsx`）。
 
+**実装（#554）は CASCADE に頼らず、子テーブル 8 つを明示的に DELETE する。** `sessions` / `passkeys` / `webauthn_challenges` / `email_challenges` / `oauth_tokens` / `oauth_grants` / `oauth_authorization_codes` / `user_emails` はどれも `onDelete: "cascade"` を持つが、**本番 D1 で `PRAGMA foreign_keys` が有効かどうかを実測する手段が無い。** 効かなければこれらの行は自動掃除の対象外（`NEVER_SWEPT`）のまま永久に孤児として残り、`users` の行自体は既に無いので後から洗い出す手段も無い——物理削除の目的そのものが達成されなくなる。`purge-user.sql.ts` と同じ考え方で、CASCADE の有無に関係なく正しく動く形を選んだ。
+
+**削除できるかどうかの判定（`status <> 'active'`）は、子テーブルの DELETE・owner の null 化・本体の DELETE を含む 10 文すべてに入れてある。** `users` の DELETE だけに条件を絞ると、`active` な利用者に対して呼んだときに本体は残るのに子テーブルだけ消える、という中途半端な壊れ方になることが実装中に見つかった。10 文は 1 つの batch（implicit transaction）にまとめてあり、途中で失敗すれば全体が巻き戻る。
+
+**admin-worker 経由の呼び出しは `requireExistingActor`（実行者の実在確認）だけを通る。** これにより、**admin-worker 側の承認リスト（`admin_approvals`）には残っているが、auth-worker 側の `users` 行が既に消えている人**を実行者にした委譲呼び出しは `invalid_input` で弾かれる。実害は無いが、**admin-worker の承認リストと auth-worker の実在が初めてズレうる組み合わせ**である（b6 の調査、2026-11-08）。
+
 ### 11.2 手順
 
 セルフサービスの削除 API は存在しない（`PATCH /api/me` も `displayName` / `username` しか受け付けない）。
 
-> **2026-11-08 以降、凍結・purge・物理削除の入口は `admin.under18.dev` の利用者詳細画面に集約される**（§11.1、仕様書 §14.1 決定 7）。以下の手順は、画面ができる前の運用者が手で実行する手順として書かれたものである。画面がどの手順をどこまで置き換えるかは実装を見てから本節を書き直すこと——**ここでは変えていない。**
+**2026-11-08 以降、凍結と物理削除は `admin.under18.dev` の利用者詳細画面から行える**（#554）。**purge（§11.6）はこの画面には乗っていない** —— 引き続き `purge-user.mjs` を手で実行する。以下の手順（本人依頼への対応、§11.6 より前の経緯）は、画面ができる前から変わっていない。
+
+#### 物理削除の画面での手順（#554）
+
+1. 利用者詳細画面を開く。対象が `active` なら「削除するには先に凍結してください」とだけ表示され、ボタン自体が出ない——`status` を見る判定は画面だけでなく use-case 側（`DelegatedDeleteUserUseCase` / `deletePermanently`）にもある（§11.1）ので、`userId` を直接 POST しても同じ条件で弾かれる。
+2. `suspended` か `deleted` であれば「削除する」ボタンが出る。押しても即座には削除されず、確認カードに切り替わるだけ（`/clients/disable` と同じ 2 段階確認）。
+3. 確認カードは、対象が `suspended` のとき**停止理由（BAN か、侵害による緊急停止か）に応じた警告**を追加で出す——BAN なら「BAN が無意味になる」、侵害による緊急停止なら「本人の復旧手段が消える」。理由が記録から読めない場合は両方を併記する。`self_closed`（本人の退会）と `deleted`（purge 済み）には出さない——どちらの警告も事実に反するため。
+4. 自分自身の行には、このセクション自体が「自分のアカウントは削除できません」としか出さない。
+5. 「本当に削除する」を押すと、対象が admin-worker 自身の承認リスト（`admin_approvals`）にも乗っている場合、**先に締め出し判定（`checkApprovalRevocation`）を確認してから**確認カードを出す——最後の super approver には確認カードの前で理由だけを返す。判定を通れば、auth-worker 側の削除が成功したあとに承認行を剥奪する（逆順にすると、削除が失敗したときに「承認だけ失って本人の行は残る」という中途半端な状態になる）。
+6. 成功すると一覧へ戻り「削除しました。同じメールアドレスで再登録できます。」と表示される。
+
+**NFC カードはこの画面の操作では触らない（運用者の明示的な選択）。** 確認カードには「NFC カードの所有情報は別の記録のため消えません」という注記が出るが、**止める・解除するには §11.6 の「先に NFC のカードを解除する」を別途実行する必要がある。**
 
 **現時点では運用者が手で実行する。**
 
@@ -2902,6 +2919,8 @@ ORDER BY last_active_at;
 **`purge-user.mjs` は `u18-identity` しか触らない。** `u18-nfc` は別の D1 で、同じ `wrangler d1 execute` の対象にならない。
 
 `nfc_cards.owner_user_id` は **Identity の userId をそのまま持っている**（外部キーは別 D1 なので張れない）。**落としたあとも、そのカードには userId が残る。**
+
+**§11.1 の物理削除では、この手順を飛ばした結果がさらに悪くなる。** purge は `users` の行を残す（トゥームストーン化するだけ）ので、飛ばしても「実在するが空の id」を指すだけで済むが、**物理削除は行そのものを消す**ので、飛ばすと「実在しない id」を指すカードが残る——後から持ち主を引き直す手段が無い。物理削除の確認画面はこれを警告として表示するが、**実際にカードを解除するにはこの節の手順を別途、手で実行する必要がある。**
 
 ```bash
 cd ../nfc-worker
