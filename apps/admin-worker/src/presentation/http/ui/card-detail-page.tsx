@@ -432,7 +432,6 @@ export const CardDetailPage: FC<CardDetailPageProps> = ({
     scripts={[ISLAND_PATH]}
     heading="カードの詳細"
     lead="誰のカードで、いつ発行され、何回タップされたかを 1 枚で確かめられます。"
-    maxWidth="max-w-6xl"
   >
     <div>
       <a href="/nfc" class="text-sm text-foreground-muted underline underline-offset-4">

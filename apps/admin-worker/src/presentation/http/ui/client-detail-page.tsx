@@ -171,7 +171,6 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="クライアントの詳細"
     lead="1 件のクライアントを確かめてから、同じ画面で操作できます。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     <div>

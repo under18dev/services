@@ -8,6 +8,21 @@ import { SidebarItem } from "./sidebar-item";
  * **このファイルは上流の取り込みではない。** `./README.md` の表に
  * 載っていないものは、このリポジトリで書いたものである。
  *
+ * ## 本文の幅は中央寄せしない（運用者の直接の要望）
+ *
+ * かつて `maxWidth` prop があり、既定 `max-w-3xl`（768px）・admin の
+ * 表の画面だけ `max-w-6xl`（1152px）を渡していた。**どちらも中央寄せ**
+ * だったため、画面によって本文の横幅と左右の余白がまちまちに見えていた
+ * ——「コンテンツの横幅が自由すぎる」という運用者の指摘そのもの。
+ *
+ * **prop ごと外し、本文は常に全幅にした。** 既定値を持つ prop を残すと
+ * また画面ごとに値が散る——型から消して、呼び出し側を typecheck に
+ * 全部拾わせる。左右の余白（`px-5` / `md:px-10`）はそのまま残している。
+ * 無くすのはビューポート端に文字が付く別問題で、今回の指摘とは別物。
+ *
+ * **`card-shell.tsx`（ログイン・同意画面の `max-w-md`）は対象外。** あちらは
+ * 本文ではなくフォームカードで、全幅にすると明らかに使いにくくなる。
+ *
  * ## 並びも行き先も知らない
  *
  * `nav` と `stylesheet` と `brandHref` を**引数で受け取る。**
@@ -121,13 +136,6 @@ export type KiwaShellProps = {
   /** 読み込む外部スクリプト。インラインは CSP が禁じている。 */
   readonly scripts?: readonly string[];
   /**
-   * 本文の最大幅（Tailwind の `max-w-*` クラス）。既定は `max-w-3xl`。
-   *
-   * **admin 画面は表が主役で、768px では足りない。** 画面ごとに
-   * 必要な幅が違うので、既定値を持つが固定はしない。
-   */
-  readonly maxWidth?: string;
-  /**
    * 取り消しの操作がある画面かどうか。`true` なら `<noscript>` で
    * 「JS が無いとできないこと」を伝える。
    *
@@ -203,7 +211,6 @@ export const KiwaShell: FC<KiwaShellProps> = ({
   heading,
   lead,
   scripts = [],
-  maxWidth = "max-w-3xl",
   hasRevokeActions = false,
   loginHref,
   children,
@@ -250,7 +257,7 @@ export const KiwaShell: FC<KiwaShellProps> = ({
         </div>,
       ]}
       <main class="min-w-0 flex-1 px-5 py-8 md:px-10 md:py-12">
-        <div class={`mx-auto flex w-full ${maxWidth} flex-col gap-8`}>
+        <div class="flex w-full flex-col gap-8">
           <div class="flex flex-col gap-2">
             <h1 class="text-2xl">{heading}</h1>
             {lead !== undefined && <p class="text-sm/relaxed text-foreground-muted">{lead}</p>}
