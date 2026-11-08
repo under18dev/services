@@ -1,5 +1,11 @@
 import { env } from "cloudflare:test";
-import { classesIn, classesMissingFrom, darkMediaVarNames } from "@u18/testing";
+import {
+  classesIn,
+  classesMissingFrom,
+  darkMediaVarNames,
+  gdgShadowTokenDefs,
+  shadowDeclsWithClay,
+} from "@u18/testing";
 import { GDG_DARK_CLASS_VAR_NAMES, hashedFileName } from "@u18/web-ui";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CARDS_UI_PATH, createApp } from "../src/presentation/http/app";
@@ -206,5 +212,46 @@ describe("配信する CSS に、OS 設定に従うダークの @media が実際
     expect(GDG_DARK_CLASS_VAR_NAMES.length).toBeGreaterThan(0);
 
     expect([...delivered].sort()).toEqual([...GDG_DARK_CLASS_VAR_NAMES].sort());
+  });
+});
+
+/**
+ * クレイモーフィズムの影を重ねても、輪郭のリングと GDG の inset ハイライトが
+ * 両方生きているか（GDG デザイン移行 PR3）。
+ *
+ * `theme.css` の `--shadow-sm` 等は `0 0 0 1px var(--border), var(--gdg-shadow-sm)`
+ * の形でリングとクレイを合成している。Tailwind v4 の `shadow-*` ユーティリティは
+ * 値の末尾の色を `--tw-shadow-color` へ静的に置き換えるため、多段 かつ inset を
+ * 含む値を渡したときにこの分解が崩れていないかは実測でしか分からない
+ * （`packages/testing/src/clay-shadow.ts` 参照）。
+ */
+describe("配信する CSS に、クレイの陰影とリングの輪郭が両方生きている", () => {
+  it("shadow-* ユーティリティが --gdg-shadow-* を合成してもリング (0 0 0 1px) を失っていない", async () => {
+    const css = await fetchText(KIWA_STYLESHEET_PATH);
+    const decls = shadowDeclsWithClay(css);
+
+    // 0 件のまま下の assert へ進むと、何も確かめずに緑になる。
+    expect(
+      decls.length,
+      "配信 CSS に --gdg-shadow-* を合成した shadow-* ユーティリティが見当たらない——" +
+        "theme.css の --shadow-* から var(--gdg-shadow-*) が外れたか、" +
+        "card.tsx / alert.tsx / empty.tsx の shadow-* クラスが @source の走査から漏れている可能性がある。",
+    ).toBeGreaterThan(0);
+
+    for (const decl of decls) {
+      expect(decl, `輪郭(0 0 0 1px)を失った shadow 合成: ${decl}`).toMatch(/0 0 0 1px/);
+    }
+  });
+
+  it("--gdg-shadow-sm/md/lg トークン自体に、クレイの inset ハイライトが残っている", async () => {
+    const css = await fetchText(KIWA_STYLESHEET_PATH);
+    const tokenDefs = gdgShadowTokenDefs(css);
+
+    expect(
+      tokenDefs.length,
+      "配信 CSS に --gdg-shadow-sm/md/lg のトークン定義が見当たらない。",
+    ).toBeGreaterThan(0);
+
+    expect(tokenDefs.some((decl) => decl.includes("inset"))).toBe(true);
   });
 });

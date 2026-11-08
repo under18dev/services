@@ -39,17 +39,22 @@
  *    削除した——残すと**どのレイヤーより強い無所属ルール**になり、
  *    `color-scheme` 等、GDG 側が出す値を常に上書きしてしまう。
  *
- * 3. **影はリングのまま残した。** GDG の `--gdg-shadow-*` は claymorphism
- *    用の多層シャドウで、GDG 自身の `.gdg-*` コンポーネント（余白・背景と
- *    セットで設計されている）を前提にした値である。このファイルが触って
- *    いいのは `.tsx` を変えない範囲（PR1 の制約）で、`card.tsx` 等は
- *    いまも `border` を持たず `shadow-sm` のリングだけで輪郭を作っている
- *    （#332 からの設計）。ここを claymorphism シャドウに差し替えると、
- *    輪郭を失ったカードが生まれる可能性があり、`.tsx` 側の調整なしには
- *    確かめられない。**そのためリング方式は維持し、リングの色
- *    （`--border` / `--border-strong`）だけが `--gdg-*` 経由で変わるように
- *    してある。** claymorphism シャドウへの移行は、コンポーネント側を
- *    `.gdg-*` へ寄せる PR3 の範囲とする。
+ * 3. **影はリングを残したまま GDG のクレイを重ねた（PR3）。** `card.tsx` 等は
+ *    `border` を持たず `shadow-sm` のリングだけで輪郭を作っている
+ *    （#332 からの設計）ので、リングをクレイで**置き換える**と輪郭を失う
+ *    カードが生まれる——`.gdg-*` クラスへの移行（旧 PR3 案）は b6 の調査で
+ *    構造的な欠落が 12 箇所見つかったため行わない。代わりに
+ *    `0 0 0 1px var(--border), var(--gdg-shadow-*)` という comma 区切りの
+ *    複数レイヤーとして**両方を合成**する——1 レイヤー目がリング、
+ *    2 レイヤー目（`var()` の入れ子、ペイント時にブラウザが展開する）が
+ *    GDG の inset ハイライトを含む多層クレイ。
+ *
+ *    **Tailwind v4 の `shadow-*` ユーティリティはこの値を静的に分解する**
+ *    （末尾の色を `--tw-shadow-color` で上書き可能にするため）。多段・inset
+ *    込みの値を渡したときにリングや inset が壊れないかは実測した——
+ *    各 Worker の `test/kiwa-stylesheet.test.ts` にある「クレイの陰影と
+ *    リングの輪郭が両方生きている」が壊れると落ちる。`--shadow-xs` は
+ *    誰も `shadow-xs` を使っていないため据え置き（クレイを合成する意味が無い）。
  *
  * 4. **`.bg-primary-mesh` を持ってきていないのは変わらない。** 中身が
  *    グラデーションで、design.md の "No gradients." に当たる。
@@ -144,14 +149,18 @@
   --animate-fade-out: fade-out 0.15s ease-out;
 
   /*
-   * **輪郭はリングで作る。** 理由は冒頭「旧版からの変更点 3」を参照。
-   * リングの色（`--border` / `--border-strong`）は GDG 側の値に従う。
+   * **輪郭はリングで作り、その上に GDG のクレイを重ねる（PR3）。**
+   * 理由は冒頭「旧版からの変更点 3」を参照。リングの色
+   * （`--border` / `--border-strong`）は GDG 側の値に従う。
+   *
+   * `--shadow-xs` だけは据え置き（`shadow-xs` を使っている箇所が無い——
+   * クレイを合成しても誰にも届かない）。
    */
   --shadow-xs: 0 0 0 1px var(--border);
-  --shadow-sm: 0 0 0 1px var(--border);
-  --shadow: 0 0 0 1px var(--border);
-  --shadow-md: 0 0 0 1px var(--border-strong);
-  --shadow-lg: 0 0 0 1px var(--border-strong);
+  --shadow-sm: 0 0 0 1px var(--border), var(--gdg-shadow-sm);
+  --shadow: 0 0 0 1px var(--border), var(--gdg-shadow-sm);
+  --shadow-md: 0 0 0 1px var(--border-strong), var(--gdg-shadow-md);
+  --shadow-lg: 0 0 0 1px var(--border-strong), var(--gdg-shadow-lg);
 
   /*
    * 文字サイズ・太さのスケール。GDG 自身の `tailwind.css` が同じ Tailwind
