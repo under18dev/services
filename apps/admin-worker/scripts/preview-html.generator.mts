@@ -936,6 +936,12 @@ export async function buildPreviewPages(): Promise<readonly PreviewPage[]> {
    * のため）ので、どのページを引いても `data-tabs` が動いている様子を
    * 確かめられない。#471〜#473 が最初の利用者になる前に、架空データで
    * 1 枚だけ動く見本を出しておく（3b の指示）。
+   *
+   * **`KiwaShell` を使わない独立した静的 HTML なので、`maxWidth` prop の
+   * 削除（#544、全ページ全幅化）を自動では拾わない。** `mx-auto max-w-
+   * 3xl` を手で外してある——残したままだと `preview:html` の一覧で
+   * この見本だけ中央寄せの 768px のまま取り残され、見た人に「直って
+   * いない」と誤認される（指摘: 3b）。
    */
   const tabsSampleHtml = `<!doctype html>
 <html lang="ja">
@@ -947,7 +953,7 @@ export async function buildPreviewPages(): Promise<readonly PreviewPage[]> {
 </head>
 <body>
 <main class="px-5 py-8 md:px-10 md:py-12">
-<div class="mx-auto flex w-full max-w-3xl flex-col gap-6">
+<div class="flex w-full flex-col gap-6">
 <div class="flex flex-col gap-2">
 <h1 class="text-2xl">data-tabs の見本（架空データ）</h1>
 <p class="text-sm/relaxed text-foreground-muted">
@@ -995,6 +1001,9 @@ JS が有効なら、タブで切り替えられます。
    * **送信先（`action`）は実在しない。** ここは JS 側の挙動（件数表示・
    * 全選択・絞り込みとの連携）を確かめる見本であって、実際の一括操作を
    * 試す場所ではない。
+   *
+   * **`maxWidth` 削除（#544）の件は `tabs-sample` と同じ**——
+   * `mx-auto max-w-3xl` を手で外してある。
    */
   const bulkSelectSampleHtml = `<!doctype html>
 <html lang="ja">
@@ -1006,7 +1015,7 @@ JS が有効なら、タブで切り替えられます。
 </head>
 <body>
 <main class="px-5 py-8 md:px-10 md:py-12">
-<div class="mx-auto flex w-full max-w-3xl flex-col gap-6">
+<div class="flex w-full flex-col gap-6">
 <div class="flex flex-col gap-2">
 <h1 class="text-2xl">選択と一括操作の見本（架空データ）</h1>
 <p class="text-sm/relaxed text-foreground-muted">
