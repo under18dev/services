@@ -228,10 +228,14 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
    * `client-detail-page.tsx` の JSDoc「失効は確認を挟む」を参照。
    *
    * **一覧（`toDetail === false`）から来た場合は確認カードを出さない。**
-   * `clients-page.tsx` 側には確認カードの markup が無く（#508 でこの画面
-   * から失効ボタン自体を detail へ寄せたため、いまこの分岐を実際に通る
-   * 経路は無い）、出しようがない——未確認のまま即座に失効させる代わりに、
-   * 何もせず一覧を返す。安全側に倒しているだけで、積極的な機能ではない。
+   * `clients-page.tsx` 側には確認カードの markup が無い（#508 でこの画面
+   * から失効ボタン自体を detail へ寄せたため）。**ただし「いま UI から
+   * 通る経路が無い」はこのルート自体の性質ではない——`POST` は直接叩ける
+   * ので、古いブックマークやスクリプト、将来一覧に失効ボタンが戻ったとき
+   * にはここを通る（指摘: 3b）。** 未確認のまま即座に失効させる代わりに
+   * 何もしないのは正しいが、**`error` 無しで一覧をそのまま返すと 200 が
+   * 「成功したように見えて実は何もしていない」無言の行き止まりになる**
+   * ——`error` に理由を乗せて、呼んだ側が気づけるようにする。
    */
   app.post("/clients/disable", pageSecurityHeaders, async (c) => {
     const form = await c.req.formData().catch(() => null);
@@ -250,7 +254,9 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
       c.header("Cache-Control", "no-store");
       return toDetail
         ? renderClientDetailPage(c, clientId, { disableConfirm: true })
-        : renderClientsPage(c, {});
+        : renderClientsPage(c, {
+            error: "失効には確認が要ります。クライアントの詳細画面から操作してください。",
+          });
     }
 
     const container = c.get("container");

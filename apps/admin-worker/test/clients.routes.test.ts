@@ -1083,7 +1083,14 @@ describe("POST /clients/disable", () => {
     expect(html).toContain('name="confirm" value="true"');
   });
 
-  it("一覧から（from=detail 無し）confirm 無しで来たら、何もせず一覧を返す", async () => {
+  /**
+   * **無言の 200 にしない（指摘: 3b）。** `clients-page.tsx` に失効ボタンは
+   * 無いので UI からこの分岐を通る経路は無いが、`POST` は直接叩けるので
+   * 古いブックマークやスクリプトがここを通りうる。`error` 無しで一覧を
+   * そのまま返すと、呼んだ側からは「200 = 成功したように見えて実は
+   * 何もしていない」行き止まりになる。
+   */
+  it("一覧から（from=detail 無し）confirm 無しで来たら、何もせず理由を表示する", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc, calls } = fakeIdentityAdmin();
     const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
@@ -1112,6 +1119,8 @@ describe("POST /clients/disable", () => {
 
     expect(response.status).toBe(200);
     expect(calls.disableOAuthClient).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("失効には確認が要ります");
   });
 
   it("CSRF が通れば disableOAuthClient を actorUserId 付きで呼ぶ", async () => {
