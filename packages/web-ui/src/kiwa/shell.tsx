@@ -158,10 +158,17 @@ const Sidebar: FC<SidebarProps> = ({ nav, current, brandHref }) => (
       状態になる。
       **モバイルでは隠す** —— 折りたたみを開いたときに出てくる地点が、
       常時見えているモバイルの上部バー（下記）と二重に出ないように。
+
+      **focus-visible のリングは `sidebar-item.tsx` と同じ class を使う**
+      （指摘: 3b）。`rounded-lg border border-transparent outline-none` +
+      `focus-visible:border-ring focus-visible:ring-ring/20
+      focus-visible:ring-[3px]` ——他のサイドバー項目はこれを持つが、
+      このリンクだけ決め打ちの class に無く、ブラウザ既定のアウトラインに
+      頼っていた。
     */}
     <a
       href={brandHref}
-      class="mb-6 hidden px-3 text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground md:block"
+      class="mb-6 hidden rounded-lg border border-transparent px-3 text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase outline-none transition-colors hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20 md:block"
       {...(current === "home" ? { "aria-current": "page" } : {})}
     >
       u18 Identity
@@ -214,9 +221,14 @@ export const KiwaShell: FC<KiwaShellProps> = ({
           key="mobile-bar"
           class="flex items-center justify-between border-b border-border px-5 py-4 md:hidden"
         >
+          {/*
+            デスクトップの `Sidebar` 側と同じブランドリンクがここにも
+            もう 1 つある——`focus-visible` のリングも同じ理由・同じ class
+            で揃えておく（指摘: 3b、上の `Sidebar` 側のコメント参照）。
+          */}
           <a
             href={brandHref}
-            class="text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase transition-colors hover:text-foreground"
+            class="rounded-lg border border-transparent text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase outline-none transition-colors hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20"
           >
             u18 Identity
           </a>

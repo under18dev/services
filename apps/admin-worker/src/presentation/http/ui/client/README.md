@@ -183,3 +183,25 @@ JS が無ければ `<section>` は誰にも隠されず、見出し付きで縦�
 - `hidden` で描いた要素（絞り込み欄・コピーボタン・全選択）は、対応する
   `attach*` が呼ばれたときに JS が外す。呼ばれなければ `hidden` のまま
   —— 壊れたページではなく、「JS 無しのときはそもそも無い機能」になる。
+
+## `admin-island.test.ts` から Worker 本体の `.tsx` を import しない
+
+`ui/client/**` の型検査は `tsconfig.client.json`（DOM の型だけ、`Env` /
+`Fetcher` / `D1Database` のような Workers の ambient 型を持たない）が
+見る——Worker 本体の `tsconfig.json`（`types: ["./worker-configuration.d.ts",
+...]`）とは別の型環境になっている（このファイルの先頭の「共有コンポーネント
+にはしていない」とは別の理由での分離）。
+
+`admin-island.test.ts` から `client-detail-page.tsx` のような Worker 側の
+page component を import すると、`tsconfig.client.json` の型検査がその
+import グラフを辿ってしまう——`client-detail-page.tsx` は `../csrf` を
+import しており、`csrf.ts` → `types.ts` → `composition/container.ts`
+（DI 本体、DB・RPC gateway を抱える）まで芋づる式につながる。`container.ts`
+側は `Env` 型を前提にしたコードなので、`tsconfig.client.json` の型環境
+（`types: []`）では解決できず、無関係なファイルで型検査が落ちる（#543 で
+一度踏んだ）。
+
+実在する画面の markup を検査したいときは、`admin-island.test.ts` 側には
+実際の class 文字列を埋め込んだ fixture を置き、画面そのものの検証は
+`test/*.test.ts`（workerd 側、`tsconfig.json` 本体の型環境）で実在のルートを
+fetch する形に分けること。

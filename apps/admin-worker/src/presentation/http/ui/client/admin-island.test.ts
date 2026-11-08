@@ -419,10 +419,11 @@ describe("attachTabs", () => {
    * `tsconfig.client.json` 側——`../csrf` 経由で `composition/container.ts`
    * （DI 本体、DB・RPC gateway を抱える）まで import グラフが伸び、
    * `Env` / `Fetcher` / `D1Database` が解決できず型検査が落ちる（最初の
-   * 実装でこれをやって踏んだ）。**ここでは実在する画面と同じ class
-   * 文字列をそのまま埋め込んで**検査する——`TAB_BUTTON_CLASS` が実際の
-   * 2 画面と一致していることは `test/tab-highlight.test.ts`（workerd 側、
-   * 実在のルートを fetch する）が別途見ている。
+   * 実装でこれをやって踏んだ、詳しくは `./README.md`）。**ここでは実在
+   * する画面と同じ class 文字列をそのまま埋め込んで**検査する——
+   * `TAB_BUTTON_CLASS` が実際の 2 画面と一致していることは
+   * `test/tab-highlight.test.ts`（workerd 側、実在のルートを fetch する）
+   * が別途見ている。
    *
    * **空でも緑になる形にしない。** `[aria-selected="true"]` が 1 つも
    * 無ければ、その後の class の検査は何もしないまま通ってしまう
