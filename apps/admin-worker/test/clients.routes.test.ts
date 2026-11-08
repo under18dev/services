@@ -6,6 +6,8 @@ import type {
   CreateOAuthClientDelegatedResult,
   DisableOAuthClientDelegatedInput,
   DisableOAuthClientDelegatedResult,
+  EnableOAuthClientDelegatedInput,
+  EnableOAuthClientDelegatedResult,
   GetOAuthClientDelegatedResult,
   IdentityAdminDelegatedRpcContract,
   ListOAuthClientsDelegatedResult,
@@ -52,6 +54,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
   readonly calls: {
     createOAuthClient: CreateOAuthClientDelegatedInput[];
     disableOAuthClient: DisableOAuthClientDelegatedInput[];
+    enableOAuthClient: EnableOAuthClientDelegatedInput[];
     setOAuthClientOwner: SetOAuthClientOwnerDelegatedInput[];
     setOAuthClientAppUrl: SetOAuthClientAppUrlDelegatedInput[];
   };
@@ -59,6 +62,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
   const calls = {
     createOAuthClient: [] as CreateOAuthClientDelegatedInput[],
     disableOAuthClient: [] as DisableOAuthClientDelegatedInput[],
+    enableOAuthClient: [] as EnableOAuthClientDelegatedInput[],
     setOAuthClientOwner: [] as SetOAuthClientOwnerDelegatedInput[],
     setOAuthClientAppUrl: [] as SetOAuthClientAppUrlDelegatedInput[],
   };
@@ -84,6 +88,10 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     disableOAuthClient: async (input): Promise<DisableOAuthClientDelegatedResult> => {
       calls.disableOAuthClient.push(input);
       return rpcOk({ disabled: true });
+    },
+    enableOAuthClient: async (input): Promise<EnableOAuthClientDelegatedResult> => {
+      calls.enableOAuthClient.push(input);
+      return rpcOk({ enabled: true });
     },
     setOAuthClientOwner: async (input): Promise<SetOAuthClientOwnerDelegatedResult> => {
       calls.setOAuthClientOwner.push(input);
@@ -308,6 +316,38 @@ describe("GET /clients/:clientId（#473）", () => {
   });
 
   /**
+   * **失効済みのクライアントは、失効ではなく有効化のフォームを出す**
+   * （#551）。確認の段は無い——`disable` と違い、押した瞬間に戻れなく
+   * なる操作ではないため。
+   */
+  it("失効済みなら失効を解除するフォームを出し、失効フォームは出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(
+          client({
+            clientId: "app_0001",
+            disabledAt: "2026-11-01T00:00:00.000Z",
+          }),
+        ),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain('action="/clients/enable"');
+    expect(html).not.toContain('action="/clients/disable"');
+    expect(html).toContain("失効を解除する");
+    // **確認は挟まない。** `confirm` フィールドが無いこと。
+    expect(html).not.toContain('name="confirm"');
+  });
+
+  /**
    * 監査ログの表が並べ替えられること（#488）。**日時の型を `/audit` 本体と
    * 揃える**——`text` 扱いだと文字列として並べ替わり、「2026/11/5」と
    * 「2026/11/12」のような表記で順序が狂う（指摘: 3b）。
@@ -354,7 +394,7 @@ describe("GET /clients/:clientId（#473）", () => {
     expect(html).toContain('data-sort="text">イベント');
   });
 
-  it("一次パーティは失効フォームを出さない", async () => {
+  it("一次パーティは失効・失効の解除フォームを出さない（指摘: 3b、#551）", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
       getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
@@ -370,7 +410,40 @@ describe("GET /clients/:clientId（#473）", () => {
 
     const html = await response.text();
     expect(html).not.toContain('action="/clients/disable"');
-    expect(html).toContain("この画面からは失効させられません");
+    expect(html).not.toContain('action="/clients/enable"');
+    expect(html).toContain("この画面からは失効・失効の解除ができません");
+  });
+
+  /**
+   * **失効済みの一次パーティでも、同じメッセージのまま有効化フォームを
+   * 出さない。** `client.isFirstParty` の分岐が `disabledAt` より先に
+   * 評価されることを実測で確かめる——順序を間違えると、CLI で止めた
+   * 一次パーティがこの画面に「失効を解除する」ボタンを出してしまう
+   * （`client-detail-page.tsx` の分岐順そのものを見るテスト）。
+   */
+  it("失効済みの一次パーティでも有効化フォームを出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(
+          client({
+            clientId: "app_dashboard",
+            isFirstParty: true,
+            disabledAt: "2026-11-01T00:00:00.000Z",
+          }),
+        ),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_dashboard`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain('action="/clients/enable"');
+    expect(html).toContain("この画面からは失効・失効の解除ができません");
   });
 
   /**
@@ -1273,6 +1346,169 @@ describe("POST /clients/disable", () => {
     // **詳細画面が描き直されたことの証拠。** 一覧（`clients-page.tsx`）には
     // 出ない `data-panel` が出ていること、一覧の見出しではなく詳細の
     // 見出しが出ていることの両方で確かめる。
+    expect(html).toContain('data-panel="overview"');
+    expect(html).toContain("Detail Target");
+  });
+});
+
+/**
+ * `POST /clients/enable`（#551）。`disable` の裏返し——**確認の段は無い**
+ * （押した瞬間に戻れなくなる操作ではないため）。
+ */
+describe("POST /clients/enable", () => {
+  it("CSRF トークンが無ければ 403 で、enableOAuthClient を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/enable`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: "app_0001" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.enableOAuthClient).toHaveLength(0);
+  });
+
+  it("CSRF が通れば enableOAuthClient を actorUserId 付きで呼び、確認を挟まない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/enable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        // **`confirm` を付けていない。** 付けなくても 1 回で実行される
+        // ことを見る——`disable` と違い確認は無い。
+        body: new URLSearchParams({ client_id: "app_0001", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.enableOAuthClient).toEqual([{ actorUserId: SUB, clientId: "app_0001" }]);
+    const html = await response.text();
+    expect(html).toContain("失効を解除しました");
+  });
+
+  it("一次パーティは conflict で拒まれ、理由を表示する", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      enableOAuthClient: async () => rpcErr(RpcErrorCode.Conflict, "first-party"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/enable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "u18-dashboard", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("この画面からは失効を解除できません");
+  });
+
+  it("既に有効（冪等）なら言い切らない文言にする", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      enableOAuthClient: async () => rpcOk({ enabled: false }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/enable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("このクライアントは失効していません");
+  });
+
+  it("from=detail なら一覧ではなく詳細画面を描き直す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", name: "Detail Target" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/enable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", from: "detail", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
     expect(html).toContain('data-panel="overview"');
     expect(html).toContain("Detail Target");
   });

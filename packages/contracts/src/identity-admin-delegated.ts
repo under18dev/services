@@ -275,6 +275,15 @@ export type DisableOAuthClientDelegatedInput = z.infer<
 >;
 export type DisableOAuthClientDelegatedResult = RpcResult<{ readonly disabled: boolean }>;
 
+// ------------------------------------------------------- enableOAuthClient
+
+export const enableOAuthClientDelegatedInputSchema = z.object({
+  actorUserId: z.string().min(1),
+  clientId: z.string().min(1).max(255),
+});
+export type EnableOAuthClientDelegatedInput = z.infer<typeof enableOAuthClientDelegatedInputSchema>;
+export type EnableOAuthClientDelegatedResult = RpcResult<{ readonly enabled: boolean }>;
+
 // ------------------------------------------------------ setOAuthClientOwner
 
 export const setOAuthClientOwnerDelegatedInputSchema = z.object({
@@ -333,7 +342,7 @@ export type SetOAuthClientAppUrlDelegatedResult = RpcResult<null>;
  *   は RP が来るたびに書かれる、本番で最も量が多い部類のイベントで、
  *   接頭辞で拾うと #515 で直した「ログインに流される」のと同じことが
  *   `oauth.client.*` の中だけで起きる。管理者まで通った呼び出しだけが
- *   書く 4 件（`created` / `disabled` / `owner_changed` /
+ *   書く 5 件（`created` / `disabled` / `enabled` / `owner_changed` /
  *   `app_url_changed`）を明示的に列挙する。
  * - **`ops.approval.*` / `ops.permission.*` を含まない。** あれは
  *   admin-worker 自身の承認リスト（`admin_approval_events`、`u18-admin`
@@ -361,6 +370,7 @@ export const OPERATOR_ACTION_EVENTS = [
   "ops.user.sessions_revoked",
   "oauth.client.created",
   "oauth.client.disabled",
+  "oauth.client.enabled",
   "oauth.client.owner_changed",
   "oauth.client.app_url_changed",
 ] as const;
@@ -429,6 +439,9 @@ export interface IdentityAdminDelegatedRpcContract {
   disableOAuthClient(
     input: DisableOAuthClientDelegatedInput,
   ): Promise<DisableOAuthClientDelegatedResult>;
+  enableOAuthClient(
+    input: EnableOAuthClientDelegatedInput,
+  ): Promise<EnableOAuthClientDelegatedResult>;
   setOAuthClientOwner(
     input: SetOAuthClientOwnerDelegatedInput,
   ): Promise<SetOAuthClientOwnerDelegatedResult>;
