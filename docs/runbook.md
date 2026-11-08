@@ -1967,21 +1967,57 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
    # oauth_clients の持ち主も、消さずに null へ戻してから本体を消す——
    # 持ち主がいる OAuth クライアントが残っていると、外部キーが有効な環境では
    # users の DELETE 自体が失敗する。
+   #
+   # 全 10 文に同じガード（上の確認クエリと同じ条件）を入れてある。
+   # <USER_ID> を打ち間違えたとき、最後の users の DELETE だけがガードで
+   # 弾かれても、その手前の 9 文は既に流れた後なので手遅れになる——
+   # #554 の実装中に見つかった事故（status を見る条件を users の DELETE
+   # だけに入れたところ、active な利用者に対して呼ぶと本体は残るのに
+   # 子テーブルだけ消えた）と同じ形。手で打つこの手順は <USER_ID> を
+   # 9 箇所に貼り付けるので、実装より貼り間違いの機会が多い。
    npx wrangler d1 execute u18-identity --remote --command "
-   delete from sessions where user_id = '<USER_ID>';
-   delete from passkeys where user_id = '<USER_ID>';
-   delete from webauthn_challenges where user_id = '<USER_ID>';
-   delete from email_challenges where user_id = '<USER_ID>';
-   delete from oauth_tokens where user_id = '<USER_ID>';
-   delete from oauth_grants where user_id = '<USER_ID>';
-   delete from oauth_authorization_codes where user_id = '<USER_ID>';
-   delete from user_emails where user_id = '<USER_ID>';
-   update oauth_clients set owner_user_id = null where owner_user_id = '<USER_ID>';
-   delete from users where id = '<USER_ID>';
+   delete from sessions where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from passkeys where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from webauthn_challenges where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from email_challenges where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from oauth_tokens where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from oauth_grants where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from oauth_authorization_codes where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from user_emails where user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   update oauth_clients set owner_user_id = null where owner_user_id = '<USER_ID>' and exists (
+     select 1 from users where id = '<USER_ID>'
+       and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000
+   );
+   delete from users where id = '<USER_ID>'
+     and deleted_at is not null and deleted_at < (unixepoch() - 30 * 86400) * 1000;
    "
    ```
 
-   **`#554` は 1 つの batch（implicit transaction）にまとめて原子的に実行するが、この手順は手で打つ複数の文なので、途中で失敗しても自動では戻らない。** 失敗したら、残りの文をそのまま流し直せばよい——どの文も対象が既に無ければ 0 行で返るだけで、二重実行しても壊れない。
+   **`#554` は 1 つの batch（implicit transaction）にまとめて原子的に実行するが、この手順は手で打つ複数の文なので、途中で失敗しても自動では戻らない。** 失敗したら、残りの文をそのまま流し直せばよい——どの文も対象が既に無ければ、またはガードに当たらなければ 0 行で返るだけで、二重実行しても壊れない。
 
    **`audit_logs` は連鎖削除されない。** `audit_logs.user_id` は外部キーではなく、ただの `text` 列である（`packages/db/src/schema/audit.ts`）。これは意図的で、ユーザーを消しても監査の証跡が残るようにしてある。つまり **物理削除後も `audit_logs.user_id` に ID が残り続ける。** 完全な消去を求められた場合は、別途この列を匿名化する必要がある。
 
