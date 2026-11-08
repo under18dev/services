@@ -142,10 +142,40 @@ const BUTTON_SIZE_SM = "h-8 rounded-lg gap-1.5 px-3 has-[>svg]:px-2.5";
 export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`;
 
 /**
- * 取り消しのボタン。
+ * 取り消しのボタン——ただし破壊的な操作の全部ではない（issue #535、
+ * 指摘: 3b）。
  *
  * **面を赤く塗らない。** 一覧の各行に 1 つずつ並ぶので、塗ると
- * design.md の "No colorful UI." に当たる赤い面が画面を占める。
+ * GDG の DESIGN.md が言う "No colorful UI." に当たる赤い面が画面を占める
+ * （承認者が 10 人いれば塗りの赤が 10 個並ぶ、という形）。
  * 文字だけ `--danger` にする。
+ *
+ * ## 破壊的な操作の重みは 3 段ある
+ *
+ * **分かれ目は「単独で出るか」でも「押した瞬間に戻れなくなるか」でもなく、
+ * 「戻せるか」。**
+ *
+ * | 場面 | 使うもの | 具体例 |
+ * | --- | --- | --- |
+ * | 一覧の各行に 1 つずつ並ぶ破壊的操作 | `DANGER_BUTTON_CLASS` | — |
+ * | **戻せる操作**（やり直せば元に戻る） | `DANGER_BUTTON_CLASS` | `POST /users/:userId/revoke-sessions`（`user-detail-page.tsx`「ログイン中の端末を全部切る」）。セッションを切られた人はログインし直せば戻れる——不便だが失われるものが無い |
+ * | **戻せない確定操作**（確認カードの最終ボタン、対になる取り消し手段が無いもの） | `getButtonClasses("destructive", ...)` | 対になる enable ルートが存在しない `POST /clients/disable`（`clients.routes.tsx:223`）のような操作の確認ボタン |
+ *
+ * 「単独で出る確定操作だから塗り」という最初の案は、`revoke-sessions` で
+ * 外れた——あれは詳細画面に単独で出るが、ログインし直せば戻るので
+ * `DANGER_BUTTON_CLASS` のままでよい。**本当に見るべきは、対になる
+ * 取り消し手段（reinstate・enable 相当）が存在するかどうか**——無ければ
+ * 一番強い見た目（塗り）を取っておく。両方同じ強さだと、どちらが本当に
+ * 戻れないのか画面から読めなくなる。
+ *
+ * **根拠は vendored `../gdg/components.css` が 2 段持っていること。**
+ * `.gdg-button-danger`（L122、`background: var(--gdg-danger)` の塗り）と
+ * `.gdg-tone-danger`（L266、`background: var(--gdg-danger-surface)` の
+ * 柔らかい面）——GDG が 2 つ用意しているのは、使い分けろという意味だと
+ * 読む。`getButtonClasses("destructive")` が前者、この
+ * `DANGER_BUTTON_CLASS` が後者に対応する。上の行番号は vendored ファイル
+ * の更新でズレる。`gdg-vendor-integrity.test.ts` が `components.css` を
+ * SHA-256 で固定しているので、ズレる更新は必ずそちらのテストが先に落ちる
+ * （#542 で `--radius-lg` 等に同じ注記を入れたのと同じ形）。
  */
 export const DANGER_BUTTON_CLASS = `${BUTTON_CLASS} text-destructive hover:text-destructive`;
