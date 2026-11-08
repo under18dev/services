@@ -6,6 +6,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  getButtonClasses,
   KiwaShell,
   Table,
   TableBody,
@@ -51,6 +52,15 @@ import { formatDateTime } from "./format";
  *
  * **JS が無ければ 4 枚とも見出し付きで縦に並ぶ**（`attachTabs` は
  * `hidden` を JS 側からしか付けない、README の絶対条件）。
+ *
+ * ## 選択中タブの強調（指摘: 3b）
+ *
+ * `c5db342` でこの `data-tab` を足した時点から、選択中かどうかで見た目が
+ * 変わる class が無かった——`attachTabs` は `aria-selected` を
+ * 付け外しするだけで、それに反応する CSS がどこにも無かった（GDG 側を
+ * 含めて確認済み）。`aria-selected:border-primary aria-selected:text-
+ * foreground` を静的な class として足し、`[aria-selected="true"]` を
+ * Tailwind の variant で踏ませている——`attachTabs` 側は変えていない。
  */
 
 export type ClientDetailPageProps = {
@@ -197,28 +207,28 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
         <button
           type="button"
           data-tab="overview"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           概要
         </button>
         <button
           type="button"
           data-tab="redirect-uris"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           redirect_uri
         </button>
         <button
           type="button"
           data-tab="audit"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           監査ログ
         </button>
         <button
           type="button"
           data-tab="operations"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           操作
         </button>
@@ -352,6 +362,20 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
             持ち主・表示用 URL の変更と失効は、この画面で行います。変更は一覧にも反映されます。
           </CardDescription>
         </CardHeader>
+        {/*
+          3 つのボタンとも `getButtonClasses()` を使う（指摘: 3b、
+          services-11 の走査で素の下線テキストのままだったと判明）。
+
+          `失効させる` は `variant="destructive"`（塗り）——`DANGER_
+          BUTTON_CLASS`（outline + 文字だけ赤）ではない。分かれ目は
+          「押した瞬間に戻れなくなるか」で、`DANGER_BUTTON_CLASS` は
+          一覧の各行に 1 つずつ並ぶ破壊的操作向け（`island-classes.ts`
+          の「塗ると赤い面が画面を占める」はそちら向けの判断）。ここは
+          詳細画面に 1 つだけ出て、確認の段を挟まず 1 クリックで
+          失効が確定するので、単独で出る確定操作として塗りを選ぶ
+          （指摘: 3b、根拠は vendored `components.css` の
+          `.gdg-button-danger`/`.gdg-tone-danger` の 2 段）。
+        */}
         <CardContent class={ITEM_BODY_CLASS}>
           <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
             <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
@@ -368,7 +392,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               />
             </label>
             <div>
-              <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+              <button type="submit" class={getButtonClasses("outline", "sm")}>
                 持ち主を変更する
               </button>
             </div>
@@ -389,7 +413,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               />
             </label>
             <div>
-              <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+              <button type="submit" class={getButtonClasses("outline", "sm")}>
                 表示用 URL を変更する
               </button>
             </div>
@@ -405,7 +429,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="client_id" value={client.clientId} />
               <input type="hidden" name="from" value="detail" />
-              <button type="submit" class="text-sm text-destructive underline underline-offset-4">
+              <button type="submit" class={getButtonClasses("destructive", "sm")}>
                 失効させる
               </button>
             </form>
