@@ -32,13 +32,45 @@
  * `@media` の中身を直接見るには、既に実績のある `darkMediaVarNames`
  * （`./dark-media`）を再利用し、返ってくる変数名の集合に
  * `--gdg-shadow-sm` / `-md` / `-lg` が入っていることを別 assert すること。
+ *
+ * ## 正規表現を使わない理由（CodeQL `js/polynomial-redos`、指摘: 3b）
+ *
+ * 当初は `/--tw-shadow:([^;]*);/g` のような正規表現で宣言の値を取っていたが、
+ * CodeQL が polynomial ReDoS（high）として検出した——終端の `;` が無い
+ * まま `--tw-shadow:` の形をした文字列が繰り返されると、バックトラックで
+ * 再走査が起きる形になっていた。配信 CSS は自分たちのビルドが生成する
+ * 信頼できる入力だが、required check なので構造ごと直す。
+ *
+ * `;` で素直に分割する線形処理に置き換えた——CSS の宣言値に `;` が入らない
+ * という前提は、もとの `[^;]*` も同じものを置いていたので変わっていない。
+ * `darkMediaVarNames`（`./dark-media`）がブロック全体に正規表現を当てず
+ * ブレースの対応を数えているのも、同じ理由（意図しないバックトラック・
+ * 誤マッチを避ける）だと見て、書き方を合わせた。
+ *
+ * **最後の宣言には末尾の `;` が無いことがある**（lightningcss は `}` の
+ * 直前の `;` を省略して minify する）。`;` で割った最後のチャンクが
+ * 次のセレクタまで取り込んでしまわないよう、`}` が現れたらそこで値を
+ * 打ち切る——今の配信 CSS では `--tw-shadow` も `--gdg-shadow-*` も
+ * ブロック内の最後の宣言ではないため実害は今は無いが、上流の並びが
+ * 変わっても壊れない形にしてある。
  */
+
+function declarationValue(chunk: string, propertyName: string): string | null {
+  const prefix = `${propertyName}:`;
+  const start = chunk.indexOf(prefix);
+  if (start === -1) return null;
+
+  const rest = chunk.slice(start + prefix.length);
+  const closeBrace = rest.indexOf("}");
+  return (closeBrace === -1 ? rest : rest.slice(0, closeBrace)).trim();
+}
 
 /** 配信 CSS が持つ `--tw-shadow:` 宣言のうち、GDG のクレイトークンを合成しているものの値。 */
 export function shadowDeclsWithClay(css: string): readonly string[] {
-  return [...css.matchAll(/--tw-shadow:([^;]*);/g)]
-    .map((m) => m[1] ?? "")
-    .filter((decl) => decl.includes("--gdg-shadow-"));
+  return css
+    .split(";")
+    .map((chunk) => declarationValue(chunk, "--tw-shadow"))
+    .filter((value): value is string => value !== null && value.includes("--gdg-shadow-"));
 }
 
 /**
@@ -48,5 +80,13 @@ export function shadowDeclsWithClay(css: string): readonly string[] {
  * JSDoc 参照）。
  */
 export function gdgShadowTokenDefs(css: string): readonly string[] {
-  return [...css.matchAll(/--gdg-shadow-(?:sm|md|lg):([^;]*);/g)].map((m) => m[1] ?? "");
+  const names = ["--gdg-shadow-sm", "--gdg-shadow-md", "--gdg-shadow-lg"];
+  const values: string[] = [];
+  for (const chunk of css.split(";")) {
+    for (const name of names) {
+      const value = declarationValue(chunk, name);
+      if (value !== null) values.push(value);
+    }
+  }
+  return values;
 }
