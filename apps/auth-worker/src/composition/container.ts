@@ -51,6 +51,7 @@ import { DelegatedGetUserUseCase } from "../application/use-cases/delegated-get-
 import { DelegatedGetUsersByIdsUseCase } from "../application/use-cases/delegated-get-users-by-ids.use-case";
 import { DelegatedListUsersUseCase } from "../application/use-cases/delegated-list-users.use-case";
 import { DelegatedManageUserUseCase } from "../application/use-cases/delegated-manage-user.use-case";
+import { DelegatedDeleteUserUseCase } from "../application/use-cases/delegated-delete-user.use-case";
 import { DelegatedCountOAuthClientsUseCase } from "../application/use-cases/delegated-count-oauth-clients.use-case";
 import { DelegatedCountUsersUseCase } from "../application/use-cases/delegated-count-users.use-case";
 import { DelegatedGetOAuthClientUseCase } from "../application/use-cases/delegated-get-oauth-client.use-case";
@@ -190,6 +191,7 @@ export type Container = {
     readonly delegatedGetUser: DelegatedGetUserUseCase;
     readonly delegatedGetUsersByIds: DelegatedGetUsersByIdsUseCase;
     readonly delegatedManageUser: DelegatedManageUserUseCase;
+    readonly delegatedDeleteUser: DelegatedDeleteUserUseCase;
     readonly delegatedListOAuthClients: DelegatedListOAuthClientsUseCase;
     readonly delegatedGetOAuthClient: DelegatedGetOAuthClientUseCase;
     readonly delegatedCountOAuthClients: DelegatedCountOAuthClientsUseCase;
@@ -532,6 +534,7 @@ export function createContainer(
       delegatedGetUser: new DelegatedGetUserUseCase({ users }),
       delegatedGetUsersByIds: new DelegatedGetUsersByIdsUseCase({ users }),
       delegatedManageUser: new DelegatedManageUserUseCase({ users, sessions, clock, audit }),
+      delegatedDeleteUser: new DelegatedDeleteUserUseCase({ users, audit }),
       delegatedListOAuthClients: new DelegatedListOAuthClientsUseCase({ clients: oauthClients }),
       delegatedGetOAuthClient: new DelegatedGetOAuthClientUseCase({ clients: oauthClients }),
       delegatedCountOAuthClients: new DelegatedCountOAuthClientsUseCase({ clients: oauthClients }),

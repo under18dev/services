@@ -1,4 +1,4 @@
-import { type IdentityDatabase, userEmails, users } from "@u18/db";
+import { type IdentityDatabase, oauthClients, userEmails, users } from "@u18/db";
 import { newId, newUserId } from "@u18/domain";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import type {
@@ -380,5 +380,29 @@ export class DrizzleUserRepository implements UserRepository {
     const result = { active: 0, suspended: 0, deleted: 0 };
     for (const row of rows) result[row.status] = row.count;
     return result;
+  }
+
+  /**
+   * 行そのものを消す（運用者判断、2026-11-08）。**2 文を batch でまとめる。**
+   *
+   * 1 文目で `oauth_clients.owner_user_id` を外す——`onDelete` を持たない
+   * 参照なので、先にこれをしないと 2 文目が FK 違反で落ちる
+   * （port の JSDoc を参照）。クライアントの行自体は更新するだけで消さない。
+   *
+   * 2 文目が `users` を消す。他の参照（セッション・Passkey・`user_emails`・
+   * 認可コード・同意・トークン）はすべて `onDelete: "cascade"` なので、
+   * この 1 文で一緒に消える。
+   *
+   * `returning` で実際に消えた行だけを見る。対象が無ければ 0 行で `false`。
+   */
+  async deletePermanently(id: string): Promise<boolean> {
+    const [, deletedRows] = await this.db.batch([
+      this.db
+        .update(oauthClients)
+        .set({ ownerUserId: null })
+        .where(eq(oauthClients.ownerUserId, id)),
+      this.db.delete(users).where(eq(users.id, id)).returning({ id: users.id }),
+    ]);
+    return deletedRows.length > 0;
   }
 }

@@ -137,6 +137,26 @@ export const AUDIT_EVENTS = [
    */
   "ops.user.sessions_revoked",
   /**
+   * 管理者が利用者の行を物理的に消した（運用者判断、2026-11-08）。運用者が
+   * 仕様書 §14.1 決定 7（凍結で表現し物理削除しない）を上書きした判断に
+   * 対応する（改訂の docs は #553）。
+   *
+   * **`user.purged` とは別物。** あちらは CLI 専用で、行を残したまま
+   * 個人情報だけ置き換える（`purge-user.sql.ts`）。こちらは管理画面から
+   * 呼べて、行そのものが無くなる。同じ画面にこの 2 つが並んだとき
+   * `event` 名が読めば区別が付くよう、接頭辞をあえて揃えていない
+   * （`user.purged` に `ops.` を付けない理由も同じ——CLI 発というもう1つの
+   * 軸があるため）。
+   *
+   * **`userId` は対象者本人。** `oauth.client.*` と違い、利用者を対象と
+   * するイベントなので、「利用者」列の意味（`audit-page.tsx` の冒頭）に
+   * 従う。しかも物理削除後は `users` の行が消えるので、`audit_logs.user_id`
+   * に対象の id を残すことが**唯一、後から「この id は削除された」と
+   * 辿れる手段**になる——実行者を入れてしまうと、削除された本人を指す
+   * ものがどこにも残らない。実行者は `metadata.actorUserId` に入れる。
+   */
+  "ops.user.deleted",
+  /**
    * 管理者の旗が立ったアカウントが、**Passkey 以外で張られたセッション**で
    * 現れた（決定 8 / 脅威モデル RR-5）。権限は与えず、その事実だけを出す。
    *
@@ -389,6 +409,14 @@ export const AUDIT_EVENT_RETENTION = {
    * `admin.denied` と違い、`audit_logs` を伸ばす経路にならない。
    */
   "ops.user.sessions_revoked": { sink: "d1", retention: "security" },
+  /**
+   * 物理削除。**`user.purged` と同じく、戻せない操作の記録。**
+   *
+   * `ops.*` は全部 security 区分である（下のテストが固定する）ので、
+   * 選べる区分はこれしかないが、仮に選べたとしても suspend より軽い扱いに
+   * する理由が無い——suspend は戻せるが、これは戻せない。
+   */
+  "ops.user.deleted": { sink: "d1", retention: "security" },
   /** 認証器を足した。乗っ取りの最も典型的な足跡。 */
   "passkey.register": { sink: "d1", retention: "security" },
   /** 認証器を外した。締め出しの手口でもある。 */

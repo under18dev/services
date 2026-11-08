@@ -1,5 +1,5 @@
 import { auditLogs, oauthClients, users } from "@u18/db";
-import { createExecutionContext } from "cloudflare:test";
+import { createExecutionContext, env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { IdentityAdminDelegatedRPC } from "../src/presentation/rpc/identity-admin-delegated.entrypoint";
@@ -463,6 +463,102 @@ describe("suspendUser / reinstateUser / revokeUserSessions", () => {
 
     // `ManageUserUseCase` 相当の `reauthentication_required` は出ない。
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
+  it("削除でき、行が実際に消える（レスポンスではなく DB で確認する）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const target: SeededUser = await seedLoggedInUser();
+
+    const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
+
+    expect(result.ok).toBe(true);
+    const row = await db().select().from(users).where(eq(users.id, target.userId)).get();
+    expect(row).toBeUndefined();
+  });
+
+  it("自分自身は削除できない（conflict）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: admin.userId });
+
+    expect(!result.ok && result.error.code).toBe("conflict");
+    // 自分自身への conflict では、本人の行は消えずに残る。
+    const row = await db().select().from(users).where(eq(users.id, admin.userId)).get();
+    expect(row).toBeDefined();
+  });
+
+  it("存在しない userId は not_found", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    const result = await rpc.deleteUser({
+      actorUserId: admin.userId,
+      userId: "usr_does_not_exist",
+    });
+
+    expect(!result.ok && result.error.code).toBe("not_found");
+  });
+
+  it("削除は監査に残る。userId は対象者本人、実行者は metadata", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const target: SeededUser = await seedLoggedInUser();
+
+    await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
+
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "ops.user.deleted"))
+      .all();
+    expect(rows).toHaveLength(1);
+    // **`oauth.client.disabled` とは逆。** ここでは対象者本人の id が
+    // `userId` に入る——物理削除後は `users` の行が消えるので、これが
+    // 「この id は削除された」と後から辿れる唯一の手段になる。
+    expect(rows[0]?.userId).toBe(target.userId);
+    const metadata = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
+    expect(metadata["actorUserId"]).toBe(admin.userId);
+  });
+
+  it("存在しない userId への削除は監査に残らない（oauth.client.* の「何も起きなかった呼び出しも残す」とは違う）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    await rpc.deleteUser({ actorUserId: admin.userId, userId: "usr_does_not_exist" });
+
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "ops.user.deleted"))
+      .all();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("クライアントを所有している利用者の削除が成功する（owner_user_id が null になり、クライアントは残る）", async () => {
+    // **ここを測らないと、FK で落ちる経路が本番で初めて出る。**
+    const admin: SeededUser = await seedLoggedInUser();
+    const target: SeededUser = await seedLoggedInUser();
+    const client = await seedClient({
+      clientId: "owned-by-target",
+      clientType: "public",
+      isFirstParty: false,
+    });
+    await db()
+      .update(oauthClients)
+      .set({ ownerUserId: target.userId })
+      .where(eq(oauthClients.id, client.id))
+      .run();
+
+    // 明示的に強制する。無いと FK 違反が起きず、この検査が「owner が
+    // 残っていても消せる」ことを偶然を装って通すだけになる
+    // （3b の指摘、2026-11-08。`session-repository.test.ts` 等と同じ理由）。
+    await env.IDENTITY_DB.prepare("pragma foreign_keys = on").run();
+
+    const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
+
+    expect(result.ok).toBe(true);
+    const row = await db().select().from(oauthClients).where(eq(oauthClients.id, client.id)).get();
+    expect(row).toBeDefined();
+    expect(row?.ownerUserId).toBeNull();
   });
 });
 

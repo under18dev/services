@@ -123,4 +123,43 @@ export interface UserRepository {
     readonly suspended: number;
     readonly deleted: number;
   }>;
+  /**
+   * 行そのものを消す（管理画面からの強制削除、運用者判断 2026-11-08）。
+   * **`closeAccount` / `purgeUserSql` とは別物。** あちらは `status` を
+   * 変えるだけで行は残す（仕様書 §14.1 決定 7、ただし運用者がこの操作の
+   * ために上書きした。改訂の docs は #553）。
+   * こちらは `delete from users` そのもので、**戻せない。**
+   *
+   * **名前を `delete` にしていない。** `status` の列挙には既に `"deleted"`
+   * という値があり（`purgeUserSql` が立てる、行は残る）、`delete()` という
+   * メソッド名を見ても「行が消えるのか、`status` が変わるのか」が読めない。
+   * `deletePermanently` という名前自体に、どちらであるかを書いてある。
+   *
+   * ## `oauth_clients.owner_user_id` を道連れにする
+   *
+   * `owner_user_id` は `users.id` を参照するが `onDelete` を持たない
+   * （`packages/db/src/schema/oauth.ts` の注釈——決定 7 を前提に、参照先が
+   * 消えて空振りする経路は無いはずだった）。そのままでは `delete from users`
+   * が FK 違反で落ちる。**クライアントの行は消さない**——持ち主が消えた
+   * だけでログインの宛先を失わせる理由が無いので、`owner_user_id` を
+   * `null` に戻してから本体を消す。2 文は `d1.batch()` でまとめ、
+   * 「owner だけ外れて user は残る」中途半端な状態を作らない。
+   *
+   * ## 他のテーブルは CASCADE に任せる
+   *
+   * セッション・Passkey・`user_emails`・認可コード・同意・トークンは
+   * すべて `onDelete: "cascade"` を持つので、この 1 文で一緒に消える
+   * （`packages/db/src/schema` を参照）。
+   *
+   * ## 残るもの
+   *
+   * `audit_logs.user_id` は FK を持たないので残る——**意図的。**
+   * 物理削除後に「この id は削除された」と辿れる唯一の手段になる
+   * （`purgeUserSql` の JSDoc と同じ理由）。`nfc_cards.owner_user_id` /
+   * `admin_approvals.sub` も別 D1 で FK を持たず、ここからは触れない
+   * （別の Worker・別のマイグレーションの範囲）。
+   *
+   * 対象が存在しなければ `false`。呼ぶ側はそれを `not_found` に訳す。
+   */
+  deletePermanently(id: string): Promise<boolean>;
 }

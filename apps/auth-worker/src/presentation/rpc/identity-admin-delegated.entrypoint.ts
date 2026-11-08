@@ -2,6 +2,7 @@ import {
   countOAuthClientsDelegatedInputSchema,
   countUsersDelegatedInputSchema,
   createOAuthClientDelegatedInputSchema,
+  deleteUserDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
   getOAuthClientDelegatedInputSchema,
   getUserDelegatedInputSchema,
@@ -23,6 +24,8 @@ import {
   type CountUsersDelegatedResult,
   type CreateOAuthClientDelegatedInput,
   type CreateOAuthClientDelegatedResult,
+  type DeleteUserDelegatedInput,
+  type DeleteUserDelegatedResult,
   type DisableOAuthClientDelegatedInput,
   type DisableOAuthClientDelegatedResult,
   type GetOAuthClientDelegatedInput,
@@ -216,6 +219,20 @@ export class IdentityAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk({ revokedSessions: result.value.revokedSessions });
+  }
+
+  async deleteUser(input: DeleteUserDelegatedInput): Promise<DeleteUserDelegatedResult> {
+    const parsed = deleteUserDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedDeleteUser.execute({
+      actorUserId: parsed.data.actorUserId,
+      userId: parsed.data.userId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({});
   }
 
   async listOAuthClients(
