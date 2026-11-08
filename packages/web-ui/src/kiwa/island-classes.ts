@@ -142,10 +142,54 @@ const BUTTON_SIZE_SM = "h-8 rounded-lg gap-1.5 px-3 has-[>svg]:px-2.5";
 export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`;
 
 /**
- * 取り消しのボタン。
+ * 取り消しのボタン——ただし破壊的な操作の全部ではない（issue #535、
+ * 指摘: 3b）。
  *
  * **面を赤く塗らない。** 一覧の各行に 1 つずつ並ぶので、塗ると
- * design.md の "No colorful UI." に当たる赤い面が画面を占める。
- * 文字だけ `--danger` にする。
+ * `under18dev/under18dev` の `design.md`（u18 自身のデザイン方針、
+ * GDG とは別物——`./README.md` の「色は design.md（`under18dev/
+ * under18dev`）の値で」と同じ出どころ）が言う "No colorful UI." に
+ * 当たる赤い面が画面を占める（承認者が 10 人いれば塗りの赤が 10 個
+ * 並ぶ、という形）。文字だけ `--danger` にする。
+ *
+ * ## 破壊的な操作の重みは 3 段ある
+ *
+ * **分かれ目は「単独で出るか」でも「押した瞬間に戻れなくなるか」でもなく、
+ * 「戻せるか」。**
+ *
+ * | 場面 | 使うもの | 具体例 |
+ * | --- | --- | --- |
+ * | 一覧の各行に 1 つずつ並ぶ破壊的操作 | `DANGER_BUTTON_CLASS` | — |
+ * | **戻せる操作**（やり直せば元に戻る） | `DANGER_BUTTON_CLASS` | `POST /users/:userId/revoke-sessions`（`user-detail-page.tsx`「ログイン中の端末を全部切る」）。セッションを切られた人はログインし直せば戻れる——不便だが失われるものが無い |
+ * | **戻せない確定操作・確認カードの最終ボタン** | `getButtonClasses("destructive", ...)` | `approvals-page.tsx` の確認カードにある「本当に剥奪する」（`action="/approvals/:sub/revoke"`、`confirm=true` を携えた 2 段目） |
+ * | **戻せない確定操作・確認を挟まず 1 クリックで確定するもの** | `getButtonClasses("destructive", ...)` | `client-detail-page.tsx` の「失効させる」（`POST /clients/disable`）。**ただしこの操作自体（確認段も対になる enable ルートも持たないこと）は見た目とは別の未解決の問題として運用者に報告済み、判断待ち**——真似する根拠にしないこと |
+ *
+ * 「単独で出る確定操作だから塗り」という最初の案は、`revoke-sessions` で
+ * 外れた——あれは詳細画面に単独で出るが、ログインし直せば戻るので
+ * `DANGER_BUTTON_CLASS` のままでよい。**本当に見るべきは、対になる
+ * 取り消し手段（reinstate・enable 相当）が存在するかどうか**——無ければ
+ * 一番強い見た目（塗り）を取っておく。両方同じ強さだと、どちらが本当に
+ * 戻れないのか画面から読めなくなる。
+ *
+ * **「戻せる」には 2 種類ある。** 1 つは自分（管理者）がもう一度操作すれば
+ * 元に戻る形（`reinstate` 等）。もう 1 つは、管理者側に戻す手段が無くても
+ * **本人のその後の行動で**戻る形——`nfc` の「手放させる」（release）は
+ * 管理者が直接付け替えるエンドポイントを意図的に持たないが
+ * （`release-card.use-case.ts` / `claim-card.use-case.ts`）、本人が
+ * 再タップすれば自分で取り戻せるので、`revoke-sessions` と同じ「戻せる」
+ * 側に置く。**「管理者が戻せないなら戻せない側」とは限らない**——次に
+ * `release` のような操作を見た人が同じ早合点をしないよう、ここに残す。
+ *
+ * **この表は 2 つの正本を突き合わせた結果である。** `design.md`（u18）が
+ * 面を赤く塗るなと言い、GDG の vendored `../gdg/components.css` が
+ * 塗り（`.gdg-button-danger`、L122、`background: var(--gdg-danger)`）と
+ * 柔らかい面（`.gdg-tone-danger`、L266、
+ * `background: var(--gdg-danger-surface)`）の 2 段を用意している——
+ * GDG が 2 つ用意しているのは使い分けろという意味だと読み、
+ * `getButtonClasses("destructive")` を前者、この `DANGER_BUTTON_CLASS`
+ * を後者に対応させた。上の行番号は vendored ファイルの更新でズレる。
+ * `gdg-vendor-integrity.test.ts` が `components.css` を SHA-256 で
+ * 固定しているので、ズレる更新は必ずそちらのテストが先に落ちる
+ * （#542 で `--radius-lg` 等に同じ注記を入れたのと同じ形）。
  */
 export const DANGER_BUTTON_CLASS = `${BUTTON_CLASS} text-destructive hover:text-destructive`;
