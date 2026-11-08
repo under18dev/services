@@ -100,6 +100,40 @@ describe("カード詳細のタップ履歴グラフ（#512・#513）", () => {
 });
 
 /**
+ * クライアント失効の確認カード（#548）。
+ *
+ * **確認カードそのものがプレビューのどこにも無かった**（指摘: 3b、
+ * `clients-detail` には確認前の「失効させる」しか出ていなかった）。
+ * `disableConfirm` は GET で辿り着ける URL が無いので、`clients-detail`
+ * と違って `preview-html.generator.mts` 側で `POST /clients/disable` を
+ * `confirm` 無しで叩いて書き出している——そちらが壊れて普通の詳細画面に
+ * 戻ってしまった場合もここで拾える。
+ */
+describe("クライアント失効の確認カード（#548）", () => {
+  it("「元に戻せません」の文言と、確定・取り消しの両方のボタンが出る", () => {
+    const html = pageHtml("clients-detail-disable-confirm");
+    expect(html).toContain("この操作は管理画面から元に戻せません");
+
+    // **確定ボタンは塗りの destructive。** `getButtonClasses("destructive")`
+    // の variant 由来の class（`bg-destructive`）を持つ「本当に失効させる」
+    // が無ければ、確認カード自体が出ていないか、ボタンの見た目が作り直
+    // されたときに静かに緑のままになる——`toMatch` は 0 件なら失敗する。
+    const destructiveButtonMatch = /<button[^>]*bg-destructive[^>]*>\s*本当に失効させる/;
+    expect(html).toMatch(destructiveButtonMatch);
+
+    // **取り消しは outline の `<a>`。** form の送信ボタンではなく遷移
+    // ——`/approvals` のキャンセルと同じ形であることも確かめる。
+    const cancelLinkMatch = /<a[^>]*href="\/clients\/app_preview3"[^>]*>\s*キャンセル/;
+    expect(html).toMatch(cancelLinkMatch);
+
+    // **確認段だけで、実際には失効していないこと。** この画面を作る
+    // POST は `confirm` を付けていないので、成功の文言が出ていたら
+    // `fetchHtmlPost` の呼び出しがどこかで壊れている。
+    expect(html).not.toContain("失効させました");
+  });
+});
+
+/**
  * Google Sans が実際にプレビュー出力へ書き出されること（design-system
  * 連携、PR2）。
  *

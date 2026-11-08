@@ -102,7 +102,7 @@ describe("buildPreviewIndexHtml のライト/ダーク切り替え", () => {
   });
 
   it("ページの本文に <script> タグが含まれていても、埋め込みが壊れない", async () => {
-    // 実物の17画面は admin-island.js を読む <script type="module"> を
+    // 実物の各画面は admin-island.js を読む <script type="module"> を
     // 本文に持つ。`</script` の文字列をエスケープし忘れると、埋め込んだ
     // ページのところで外側の <script> が早期に閉じ、後続のボタンの配線が
     // 丸ごと本文として描画されてしまう（詳細は preview-index.mjs の
