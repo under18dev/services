@@ -6,6 +6,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  getButtonClasses,
   KiwaShell,
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import {
   TableRow,
 } from "@u18/web-ui/kiwa";
 import {
+  DANGER_BUTTON_CLASS,
   EMPTY_CLASS,
   FIELD_CLASS,
   INPUT_CLASS,
@@ -362,6 +364,13 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
             持ち主・表示用 URL の変更と失効は、この画面で行います。変更は一覧にも反映されます。
           </CardDescription>
         </CardHeader>
+        {/*
+          3 つのボタンとも `getButtonClasses()` / `DANGER_BUTTON_CLASS` を
+          使う（指摘: 3b、services-11 の走査で素の下線テキストのまま
+          だったと判明）。`失効させる` は破壊的操作なので
+          `DANGER_BUTTON_CLASS`——`card-detail-page.tsx` の
+          `CardDetailActions` と同じ使い分け。
+        */}
         <CardContent class={ITEM_BODY_CLASS}>
           <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
             <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
@@ -378,7 +387,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               />
             </label>
             <div>
-              <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+              <button type="submit" class={getButtonClasses("outline", "sm")}>
                 持ち主を変更する
               </button>
             </div>
@@ -399,7 +408,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               />
             </label>
             <div>
-              <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+              <button type="submit" class={getButtonClasses("outline", "sm")}>
                 表示用 URL を変更する
               </button>
             </div>
@@ -415,7 +424,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="client_id" value={client.clientId} />
               <input type="hidden" name="from" value="detail" />
-              <button type="submit" class="text-sm text-destructive underline underline-offset-4">
+              <button type="submit" class={DANGER_BUTTON_CLASS}>
                 失効させる
               </button>
             </form>
