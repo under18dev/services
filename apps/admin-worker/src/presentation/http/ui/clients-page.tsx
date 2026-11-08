@@ -7,6 +7,7 @@ import {
   CardTitle,
   KiwaShell,
   Separator,
+  getButtonClasses,
 } from "@u18/web-ui/kiwa";
 import {
   EMPTY_CLASS,
@@ -339,7 +340,7 @@ export const ClientsPage: FC<ClientsPageProps> = ({
             ここから登録したクライアントでは、利用者に必ず同意画面が表示されます。
           </p>
           <div>
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("default")}>
               登録する
             </button>
           </div>

@@ -12,6 +12,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  getButtonClasses,
 } from "@u18/web-ui/kiwa";
 import {
   EMPTY_CLASS,
@@ -219,7 +220,7 @@ export const AuditPage: FC<AuditPageProps> = ({
             </label>
           </fieldset>
           <div>
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("outline")}>
               絞り込む
             </button>
           </div>
@@ -276,7 +277,7 @@ export const AuditPage: FC<AuditPageProps> = ({
             <input type="hidden" name="event" value={event ?? ""} />
             <input type="hidden" name="user_id" value={userId ?? ""} />
             <input type="hidden" name="outcome" value={outcome ?? ""} />
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("ghost")}>
               続きを読む
             </button>
           </form>

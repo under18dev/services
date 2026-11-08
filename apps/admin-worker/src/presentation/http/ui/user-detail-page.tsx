@@ -296,9 +296,7 @@ const UserActions: FC<{
           <button
             type="submit"
             class={
-              suspension.kind === "self_closed"
-                ? DANGER_BUTTON_CLASS
-                : "text-sm text-foreground underline underline-offset-4"
+              suspension.kind === "self_closed" ? DANGER_BUTTON_CLASS : getButtonClasses("outline")
             }
           >
             {suspension.kind === "self_closed" ? "それでも停止を解除する" : "停止を解除する"}
@@ -312,7 +310,7 @@ const UserActions: FC<{
       <form method="post" action={`/users/${user.id}/revoke-sessions`}>
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
         <input type="hidden" name="from" value="detail" />
-        <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+        <button type="submit" class={DANGER_BUTTON_CLASS}>
           ログイン中の端末を全部切る
         </button>
       </form>
@@ -765,6 +763,15 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
           form POST の本文で渡す作りで（検索語を URL に残さないため）、
           GET のクエリを読むハンドラが無い。リンクに見せるために
           `<button>` へリンクの見た目を当てている。
+
+          **見た目を Button コンポーネント相当に変えなかった理由（#535 の
+          button/action 洗い出しで再確認済み）。** `audit.routes.tsx` を
+          読み直し、`app.get("/audit", ...)` がいまも引数無しで
+          `renderAuditPage` を呼ぶだけで、クエリ文字列を一切読まないことを
+          実測で確認した——`GET /audit?user_id=...` を直接叩いても絞り込みは
+          効かない。絞り込みが効く唯一の経路は `POST /audit/search` であり、
+          ここはその POST を送るためのボタンなので、見た目だけ `<a>` 風の
+          `<Button variant="link">` 相当にしても実体は変わらない。
         */}
         <form method="post" action="/audit/search" class="mt-3">
           <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
