@@ -310,6 +310,44 @@ describe("Kiwa の画面が使うクラスは、配信する CSS に在る", () 
 });
 
 /**
+ * 本文の幅をページごとに変えない（運用者の直接の要望）。
+ *
+ * `KiwaShell` はかつて `maxWidth` prop を持っていた（この Worker の
+ * 6 画面は全部既定の `max-w-3xl` のままだったが、admin の 7 画面が
+ * `max-w-6xl` を渡しており、**同じ `KiwaShell` なのに画面によって本文の
+ * 幅が違う**という指摘そのもの）。prop ごと外したので、ここでは
+ * **型だけの保証で終わっていないか**——実際に配信される HTML に
+ * `max-w-` が残っていないかを見る。
+ *
+ * `PAGES`（6 枚）に加え、未認証の `message-page.tsx` も見る——`current`
+ * を渡していないだけで、本文ラッパは同じ `KiwaShell` を通る。
+ */
+describe("本文の幅はページごとに変えない（運用者の直接の要望）", () => {
+  /** `<main>` 直下の本文ラッパ div の class 属性。見つからなければ null。 */
+  function bodyWrapperClassOf(html: string): string | null {
+    return /<main[^>]*>\s*<div class="([^"]*)"/.exec(html)?.[1] ?? null;
+  }
+
+  function expectNoMaxWidth(html: string, label: string): void {
+    const wrapperClass = bodyWrapperClassOf(html);
+    // null のまま下の not.toMatch へ進むと、ラッパが見つからなくても
+    // 「max-w- を含まない」側として緑になりうる。
+    expect(wrapperClass, `${label}: <main> 直下の本文ラッパが見つからない`).not.toBeNull();
+    expect(wrapperClass, `${label}: 本文ラッパに max-w- が付いている`).not.toMatch(/max-w-/);
+  }
+
+  it.each(PAGES)("%s の本文ラッパに max-w- が無い", async (path) => {
+    const html = await fetchText(path, true);
+    expectNoMaxWidth(html, path);
+  });
+
+  it("未認証で返る画面の本文ラッパにも max-w- が無い", async () => {
+    const html = await fetchText(OVERVIEW_PATH, false, 401);
+    expectNoMaxWidth(html, "message-page");
+  });
+});
+
+/**
  * OS 設定（`prefers-color-scheme`）に従うライト/ダークが、**実際に配信
  * される CSS まで届いているか**（GDG デザイン移行 PR1、指摘: 3b）。
  *

@@ -161,7 +161,6 @@ export const AuditPage: FC<AuditPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="監査ログ"
     lead="u18 で記録されている操作の履歴を調べます。"
-    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
