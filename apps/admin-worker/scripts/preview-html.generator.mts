@@ -844,6 +844,46 @@ async function fetchHtml(path: string, cookie?: string): Promise<string> {
   return body;
 }
 
+/**
+ * form POST で辿り着く画面を書き出すための小さな追加（#548 の確認カード）。
+ *
+ * **`addPage`（GET 専用）では届かない。** `nfc-card-detail-dormant` 等の
+ * 派生画面は別の fixture ID へ GET するだけで出せるが、`disableConfirm`
+ * は `POST /clients/disable` を `confirm` 無しで叩いたときにしか現れない
+ * ——GET でたどり着ける URL が無い。`client-id` 等の対象情報を CSRF
+ * トークンと一緒に body へ積む必要がある分だけ `fetchHtml` から分けた。
+ */
+function csrfTokenFrom(cookieHeader: string): string {
+  const match = /u18_csrf=([^;]+)/.exec(cookieHeader);
+  if (match === null) throw new Error("csrf cookie が無い——先に対象の画面を GET したか確認する");
+  return decodeURIComponent(match[1]!);
+}
+
+async function fetchHtmlPost(
+  path: string,
+  body: Readonly<Record<string, string>>,
+  cookie: string,
+): Promise<string> {
+  const response = await app.fetch(
+    new Request(`${env.ADMIN_ORIGIN}${path}`, {
+      method: "POST",
+      headers: {
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: env.ADMIN_ORIGIN,
+      },
+      body: new URLSearchParams(body),
+    }),
+    env,
+    executionContext,
+  );
+  const htmlBody = await response.text();
+  if (response.status >= 500) {
+    throw new Error(`${path} が ${response.status} を返しました:\n${htmlBody.slice(0, 2000)}`);
+  }
+  return htmlBody;
+}
+
 /** `<link rel="stylesheet" href="/ui/kiwa.<hash>.css"/>` を相対パスへ書き換える。 */
 function withLocalStylesheet(html: string): string {
   return html.replace(/href="\/ui\/kiwa\.[0-9a-f]+\.css"/, 'href="./kiwa.css"');
@@ -921,6 +961,35 @@ export async function buildPreviewPages(): Promise<readonly PreviewPage[]> {
     "/clients/app_preview3",
     sessionCookie,
   );
+  {
+    // **`disableConfirm` は GET でたどり着ける URL が無い**（#548）。
+    // `POST /clients/disable` を `confirm` 無しで叩いたときにしか出ない
+    // ので、CSRF トークンを自分で取って `fetchHtmlPost` で叩く——
+    // `confirm` は付けない（付けると実際に失効してしまう。この画面は
+    // あくまで確認カードの見本で、確定はしない）。
+    const detailResponse = await app.fetch(
+      new Request(`${env.ADMIN_ORIGIN}/clients/app_preview3`, {
+        headers: { Cookie: sessionCookie },
+      }),
+      env,
+      executionContext,
+    );
+    const csrfCookie = cookieHeaderFrom(detailResponse);
+    const html = withLocalIsland(
+      withLocalStylesheet(
+        await fetchHtmlPost(
+          "/clients/disable",
+          { client_id: "app_preview3", from: "detail", csrf_token: csrfTokenFrom(csrfCookie) },
+          `${sessionCookie}; ${csrfCookie}`,
+        ),
+      ),
+    );
+    pages.push({
+      name: "clients-detail-disable-confirm",
+      title: "OAuth クライアント詳細（失効の確認、#548）",
+      html,
+    });
+  }
   await addPage("audit", "監査ログ（/audit）", "/audit", sessionCookie);
   await addPage("approvals", "承認・権限の管理（/approvals、#190）", "/approvals", sessionCookie);
   await addPage("pending", "承認待ち（/pending）", "/pending", pendingCookie);
