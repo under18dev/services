@@ -146,9 +146,11 @@ export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`
  * 指摘: 3b）。
  *
  * **面を赤く塗らない。** 一覧の各行に 1 つずつ並ぶので、塗ると
- * GDG の DESIGN.md が言う "No colorful UI." に当たる赤い面が画面を占める
- * （承認者が 10 人いれば塗りの赤が 10 個並ぶ、という形）。
- * 文字だけ `--danger` にする。
+ * `under18dev/under18dev` の `design.md`（u18 自身のデザイン方針、
+ * GDG とは別物——`./README.md` の「色は design.md（`under18dev/
+ * under18dev`）の値で」と同じ出どころ）が言う "No colorful UI." に
+ * 当たる赤い面が画面を占める（承認者が 10 人いれば塗りの赤が 10 個
+ * 並ぶ、という形）。文字だけ `--danger` にする。
  *
  * ## 破壊的な操作の重みは 3 段ある
  *
@@ -168,14 +170,25 @@ export const BUTTON_CLASS = `${BUTTON_BASE} ${BUTTON_OUTLINE} ${BUTTON_SIZE_SM}`
  * 一番強い見た目（塗り）を取っておく。両方同じ強さだと、どちらが本当に
  * 戻れないのか画面から読めなくなる。
  *
- * **根拠は vendored `../gdg/components.css` が 2 段持っていること。**
- * `.gdg-button-danger`（L122、`background: var(--gdg-danger)` の塗り）と
- * `.gdg-tone-danger`（L266、`background: var(--gdg-danger-surface)` の
- * 柔らかい面）——GDG が 2 つ用意しているのは、使い分けろという意味だと
- * 読む。`getButtonClasses("destructive")` が前者、この
- * `DANGER_BUTTON_CLASS` が後者に対応する。上の行番号は vendored ファイル
- * の更新でズレる。`gdg-vendor-integrity.test.ts` が `components.css` を
- * SHA-256 で固定しているので、ズレる更新は必ずそちらのテストが先に落ちる
+ * **「戻せる」には 2 種類ある。** 1 つは自分（管理者）がもう一度操作すれば
+ * 元に戻る形（`reinstate` 等）。もう 1 つは、管理者側に戻す手段が無くても
+ * **本人のその後の行動で**戻る形——`nfc` の「手放させる」（release）は
+ * 管理者が直接付け替えるエンドポイントを意図的に持たないが
+ * （`release-card.use-case.ts` / `claim-card.use-case.ts`）、本人が
+ * 再タップすれば自分で取り戻せるので、`revoke-sessions` と同じ「戻せる」
+ * 側に置く。**「管理者が戻せないなら戻せない側」とは限らない**——次に
+ * `release` のような操作を見た人が同じ早合点をしないよう、ここに残す。
+ *
+ * **この表は 2 つの正本を突き合わせた結果である。** `design.md`（u18）が
+ * 面を赤く塗るなと言い、GDG の vendored `../gdg/components.css` が
+ * 塗り（`.gdg-button-danger`、L122、`background: var(--gdg-danger)`）と
+ * 柔らかい面（`.gdg-tone-danger`、L266、
+ * `background: var(--gdg-danger-surface)`）の 2 段を用意している——
+ * GDG が 2 つ用意しているのは使い分けろという意味だと読み、
+ * `getButtonClasses("destructive")` を前者、この `DANGER_BUTTON_CLASS`
+ * を後者に対応させた。上の行番号は vendored ファイルの更新でズレる。
+ * `gdg-vendor-integrity.test.ts` が `components.css` を SHA-256 で
+ * 固定しているので、ズレる更新は必ずそちらのテストが先に落ちる
  * （#542 で `--radius-lg` 等に同じ注記を入れたのと同じ形）。
  */
 export const DANGER_BUTTON_CLASS = `${BUTTON_CLASS} text-destructive hover:text-destructive`;
