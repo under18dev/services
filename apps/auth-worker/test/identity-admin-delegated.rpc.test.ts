@@ -535,6 +535,105 @@ describe("createOAuthClient / disableOAuthClient", () => {
   });
 });
 
+/**
+ * `enableOAuthClient`（#551）。`disableOAuthClient` の裏返し。
+ *
+ * **画面の文言ではなく、行そのものを見る。** `enabled: true` という応答は
+ * UseCase が「成功したつもり」であることしか言わない——実際に
+ * `disabled_at` が `null` に戻っているかは、応答を信じず DB を直接見る。
+ */
+describe("enableOAuthClient（#551）", () => {
+  it("失効を解除でき、disabled_at が実際に null になる", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const client = await seedClient({
+      clientId: "app_to_enable",
+      clientType: "public",
+      isFirstParty: false,
+      disabledAt: new Date("2026-11-01T00:00:00.000Z"),
+    });
+
+    const result = await rpc.enableOAuthClient({
+      actorUserId: admin.userId,
+      clientId: client.clientId,
+    });
+    expect(result.ok && result.value.enabled).toBe(true);
+
+    // **これが本体。** 応答ではなく、行そのものを見る。
+    const [row] = await db()
+      .select({ disabledAt: oauthClients.disabledAt })
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, client.clientId))
+      .all();
+    expect(row?.disabledAt).toBeNull();
+  });
+
+  it("一次パーティは解除できない（disable と対称）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    await db()
+      .insert(oauthClients)
+      .values({
+        id: "cli_first_party_enable",
+        clientId: "u18-dashboard-enable-test",
+        name: "u18 Dashboard",
+        clientType: "confidential",
+        allowedScopes: "openid profile email",
+        isFirstParty: true,
+        logoUrl: null,
+        disabledAt: new Date("2026-11-01T00:00:00.000Z"),
+      })
+      .run();
+
+    const blocked = await rpc.enableOAuthClient({
+      actorUserId: admin.userId,
+      clientId: "u18-dashboard-enable-test",
+    });
+    expect(!blocked.ok && blocked.error.code).toBe("conflict");
+
+    // **拒否しただけでなく、本当に何も変えていないこと。**
+    const [row] = await db()
+      .select({ disabledAt: oauthClients.disabledAt })
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, "u18-dashboard-enable-test"))
+      .all();
+    expect(row?.disabledAt).not.toBeNull();
+  });
+
+  it("既に有効なものへの再実行は enabled: false だが、監査ログには残る", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+    const client = await seedClient({
+      clientId: "app_already_enabled",
+      clientType: "public",
+      isFirstParty: false,
+      disabledAt: null,
+    });
+
+    const result = await rpc.enableOAuthClient({
+      actorUserId: admin.userId,
+      clientId: client.clientId,
+    });
+    expect(result.ok && result.value.enabled).toBe(false);
+
+    // **応答では区別しないが、記録では分かる**（disable の
+    // already_disabled_or_unknown と対称）。
+    const rows = await db()
+      .select({ reason: auditLogs.reason, outcome: auditLogs.outcome })
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "oauth.client.enabled"))
+      .all();
+    expect(rows).toEqual([{ outcome: "failure", reason: "already_enabled_or_unknown" }]);
+  });
+
+  it("未登録の client_id も同じ応答になる（総当たりで実在を調べさせない）", async () => {
+    const admin: SeededUser = await seedLoggedInUser();
+
+    const result = await rpc.enableOAuthClient({
+      actorUserId: admin.userId,
+      clientId: "app_does_not_exist",
+    });
+    expect(result.ok && result.value.enabled).toBe(false);
+  });
+});
+
 describe("setOAuthClientOwner", () => {
   it("持ち主を設定でき、一覧にも反映される", async () => {
     const admin: SeededUser = await seedLoggedInUser();

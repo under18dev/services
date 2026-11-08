@@ -55,6 +55,10 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
 
   "POST /clients": "CLIENT_WRITE",
   "POST /clients/disable": "CLIENT_WRITE",
+  // #551。disable の裏返しで、新しいビットは作らない（disable と同じ
+  // 書き込み権限で足りる——3b の判断と同じ理由、auth-worker 側の
+  // 認可ゲートも disable と同じものを流用している）。
+  "POST /clients/enable": "CLIENT_WRITE",
   // #441。main に先に入ったので最終合わせを待たずここで足す
   // （#454/#455 等、まだ並行中のものは最後にまとめて合わせる）。
   "POST /clients/owner": "CLIENT_WRITE",

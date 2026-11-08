@@ -77,6 +77,32 @@ import { formatDateTime } from "./format";
  * 入れるには重すぎる。確認段だけを先に入れたのは、戻すのが安い
  * （この変更を revert すれば元の 1 クリックに戻る）ため。運用者が
  * 「現状のままでよい」と答えたら、この確認段は revert する。
+ *
+ * **上の 2 段落は #548 時点の記録としてそのまま残す。** 下の節が
+ * その続き。
+ *
+ * ## 有効化は確認を挟まない（#551、運用者の返事はまだ無い）
+ *
+ * **「enable ルートは意図的に足していない」という上の判断を、運用者の
+ * 返事を待たずに覆した。** 理由は 3 つ——(1) enable は `disable` の裏返し
+ * で、新しい概念がひとつも要らないことを実装を読んで確認した
+ * （`DelegatedEnableOAuthClientUseCase` の JSDoc）。(2) 追加のみで、
+ * 既存の挙動は何も変わらない——`git revert` 1 本で今日の状態に戻る。
+ * (3) 確認段（#548）は**起こりにくさ**を下げただけで、**起きたときの
+ * 結果**（本番 D1 の直接操作でしか戻せない）には手を付けていなかった。
+ * issue #551 は運用者の判断を待つため開けたままにしてある——「要らない」
+ * と言われたら、この節ごと revert する。
+ *
+ * **確認は挟まない。** `disable` と違い、有効化は押した瞬間に戻れなく
+ * なる操作ではない——もう一度失効させればやり直せる。`getButtonClasses(
+ * "outline", "sm")` を使う。`island-classes.ts` の `DANGER_BUTTON_CLASS`
+ * の 3 段表に照らすと、有効化は破壊的操作ではないのでそもそも対象外
+ * ——一覧の「探す」「続きを読む」ボタンと同じ、普通の操作として扱う。
+ *
+ * **一次パーティは解除できない（推奨、運用者の決定ではない）。**
+ * `disable` と対称に `conflict` を返す——CLI で止めた一次パーティを
+ * 管理者 1 人がここから戻せる形にすると、`disable` 側で守っている
+ * 非対称がそこで崩れる。復旧経路は CLI の `enable` に残した。
  */
 
 export type ClientDetailPageProps = {
@@ -378,7 +404,8 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
         <CardHeader>
           <CardTitle>操作</CardTitle>
           <CardDescription>
-            持ち主・表示用 URL の変更と失効は、この画面で行います。変更は一覧にも反映されます。
+            持ち主・表示用 URL
+            の変更、失効・失効の解除は、この画面で行います。変更は一覧にも反映されます。
           </CardDescription>
         </CardHeader>
         {/*
@@ -436,10 +463,19 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
 
           {client.isFirstParty ? (
             <p class={ITEM_META_CLASS}>
-              u18 公式のクライアントは、この画面からは失効させられません。ログイン画面そのものが
-              止まるためです。
+              u18 公式のクライアントは、この画面からは失効・失効の解除ができません。ログイン画面
+              そのものが止まる・戻るためです。
             </p>
-          ) : client.disabledAt !== null ? null : disableConfirm ? (
+          ) : client.disabledAt !== null ? (
+            <form method="post" action="/clients/enable">
+              <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+              <input type="hidden" name="client_id" value={client.clientId} />
+              <input type="hidden" name="from" value="detail" />
+              <button type="submit" class={getButtonClasses("outline", "sm")}>
+                失効を解除する
+              </button>
+            </form>
+          ) : disableConfirm ? (
             <div class={ITEM_BODY_CLASS}>
               <p class={ITEM_META_CLASS} role="alert">
                 {client.name} を失効させます。

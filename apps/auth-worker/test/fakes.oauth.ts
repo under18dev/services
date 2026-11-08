@@ -108,6 +108,13 @@ export class InMemoryOAuthClientRepository implements OAuthClientRepository {
     return true;
   }
 
+  async enable(clientId: string): Promise<boolean> {
+    const props = this.store.get(clientId);
+    if (props === undefined || props.disabledAt === null) return false;
+    this.store.set(clientId, { ...props, disabledAt: null });
+    return true;
+  }
+
   async setOwner(clientId: string, ownerUserId: string | null): Promise<boolean> {
     const props = this.store.get(clientId);
     if (props === undefined) return false;

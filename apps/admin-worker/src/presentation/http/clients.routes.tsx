@@ -66,6 +66,12 @@ function disableFailureMessage(code: string): string {
   return "いま失効させられません。しばらく待ってからもう一度お試しください。";
 }
 
+/** 失効の解除が通らなかった理由。`disable` と対称に、一次パーティは `conflict` で返る。 */
+function enableFailureMessage(code: string): string {
+  if (code === "conflict") return "u18 公式のクライアントは、この画面からは失効を解除できません。";
+  return "いま失効を解除できません。しばらく待ってからもう一度お試しください。";
+}
+
 /** 持ち主の変更が通らなかった理由。 */
 function setOwnerFailureMessage(code: string): string {
   if (code === "invalid_input") return "その userId の利用者が見つかりません。";
@@ -278,6 +284,50 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
     const notice = result.value.disabled
       ? "失効させました。以後このクライアントでの新しい認可は通りません。"
       : "このクライアントは既に失効しています。";
+    return toDetail
+      ? renderClientDetailPage(c, clientId, { notice })
+      : renderClientsPage(c, { notice });
+  });
+
+  /**
+   * 失効の解除（#551）。**冪等。確認の段は挟まない**——`disable` と違い、
+   * 押した瞬間に戻れなくなる操作ではない（もう一度失効させればよい）。
+   * 詳しい理由は `client-detail-page.tsx` の JSDoc「有効化は確認を挟まない」
+   * を参照。
+   *
+   * **詳細画面にしかボタンが無い。** `clients-page.tsx`（一覧）は #508 で
+   * 操作をすべて詳細へ寄せた設計のままで、ここに新しい分岐は足さない。
+   */
+  app.post("/clients/enable", pageSecurityHeaders, async (c) => {
+    const form = await c.req.formData().catch(() => null);
+
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, "/clients");
+    }
+
+    const session = c.get("session");
+    const clientId = (form.get("client_id")?.toString() ?? "").trim();
+    const toDetail = cameFromDetail(form);
+
+    const container = c.get("container");
+    const result = await container.identityAdmin.enableOAuthClient({
+      actorUserId: session.sub,
+      clientId,
+    });
+
+    if (!result.ok) {
+      const error = enableFailureMessage(result.error.code);
+      return toDetail
+        ? renderClientDetailPage(c, clientId, { error })
+        : renderClientsPage(c, { error });
+    }
+
+    // **「解除しました」と言い切らない**（`disable` と対称）。冪等なので
+    // 2 度目は何も変わっておらず、`enabled: false` が返る。
+    const notice = result.value.enabled
+      ? "失効を解除しました。以後このクライアントでの新しい認可が通ります。"
+      : "このクライアントは失効していません。";
     return toDetail
       ? renderClientDetailPage(c, clientId, { notice })
       : renderClientsPage(c, { notice });

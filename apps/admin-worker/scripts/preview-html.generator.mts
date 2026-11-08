@@ -623,6 +623,7 @@ const identityAdmin: IdentityAdminDelegatedRpcContract = {
   revokeUserSessions: unused("revokeUserSessions"),
   createOAuthClient: unused("createOAuthClient"),
   disableOAuthClient: unused("disableOAuthClient"),
+  enableOAuthClient: unused("enableOAuthClient"),
   setOAuthClientOwner: unused("setOAuthClientOwner"),
   setOAuthClientAppUrl: unused("setOAuthClientAppUrl"),
   listUsers: async (input: ListUsersDelegatedInput) => {
@@ -990,6 +991,12 @@ export async function buildPreviewPages(): Promise<readonly PreviewPage[]> {
       html,
     });
   }
+  await addPage(
+    "clients-detail-disabled",
+    "OAuth クライアント詳細（失効済み、/clients/app_preview5、失効の解除ボタンの見本、#551）",
+    "/clients/app_preview5",
+    sessionCookie,
+  );
   await addPage("audit", "監査ログ（/audit）", "/audit", sessionCookie);
   await addPage("approvals", "承認・権限の管理（/approvals、#190）", "/approvals", sessionCookie);
   await addPage("pending", "承認待ち（/pending）", "/pending", pendingCookie);
