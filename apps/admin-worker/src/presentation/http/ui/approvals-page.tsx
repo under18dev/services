@@ -5,8 +5,15 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  getButtonClasses,
   KiwaShell,
   Separator,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@u18/web-ui/kiwa";
 import {
   FIELD_CLASS,
@@ -17,7 +24,6 @@ import {
   ITEM_RAW_CLASS,
   ITEM_TITLE_CLASS,
   LABEL_CLASS,
-  LIST_CLASS,
 } from "@u18/web-ui/kiwa/island-classes";
 import type { UserRefAdmin } from "@u18/contracts";
 import type { FC } from "hono/jsx";
@@ -107,6 +113,88 @@ import { UserRef } from "./user-ref";
  *   「内部の言葉が漏れる」形になる。
  * - **件数は絞る**（`approvals.routes.tsx` の `HISTORY_LIMIT`）。`/audit`
  *   と同じ判断——これより古い記録が要る調査は、D1 を直接見ればよい。
+ *
+ * ## 承認済みは `<ul>` ではなく `Table`（運用者からの直接要望）
+ *
+ * 「ボタンがわかりにくい」「他と同じく table 使って下さい」という指摘。
+ * 2 つの別の問題を分けて直した。
+ *
+ * 1. **操作が素の `<button>` に下線 class を当てただけだった。** このファイル
+ *    に実在する「ボタンに見えるべき場所」を自分で全文走査して数え直した
+ *    ところ 6 箇所あった（3b が最初に伝えてきたのは 1 箇所、訂正の
+ *    やり取りで 5 箇所——どちらも全文ではなく一部を数えた結果で、
+ *    実際に合っていたのは「承認済みテーブルの中が 3 つ」ではなく
+ *    「ファイル全体で 6 つ」だった。3b 自身が `generated/` 除外漏れ・
+ *    `.tsx` だけ grep して `.ts` の島を見落とす、という同じ形の数え
+ *    違いを過去にもしており、今回も鵜呑みにせず自分で数え直した）。
+ *
+ *    | 行（目安） | 操作 | 選んだ variant |
+ *    | --- | --- | --- |
+ *    | 承認済み行・操作セル | super approver にする/外す | outline |
+ *    | 承認済み行・操作セル | 権限を更新する | outline |
+ *    | 承認済み行・操作セル | 承認を剥奪する | **destructive** |
+ *    | 剥奪の確認カード | 本当に剥奪する | **destructive** |
+ *    | 剥奪の確認カード | キャンセル | outline（**6 つ目、自分で見つけた**） |
+ *    | 新しく承認するカード | 承認する | default |
+ *
+ *    **「キャンセル」は 3b の指示には無かった。** 確定ボタンだけ塗り潰しの
+ *    赤にして隣の取り消しを下線テキストのまま残すと、2 択の片方だけが
+ *    押せるボタンに見える非対称な見た目になる——確認ダイアログの確定・
+ *    取り消しは対で扱うべき、という判断で追加した。
+ *
+ *    **`<Button>` という JSX コンポーネントは使わない。** `@u18/web-ui/kiwa`
+ *    に実在はするが、このリポジトリの 35 箇所の実例は全部
+ *    `getButtonClasses(variant, size)` を呼んで戻り値を生の `<button>`/
+ *    `<a>` の `class` に当てる書き方で、`<Button>` タグとしての利用は
+ *    リポジトリ中どこにも無い（`button.tsx` 自身の定義を除く、3b 経由で
+ *    services-11 が確認、自分でも `grep` して同じ結果を得た）。ここだけ
+ *    `<Button>` にすると流儀が 1 箇所だけ割れる。
+ * 2. **`<ul>` の縦積みだった。** `/users`（`users-page.tsx`）と同じ
+ *    `Table`/`TableHeader`/`TableRow`/`TableCell` に寄せた。列は
+ *    「承認された人」「権限」「承認」「操作」の 4 つ。
+ *
+ * ### 権限セルは `<details>`/`<summary>`（JS 不要の畳み方）
+ *
+ * 元の行にはチェックボックス 8 個 + `APPROVAL_GRANT` の節という大きな
+ * `<fieldset>` が入っていた。そのままセルに入れると行が巨大になって
+ * 表の意味が無くなる。**`<details>` を使い、既定では現在の権限を
+ * `Badge` で読み取り専用表示するだけにし、`<summary>` を開くと
+ * `<fieldset>` が出る形にした。**`home-page.tsx` の「サインイン情報」
+ * と同じ畳み方。
+ *
+ * 理由は 3 つ。
+ *
+ * - **JS 不要。** このページはずっと JS を要求しない設計（上の節参照）。
+ *   `<details>` はブラウザ標準の挙動で、`attachTabs` 的な仕組みに
+ *   依存させない
+ * - **ルート・クエリパラメータを増やさない。** 運用者が頼んだのは
+ *   見た目の話で、サーバー側の契約は変えていない
+ * - **情報を落とさない。** `PermissionCheckbox` が出す説明文（`description`）
+ *   と定数名（`name`）は、開いたときに元の文言のまま全部見える
+ *
+ * **権限を更新するボタンは「操作」セルに置き、`form` 属性でフォームと
+ * 結び付けている。** `<form>` の `<fieldset>` は「権限」セルの
+ * `<details>` の中、送信ボタンは別のセル——HTML の `<button form="...">`
+ * は同じ `<form>` の中に無くても、その `id` を指すだけで送信できる
+ * （ネストしなくてよい）。これで「操作セルに 3 つボタンを並べる」という
+ * 列の設計と、「権限セルは畳める」という設計を両立させている。送信される
+ * 内容（CSRF トークン・チェックボックスの値）は `<form>` が持つので、
+ * ボタンの物理的な位置とは無関係にそのまま届く。
+ *
+ * ### `data-sort` は「承認された人」列にだけ付けた（実測して決めた）
+ *
+ * `admin-island.ts` の `sortValueOf("date", ...)` は、セルの `textContent`
+ * から末尾の " JST" を取り除いてから `Date.parse` に通す（#500 の修正）。
+ * **「承認」列は日時のあとに承認者の `UserRef` が続く**ので、
+ * `textContent` は `"2026/01/12 09:37 JST / 承認者: 名前 (@id)"` のような
+ * 形になり、末尾が `JST` ではなく `)` になる——正規表現が外す対象を
+ * 見つけられず、`Date.parse` がそのまま壊れた文字列を受け取って
+ * `NaN`（並べ替え不能）になる。**実際に `node` で確かめてから** この列
+ * には `data-sort` を付けないことにした。「権限」列（`<details>` の
+ * 説明文まで `textContent` に含まれる）と「操作」列（ボタンの文字列を
+ * 並べ替える意味が無い）も同じ理由で付けていない。`/users` の「利用者」
+ * 列と同じ構造（名前 + バッジが同じセルに入る）の「承認された人」列
+ * だけが、既存の前例と同じ安全な形なので `data-sort="text"` を付けた。
  */
 
 const PERMISSION_ORDER = Object.keys(PERMISSION_BITS) as readonly PermissionBitName[];
@@ -244,59 +332,66 @@ const PermissionCheckbox: FC<{
   </label>
 );
 
-const ApprovalRow: FC<{
+/**
+ * 権限の編集フォームの `id`。「操作」セルの送信ボタンが `form` 属性で
+ * ここを指す——`<fieldset>` は「権限」セルの `<details>` の中にあるが、
+ * ボタンは物理的に別のセルにある（ファイル冒頭の JSDoc 参照）。
+ */
+function permissionsFormId(sub: string): string {
+  return `approval-permissions-${sub}`;
+}
+
+/**
+ * 「権限」セルの中身。
+ *
+ * super approver の行はビットを列挙しない（ファイル冒頭の JSDoc 参照）
+ * ——「全権限」の 1 枚だけを出す。それ以外は、現在のビットを `Badge` で
+ * 読み取り専用表示し、`<summary>` を開くと編集用の `<fieldset>` が出る。
+ */
+const PermissionCell: FC<{
   readonly approval: ApprovalListRow;
   readonly csrfToken: string;
-  readonly viewerSub: string;
-  readonly refs: ReadonlyMap<string, UserRefAdmin>;
-}> = ({ approval, csrfToken, viewerSub, refs }) => (
-  <li class={ITEM_BODY_CLASS}>
-    <div class={ITEM_TITLE_CLASS}>
-      <UserRef id={approval.sub} refs={refs} />
-      {/*
-        **sub のコピー**（#504）。#482 で `UserRef`（名前 + リンク）に
-        したことで、生の sub を画面の文字として取る手段が無くなった
-        ——CLI（`pnpm approval:grant/revoke/status --sub <SUB>`）が
-        この値を要求する。`UserRef` 自体は変えず、隣にボタンを足すだけ
-        （`/users` 一覧の ID 列、`users-page.tsx` と同じ形）。
-      */}
-      <button type="button" data-copy={approval.sub} hidden class="text-xs underline">
-        コピー
-      </button>
-      {approval.isSuperApprover ? <Badge variant="secondary">super approver</Badge> : null}
-      {approval.sub === viewerSub ? <Badge variant="outline">自分</Badge> : null}
-    </div>
-    <p class={ITEM_META_CLASS}>
-      承認 {formatDateTime(approval.createdAt.toISOString())}
-      {approval.approvedBySub === null ? null : (
-        <>
-          {" "}
-          / 承認者: <UserRef id={approval.approvedBySub} refs={refs} />{" "}
-          <button type="button" data-copy={approval.approvedBySub} hidden class="text-xs underline">
-            コピー
-          </button>
-        </>
-      )}
-    </p>
+}> = ({ approval, csrfToken }) => {
+  if (approval.isSuperApprover) {
+    return (
+      <div class={ITEM_BODY_CLASS}>
+        <Badge variant="outline-primary">全権限（super approver）</Badge>
+        <p class={ITEM_META_CLASS}>
+          super approver は全操作を無条件に行えます。個別の権限ビットは意味を持ちません。
+        </p>
+      </div>
+    );
+  }
 
-    <form method="post" action={`/approvals/${approval.sub}/super`} class={ITEM_BODY_CLASS}>
-      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-      <input
-        type="hidden"
-        name="is_super_approver"
-        value={approval.isSuperApprover ? "false" : "true"}
-      />
-      <button type="submit" class="text-sm text-foreground underline underline-offset-4">
-        {approval.isSuperApprover ? "super approver を外す" : "super approver にする"}
-      </button>
-    </form>
+  const granted = REGULAR_PERMISSION_ORDER.filter(
+    (name) => (approval.permissions & PERMISSION_BITS[name]) !== 0n,
+  );
+  const hasApprovalGrant = (approval.permissions & PERMISSION_BITS.APPROVAL_GRANT) !== 0n;
 
-    {approval.isSuperApprover ? (
-      <p class={ITEM_META_CLASS}>
-        super approver は全操作を無条件に行えます。個別の権限ビットは意味を持ちません。
-      </p>
-    ) : (
-      <form method="post" action={`/approvals/${approval.sub}/permissions`} class={ITEM_BODY_CLASS}>
+  return (
+    <details>
+      <summary class={ITEM_META_CLASS}>
+        {granted.length === 0 && !hasApprovalGrant ? (
+          "権限なし"
+        ) : (
+          <span class="inline-flex flex-wrap gap-1 align-middle">
+            {granted.map((name) => (
+              <Badge key={name} variant="outline">
+                {PERMISSION_LABELS[name].label}
+              </Badge>
+            ))}
+            {hasApprovalGrant ? (
+              <Badge variant="outline-primary">{PERMISSION_LABELS.APPROVAL_GRANT.label}</Badge>
+            ) : null}
+          </span>
+        )}
+      </summary>
+      <form
+        id={permissionsFormId(approval.sub)}
+        method="post"
+        action={`/approvals/${approval.sub}/permissions`}
+        class={`${ITEM_BODY_CLASS} mt-2`}
+      >
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
         <fieldset class={FIELD_CLASS}>
           <span class={LABEL_CLASS}>権限</span>
@@ -319,26 +414,98 @@ const ApprovalRow: FC<{
         */}
         <fieldset class={FIELD_CLASS}>
           <span class={LABEL_CLASS}>ここだけ特に重い（実質的な昇格）</span>
-          <PermissionCheckbox
-            name="APPROVAL_GRANT"
-            checked={(approval.permissions & PERMISSION_BITS.APPROVAL_GRANT) !== 0n}
-          />
+          <PermissionCheckbox name="APPROVAL_GRANT" checked={hasApprovalGrant} />
         </fieldset>
-        <div>
-          <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+      </form>
+    </details>
+  );
+};
+
+const ApprovalRow: FC<{
+  readonly approval: ApprovalListRow;
+  readonly csrfToken: string;
+  readonly viewerSub: string;
+  readonly refs: ReadonlyMap<string, UserRefAdmin>;
+}> = ({ approval, csrfToken, viewerSub, refs }) => (
+  <TableRow>
+    <TableCell class="whitespace-normal">
+      <div class={ITEM_TITLE_CLASS}>
+        <UserRef id={approval.sub} refs={refs} />
+        {/*
+          **sub のコピー**（#504）。#482 で `UserRef`（名前 + リンク）に
+          したことで、生の sub を画面の文字として取る手段が無くなった
+          ——CLI（`pnpm approval:grant/revoke/status --sub <SUB>`）が
+          この値を要求する。`UserRef` 自体は変えず、隣にボタンを足すだけ
+          （`/users` 一覧の ID 列、`users-page.tsx` と同じ形）。
+        */}
+        <button type="button" data-copy={approval.sub} hidden class="text-xs underline">
+          コピー
+        </button>
+        {approval.isSuperApprover ? <Badge variant="secondary">super approver</Badge> : null}
+        {approval.sub === viewerSub ? <Badge variant="outline">自分</Badge> : null}
+      </div>
+    </TableCell>
+    <TableCell class="whitespace-normal">
+      <PermissionCell approval={approval} csrfToken={csrfToken} />
+    </TableCell>
+    <TableCell class="whitespace-normal">
+      <p class={ITEM_META_CLASS}>
+        {formatDateTime(approval.createdAt.toISOString())}
+        {approval.approvedBySub === null ? null : (
+          <>
+            {" "}
+            / 承認者: <UserRef id={approval.approvedBySub} refs={refs} />{" "}
+            <button
+              type="button"
+              data-copy={approval.approvedBySub}
+              hidden
+              class="text-xs underline"
+            >
+              コピー
+            </button>
+          </>
+        )}
+      </p>
+    </TableCell>
+    <TableCell class="whitespace-normal">
+      <div class={ITEM_ACTIONS_CLASS}>
+        <form method="post" action={`/approvals/${approval.sub}/super`}>
+          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+          <input
+            type="hidden"
+            name="is_super_approver"
+            value={approval.isSuperApprover ? "false" : "true"}
+          />
+          <button type="submit" class={getButtonClasses("outline", "sm")}>
+            {approval.isSuperApprover ? "super approver を外す" : "super approver にする"}
+          </button>
+        </form>
+
+        {/*
+          **super approver の行には出さない。** `PermissionCell` が
+          `<form id={permissionsFormId(...)}>` を描かないので、出すと
+          押しても何も送信先が無いボタンになる——元の行がビットの
+          フォームごと出していなかったのと同じ理由。
+        */}
+        {approval.isSuperApprover ? null : (
+          <button
+            type="submit"
+            form={permissionsFormId(approval.sub)}
+            class={getButtonClasses("outline", "sm")}
+          >
             権限を更新する
           </button>
-        </div>
-      </form>
-    )}
+        )}
 
-    <form method="post" action={`/approvals/${approval.sub}/revoke`}>
-      <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-      <button type="submit" class="text-sm text-destructive underline underline-offset-4">
-        承認を剥奪する
-      </button>
-    </form>
-  </li>
+        <form method="post" action={`/approvals/${approval.sub}/revoke`}>
+          <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+          <button type="submit" class={getButtonClasses("destructive", "sm")}>
+            承認を剥奪する
+          </button>
+        </form>
+      </div>
+    </TableCell>
+  </TableRow>
 );
 
 export const ApprovalsPage: FC<ApprovalsPageProps> = ({
@@ -359,6 +526,8 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
     stylesheet={KIWA_STYLESHEET_PATH}
     heading="承認者・権限"
     lead="admin.under18.dev を使ってよい人と、操作ごとの権限を管理します。"
+    // `/users` と同じ理由（users-page.tsx）——4 列の表は max-w-3xl（既定）だと窮屈。
+    maxWidth="max-w-6xl"
     scripts={[ISLAND_PATH]}
   >
     {error === undefined ? null : (
@@ -390,11 +559,18 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
             <form method="post" action={`/approvals/${revokeConfirmSub}/revoke`}>
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="confirm" value="true" />
-              <button type="submit" class="text-sm text-destructive underline underline-offset-4">
+              <button type="submit" class={getButtonClasses("destructive")}>
                 本当に剥奪する
               </button>
             </form>
-            <a href="/approvals" class="text-sm text-foreground-muted underline underline-offset-4">
+            {/*
+              **ここは 3b の指示の 5 つには無かったが、自分でファイル全体を
+              走査した際に見つけた 6 つ目。** 隣の確定ボタンだけ塗り潰しの
+              赤にして、取り消しが下線テキストのままだと、2 択の片方だけ
+              押せるボタンに見えて非対称になる——確認ダイアログの
+              確定・取り消しは対で扱う。
+            */}
+            <a href="/approvals" class={getButtonClasses("outline")}>
               キャンセル
             </a>
           </div>
@@ -421,7 +597,7 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
             <input type="checkbox" name="is_super_approver" value="true" /> super approver にする
           </label>
           <div>
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses()}>
               承認する
             </button>
           </div>
@@ -439,16 +615,36 @@ export const ApprovalsPage: FC<ApprovalsPageProps> = ({
         {approvals.length === 0 ? (
           <p class={ITEM_META_CLASS}>承認されている人が居ません。</p>
         ) : (
-          <ul class={LIST_CLASS}>
-            {approvals.map((approval) => (
-              <ApprovalRow
-                approval={approval}
-                csrfToken={csrfToken}
-                viewerSub={viewerSub}
-                refs={refs}
-              />
-            ))}
-          </ul>
+          <Table id="approvals-table" data-sortable>
+            <TableHeader>
+              <TableRow>
+                <TableHead data-sort="text">承認された人</TableHead>
+                <TableHead>権限</TableHead>
+                {/*
+                  **「承認」列には `data-sort` を付けない。** 日時のあとに
+                  承認者の `UserRef` が続くセルなので `textContent` が
+                  `"... JST / 承認者: 名前 (@id)"` の形になり、
+                  `admin-island.ts` の `sortValueOf("date", ...)` が末尾の
+                  " JST" を取り除く正規表現にかからず `Date.parse` が
+                  `NaN` になる（実測して確認済み、ファイル冒頭の JSDoc
+                  参照）。
+                */}
+                <TableHead>承認</TableHead>
+                <TableHead>操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {approvals.map((approval) => (
+                <ApprovalRow
+                  key={approval.sub}
+                  approval={approval}
+                  csrfToken={csrfToken}
+                  viewerSub={viewerSub}
+                  refs={refs}
+                />
+              ))}
+            </TableBody>
+          </Table>
         )}
       </CardContent>
     </Card>
