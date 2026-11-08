@@ -114,6 +114,12 @@ export type UserDetailPageProps = {
   readonly disableCardsConfirm: DisableCardsConfirmState;
   /** 実行結果（#486）。`/nfc` の `BulkResultState` と同じく、部分失敗を正直に出す。 */
   readonly disableCardsResult: DisableCardsResultState;
+  /**
+   * 利用者の物理削除、2 段階確認の 1 段目を見せているか（運用者判断、
+   * 2026-11-08）。`client-detail-page.tsx` の `disableConfirm` と同じ形
+   * ——`true` のときだけ確認カードを出し、まだ何も変えていない。
+   */
+  readonly deleteConfirm?: boolean;
   readonly error?: string;
   readonly notice?: string;
 };
@@ -502,6 +508,154 @@ const DisableCardsSection: FC<{
   );
 };
 
+/**
+ * 削除の確認カードに足す、状態固有の警告（運用者判断、2026-11-08）。
+ *
+ * **`suspended` には BAN と侵害時の緊急停止の両方が入る**（`status` だけ
+ * では区別できない。`suspension-origin.ts` の冒頭と同じ理由）。どちらかで
+ * 警告の中身が変わる——BAN 済みを消すとそのメールアドレスが解放されて
+ * 同じ人が再登録できてしまい BAN が無意味になるが、侵害で緊急停止した
+ * アカウントを消すと被害者本人の復旧手段が消え、そのアドレスを攻撃者が
+ * 再取得できるようになる。**理由が取れなければ両方を併記する**（指摘:
+ * 3b、取れないなら片方に絞らない）。
+ *
+ * **`self_closed`（本人の退会）には出さない。** BAN でも侵害の緊急停止
+ * でもないので、どちらの警告も事実に反する。
+ *
+ * **`deleted`（個人情報 purge 済み）には出さない。** `purge-user.sql.ts`
+ * の表が言う通り、`deleted` は既に `primary_email` を落としていて
+ * 同じアドレスでの再登録はこの操作を待たずに可能——BAN の無効化も
+ * 侵害復旧の喪失も、purge の時点で既に起きている。
+ */
+const DeleteWarningExtra: FC<{
+  readonly status: UserAdminSummary["status"];
+  readonly suspension: SuspensionOrigin;
+}> = ({ status, suspension }) => {
+  if (status !== "suspended" || suspension.kind === "self_closed") return null;
+
+  if (suspension.kind === "ops" && suspension.reason === "abuse") {
+    return (
+      <>
+        {" "}
+        <strong>規約違反による停止(BAN)の意味が失われます。</strong>
+        同じメールアドレスで再登録できるようになるため、BAN が無意味になります。
+      </>
+    );
+  }
+  if (suspension.kind === "ops" && suspension.reason === "compromise") {
+    return (
+      <>
+        {" "}
+        <strong>侵害の疑いによる緊急停止の意味が失われます。</strong>
+        本人の復旧手段が消え、同じメールアドレスを攻撃者が再取得できるようになります。
+      </>
+    );
+  }
+
+  // ops だが reason が記録から読めない・そもそも理由を引いていない
+  // (`unknown` / `unavailable`)。**どちらの警告も削らず併記する。**
+  return (
+    <>
+      {" "}
+      <strong>停止の理由を確かめられませんでした。</strong>
+      規約違反による停止(BAN)なら BAN が無意味になり、侵害による緊急停止なら
+      本人の復旧手段が消えます。
+    </>
+  );
+};
+
+/**
+ * 利用者の行を物理的に削除する(運用者判断、2026-11-08)。
+ *
+ * **凍結(`UserActions`)・カードの一括停止(`DisableCardsSection`)とは
+ * 別の節。**
+ *
+ * ## 削除できるのは `suspended` と `deleted` だけ(運用は「凍結 → 削除」の 2 段階)
+ *
+ * **`active` には出さない。** `client-detail-page.tsx` が一次パーティの
+ * クライアントに対してやっている形と同じ——ボタンを消すだけだと、押せ
+ * ない理由が「権限不足」なのか「バグ」なのか使う人に分からないので、
+ * 理由も書く。`DelegatedDeleteUserUseCase` 自体は `status` を見ないが、
+ * **運用者の判断で画面側だけがここを絞る**(2026-11-08 追加決定)。
+ *
+ * ## 2 段階確認(`/clients/disable`・#548 と同じ形)
+ *
+ * 1 段目は `DANGER_BUTTON_CLASS`(確認画面への遷移でしかなく、押した
+ * 瞬間には何も変わらない)。確認カードの確定ボタンだけ
+ * `getButtonClasses("destructive")`(戻せない確定操作)。基準は
+ * `island-classes.ts` の `DANGER_BUTTON_CLASS` の JSDoc(3 段の表)。
+ *
+ * ## 自分の行には出さない
+ *
+ * `approvals-page.tsx` が `viewerSub` で「自分」のバッジを出す形と違い、
+ * ここは**ボタン自体を出さない**(指摘: 3b)。use-case 側
+ * (`DelegatedDeleteUserUseCase`)も自分自身を `conflict` で拒むが、
+ * 画面にボタンが出ていると「押せるのに拒否される」行き止まりになる
+ * ——`UserActions` が自分の停止ボタンを隠すのと同じ判断。
+ */
+const DeleteUserSection: FC<{
+  readonly user: UserAdminSummary;
+  readonly csrfToken: string;
+  readonly isSelf: boolean;
+  readonly confirm: boolean;
+  readonly suspension: SuspensionOrigin;
+}> = ({ user, csrfToken, isSelf, confirm, suspension }) => {
+  if (isSelf) {
+    return <p class={ITEM_META_CLASS}>自分のアカウントは削除できません。</p>;
+  }
+
+  if (user.status === "active") {
+    return (
+      <p class={ITEM_META_CLASS}>
+        削除するには先に凍結してください。動いているアカウントをそのまま削除すると、
+        本人確認の猶予が無いまま行が消えてしまうため、この画面からは凍結中・
+        個人情報削除済みの利用者だけを削除できます。
+      </p>
+    );
+  }
+
+  const actionPath = `/users/${encodeURIComponent(user.id)}/delete`;
+
+  if (confirm) {
+    return (
+      <div class="flex flex-col gap-3 border-t border-border pt-4">
+        <p class={ITEM_META_CLASS} role="alert">
+          {user.displayName} を削除します。<strong>この操作は取り消せません。</strong>
+          同じメールアドレスで再登録できるようになります。
+          <DeleteWarningExtra status={user.status} suspension={suspension} /> NFC
+          カードの所有情報は別の記録のため消えません。監査ログは残ります。
+        </p>
+        <div class={ITEM_ACTIONS_CLASS}>
+          <form method="post" action={actionPath}>
+            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+            <input type="hidden" name="confirm" value="true" />
+            <button type="submit" class={getButtonClasses("destructive")}>
+              本当に削除する
+            </button>
+          </form>
+          <a href={`/users/${encodeURIComponent(user.id)}`} class={getButtonClasses("outline")}>
+            キャンセル
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div class="flex flex-col gap-2 border-t border-border pt-4">
+      <p class={ITEM_META_CLASS}>
+        個人情報を物理的に削除します。押しても削除されません——まず確認画面を出します。
+      </p>
+      <form method="post" action={actionPath}>
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <button type="submit" class={DANGER_BUTTON_CLASS}>
+          削除する
+        </button>
+      </form>
+    </div>
+  );
+};
+
 const AuditEntries: FC<{
   readonly entries: readonly AuditLogEntryAdmin[] | null;
   readonly userRefs: ReadonlyMap<string, UserRefAdmin>;
@@ -603,6 +757,7 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
   cards,
   disableCardsConfirm,
   disableCardsResult,
+  deleteConfirm = false,
   error,
   notice,
 }) => (
@@ -714,6 +869,24 @@ export const UserDetailPage: FC<UserDetailPageProps> = ({
           user={user}
           csrfToken={csrfToken}
           isSelf={user.id === actorUserId}
+          suspension={suspension}
+        />
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>利用者の削除</CardTitle>
+        <CardDescription>
+          凍結とは別の、戻せない操作です。個人情報を含む行そのものを削除します。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <DeleteUserSection
+          user={user}
+          csrfToken={csrfToken}
+          isSelf={user.id === actorUserId}
+          confirm={deleteConfirm}
           suspension={suspension}
         />
       </CardContent>

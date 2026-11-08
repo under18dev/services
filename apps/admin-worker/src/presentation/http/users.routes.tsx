@@ -10,6 +10,8 @@ import type {
   SuspendReason,
 } from "@u18/contracts";
 import type { Context, Hono } from "hono";
+import { APPROVAL_AUDIT_EVENTS } from "../../domain/approval-audit-events";
+import { checkApprovalRevocation } from "../../domain/approval-guard";
 import { CSRF_FIELD_NAME, ensureCsrfToken, isValidCsrf } from "./csrf";
 import { MessagePage, csrfRejected, serviceUnavailable } from "./ui/message-page";
 import {
@@ -91,6 +93,10 @@ function noticeFromQuery(c: Context<AppBindings>): string | undefined {
     // **「ログインできなくなります」とは書かない。** 止めていないので、
     // 本人はログインし直せる。
     return `${revokedCount} 件の端末を切りました。本人はログインし直せます。`;
+  }
+  if (notice === "deleted") {
+    // 行自体が消えているので詳細へは戻さず、ここ（一覧）で伝える。
+    return "削除しました。同じメールアドレスで再登録できます。";
   }
   return undefined;
 }
@@ -222,6 +228,7 @@ async function renderUserDetailPage(
     notice?: string;
     disableCardsConfirm?: DisableCardsConfirmState;
     disableCardsResult?: DisableCardsResultState;
+    deleteConfirm?: boolean;
   },
 ): Promise<Response> {
   const session = c.get("session");
@@ -296,6 +303,7 @@ async function renderUserDetailPage(
       cards={cardsOf(cards)}
       disableCardsConfirm={options.disableCardsConfirm ?? null}
       disableCardsResult={options.disableCardsResult ?? null}
+      {...(options.deleteConfirm === undefined ? {} : { deleteConfirm: options.deleteConfirm })}
       {...(options.error === undefined ? {} : { error: options.error })}
       {...(options.notice === undefined ? {} : { notice: options.notice })}
     />,
@@ -304,7 +312,7 @@ async function renderUserDetailPage(
 
 /** 通らなかった理由。**内部の事情は書かない。** */
 function manageFailureMessage(
-  action: "suspend" | "reinstate" | "revoke-sessions",
+  action: "suspend" | "reinstate" | "revoke-sessions" | "delete",
   error: RpcError,
 ): string {
   if (error.code === "conflict") {
@@ -316,6 +324,18 @@ function manageFailureMessage(
     if (action === "reinstate") {
       return "解除できませんでした。停止中ではないか、個人情報を削除済みのアカウントです。";
     }
+    if (action === "delete") {
+      // `DelegatedDeleteUserUseCase` の `conflict` は「自分自身」と
+      // 「active（先に凍結が要る）」の両方を指す（c0f800d で active ガードが
+      // use-case 側にも入った）。この route は呼ぶ前に自分で
+      // `summary.value.status === "active"` を確かめていて普段はそちらで
+      // 止まるので、ここに来るのはほぼ自分自身のケースだが、確かめてから
+      // 呼ぶまでの間に状態が変わる競合もありうる——原因を言い切らない。
+      return "削除できませんでした。自分自身のアカウントか、凍結が先に必要な状態です。";
+    }
+  }
+  if (action === "delete" && error.code === "not_found") {
+    return "削除できませんでした。すでに削除されているか、存在しない利用者です。";
   }
   return "いま操作できません。しばらく待ってからもう一度お試しください。";
 }
@@ -588,5 +608,109 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
 
     const disableCardsResult: DisableCardsResultState = { succeeded, failed };
     return renderUserDetailPage(c, userId, { disableCardsResult });
+  });
+
+  /**
+   * 利用者の行を物理的に削除する（運用者判断、2026-11-08）。**この画面
+   * だけが持つ**（#486 の `disable-cards` と同じ判断で、一覧には出さない
+   * ——`from=detail` を使わず、常に詳細を描き直す／一覧へ戻す）。
+   *
+   * ## `active` は先に止める（2026-11-08 追加決定）
+   *
+   * 運用は「凍結 → 削除」の 2 段階。`DeleteUserSection` は `active` に
+   * ボタン自体を出さないが、この route は `userId` さえ分かれば直接
+   * POST できる——`/clients/disable` の一覧経路と同じ理由で、画面側の
+   * 非表示だけに頼らずここでも確かめる。
+   *
+   * ## 締め出し判定を確認画面より先に呼ぶ（`/approvals/:sub/revoke` と同じ順序、指摘: 3b）
+   *
+   * 対象が admin-worker 自身の承認リスト（`admin_approvals`）にも乗って
+   * いる場合、削除は承認の剥奪を兼ねる。1 段階目で「削除します」と
+   * 見せたあと 2 段階目で締め出し判定に落ちると、運用者は確認を押して
+   * から拒否されることになる——剥奪できないなら、そもそも確認画面を
+   * 出さずに理由だけ返す。
+   *
+   * ## 承認行は、auth-worker の削除が成功したあとに消す
+   *
+   * 逆順（先に承認を剥奪してから auth-worker を呼ぶ）だと、`deleteUser`
+   * が `conflict`/`not_found` で失敗したときに「運用者としての権限だけ
+   * 失われ、本人の行は残る」という中途半端な状態になる。
+   */
+  app.post("/users/:userId/delete", pageSecurityHeaders, async (c) => {
+    const userId = c.req.param("userId");
+    const form = await c.req.formData().catch(() => null);
+    if (form === null || !isValidCsrf(c, form.get(CSRF_FIELD_NAME)?.toString())) {
+      c.header("Cache-Control", "no-store");
+      return csrfRejected(c, `/users/${encodeURIComponent(userId)}`);
+    }
+
+    const session = c.get("session");
+    const container = c.get("container");
+
+    // **運用は「凍結 → 削除」の 2 段階**(2026-11-08 追加決定)。`active`
+    // はここで止める——画面はボタン自体を出していないが(`DeleteUserSection`
+    // の `user.status === "active"` 分岐)、この route は直接 POST できる
+    // ので、ここでも同じ制約を効かせる(`/clients/disable` の一覧経路と
+    // 同じ判断)。`DelegatedDeleteUserUseCase` 自身は `status` を見ない
+    // ——運用者の判断で画面側だけがここを絞っている。
+    const summary = await container.identityAdmin.getUser({ actorUserId: session.sub, userId });
+    if (!summary.ok) {
+      return summary.error.code === "not_found" || summary.error.code === "invalid_input"
+        ? userNotFound(c)
+        : renderUserDetailPage(c, userId, {
+            error: "いま確認できません。しばらくしてからもう一度お試しください。",
+          });
+    }
+    if (summary.value.status === "active") {
+      return renderUserDetailPage(c, userId, {
+        error: "削除するには先に凍結してください。",
+      });
+    }
+
+    // 削除は admin_approvals の剥奪を兼ねる(運用者の選択)。承認されて
+    // いない userId なら `currentApproval` は null で、下の締め出し判定
+    // は何もせず通る。
+    const currentApproval = await container.approvals.getBySub(userId);
+    if (currentApproval !== null) {
+      const totalSuperApproverCount = await container.approvals.countSuperApprovers();
+      const check = checkApprovalRevocation({
+        actorSub: session.sub,
+        targetSub: userId,
+        targetIsCurrentlySuperApprover: currentApproval.isSuperApprover,
+        totalSuperApproverCount,
+      });
+      if (!check.ok) {
+        return renderUserDetailPage(c, userId, { error: check.reason });
+      }
+    }
+
+    const confirmed = form.get("confirm")?.toString() === "true";
+    if (!confirmed) {
+      c.header("Cache-Control", "no-store");
+      return renderUserDetailPage(c, userId, { deleteConfirm: true });
+    }
+
+    const result = await container.identityAdmin.deleteUser({
+      actorUserId: session.sub,
+      userId,
+    });
+
+    if (!result.ok) {
+      const message = manageFailureMessage("delete", result.error);
+      return renderUserDetailPage(c, userId, { error: message });
+    }
+
+    if (currentApproval !== null) {
+      await container.approvals.revoke(userId);
+      await container.approvals.recordAuditEvent({
+        event: APPROVAL_AUDIT_EVENTS.revoked.event,
+        sub: userId,
+        actor: session.sub,
+        reason: "user_deleted",
+      });
+    }
+
+    c.header("Cache-Control", "no-store");
+    return c.redirect(`/users?${NOTICE_PARAM}=deleted`, 303);
   });
 }

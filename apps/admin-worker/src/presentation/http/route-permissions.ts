@@ -72,6 +72,10 @@ export const ROUTE_PERMISSIONS: Readonly<Record<string, PermissionBitName>> = {
   // 同じビット」を守らないと、USER_SUSPEND だけ持つ人が NFC_WRITE 無しに
   // カードを止められる抜け道になる。
   "POST /users/:userId/disable-cards": "NFC_WRITE",
+  // 利用者の行を物理削除する（運用者判断、2026-11-08）。**`USER_SUSPEND`
+  // ではなく専用ビット。** `permissions.ts` の `USER_DELETE` の JSDoc と
+  // 同じ理由——凍結と違い戻せないので、同じビットに載せない。
+  "POST /users/:userId/delete": "USER_DELETE",
 
   "POST /audit/search": "AUDIT_READ",
 

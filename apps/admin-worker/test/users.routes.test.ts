@@ -4,6 +4,7 @@ import { RpcErrorCode, rpcErr, rpcOk } from "@u18/contracts";
 import type {
   AdminCardViewDelegated,
   AuditLogEntryAdmin,
+  DeleteUserDelegatedInput,
   DisableCardDelegatedInput,
   GetUserDelegatedInput,
   IdentityAdminDelegatedRpcContract,
@@ -17,6 +18,7 @@ import type {
   SuspendUserDelegatedInput,
   UserAdminSummary,
 } from "@u18/contracts";
+import { PERMISSION_BITS } from "../src/domain/permissions";
 import { createApp } from "../src/presentation/http/app";
 import { KIWA_STYLESHEET_PATH } from "../src/presentation/http/ui/asset-paths";
 import { ORIGIN, cookieHeaderFrom, executionContext, fakeApprovals, loginAs } from "./helpers";
@@ -131,6 +133,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     suspendUser: SuspendUserDelegatedInput[];
     reinstateUser: ReinstateUserDelegatedInput[];
     revokeUserSessions: RevokeUserSessionsDelegatedInput[];
+    deleteUser: DeleteUserDelegatedInput[];
   };
 } {
   const calls = {
@@ -140,6 +143,7 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     suspendUser: [] as SuspendUserDelegatedInput[],
     reinstateUser: [] as ReinstateUserDelegatedInput[],
     revokeUserSessions: [] as RevokeUserSessionsDelegatedInput[],
+    deleteUser: [] as DeleteUserDelegatedInput[],
   };
 
   const rpc: IdentityAdminDelegatedRpcContract = {
@@ -163,6 +167,10 @@ function fakeIdentityAdmin(overrides: Partial<IdentityAdminDelegatedRpcContract>
     revokeUserSessions: async (input) => {
       calls.revokeUserSessions.push(input);
       return rpcOk({ revokedSessions: 1 });
+    },
+    deleteUser: async (input) => {
+      calls.deleteUser.push(input);
+      return rpcOk({});
     },
     listOAuthClients: async () => rpcOk([]),
     getOAuthClient: async () => rpcErr(RpcErrorCode.Internal, "unused"),
@@ -567,6 +575,490 @@ describe("POST /users/:userId/revoke-sessions", () => {
 });
 
 /**
+ * 利用者の行を物理的に削除する（運用者判断、2026-11-08）。
+ *
+ * **`IdentityAdminDelegatedRPC` の契約そのものは見ない**（ファイル冒頭と
+ * 同じ方針）。ここで見るのは HTTP 層の責務——CSRF・`USER_DELETE` の
+ * ガード・2 段階確認・`admin_approvals` との連携・自分自身の扱い。
+ */
+describe("POST /users/:userId/delete", () => {
+  it("CSRF トークンが無ければ 403 で、deleteUser を呼ばない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, Origin: ORIGIN },
+        body: new URLSearchParams(),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.deleteUser).toHaveLength(0);
+  });
+
+  it("USER_DELETE を持たなければ 403 で、deleteUser を呼ばない", async () => {
+    // **`USER_SUSPEND` だけ持っていても通らない。** 専用ビットを使う理由
+    // そのものを固定する（`permissions.ts` の `USER_DELETE` の JSDoc）。
+    const approvals = fakeApprovals([SUB], [], { [SUB]: PERMISSION_BITS.USER_SUSPEND });
+    const sessionCookie = await loginAs(SUB, approvals);
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals, identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: { Cookie: sessionCookie, Origin: ORIGIN },
+        body: new URLSearchParams({ confirm: "true" }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(calls.deleteUser).toHaveLength(0);
+  });
+
+  it("confirm が無ければ deleteUser を呼ばず、確認カードを返す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.deleteUser).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("この操作は取り消せません");
+    expect(html).toMatch(/<button[^>]*bg-destructive[^>]*>\s*本当に削除する/);
+    expect(html).toMatch(/<a[^>]*href="\/users\/usr_taro"[^>]*>\s*キャンセル/);
+  });
+
+  it("confirm=true で呼べば actorUserId・userId 付きで deleteUser を呼び、一覧へ PRG する", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ confirm: "true", csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("/users?notice=deleted");
+    expect(calls.deleteUser).toEqual([{ actorUserId: SUB, userId: "usr_taro" }]);
+  });
+
+  it("conflict（自分自身）なら理由を言って詳細を描き直す（303 では戻さない）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+      deleteUser: async () => rpcErr(RpcErrorCode.Conflict, "cannot delete yourself"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ confirm: "true", csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("削除できませんでした");
+  });
+
+  it("not_found なら理由を言って詳細を描き直す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+      deleteUser: async () => rpcErr(RpcErrorCode.NotFound, "user does not exist"),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ confirm: "true", csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("すでに削除されているか");
+  });
+
+  it("対象が admin_approvals にも乗っていれば、削除の成功後にその行を消す", async () => {
+    const approvals = fakeApprovals([SUB, "usr_taro"]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const { rpc, calls } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const app = createApp({ approvals, identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ confirm: "true", csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(calls.deleteUser).toEqual([{ actorUserId: SUB, userId: "usr_taro" }]);
+    expect(await approvals.getBySub("usr_taro")).toBeNull();
+    expect(approvals.events.at(-1)).toMatchObject({
+      event: "ops.approval.revoked",
+      sub: "usr_taro",
+      actor: SUB,
+      reason: "user_deleted",
+    });
+  });
+
+  it("active な利用者は route 側でも止める（画面の非表示に頼らない、直接 POST を想定）", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "active" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    // **確認済みのふりをして直接叩いても止まる。** 画面はボタン自体を
+    // 出していないが、この route は `userId` さえ分かれば直接 POST できる。
+    const body = new URLSearchParams({ confirm: "true", csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.deleteUser).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("削除するには先に凍結してください");
+  });
+
+  it("suspended・理由が abuse(BAN)なら、確認カードに BAN 無効化の警告を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+      listAuditLogs: async (input) => {
+        if (input.event === "ops.user.suspended") {
+          return rpcOk({
+            entries: [auditEntry({ event: "ops.user.suspended", metadata: { reason: "abuse" } })],
+            nextCursor: null,
+          });
+        }
+        return rpcOk({ entries: [], nextCursor: null });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("規約違反による停止(BAN)の意味が失われます");
+    expect(html).not.toContain("侵害の疑いによる緊急停止の意味が失われます");
+    expect(html).not.toContain("停止の理由を確かめられませんでした");
+  });
+
+  it("suspended・理由が compromise(侵害)なら、確認カードに復旧手段喪失の警告を出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+      listAuditLogs: async (input) => {
+        if (input.event === "ops.user.suspended") {
+          return rpcOk({
+            entries: [
+              auditEntry({ event: "ops.user.suspended", metadata: { reason: "compromise" } }),
+            ],
+            nextCursor: null,
+          });
+        }
+        return rpcOk({ entries: [], nextCursor: null });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("侵害の疑いによる緊急停止の意味が失われます");
+    expect(html).not.toContain("規約違反による停止(BAN)の意味が失われます");
+  });
+
+  it("suspended・理由が記録から読めなければ、BAN・侵害の両方を併記する", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+      listAuditLogs: async () => rpcOk({ entries: [], nextCursor: null }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).toContain("停止の理由を確かめられませんでした");
+  });
+
+  it("deleted（個人情報 purge 済み）には、BAN／侵害の警告を出さない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "deleted" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.deleteUser).toHaveLength(0);
+    const html = await response.text();
+    // deleted でも削除できる(凍結の代わりに purge 済みであればよい)。
+    expect(html).toContain("この操作は取り消せません");
+    expect(html).not.toContain("規約違反による停止(BAN)の意味が失われます");
+    expect(html).not.toContain("侵害の疑いによる緊急停止の意味が失われます");
+    expect(html).not.toContain("停止の理由を確かめられませんでした");
+  });
+
+  it("最後の super approver を対象にすると、締め出し判定で止まり deleteUser を呼ばない（確認カードも出さない）", async () => {
+    // **1 段階目（confirm 無し）でも止まる。** 締め出し判定を確認画面より
+    // 先に呼ぶ（指摘: 3b）——「削除できる」と見せてから 2 段階目で拒否する
+    // のは行き止まりになる。
+    const approvals = fakeApprovals([SUB, "usr_taro"], ["usr_taro"]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const { rpc, calls } = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+    const app = createApp({ approvals, identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrfToken = csrfTokenFrom(csrfCookie);
+
+    const body = new URLSearchParams({ csrf_token: csrfToken });
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users/usr_taro/delete`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body,
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.deleteUser).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("最後の super approver");
+    // 締め出し判定で止まったので、確認カード（本当に削除する）は出ていない。
+    expect(html).not.toContain("本当に削除する");
+    expect(await approvals.getBySub("usr_taro")).not.toBeNull();
+  });
+});
+
+/**
  * 利用者 1 人の詳細（`/users/:userId`、#455）。
  *
  * **見たいのは HTTP 層の責務だけ**（ファイル冒頭と同じ方針）——
@@ -905,6 +1397,43 @@ describe("GET /users/:userId", () => {
 
     const html = await response.text();
     expect(html).toContain("自分のアカウントは停止できません");
+  });
+
+  it("自分の行には削除ボタンを出さない（運用者判断、2026-11-08。指摘: 3b）", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId })),
+    });
+
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc, SUB);
+
+    const html = await response.text();
+    expect(html).toContain("自分のアカウントは削除できません");
+    expect(html).not.toContain(`action="/users/${SUB}/delete"`);
+  });
+
+  it("active な利用者には削除ボタンを出さず、先に凍結するよう案内する（2026-11-08 追加決定）", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "active" })),
+    });
+
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    expect(html).toContain("削除するには先に凍結してください");
+    expect(html).not.toContain('action="/users/usr_taro/delete"');
+  });
+
+  it("suspended（BAN／侵害停止どちらもありうる）の利用者には、削除ボタンを出す", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+    });
+
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc);
+
+    const html = await response.text();
+    // active と違って、凍結中は削除ボタン自体が出る。警告文の出し分け
+    // そのものは確認カードが出る POST 側のテストで見る。
+    expect(html).toContain('action="/users/usr_taro/delete"');
   });
 });
 
