@@ -27,12 +27,20 @@ export type DelegatedDeleteUserDeps = {
  * （admin-worker が管理者性を確かめ済み）。自分自身を対象にできない点も
  * 同じ——止める人が居なくなるのと同じ理由で、削除する人も居なくなる。
  *
- * **`DelegatedEnableOAuthClientUseCase` とは監査の持ち方が違う。** あちらは
- * 「何も起きなかった呼び出しも残す」が、ここでは呼ばない——未登録の
- * `userId` を叩く失敗を毎回記録すると、`suspend`/`reinstate` が
- * 失敗時に記録しない既存の方針と揃わなくなる（どちらも利用者を対象と
- * するイベントであり、揃える先はこちら）。削除が実際に起きたときだけ
- * `ops.user.deleted` を書く。
+ * ## 失敗も記録する（`disable` / `enable` と同じ形、3b の指摘）
+ *
+ * 当初は成功時だけ記録していたが、それでは **物理削除後に対象の行が
+ * 無くなったとき、「誰がこの id に手を出そうとしたか」を辿る手段が
+ * 失敗の記録以外に残らない。** `oauth.client.disabled` /
+ * `oauth.client.enabled` と同じく、`requireExistingActor` を通った
+ * あとの失敗（`conflict` / `not_found`）はすべて `outcome: "failure"`
+ * + `reason` で残す。
+ *
+ * **脅威モデル RR-21 の緩和 (8)（「管理者でない呼び出しを書かない」）には
+ * 当たらない。** `requireExistingActor` が落ちた時点ではまだ書かない
+ * ——ここから先は実在する `actorUserId` を通った呼び出しだけなので、
+ * 件数は管理者の操作回数で頭打ちになる（`disable-oauth-client.use-case.ts`
+ * と同じ理由）。
  *
  * ## NFC カードと `admin_approvals` は触らない
  *
@@ -82,6 +90,7 @@ export class DelegatedDeleteUserUseCase {
     // 自分自身は消せない。止められなくなる人が居なくなるのと同じ理由
     // （`DelegatedManageUserUseCase.authorize`）。
     if (command.actorUserId === command.userId) {
+      await this.record(command.actorUserId, command.userId, "failure", "self");
       return err("conflict", "cannot delete yourself");
     }
 
@@ -90,20 +99,34 @@ export class DelegatedDeleteUserUseCase {
       // 失敗した理由を区別するためだけに引き直す（判定そのものは
       // `deletePermanently` の 1 文が既に原子的に下している）。
       const target = await this.deps.users.findById(command.userId);
-      if (target === null) return err("not_found", "user does not exist");
+      if (target === null) {
+        await this.record(command.actorUserId, command.userId, "failure", "not_found");
+        return err("not_found", "user does not exist");
+      }
+      await this.record(command.actorUserId, command.userId, "failure", "status_active");
       return err("conflict", "suspend the user before deleting (status is active)");
     }
 
+    await this.record(command.actorUserId, command.userId, "success");
+
+    return ok({});
+  }
+
+  private async record(
+    actorUserId: string,
+    targetUserId: string,
+    outcome: "success" | "failure",
+    reason?: string,
+  ): Promise<void> {
     await settleSideEffects(
       "ops.user.deleted",
       this.deps.audit.record({
         event: "ops.user.deleted",
-        userId: command.userId,
-        outcome: "success",
-        metadata: { actorUserId: command.actorUserId },
+        userId: targetUserId,
+        outcome,
+        ...(reason === undefined ? {} : { reason }),
+        metadata: { actorUserId },
       }),
     );
-
-    return ok({});
   }
 }

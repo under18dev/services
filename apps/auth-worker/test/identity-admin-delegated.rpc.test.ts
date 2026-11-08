@@ -490,6 +490,17 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
     // 行は消えずに残る——子テーブルも含めて何も変わっていないこと。
     const row = await db().select().from(users).where(eq(users.id, target.userId)).get();
     expect(row).toBeDefined();
+
+    // **失敗も記録する**（`disable`/`enable` と同じ形、3b の指摘）。
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "ops.user.deleted"))
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.outcome).toBe("failure");
+    expect(rows[0]?.reason).toBe("status_active");
+    expect(rows[0]?.userId).toBe(target.userId);
   });
 
   it("deleted（purge 済み）の利用者も削除できる", async () => {
@@ -515,9 +526,18 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
     // 自分自身への conflict では、本人の行は消えずに残る。
     const row = await db().select().from(users).where(eq(users.id, admin.userId)).get();
     expect(row).toBeDefined();
+
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "ops.user.deleted"))
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.outcome).toBe("failure");
+    expect(rows[0]?.reason).toBe("self");
   });
 
-  it("存在しない userId は not_found", async () => {
+  it("存在しない userId は not_found。それでも記録には残る", async () => {
     const admin: SeededUser = await seedLoggedInUser();
 
     const result = await rpc.deleteUser({
@@ -526,6 +546,19 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
     });
 
     expect(!result.ok && result.error.code).toBe("not_found");
+
+    // **誰がこの id に手を出そうとしたかを辿る唯一の手段**（3b の指摘）。
+    const rows = await db()
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.event, "ops.user.deleted"))
+      .all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.outcome).toBe("failure");
+    expect(rows[0]?.reason).toBe("not_found");
+    expect(rows[0]?.userId).toBe("usr_does_not_exist");
+    const metadata = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
+    expect(metadata["actorUserId"]).toBe(admin.userId);
   });
 
   it("削除は監査に残る。userId は対象者本人、実行者は metadata", async () => {
@@ -546,19 +579,6 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
     expect(rows[0]?.userId).toBe(target.userId);
     const metadata = (rows[0]?.metadata ?? {}) as Record<string, unknown>;
     expect(metadata["actorUserId"]).toBe(admin.userId);
-  });
-
-  it("存在しない userId への削除は監査に残らない（oauth.client.* の「何も起きなかった呼び出しも残す」とは違う）", async () => {
-    const admin: SeededUser = await seedLoggedInUser();
-
-    await rpc.deleteUser({ actorUserId: admin.userId, userId: "usr_does_not_exist" });
-
-    const rows = await db()
-      .select()
-      .from(auditLogs)
-      .where(eq(auditLogs.event, "ops.user.deleted"))
-      .all();
-    expect(rows).toHaveLength(0);
   });
 
   it("クライアントを所有している利用者の削除が成功する（owner_user_id が null になり、クライアントは残る）", async () => {
