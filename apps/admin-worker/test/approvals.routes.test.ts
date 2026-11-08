@@ -65,6 +65,18 @@ async function post(
   );
 }
 
+/**
+ * `>text<` を内側に持つ最初の `<button>`/`<a>` タグの `class` 属性の
+ * 中身を取り出す。variant・size の「段」が変わっても壊れない検査を
+ * 書くため——1 本の正規表現に class 文字列全体を埋め込むと、段を
+ * 変えるたびに検査側の文字列も書き直す必要が出る（指摘: 3b）。
+ */
+function classOf(html: string, text: string): string | null {
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`<(?:button|a)[^>]*class="([^"]*)"[^>]*>${escaped}<`).exec(html);
+  return match?.[1] ?? null;
+}
+
 describe("GET /approvals", () => {
   it("承認済みの一覧を描く", async () => {
     const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
@@ -320,10 +332,204 @@ describe("GET /approvals", () => {
 
     const html = await response.text();
     expect(html).toContain("利用者の詳細画面から、その人のカードをまとめて止めることもできます。");
-    // チェックボックス横の label（1 箇所）と履歴の表記（1 箇所）で、
-    // 「カードを操作する」が同じ文字列として 2 回出る——別の言い方に
-    // なっていない。
-    expect(html.split("カードを操作する").length - 1).toBe(2);
+    // チェックボックス横の label・「権限」列の読み取り専用バッジ・履歴の
+    // 表記の 3 箇所で、「カードを操作する」が同じ文字列として出る——
+    // 別の言い方になっていない。**3 箇所目（バッジ）は承認済みテーブルが
+    // #542 で `<ul>` から `Table` に変わったときに増えた**——`usr_other`
+    // は `fakeApprovals` の既定（`ALL_DEFINED_PERMISSIONS`）で NFC_WRITE
+    // を実際に持っているため、「権限」列の読み取り専用表示にも同じ
+    // label が出る。チェックボックスの label（`<details>` の中）・
+    // バッジ（summary）・履歴の 3 つが同じ文字列であることまで含めて
+    // 確かめる。
+    expect(html.split("カードを操作する").length - 1).toBe(3);
+  });
+});
+
+/**
+ * 承認済みの一覧（運用者からの直接要望、#542）。
+ *
+ * **「空でも緑になる」形にしない。** まず「承認済みの行が 1 件以上
+ * `<table>` の中に描かれている」ことを assert してから、個々の要素を見る
+ * ——行が 0 件のまま通っても気づけない検査にしない。
+ */
+describe("GET /approvals（承認済みの一覧、#542 で table 化）", () => {
+  it("承認済みが <table> の行として出る（<ul> の縦積みに戻っていない）", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    // **まず「0 件でないこと」を先に確かめる。** 空の `<table>` に
+    // ヘッダ行だけがあっても、これ以降の正規表現は「無い」が一致してしまい
+    // 空のまま緑になりかねない。`<tbody>` の中だけを見る——ヘッダ行
+    // （`<thead>`）も同じ `TableRow` を使うので、ページ全体を数えると
+    // ヘッダだけでも 1 件以上になって 0 件を見逃す。
+    const tbodyMatch = /<tbody[^>]*>([\s\S]*?)<\/tbody>/.exec(html);
+    expect(tbodyMatch).not.toBeNull();
+    const tbodyHtml = tbodyMatch?.[1] ?? "";
+    const rowMatches = [...tbodyHtml.matchAll(/<tr data-slot="table-row"/g)];
+    expect(rowMatches.length).toBeGreaterThan(0);
+    // 承認済みの表（`id="approvals-table"`）が実在する。
+    expect(html).toContain('id="approvals-table" data-sortable');
+    // 4 列の見出し。
+    expect(html).toContain(">承認された人<");
+    expect(html).toContain(">権限<");
+    expect(html).toContain(">承認<");
+    expect(html).toContain(">操作<");
+    // もう `<ul>` の縦積みではない（旧実装のクラス）。
+    expect(html).not.toMatch(/<ul class="flex flex-col">/);
+  });
+
+  /**
+   * **ここは当初「3 つ」「`<Button>` を使う」という誤った指示で書いていた
+   * ものを訂正した。** 自分でファイル全体を走査した結果、`<Button>` という
+   * JSX タグはリポジトリのどこにも実例が無く（`getButtonClasses()` を
+   * 呼んで `class` に当てる書き方が 35 箇所の実例全部）、ボタンに
+   * 見えるべき箇所も「承認済みテーブルの中の 3 つ」だけでなく、確認
+   * カードの「本当に剥奪する」「キャンセル」、新規承認カードの
+   * 「承認する」まで含めて 6 箇所あった。6 箇所それぞれを
+   * `getButtonClasses()` の戻り値の特徴的な部分文字列（variant・size ごとに
+   * 変わる箇所）で確かめる——`data-slot="button"` は `<Button>` 固有の
+   * 属性で、素の `<button class={getButtonClasses(...)}>` には付かない。
+   */
+  it("6 つの操作ボタン全部が getButtonClasses() の class で出る（下線テキストの素の button に戻っていない）", async () => {
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const identityAdmin = {
+      ...minimalIdentityAdmin(),
+      getUsersByIds: async () =>
+        rpcOk([
+          { id: "usr_other", username: "other", displayName: "別の人", status: "active" as const },
+        ]),
+    };
+    const app = createApp({ approvals, identityAdmin });
+    const { cookie, csrfToken } = await csrfContext(app, sessionCookie);
+
+    // **確認カードの 2 つ（本当に剥奪する・キャンセル）は revokeConfirmSub
+    // が立っていないと描かれない。** 1 段階目の revoke を叩いて確認画面を
+    // 出させる——この POST 自体は何も変更しない（`revoke.test` 群が別途
+    // 確認済み）。
+    const confirmResponse = await post(
+      app,
+      "/approvals/usr_other/revoke",
+      cookie,
+      new URLSearchParams({ csrf_token: csrfToken }),
+    );
+    const confirmHtml = await confirmResponse.text();
+
+    // outline + sm（super approver にする/外す・権限を更新する・キャンセル
+    // は outline、キャンセルだけ sm を付けていない——ファイル冒頭の
+    // JSDoc 参照）の特徴的な部分文字列。
+    const outlineSm =
+      "border-border bg-card hover:bg-secondary hover:text-foreground h-8 rounded-lg gap-1.5 px-3";
+    const outlineDefault = "border-border bg-card hover:bg-secondary hover:text-foreground";
+    const destructiveDefault =
+      "bg-destructive text-destructive-foreground hover:bg-destructive-hover h-9 px-4 py-2";
+    const primaryDefault =
+      "bg-primary text-primary-foreground hover:bg-primary-hover h-9 px-4 py-2";
+
+    const listHtml = await (
+      await app.fetch(
+        new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+        env,
+        executionContext(),
+      )
+    ).text();
+
+    // 1. super approver にする/外す（承認済み行・操作セル、outline/sm）
+    expect(listHtml).toMatch(
+      new RegExp(`<button[^>]*class="[^"]*${outlineSm}[^"]*"[^>]*>super approver にする</button>`),
+    );
+    // 2. 権限を更新する（承認済み行・操作セル、outline/sm）
+    expect(listHtml).toMatch(
+      new RegExp(`<button[^>]*class="[^"]*${outlineSm}[^"]*"[^>]*>権限を更新する</button>`),
+    );
+    // 3. 承認を剥奪する（承認済み行・操作セル）。
+    // **`getButtonClasses("destructive", ...)` ではなく
+    // `DANGER_BUTTON_CLASS`（outline の sm の土台 + 文字だけ赤）。** PR
+    // レビューで訂正（指摘: 3b）——押した瞬間に消えるのは確認カードの方
+    // だけで、行のボタンは確認画面への遷移でしかない。塗りの強さは
+    // 確認カードに残す。class 属性の中身を取り出して個別に確かめる形に
+    // してある——1 本の正規表現に土台ごと埋め込むと、3b の言う「段に
+    // 依存しすぎた検査」になる（塗りか否かを変えるたびに文字列全体を
+    // 書き直す必要が出る）。
+    const revokeRowButtonClass = classOf(listHtml, "承認を剥奪する");
+    expect(revokeRowButtonClass).not.toBeNull();
+    expect(revokeRowButtonClass).toContain(outlineSm);
+    expect(revokeRowButtonClass).toContain("text-destructive");
+    // 面は塗らない——`bg-destructive`（塗り）は付いていない。
+    expect(revokeRowButtonClass).not.toContain("bg-destructive");
+    // 4. 本当に剥奪する（確認カード、destructive）
+    expect(confirmHtml).toMatch(
+      new RegExp(
+        `<button[^>]*class="[^"]*${destructiveDefault}[^"]*"[^>]*>本当に剥奪する</button>`,
+      ),
+    );
+    // 5. キャンセル（確認カード、outline の <a>——3b の指示には無かった、
+    // 自分で見つけて足した）
+    expect(confirmHtml).toMatch(
+      new RegExp(`<a href="/approvals" class="[^"]*${outlineDefault}[^"]*">キャンセル</a>`),
+    );
+    // 6. 承認する（新規承認カード、default/primary）
+    expect(listHtml).toMatch(
+      new RegExp(`<button[^>]*class="[^"]*${primaryDefault}[^"]*"[^>]*>承認する</button>`),
+    );
+  });
+
+  it("ファイル内の全ての action パターンが変わっていない（4 パターン、数え直した）", async () => {
+    // **「3 つ」ではなく、ファイルに実在する action の URL パターンを
+    // 自分で数え直した結果が 4 つ。** `/approvals/:sub/revoke` は
+    // 承認済み行の 1 段階目と、確認カードの 2 段階目（`confirm=true` が
+    // 付くだけで URL は同じ）の両方が使う、同じ 1 パターン。
+    const approvals = fakeApprovals([SUB, "usr_other"], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    // 1. 新規承認（テーブルの外、カードの外側の判断——3b の「同じファイルの
+    //    同じ問題」の指摘どおり、テーブル化とは別の見た目修正だが同じ
+    //    検査にまとめた）。
+    expect(html).toContain('<form method="post" action="/approvals"');
+    // 2〜4. 承認済み行（usr_other）ぶんの 3 パターン。
+    expect(html).toContain('action="/approvals/usr_other/super"');
+    expect(html).toContain('action="/approvals/usr_other/permissions"');
+    expect(html).toContain('action="/approvals/usr_other/revoke"');
+    // 権限フォームの送信ボタンは「操作」セル側にあり、`form` 属性で
+    // 「権限」セル側の `<form id="...">` を指す（セルをまたぐため）。
+    const formIdMatch = /<form id="(approval-permissions-usr_other)"/.exec(html);
+    expect(formIdMatch).not.toBeNull();
+    const formId = formIdMatch?.[1];
+    expect(html).toContain(`form="${formId}"`);
+  });
+
+  it("super approver の行には「権限を更新する」ボタンも権限の <form> も出さない", async () => {
+    // SUB は super approver。個別ビットのフォームが無いことを確かめる
+    // ——出ていると、押しても送信先の無いボタンになる。
+    const approvals = fakeApprovals([SUB], [SUB]);
+    const sessionCookie = await loginAs(SUB, approvals);
+    const app = createApp({ approvals });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/approvals`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(html).not.toContain(`action="/approvals/${SUB}/permissions"`);
+    expect(html).not.toMatch(/<button data-slot="button"[^>]*>権限を更新する<\/button>/);
   });
 });
 
