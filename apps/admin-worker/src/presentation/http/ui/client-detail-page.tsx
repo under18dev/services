@@ -51,6 +51,15 @@ import { formatDateTime } from "./format";
  *
  * **JS が無ければ 4 枚とも見出し付きで縦に並ぶ**（`attachTabs` は
  * `hidden` を JS 側からしか付けない、README の絶対条件）。
+ *
+ * ## 選択中タブの強調（指摘: 3b）
+ *
+ * `c5db342` でこの `data-tab` を足した時点から、選択中かどうかで見た目が
+ * 変わる class が無かった——`attachTabs` は `aria-selected` を
+ * 付け外しするだけで、それに反応する CSS がどこにも無かった（GDG 側を
+ * 含めて確認済み）。`aria-selected:border-primary aria-selected:text-
+ * foreground` を静的な class として足し、`[aria-selected="true"]` を
+ * Tailwind の variant で踏ませている——`attachTabs` 側は変えていない。
  */
 
 export type ClientDetailPageProps = {
@@ -198,28 +207,28 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
         <button
           type="button"
           data-tab="overview"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           概要
         </button>
         <button
           type="button"
           data-tab="redirect-uris"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           redirect_uri
         </button>
         <button
           type="button"
           data-tab="audit"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           監査ログ
         </button>
         <button
           type="button"
           data-tab="operations"
-          class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
+          class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground"
         >
           操作
         </button>

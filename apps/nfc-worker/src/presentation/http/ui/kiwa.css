@@ -52,3 +52,28 @@
 
 @import "../../../../../../packages/web-ui/src/kiwa/theme.css";
 @import "../../../../../../packages/web-ui/src/gdg/components.css";
+
+/*
+ * サイドバー最上部の「u18 Identity」ロゴリンクだけ focus-visible の
+ * リングが無い（指摘: 3b）。他のサイドバー項目（`sidebar-item.tsx`）は
+ * `focus-visible:border-ring focus-visible:ring-ring/20` を持つが、
+ * ブランドリンクは `shell.tsx` の `Sidebar` が class を決め打ちで組んで
+ * おり、呼び出し側からは渡せない。
+ *
+ * **本来直すべきは `shell.tsx` 側だが、この PR では
+ * `packages/web-ui/src/kiwa/*.tsx` を触らない約束**（services-11 が
+ * 別件で触っている最中のため）。そのため Worker 側（ここ）から
+ * `aria-label` を手がかりに上書きしている——`shell.tsx` の
+ * `aria-label="ダッシュボード"` が変わるか、ブランドリンクが `<nav>` の
+ * 先頭要素でなくなると、この selector ごと直す必要がある。
+ *
+ * `admin-worker` / `dashboard-worker` の同名ファイルにも同じ節がある
+ * （`shell.tsx` を 3 つの Worker が共有しているため、ここだけ直しても
+ * 揃わない）。`auth-worker` はログイン画面でサイドバーを出さないので対象外。
+ */
+@layer utilities {
+  nav[aria-label="ダッシュボード"] > a:first-child {
+    @apply rounded-lg border border-transparent outline-none transition-colors;
+    @apply focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20;
+  }
+}

@@ -957,9 +957,9 @@ JS が有効なら、タブで切り替えられます。
 </div>
 <div data-tabs class="flex flex-col gap-4">
 <div role="tablist" class="flex gap-2 border-b border-border" aria-label="見本のタブ">
-<button type="button" data-tab="apple" class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground">りんご</button>
-<button type="button" data-tab="banana" class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground">ばなな</button>
-<button type="button" data-tab="cherry" class="px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground">さくらんぼ</button>
+<button type="button" data-tab="apple" class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground">りんご</button>
+<button type="button" data-tab="banana" class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground">ばなな</button>
+<button type="button" data-tab="cherry" class="px-3 py-2 text-sm font-medium text-foreground-muted border-b-2 border-transparent -mb-px hover:text-foreground aria-selected:border-primary aria-selected:text-foreground">さくらんぼ</button>
 </div>
 <section data-panel="apple" class="flex flex-col gap-2">
 <h2 class="text-lg">りんご</h2>
