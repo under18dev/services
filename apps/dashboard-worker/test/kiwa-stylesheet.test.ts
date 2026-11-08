@@ -6,6 +6,7 @@ import {
   classesIn,
   classesMissingFrom,
   darkMediaVarNames,
+  deliveredBorderRadius,
   gdgShadowTokenDefs,
   shadowDeclsWithClay,
 } from "@u18/testing";
@@ -407,5 +408,33 @@ describe("配信する CSS に、クレイの陰影とリングの輪郭が両�
     for (const name of ["--gdg-shadow-sm", "--gdg-shadow-md", "--gdg-shadow-lg"]) {
       expect(darkVars.has(name), `ダークの @media に ${name} が無い`).toBe(true);
     }
+  });
+});
+
+/**
+ * 角丸の対応表が、GDG の実コンポーネントが実際に使っている段と合っているか
+ * （GDG デザイン移行 PR4、issue #535）。
+ *
+ * PR1 の対応表は 2 回目の間違いだった——`--radius-lg` に GDG 自身の
+ * `tailwind.css` 内部の命名をそのまま持ち込んだ結果、GDG が実際には使って
+ * いない 28px がボタン・入力欄に入っていた（vendored `../gdg/
+ * components.css` の `.gdg-button`/`.gdg-input` は `--gdg-radius-md` = 18px、
+ * `.gdg-card` が `--gdg-radius-card` = 28px）。`theme.css` の
+ * `@theme inline` 側のコメントに根拠の行番号を書いたが、**対応表はこれで
+ * 2 回ズレている**ので、配信 CSS の実測で固定する。
+ */
+describe("配信する CSS に、角丸の対応表が GDG の実値どおりに出ている", () => {
+  it("rounded-lg（ボタン・入力欄）が --gdg-radius-md 由来、rounded-xl（カード）が --gdg-radius-card 由来", async () => {
+    const css = await fetchText(KIWA_STYLESHEET_PATH, false);
+
+    const roundedLg = deliveredBorderRadius(css, "rounded-lg");
+    const roundedXl = deliveredBorderRadius(css, "rounded-xl");
+
+    // null のまま下の比較へ進むと、見つからなかったことに気づけない。
+    expect(roundedLg, "配信 CSS に .rounded-lg が見当たらない").not.toBeNull();
+    expect(roundedXl, "配信 CSS に .rounded-xl が見当たらない").not.toBeNull();
+
+    expect(roundedLg).toBe("var(--gdg-radius-md)");
+    expect(roundedXl).toBe("var(--gdg-radius-card)");
   });
 });
