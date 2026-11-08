@@ -691,7 +691,7 @@ describe("GET /clients/:clientId（#473）", () => {
           "Content-Type": "application/x-www-form-urlencoded",
           Origin: ORIGIN,
         },
-        body: new URLSearchParams({ client_id: "app_0001", csrf_token }),
+        body: new URLSearchParams({ client_id: "app_0001", confirm: "true", csrf_token }),
       }),
       env,
       executionContext(),
@@ -1036,7 +1036,61 @@ describe("POST /clients/disable", () => {
     expect(calls.disableOAuthClient).toHaveLength(0);
   });
 
-  it("CSRF が通れば disableOAuthClient を actorUserId 付きで呼ぶ", async () => {
+  /**
+   * **2 段階確認（指摘: 3b）。** `confirm` が無い 1 回目は、実際には
+   * 何も変えず確認カードを返すだけ——`disableOAuthClient` が呼ばれて
+   * いないことまで見る（画面の文言だけでは、サーバー側が実は実行して
+   * いた、という事故を拾えない）。
+   */
+  it("confirm が無ければ disableOAuthClient を呼ばず、確認カードを返す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001", name: "Confirm Target" })),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", from: "detail", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    // **これが本体。** `disableOAuthClient` が 1 回も呼ばれていないこと
+    // ——確認カードの文言が出ているだけでは、サーバーが実は実行済み
+    // だった、という形の事故を拾えない。
+    expect(calls.disableOAuthClient).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("Confirm Target");
+    expect(html).toContain("この操作は管理画面から元に戻せません");
+    expect(html).toContain('name="confirm" value="true"');
+  });
+
+  /**
+   * **無言の 200 にしない（指摘: 3b）。** `clients-page.tsx` に失効ボタンは
+   * 無いので UI からこの分岐を通る経路は無いが、`POST` は直接叩けるので
+   * 古いブックマークやスクリプトがここを通りうる。`error` 無しで一覧を
+   * そのまま返すと、呼んだ側からは「200 = 成功したように見えて実は
+   * 何もしていない」行き止まりになる。
+   */
+  it("一覧から（from=detail 無し）confirm 無しで来たら、何もせず理由を表示する", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc, calls } = fakeIdentityAdmin();
     const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
@@ -1058,6 +1112,39 @@ describe("POST /clients/disable", () => {
           Origin: ORIGIN,
         },
         body: new URLSearchParams({ client_id: "app_0001", csrf_token }),
+      }),
+      env,
+      executionContext(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls.disableOAuthClient).toHaveLength(0);
+    const html = await response.text();
+    expect(html).toContain("失効には確認が要ります");
+  });
+
+  it("CSRF が通れば disableOAuthClient を actorUserId 付きで呼ぶ", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc, calls } = fakeIdentityAdmin();
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const getResponse = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const csrfCookie = cookieHeaderFrom(getResponse);
+    const csrf_token = csrfTokenFrom(csrfCookie);
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/disable`, {
+        method: "POST",
+        headers: {
+          Cookie: `${sessionCookie}; ${csrfCookie}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Origin: ORIGIN,
+        },
+        body: new URLSearchParams({ client_id: "app_0001", confirm: "true", csrf_token }),
       }),
       env,
       executionContext(),
@@ -1102,7 +1189,7 @@ describe("POST /clients/disable", () => {
           "Content-Type": "application/x-www-form-urlencoded",
           Origin: ORIGIN,
         },
-        body: new URLSearchParams({ client_id: "app_dashboard", csrf_token }),
+        body: new URLSearchParams({ client_id: "app_dashboard", confirm: "true", csrf_token }),
       }),
       env,
       executionContext(),
@@ -1136,7 +1223,7 @@ describe("POST /clients/disable", () => {
           "Content-Type": "application/x-www-form-urlencoded",
           Origin: ORIGIN,
         },
-        body: new URLSearchParams({ client_id: "app_unknown", csrf_token }),
+        body: new URLSearchParams({ client_id: "app_unknown", confirm: "true", csrf_token }),
       }),
       env,
       executionContext(),
@@ -1170,7 +1257,12 @@ describe("POST /clients/disable", () => {
           "Content-Type": "application/x-www-form-urlencoded",
           Origin: ORIGIN,
         },
-        body: new URLSearchParams({ client_id: "app_0001", from: "detail", csrf_token }),
+        body: new URLSearchParams({
+          client_id: "app_0001",
+          from: "detail",
+          confirm: "true",
+          csrf_token,
+        }),
       }),
       env,
       executionContext(),
