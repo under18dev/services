@@ -237,15 +237,37 @@ describe("配信する CSS に、クレイの陰影とリングの輪郭が両�
     }
   });
 
-  it("--gdg-shadow-sm/md/lg トークン自体に、クレイの inset ハイライトが残っている", async () => {
+  it("--gdg-shadow-sm/md/lg トークン自体に、クレイの inset ハイライトが残っている（ライト・ダーク両方）", async () => {
     const css = await fetchText(KIWA_STYLESHEET_PATH);
     const tokenDefs = gdgShadowTokenDefs(css);
 
+    // 0 件のまま下の assert へ進むと、何も確かめずに緑になる。
     expect(
       tokenDefs.length,
       "配信 CSS に --gdg-shadow-sm/md/lg のトークン定義が見当たらない。",
     ).toBeGreaterThan(0);
 
-    expect(tokenDefs.some((decl) => decl.includes("inset"))).toBe(true);
+    // `.some()` だと、ダーク側の inset が丸ごと消えてもライト側の 3 件が
+    // 残っていれば緑のまま通ってしまう（指摘: 3b）。全件を見る。
+    for (const decl of tokenDefs) {
+      expect(decl, `inset を失った --gdg-shadow-* トークン: ${decl}`).toContain("inset");
+    }
+  });
+
+  it("--gdg-shadow-sm/md/lg が、ダークの @media の中にも実際に出ている", async () => {
+    // #531 で一度踏んだ穴と同じ形——「count > 0」は何かを見つけたとしか
+    // 言わず、見るべきものを見つけたとは言わない。ダークの @media の中身を
+    // 直接見るのに、既に実績のある darkMediaVarNames を再利用する。
+    const css = await fetchText(KIWA_STYLESHEET_PATH);
+    const darkVars = darkMediaVarNames(css);
+
+    expect(
+      darkVars.size,
+      "配信 CSS に @media (prefers-color-scheme: dark) が見つからない。",
+    ).toBeGreaterThan(0);
+
+    for (const name of ["--gdg-shadow-sm", "--gdg-shadow-md", "--gdg-shadow-lg"]) {
+      expect(darkVars.has(name), `ダークの @media に ${name} が無い`).toBe(true);
+    }
   });
 });
