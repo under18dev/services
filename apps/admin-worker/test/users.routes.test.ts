@@ -214,6 +214,33 @@ describe("GET /users", () => {
     expect(html).toMatch(/name="csrf_token"/);
   });
 
+  /**
+   * ボタンの variant だけ直した PR（issue #535）で form の契約まで
+   * 壊していないかを見る。既存のテストは直接 POST を組むので、描いた
+   * HTML の `name=` と実際に一致しているかはここでしか見ていない。
+   */
+  it("探すフォームと続きを読むフォームの action / method / name / CSRF が変わっていない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listUsers: async () => rpcOk({ users: [user({ id: "usr_taro" })], nextCursor: "cursor_abc" }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/users`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const html = await response.text();
+
+    expect(html).toContain('<form method="post" action="/users/search"');
+    expect(html).toMatch(/name="csrf_token"/);
+    expect(html).toContain('name="query"');
+
+    // 「続きを読む」フォーム（nextCursor が有る時だけ出る）。
+    expect(html).toContain('name="cursor" value="cursor_abc"');
+  });
+
   it("listUsers が失敗したら 503", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
@@ -584,6 +611,60 @@ describe("GET /users/:userId", () => {
     expect(identity.calls.listUsers).toHaveLength(0);
     expect(identity.calls.getUser).toEqual([{ actorUserId: SUB, userId: "usr_taro" }]);
     expect(nfc.calls.listCardsByOwner).toEqual([{ actorUserId: SUB, ownerUserId: "usr_taro" }]);
+  });
+
+  /**
+   * ボタンの variant だけ直した PR（issue #535）で form の契約まで
+   * 壊していないかを見る。既存のテストは直接 POST を組むので、描いた
+   * HTML の `name=`/`action=` と実際に一致しているかはここでしか見ていない。
+   */
+  it("有効な利用者の停止・端末失効フォームの action / method / name / CSRF が変わっていない", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "active" })),
+    });
+
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc);
+    const html = await response.text();
+
+    expect(html).toContain('<form method="post" action="/users/usr_taro/suspend">');
+    expect(html).toContain('name="from" value="detail"');
+    expect(html).toContain('name="reason" value="compromise"');
+    expect(html).toContain('name="reason" value="abuse"');
+
+    expect(html).toContain('<form method="post" action="/users/usr_taro/revoke-sessions">');
+
+    // 2 つの form が別々に CSRF トークンを持つ。
+    expect([...html.matchAll(/name="csrf_token"/g)]).toHaveLength(
+      [...html.matchAll(/<form method="post"/g)].length,
+    );
+  });
+
+  it("運営による停止中の利用者は、解除フォームの action / method / CSRF が変わっていない", async () => {
+    const identity = fakeIdentityAdmin({
+      getUser: async (input) => rpcOk(user({ id: input.userId, status: "suspended" })),
+      listAuditLogs: async (input) => {
+        if (input.event === "ops.user.suspended") {
+          return rpcOk({
+            entries: [
+              auditEntry({
+                event: "ops.user.suspended",
+                createdAt: "2026-11-01T00:00:00.000Z",
+                metadata: { reason: "compromise" },
+              }),
+            ],
+            nextCursor: null,
+          });
+        }
+        return rpcOk({ entries: [], nextCursor: null });
+      },
+    });
+
+    const response = await openDetail(identity.rpc, fakeNfcCards().rpc);
+    const html = await response.text();
+
+    expect(html).toContain('<form method="post" action="/users/usr_taro/reinstate">');
+    expect(html).toContain('name="from" value="detail"');
+    expect(html).toContain("停止を解除する");
   });
 
   it("監査ログの実行者（metadata.actorUserId）を名前で出す（#482）", async () => {

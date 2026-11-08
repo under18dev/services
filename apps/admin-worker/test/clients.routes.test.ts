@@ -143,6 +143,32 @@ describe("GET /clients", () => {
   });
 
   /**
+   * ボタンの variant だけ直した PR（issue #535）で form の契約まで
+   * 壊していないかを見る。既存のテストは直接 POST を組むので、描いた
+   * HTML の `name=`/`action=` と実際に一致しているかはここでしか見ていない。
+   */
+  it("登録フォームの action / method / name / CSRF が変わっていない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listOAuthClients: async () => rpcOk([]),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const html = await response.text();
+
+    expect(html).toContain('<form method="post" action="/clients"');
+    expect(html).toMatch(/name="csrf_token"/);
+    expect(html).toContain('name="redirect_uris"');
+    expect(html).toContain('name="scopes"');
+    expect(html).toContain('name="logo_url"');
+  });
+
+  /**
    * **行内の操作フォーム 3 種を一覧から外した**（#508、`/nfc` を #481 で
    * 外したのと同じ形）。詳細（`/clients/:clientId`）へ寄せたので、一覧の
    * 行自体はこれらの action を一切持たない——一次パーティかどうかに

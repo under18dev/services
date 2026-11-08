@@ -12,6 +12,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  getButtonClasses,
 } from "@u18/web-ui/kiwa";
 import {
   EMPTY_CLASS,
@@ -203,7 +204,7 @@ export const UsersPage: FC<UsersPageProps> = ({
             完全に一致するものだけが出ます。空のまま押すと、新しい順に表示します。
           </p>
           <div>
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("outline")}>
               探す
             </button>
           </div>
@@ -265,7 +266,7 @@ export const UsersPage: FC<UsersPageProps> = ({
             <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
             <input type="hidden" name="cursor" value={nextCursor} />
             <input type="hidden" name="query" value={query ?? ""} />
-            <button type="submit" class="text-sm text-foreground underline underline-offset-4">
+            <button type="submit" class={getButtonClasses("ghost")}>
               続きを読む
             </button>
           </form>

@@ -98,6 +98,41 @@ describe("GET /audit", () => {
     expect(html).toMatch(/name="csrf_token"/);
   });
 
+  /**
+   * **見た目（variant）だけ直した PR（issue #535）が、form の契約を
+   * 一緒に壊していないかを見る。** 既存のテストは URLSearchParams を
+   * 直接組んで POST するので、**描いた HTML の `name=` が実際にそれと
+   * 一致しているか**は確かめていない——ブラウザはレンダリングされた
+   * `<form>` の `name` 属性で送るので、ここがズレると見た目は正しいのに
+   * 本番だけ壊れる。ボタンの `class` 以外に差分が無いことを、わざと
+   * `name="event"` を壊して実測してから書いた。
+   */
+  it("絞り込みフォームと続きを読むフォームの action / method / name / CSRF が変わっていない", async () => {
+    const sessionCookie = await loginAsApproved();
+    const { rpc } = fakeIdentityAdmin({
+      listAuditLogs: async () => rpcOk({ entries: [entry()], nextCursor: "cursor_abc" }),
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/audit`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+    const html = await response.text();
+
+    expect(html).toContain('<form method="post" action="/audit/search"');
+    expect(html).toMatch(/name="csrf_token"/);
+    expect(html).toContain('name="event"');
+    expect(html).toContain('name="user_id"');
+    expect(html).toContain('name="outcome" value=""');
+    expect(html).toContain('name="outcome" value="success"');
+    expect(html).toContain('name="outcome" value="failure"');
+
+    // 「続きを読む」フォーム（nextCursor が有る時だけ出る）。
+    expect(html).toContain('name="cursor" value="cursor_abc"');
+  });
+
   it("利用者を名前で出す（#482）", async () => {
     const sessionCookie = await loginAsApproved();
     const { rpc } = fakeIdentityAdmin({
