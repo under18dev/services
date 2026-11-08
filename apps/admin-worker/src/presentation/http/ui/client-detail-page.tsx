@@ -16,9 +16,11 @@ import {
   TableRow,
 } from "@u18/web-ui/kiwa";
 import {
+  DANGER_BUTTON_CLASS,
   EMPTY_CLASS,
   FIELD_CLASS,
   INPUT_CLASS,
+  ITEM_ACTIONS_CLASS,
   ITEM_BODY_CLASS,
   ITEM_META_CLASS,
   ITEM_RAW_CLASS,
@@ -61,6 +63,20 @@ import { formatDateTime } from "./format";
  * 含めて確認済み）。`aria-selected:border-primary aria-selected:text-
  * foreground` を静的な class として足し、`[aria-selected="true"]` を
  * Tailwind の variant で踏ませている——`attachTabs` 側は変えていない。
+ *
+ * ## 失効は確認を挟む（指摘: 3b、運用者の判断が出るまでの暫定）
+ *
+ * **押した瞬間に戻れなくなる操作だった。** `clients.routes.tsx` に
+ * `POST /clients/disable` と対になる enable ルートが無く、失効させた
+ * クライアントを管理画面から元に戻す手段が無い。`/approvals` の剥奪
+ * （`approvals-page.tsx` の `revokeConfirmSub`）と同じ形の 2 段階確認に
+ * した——`disableConfirm` が立っているときだけ確認の文面とボタンを出す。
+ *
+ * **enable ルートは意図的に足していない。** 監査ログ・権限ビット・
+ * 「誰が戻せるのか」の設計が要る新機能で、運用者の返事が無いまま
+ * 入れるには重すぎる。確認段だけを先に入れたのは、戻すのが安い
+ * （この変更を revert すれば元の 1 クリックに戻る）ため。運用者が
+ * 「現状のままでよい」と答えたら、この確認段は revert する。
  */
 
 export type ClientDetailPageProps = {
@@ -80,6 +96,8 @@ export type ClientDetailPageProps = {
   readonly auditEntries: readonly AuditLogEntryAdmin[] | null;
   readonly error?: string;
   readonly notice?: string;
+  /** `true` なら失効の確認カードを出す（上の「失効は確認を挟む」参照）。 */
+  readonly disableConfirm?: boolean;
 };
 
 /** コピー用の目印（#470 決定の `data-copy`）。**値はここにしか無い——JS が後から読む。** */
@@ -162,6 +180,7 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
   auditEntries,
   error,
   notice,
+  disableConfirm = false,
 }) => (
   <KiwaShell
     title={`${client.name} の詳細`}
@@ -366,15 +385,11 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
           3 つのボタンとも `getButtonClasses()` を使う（指摘: 3b、
           services-11 の走査で素の下線テキストのままだったと判明）。
 
-          `失効させる` は `variant="destructive"`（塗り）——`DANGER_
-          BUTTON_CLASS`（outline + 文字だけ赤）ではない。分かれ目は
-          「押した瞬間に戻れなくなるか」で、`DANGER_BUTTON_CLASS` は
-          一覧の各行に 1 つずつ並ぶ破壊的操作向け（`island-classes.ts`
-          の「塗ると赤い面が画面を占める」はそちら向けの判断）。ここは
-          詳細画面に 1 つだけ出て、確認の段を挟まず 1 クリックで
-          失効が確定するので、単独で出る確定操作として塗りを選ぶ
-          （指摘: 3b、根拠は vendored `components.css` の
-          `.gdg-button-danger`/`.gdg-tone-danger` の 2 段）。
+          `失効させる`（確認前）は `DANGER_BUTTON_CLASS`（outline + 文字
+          だけ赤）——確認画面への遷移でしかなく、押した瞬間には何も
+          変わらない。確認カードの `本当に失効させる`（確定操作）が
+          `getButtonClasses("destructive")`（塗り）。`island-classes.ts`
+          の `DANGER_BUTTON_CLASS` の JSDoc（3 段の表）を参照。
         */}
         <CardContent class={ITEM_BODY_CLASS}>
           <form method="post" action="/clients/owner" class={ITEM_BODY_CLASS}>
@@ -424,16 +439,38 @@ export const ClientDetailPage: FC<ClientDetailPageProps> = ({
               u18 公式のクライアントは、この画面からは失効させられません。ログイン画面そのものが
               止まるためです。
             </p>
-          ) : client.disabledAt === null ? (
+          ) : client.disabledAt !== null ? null : disableConfirm ? (
+            <div class={ITEM_BODY_CLASS}>
+              <p class={ITEM_META_CLASS} role="alert">
+                {client.name} を失効させます。
+                <strong>この操作は管理画面から元に戻せません。</strong>
+                以後このクライアントでの新しい認可は通らなくなります。
+              </p>
+              <div class={ITEM_ACTIONS_CLASS}>
+                <form method="post" action="/clients/disable">
+                  <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+                  <input type="hidden" name="client_id" value={client.clientId} />
+                  <input type="hidden" name="from" value="detail" />
+                  <input type="hidden" name="confirm" value="true" />
+                  <button type="submit" class={getButtonClasses("destructive")}>
+                    本当に失効させる
+                  </button>
+                </form>
+                <a href={`/clients/${client.clientId}`} class={getButtonClasses("outline")}>
+                  キャンセル
+                </a>
+              </div>
+            </div>
+          ) : (
             <form method="post" action="/clients/disable">
               <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
               <input type="hidden" name="client_id" value={client.clientId} />
               <input type="hidden" name="from" value="detail" />
-              <button type="submit" class={getButtonClasses("destructive", "sm")}>
+              <button type="submit" class={DANGER_BUTTON_CLASS}>
                 失効させる
               </button>
             </form>
-          ) : null}
+          )}
         </CardContent>
       </Card>
     </div>

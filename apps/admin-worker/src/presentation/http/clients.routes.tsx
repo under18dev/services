@@ -219,6 +219,19 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
    * 秘密を返さないのでリダイレクトしてよいが、していない —— 失効は一覧の
    * 見た目が変わる操作で、同じ画面を描き直すほうが「何が変わったか」が
    * 見える（移行元と同じ理由）。
+   *
+   * ## 2 段階確認（指摘: 3b、運用者の判断が出るまでの暫定）
+   *
+   * `confirm=true` が付いていない 1 回目は、**実際には何も変えず**確認
+   * カードを返すだけにする（`/approvals/:sub/revoke` と同じ形）。対になる
+   * enable ルートが無く元に戻せないため——詳しい理由は
+   * `client-detail-page.tsx` の JSDoc「失効は確認を挟む」を参照。
+   *
+   * **一覧（`toDetail === false`）から来た場合は確認カードを出さない。**
+   * `clients-page.tsx` 側には確認カードの markup が無く（#508 でこの画面
+   * から失効ボタン自体を detail へ寄せたため、いまこの分岐を実際に通る
+   * 経路は無い）、出しようがない——未確認のまま即座に失効させる代わりに、
+   * 何もせず一覧を返す。安全側に倒しているだけで、積極的な機能ではない。
    */
   app.post("/clients/disable", pageSecurityHeaders, async (c) => {
     const form = await c.req.formData().catch(() => null);
@@ -231,6 +244,14 @@ export function registerClientsRoutes(app: Hono<AppBindings>): void {
     const session = c.get("session");
     const clientId = (form.get("client_id")?.toString() ?? "").trim();
     const toDetail = cameFromDetail(form);
+    const confirmed = form.get("confirm")?.toString() === "true";
+
+    if (!confirmed) {
+      c.header("Cache-Control", "no-store");
+      return toDetail
+        ? renderClientDetailPage(c, clientId, { disableConfirm: true })
+        : renderClientsPage(c, {});
+    }
 
     const container = c.get("container");
     const result = await container.identityAdmin.disableOAuthClient({
@@ -394,7 +415,7 @@ async function renderClientsPage(
 async function renderClientDetailPage(
   c: Context<AppBindings>,
   clientId: string,
-  extra: { error?: string; notice?: string },
+  extra: { error?: string; notice?: string; disableConfirm?: boolean },
 ): Promise<Response> {
   const container = c.get("container");
   const session = c.get("session");
@@ -439,6 +460,7 @@ async function renderClientDetailPage(
       csrfToken={ensureCsrfToken(c)}
       {...(extra.error === undefined ? {} : { error: extra.error })}
       {...(extra.notice === undefined ? {} : { notice: extra.notice })}
+      {...(extra.disableConfirm === undefined ? {} : { disableConfirm: extra.disableConfirm })}
     />,
   );
 }
