@@ -48,7 +48,7 @@
     "check:threat-model-refs": "node scripts/check-threat-model-refs.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261025.1",
+    "@cloudflare/workers-types": "5.20261101.1",
     "@types/node": "26.6.5",
     "eslint": "10.13.0",
     "prettier": "3.9.10",
