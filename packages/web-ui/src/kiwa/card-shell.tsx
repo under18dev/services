@@ -18,6 +18,12 @@ import { Layout } from "../layout";
  * **こちらは外にナビが無い。** 「どのサイトのログイン画面に居るのか」が
  * 読めないと、偽のログイン画面と区別する手掛かりが 1 つ減る。
  *
+ * ## 輪郭は `border` ではなく `shadow-sm` で作る
+ *
+ * `card.tsx` と同じく、`shadow-sm` のリングに GDG のクレイを重ねた影
+ * （`theme.css` の 3.）で輪郭を作る。`border` のままだとクレイが乗らず、
+ * サイドバー付きの画面のカードとこの画面だけが平板に見える。
+ *
  * ## インラインの `style` を書かない
  *
  * 本番の CSP は `style-src 'self'` で `'unsafe-inline'` を含まない。
@@ -46,7 +52,7 @@ export const KiwaCardShell: FC<KiwaCardShellProps> = ({
 }) => (
   <Layout title={title} stylesheet={stylesheet} scripts={scripts}>
     <div class="flex min-h-dvh items-center justify-center px-5 py-10">
-      <main class="flex w-full max-w-md flex-col gap-5 rounded-xl border border-border bg-card p-8">
+      <main class="flex w-full max-w-md flex-col gap-5 rounded-xl bg-card p-8 shadow-sm">
         <p class="text-xs font-medium tracking-[0.12em] text-foreground-soft uppercase">
           u18 Identity
         </p>
