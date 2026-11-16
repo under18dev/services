@@ -19,12 +19,12 @@
   "dependencies": {
     "@u18/contracts": "workspace:*",
     "clsx": "2.1.1",
-    "hono": "4.13.14",
+    "hono": "4.13.17",
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
     "@types/fontkit": "2.0.9",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@types/subset-font": "2.3.0",
     "esbuild": "0.28.2",
     "fontkit": "2.0.4",
