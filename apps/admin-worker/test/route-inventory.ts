@@ -180,6 +180,7 @@ export const NAV_ACTION_ROUTES: readonly Route[] = [
   { method: "POST", path: "/nfc/:cardId/target" },
   { method: "POST", path: "/clients" },
   { method: "POST", path: "/clients/disable" },
+  { method: "POST", path: "/clients/enable" },
   { method: "POST", path: "/clients/owner" },
   { method: "POST", path: "/clients/app-url" },
   { method: "POST", path: "/users/search" },

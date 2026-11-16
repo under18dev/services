@@ -1,5 +1,5 @@
 import { type IdentityDatabase, oauthClients, oauthRedirectUris } from "@u18/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { ConstantTimeComparator, TokenHasher } from "../../application/ports/crypto.port";
 import type {
   CreateOAuthClientInput,
@@ -175,6 +175,18 @@ export class DrizzleOAuthClientRepository implements OAuthClientRepository {
       .update(oauthClients)
       .set({ disabledAt: at })
       .where(and(eq(oauthClients.clientId, clientId), isNull(oauthClients.disabledAt)))
+      .returning({ id: oauthClients.id })
+      .all();
+    return rows.length > 0;
+  }
+
+  async enable(clientId: string): Promise<boolean> {
+    // `disable` の裏返し。`disabled_at IS NOT NULL` を条件に入れて、
+    // まだ失効していない行（0 行更新）と区別する。
+    const rows = await this.db
+      .update(oauthClients)
+      .set({ disabledAt: null })
+      .where(and(eq(oauthClients.clientId, clientId), isNotNull(oauthClients.disabledAt)))
       .returning({ id: oauthClients.id })
       .all();
     return rows.length > 0;

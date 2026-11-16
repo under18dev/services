@@ -4,6 +4,7 @@ import {
   createOAuthClientDelegatedInputSchema,
   deleteUserDelegatedInputSchema,
   disableOAuthClientDelegatedInputSchema,
+  enableOAuthClientDelegatedInputSchema,
   getOAuthClientDelegatedInputSchema,
   getUserDelegatedInputSchema,
   getUsersByIdsDelegatedInputSchema,
@@ -28,6 +29,8 @@ import {
   type DeleteUserDelegatedResult,
   type DisableOAuthClientDelegatedInput,
   type DisableOAuthClientDelegatedResult,
+  type EnableOAuthClientDelegatedInput,
+  type EnableOAuthClientDelegatedResult,
   type GetOAuthClientDelegatedInput,
   type GetOAuthClientDelegatedResult,
   type GetUserDelegatedInput,
@@ -331,6 +334,28 @@ export class IdentityAdminDelegatedRPC
     if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
 
     return rpcOk({ disabled: result.value.disabled });
+  }
+
+  /**
+   * OAuth クライアントの失効を解除する（#551）。**管理者のみ。**冪等。
+   * `disableOAuthClient` の裏返し——2 段階確認は無い（押した瞬間に
+   * 戻せなくなる操作ではないため）。一次パーティは `disable` と対称に
+   * `conflict` で拒否する（`DelegatedEnableOAuthClientUseCase` の JSDoc）。
+   */
+  async enableOAuthClient(
+    input: EnableOAuthClientDelegatedInput,
+  ): Promise<EnableOAuthClientDelegatedResult> {
+    const parsed = enableOAuthClientDelegatedInputSchema.safeParse(input);
+    if (!parsed.success) return rpcErr("invalid_input", "input is malformed");
+
+    const container = createContainer(this.env, {}, this.context());
+    const result = await container.useCases.delegatedEnableOAuthClient.execute({
+      actorUserId: parsed.data.actorUserId,
+      clientId: parsed.data.clientId,
+    });
+    if (!result.ok) return rpcErr(toRpcCode(result.error.code), result.error.message);
+
+    return rpcOk({ enabled: result.value.enabled });
   }
 
   async setOAuthClientOwner(

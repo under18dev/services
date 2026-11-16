@@ -94,6 +94,13 @@ export interface OAuthClientRepository {
   disable(clientId: string, at: Date): Promise<boolean>;
 
   /**
+   * 失効を解除する（#551）。**`disable` の裏返し**——`disabled_at IS NOT
+   * NULL` を条件にした UPDATE 1 文で `disabled_at` を `null` に戻す。
+   * まだ失効していない・未登録のどちらでも false（冪等）。
+   */
+  enable(clientId: string): Promise<boolean>;
+
+  /**
    * 持ち主を設定・変更する（#441）。**`null` を渡せば外せる。**
    *
    * `disable` と違い、一方向の遷移ではないので「既に設定済みなら false」
