@@ -25,8 +25,8 @@
     "@u18/domain": "workspace:*",
     "@u18/web-ui": "workspace:*",
     "drizzle-orm": "0.45.4",
-    "hono": "4.13.14",
-    "jose": "6.2.13"
+    "hono": "4.13.17",
+    "jose": "6.2.16"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
