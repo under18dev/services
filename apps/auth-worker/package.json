@@ -31,14 +31,14 @@
     "build:client": "node scripts/build-client.mjs"
   },
   "dependencies": {
-    "@simplewebauthn/server": "14.0.3",
+    "@simplewebauthn/server": "14.1.0",
     "@u18/contracts": "workspace:*",
     "@u18/db": "workspace:*",
     "@u18/domain": "workspace:*",
     "@u18/web-ui": "workspace:*",
     "drizzle-orm": "0.45.4",
-    "hono": "4.13.14",
-    "jose": "6.2.13",
+    "hono": "4.13.17",
+    "jose": "6.2.16",
     "zod": "4.6.7"
   },
   "devDependencies": {
