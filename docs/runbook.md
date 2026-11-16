@@ -1962,8 +1962,9 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"
    # どれも user_id の外部キーに onDelete: cascade を持つ。本番 D1 は外部キー
    # 制約を強制する（scripts/lib/restore-rehearsal.mjs、#165）ので cascade も
    # 効くはずだが、それには頼らない。万一効かない環境で cascade 任せにすると、
-   # これらの行が孤児のまま永久に残る——しかも users の行は既に無いので、
-   # 後から洗い出す手段も無い。
+   # 孤児が残る。user_emails / passkeys / oauth_grants は自動掃除の対象外
+   # （NEVER_SWEPT）なので永久に残る——しかも users の行は既に無いので、
+   # 後から洗い出す手段も無い（残りの 5 つは保持期間の Cron がいずれ消す）。
    #
    # `admin.under18.dev` の物理削除（#554 の deletePermanently）と同じ順序・
    # 同じ対象で、子テーブルを明示的に DELETE してから users を消す。
@@ -2718,11 +2719,11 @@ get isActive(): boolean {
 
 **物理削除はこの表のどの行とも違う。** `status` の enum にもう 1 つ値を足したのではなく、`users` の行そのものが無くなる。上の 3 行はどれも「行は残る」ことを前提にしているので、物理削除を選んだあとは `status` も `deleted_at` も読む対象の行自体が存在しない。**`suspended` / `deleted`（§11.6 の purge まで）は、物理削除を足したあともそのまま残る** —— 凍結は可逆な手段として引き続き使う。ただし上の表で BAN の行に書いた「再登録を防ぐために行を残す」は、その行を物理削除した時点で成り立たなくなる。
 
-**本番 D1 は外部キー制約を強制する。** `scripts/lib/restore-rehearsal.mjs` のコメントに経緯がある —— #165 では、親より先に子を入れるダンプが D1 への復元で外部キー違反として落ちた。テスト環境の SQLite は既定で強制しないため、`apps/auth-worker/test/session-repository.test.ts` などは `pragma foreign_keys = on` を明示している。
+**本番 D1 は外部キー制約を強制する。** `scripts/lib/restore-rehearsal.mjs` のコメントに経緯がある —— #165 では、親より先に子を入れるダンプが D1 への復元で外部キー違反として落ちた。既定で強制しないのは素の SQLite（`restore-rehearsal.mjs` が使うメモリ上の DB など）で、このリハーサルは `PRAGMA foreign_keys = ON` を明示して D1 に合わせている。auth-worker のテストが使う miniflare の D1 も強制しており、#554 のテスト（`apps/auth-worker/test/user-repository.test.ts`）は `pragma foreign_keys = off` を実行しても読み戻しが `1` のままで、無効化できないことを実測している。
 
 **`oauth_clients.owner_user_id` には外部キーがあるが `onDelete` を指定していない**（`packages/db/src/schema/oauth.ts`）。そのままでは、OAuth クライアントを持っている利用者の `users` 行を消そうとすると外部キー違反で失敗する。**#554 の実装（`deletePermanently`）は、同じ batch の中で `owner_user_id` を `null` に戻してから `users` を消す。** 運用者が先に `/clients/owner` で持ち主を外しておく必要は無い。クライアント自体は消えず、持ち主が空（`—`）になるだけである。
 
-**実装（#554）は CASCADE に頼らず、子テーブル 8 つを明示的に DELETE する。** `sessions` / `passkeys` / `webauthn_challenges` / `email_challenges` / `oauth_tokens` / `oauth_grants` / `oauth_authorization_codes` / `user_emails` はどれも `onDelete: "cascade"` を持ち、外部キーを強制する本番 D1 では cascade も効くはずである。それでも頼らないのは、万一効かなかった場合の壊れ方が重いからである —— これらの行は自動掃除の対象外（`NEVER_SWEPT`）のまま永久に孤児として残り、`users` の行自体は既に無いので後から洗い出す手段も無い。`purge-user.sql.ts` と同じ考え方で、cascade が効くかどうかに関係なく同じ結果になる形を選んだ。§7.1 手順 8 の SQL も同じ形に揃えてある（#556）。
+**実装（#554）は CASCADE に頼らず、子テーブル 8 つを明示的に DELETE する。** `sessions` / `passkeys` / `webauthn_challenges` / `email_challenges` / `oauth_tokens` / `oauth_grants` / `oauth_authorization_codes` / `user_emails` はどれも `onDelete: "cascade"` を持ち、外部キーを強制する本番 D1 では cascade も効くはずである。それでも頼らないのは、万一効かなかった場合の壊れ方が重いからである。このうち `sessions` / `oauth_tokens` / `oauth_authorization_codes` / `email_challenges` / `webauthn_challenges` は保持期間による自動掃除（`RetentionPolicy`）の対象なので、孤児になってもいずれ Cron が消す。**残る 3 つ —— `user_emails` / `passkeys` / `oauth_grants` —— は自動掃除の対象外（`NEVER_SWEPT`、`apps/auth-worker/src/domain/services/retention-policy.ts`）なので、孤児のまま永久に残る。** `users` の行自体は既に無いので、後から洗い出す手段も無い。`purge-user.sql.ts` と同じ考え方で、cascade が効くかどうかに関係なく同じ結果になる形を選んだ。§7.1 手順 8 の SQL も同じ形に揃えてある（#556）。
 
 **削除できるかどうかの判定（`status <> 'active'`）は、子テーブルの DELETE・owner の null 化・本体の DELETE を含む 10 文すべてに入れてある。** `users` の DELETE だけに条件を絞ると、`active` な利用者に対して呼んだときに本体は残るのに子テーブルだけ消える、という中途半端な壊れ方になることが実装中に見つかった。10 文は 1 つの batch（implicit transaction）にまとめてあり、途中で失敗すれば全体が巻き戻る。
 
