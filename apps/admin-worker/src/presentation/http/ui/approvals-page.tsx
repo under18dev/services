@@ -252,6 +252,12 @@ const PERMISSION_LABELS: Readonly<
     label: "監査ログを読む",
     description: "誰が何をしたかの記録を全件たどれます。",
   },
+  USER_DELETE: {
+    label: "利用者を削除する（戻せません）",
+    description:
+      "利用者の行を物理的に削除します。この操作は取り消せません。" +
+      "凍結（利用者を止める）とは別の権限です。",
+  },
   APPROVAL_GRANT: {
     label: "権限を配る",
     description:
