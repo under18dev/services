@@ -24,10 +24,11 @@
  *
  * **このスクリプトは消さない。** 理由は 3 つ。(1) **管理者が 0 人のときの
  * 唯一の入口**で、実際いま本番の管理者は 0 人である（最初の 1 人は
- * ここからしか作れない）。(2) **一次パーティの登録と失効はここにしか無い**
- * —— 同意画面の省略は「登録できること」とは別の、より重い権限なので
- * RPC の入力に項目ごと置いておらず、止めるほうも RPC からは `conflict` に
- * なる（`u18-dashboard` を止められると u18 全サービスのログインが落ちる）。
+ * ここからしか作れない）。(2) **一次パーティの登録・失効・失効の解除は
+ * ここにしか無い** —— 同意画面の省略は「登録できること」とは別の、より
+ * 重い権限なので RPC の入力に項目ごと置いておらず、止める・戻すほうも
+ * RPC からは `conflict` になる（`u18-dashboard` を止める・戻すのを管理者
+ * 1 人の判断に任せると u18 全サービスのログインが落ちる・戻る、#551）。
  * (3) RPC 側は `http://localhost` を登録できないので、`seed-dev` の
  * 代わりにならない。
  *
@@ -38,6 +39,7 @@
  *     --redirect-uri https://auth.under18.dev/account/callback --first-party \
  *     --out secret.txt [--remote]          # confidential には --out が必須
  *   node scripts/oauth-client.mjs disable --client-id u18-dashboard [--remote]
+ *   node scripts/oauth-client.mjs enable --client-id u18-dashboard [--remote]
  *   node scripts/oauth-client.mjs list [--remote]
  *   node scripts/oauth-client.mjs seed-dev          # ローカル専用（下記）
  *   node scripts/oauth-client.mjs generate-secret --out secret.txt
@@ -348,6 +350,28 @@ async function disable(options) {
 }
 
 /**
+ * `disable` の裏返し（#551）。**一次パーティの制限は無い**——RPC 側
+ * （`enableOAuthClient`）が一次パーティを `conflict` で拒むのと違い、
+ * ここは `disable` と同じく CLI 側の制限を持たない。一次パーティを
+ * 止める・戻す経路は両方ともここだけに残してある。
+ */
+async function enable(options) {
+  if (!options.clientId) throw new Error("--client-id は必須");
+  // `disabled_at is not null` を条件に入れて、既に有効なものへの
+  // 実行と区別する（`disable` と対称）。
+  runSql(
+    `update oauth_clients set disabled_at = null, updated_at = unixepoch() * 1000
+     where client_id = ${quote(options.clientId)} and disabled_at is not null;`,
+    options,
+  );
+  console.log(
+    options.dryRun
+      ? `dry-run: 上の SQL を流せば client_id=${options.clientId} の失効が解除される`
+      : `失効を解除した: client_id=${options.clientId}`,
+  );
+}
+
+/**
  * 新しい `client_secret` をファイルへ書く（#445）。**D1 には触れない。**
  *
  * 生成と適用（`rotate`）を分けてある理由はファイル冒頭の #445 の節を参照。
@@ -541,6 +565,9 @@ async function main() {
     case "disable":
       await disable(options);
       break;
+    case "enable":
+      await enable(options);
+      break;
     case "list":
       list(options);
       break;
@@ -555,7 +582,7 @@ async function main() {
       break;
     default:
       console.error(
-        "使い方: node scripts/oauth-client.mjs <create|disable|list|seed-dev|generate-secret|rotate> [...]",
+        "使い方: node scripts/oauth-client.mjs <create|disable|enable|list|seed-dev|generate-secret|rotate> [...]",
       );
       process.exitCode = 1;
   }

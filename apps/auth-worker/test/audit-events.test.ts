@@ -216,7 +216,7 @@ describe("OPERATOR_ACTION_EVENTS（#515）", () => {
     expect(OPERATOR_ACTION_EVENTS).not.toContain("oauth.client.resolve");
   });
 
-  it("oauth.client.* のうち、管理者まで通った呼び出しだけが書く 4 件を含む", () => {
+  it("oauth.client.* のうち、管理者まで通った呼び出しだけが書く 5 件を含む", () => {
     const includedOAuthClientEvents = OPERATOR_ACTION_EVENTS.filter((event) =>
       event.startsWith("oauth.client."),
     ).sort();
@@ -226,6 +226,7 @@ describe("OPERATOR_ACTION_EVENTS（#515）", () => {
         "oauth.client.app_url_changed",
         "oauth.client.created",
         "oauth.client.disabled",
+        "oauth.client.enabled",
         "oauth.client.owner_changed",
       ].sort(),
     );

@@ -57,6 +57,7 @@ import { DelegatedGetOAuthClientUseCase } from "../application/use-cases/delegat
 import { DelegatedListOAuthClientsUseCase } from "../application/use-cases/delegated-list-oauth-clients.use-case";
 import { DelegatedCreateOAuthClientUseCase } from "../application/use-cases/delegated-create-oauth-client.use-case";
 import { DelegatedDisableOAuthClientUseCase } from "../application/use-cases/delegated-disable-oauth-client.use-case";
+import { DelegatedEnableOAuthClientUseCase } from "../application/use-cases/delegated-enable-oauth-client.use-case";
 import { DelegatedSetOAuthClientAppUrlUseCase } from "../application/use-cases/delegated-set-oauth-client-app-url.use-case";
 import { DelegatedSetOAuthClientOwnerUseCase } from "../application/use-cases/delegated-set-oauth-client-owner.use-case";
 import { DelegatedListAuditLogsUseCase } from "../application/use-cases/delegated-list-audit-logs.use-case";
@@ -196,6 +197,7 @@ export type Container = {
     readonly delegatedCountUsers: DelegatedCountUsersUseCase;
     readonly delegatedCreateOAuthClient: DelegatedCreateOAuthClientUseCase;
     readonly delegatedDisableOAuthClient: DelegatedDisableOAuthClientUseCase;
+    readonly delegatedEnableOAuthClient: DelegatedEnableOAuthClientUseCase;
     readonly delegatedSetOAuthClientOwner: DelegatedSetOAuthClientOwnerUseCase;
     readonly delegatedSetOAuthClientAppUrl: DelegatedSetOAuthClientAppUrlUseCase;
     readonly delegatedListAuditLogs: DelegatedListAuditLogsUseCase;
@@ -547,6 +549,11 @@ export function createContainer(
         users,
         clients: oauthClients,
         clock,
+        audit,
+      }),
+      delegatedEnableOAuthClient: new DelegatedEnableOAuthClientUseCase({
+        users,
+        clients: oauthClients,
         audit,
       }),
       delegatedSetOAuthClientOwner: new DelegatedSetOAuthClientOwnerUseCase({

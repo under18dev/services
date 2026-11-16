@@ -201,6 +201,12 @@ export const AUDIT_EVENTS = [
    */
   "oauth.client.disabled",
   /**
+   * 管理者がクライアントの失効を解除した（#551）。**`disabled` の裏返し**
+   * で、同じだけ残す——失効と同じく、正規のクライアントの状態を動かす
+   * 支配権の操作である。
+   */
+  "oauth.client.enabled",
+  /**
    * 管理者がクライアントの持ち主を設定・変更した（#441）。
    *
    * **新しい名前にする。** `card.disabled` を nfc-worker の
@@ -408,6 +414,8 @@ export const AUDIT_EVENT_RETENTION = {
   "oauth.client.created": { sink: "d1", retention: "security" },
   /** 失効。正規のクライアントを止める手口でもあるので、登録と同じだけ残す。 */
   "oauth.client.disabled": { sink: "d1", retention: "security" },
+  /** 失効の解除（#551）。`disabled` の裏返しで、同じだけ残す。 */
+  "oauth.client.enabled": { sink: "d1", retention: "security" },
   /**
    * 持ち主の設定・変更（#441）。**侵害された管理者が、追及をかわすために
    * 持ち主を書き換える**というのが具体的な懸念——「誰の持ち物か」という
