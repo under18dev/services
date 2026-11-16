@@ -57,7 +57,11 @@ export const PERMISSION_BITS = {
 
 export type PermissionBitName = keyof typeof PERMISSION_BITS;
 
-/** いま定義されている全ビット。移行の既定値（255）と一致することをテストで固定する。 */
+/**
+ * いま定義されている全ビット。現在は 511（9 ビット）で、その値をテストで固定する。
+ * 移行 0002 のバックフィル値（255）は `USER_DELETE` を足す前の過去の記録で、
+ * もう一致しない（`permissions.test.ts` を参照）。
+ */
 export const ALL_DEFINED_PERMISSIONS: bigint = Object.values(PERMISSION_BITS).reduce(
   (acc, bit) => acc | bit,
   0n,

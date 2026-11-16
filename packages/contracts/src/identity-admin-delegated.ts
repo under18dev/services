@@ -429,7 +429,11 @@ export interface IdentityAdminDelegatedRpcContract {
   revokeUserSessions(
     input: RevokeUserSessionsDelegatedInput,
   ): Promise<RevokeUserSessionsDelegatedResult>;
-  /** 戻せない（運用者判断、2026-11-08）。`conflict` は自分自身を対象にしたとき。 */
+  /**
+   * 戻せない（運用者判断、2026-11-08）。`conflict` は自分自身を対象に
+   * したときと、対象が `active`（先に凍結が要る）のときの両方を指す。
+   * `not_found` は対象が存在しないとき。どの失敗も監査ログに残る。
+   */
   deleteUser(input: DeleteUserDelegatedInput): Promise<DeleteUserDelegatedResult>;
   listOAuthClients(input: ListOAuthClientsDelegatedInput): Promise<ListOAuthClientsDelegatedResult>;
   /**

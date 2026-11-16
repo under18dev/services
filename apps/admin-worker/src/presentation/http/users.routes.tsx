@@ -651,8 +651,10 @@ export function registerUsersRoutes(app: Hono<AppBindings>): void {
     // はここで止める——画面はボタン自体を出していないが(`DeleteUserSection`
     // の `user.status === "active"` 分岐)、この route は直接 POST できる
     // ので、ここでも同じ制約を効かせる(`/clients/disable` の一覧経路と
-    // 同じ判断)。`DelegatedDeleteUserUseCase` 自身は `status` を見ない
-    // ——運用者の判断で画面側だけがここを絞っている。
+    // 同じ判断)。`DelegatedDeleteUserUseCase` 自身も `active` を
+    // `conflict`(監査の reason は `status_active`)で拒む(c0f800d)ので
+    // 最後の砦はそちらにあるが、ここで先に止めると確認画面を出す前に
+    // 理由を伝えられ、承認行の締め出し判定まで進まずに済む。
     const summary = await container.identityAdmin.getUser({ actorUserId: session.sub, userId });
     if (!summary.ok) {
       return summary.error.code === "not_found" || summary.error.code === "invalid_input"

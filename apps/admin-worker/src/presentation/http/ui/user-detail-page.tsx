@@ -575,8 +575,9 @@ const DeleteWarningExtra: FC<{
  * **`active` には出さない。** `client-detail-page.tsx` が一次パーティの
  * クライアントに対してやっている形と同じ——ボタンを消すだけだと、押せ
  * ない理由が「権限不足」なのか「バグ」なのか使う人に分からないので、
- * 理由も書く。`DelegatedDeleteUserUseCase` 自体は `status` を見ないが、
- * **運用者の判断で画面側だけがここを絞る**(2026-11-08 追加決定)。
+ * 理由も書く(2026-11-08 追加決定)。`DelegatedDeleteUserUseCase` 自体も
+ * `active` を `conflict` で拒む(c0f800d)が、画面にボタンが出ていると
+ * 「押せるのに拒否される」行き止まりになるので、画面側でも先に絞る。
  *
  * ## 2 段階確認(`/clients/disable`・#548 と同じ形)
  *
