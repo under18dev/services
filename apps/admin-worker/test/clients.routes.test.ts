@@ -630,9 +630,56 @@ describe("GET /clients/:clientId（#473）", () => {
     );
 
     const html = await response.text();
-    expect(call).toBe(4);
+    expect(call).toBe(5);
     expect(html).toContain("oauth.client.created");
     expect(html).not.toContain("いま監査ログを取得できません");
+  });
+
+  /**
+   * 失効の解除（`oauth.client.enabled`）も詳細の監査タブに出ること（指摘: Codex、#552）。
+   * 引くイベントに入れ忘れると、失効だけが残って「いまも失効中」に見える。
+   */
+  it("失効の解除（oauth.client.enabled）も監査ログに出す", async () => {
+    const sessionCookie = await loginAsApproved();
+    const requested: string[] = [];
+    const { rpc } = fakeIdentityAdmin({
+      getOAuthClient: async (): Promise<GetOAuthClientDelegatedResult> =>
+        rpcOk(client({ clientId: "app_0001" })),
+      listAuditLogs: async (input) => {
+        if (input.event) requested.push(input.event);
+        if (input.event !== "oauth.client.enabled") {
+          return rpcOk({ entries: [], nextCursor: null });
+        }
+        return rpcOk({
+          entries: [
+            {
+              id: "aud_enabled",
+              event: "oauth.client.enabled",
+              userId: "usr_admin",
+              actor: "admin-worker",
+              outcome: "success",
+              reason: null,
+              metadata: null,
+              ipHash: null,
+              userAgent: null,
+              createdAt: "2026-10-02T00:00:00.000Z",
+            },
+          ],
+          nextCursor: null,
+        });
+      },
+    });
+    const app = createApp({ approvals: fakeApprovals([SUB]), identityAdmin: rpc });
+
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/clients/app_0001`, { headers: { Cookie: sessionCookie } }),
+      env,
+      executionContext(),
+    );
+
+    const html = await response.text();
+    expect(requested).toContain("oauth.client.enabled");
+    expect(html).toContain("oauth.client.enabled");
   });
 
   it("持ち主と、監査ログの「操作した管理者」の両方を名前で出す（#482）", async () => {

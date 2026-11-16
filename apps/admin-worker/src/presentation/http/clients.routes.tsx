@@ -115,6 +115,7 @@ function cameFromDetail(form: FormData): boolean {
 const CLIENT_AUDIT_EVENTS = [
   "oauth.client.created",
   "oauth.client.disabled",
+  "oauth.client.enabled",
   "oauth.client.owner_changed",
   "oauth.client.app_url_changed",
 ] as const;
