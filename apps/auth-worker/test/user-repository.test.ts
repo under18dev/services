@@ -18,7 +18,14 @@ import { purgeUserSql } from "../src/infrastructure/persistence/purge-user.sql";
 import { aUser, type UserFixture } from "@u18/testing";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DrizzleUserRepository } from "../src/infrastructure/persistence/drizzle-user.repository";
-import { expectForeignKeyViolation, resetDatabase } from "./helpers";
+import {
+  countUserChildRows,
+  EVERY_CHILD_ROW_PRESENT,
+  expectForeignKeyViolation,
+  NO_CHILD_ROW_LEFT,
+  resetDatabase,
+  seedUserChildRows,
+} from "./helpers";
 
 /**
  * `updateProfile` の衝突の扱いを、実際に適用されたマイグレーション越しに確かめる。
@@ -291,11 +298,25 @@ describe("DrizzleUserRepository.deletePermanently", () => {
   it("active な行には当たらない（運用者判断、2026-11-08: 先に凍結が要る）", async () => {
     const victim = aUser({ username: "still_active" }); // 既定が active。
     await insertUser(victim);
+    const { ownedClientId } = await seedUserChildRows(victim.id, victim.email, "still_active");
 
     expect(await repo.deletePermanently(victim.id)).toBe(false);
     // 行は手付かずで残る。
     const row = await db().select().from(users).where(eq(users.id, victim.id)).get();
     expect(row).toBeDefined();
+
+    // **本体が残るだけでは足りない。** いちばん危ないのは「`users` は残るが
+    // セッション・Passkey・トークンは消える」中途半端な破壊で、`users` の
+    // 行だけを見ていてはそれを見逃す。8 つの子テーブルも、
+    // `oauth_clients.owner_user_id` も、1 つずつ残っていることを数える
+    // （どれか 1 文から `targetIsDeletable` を外すと、ここが赤になる）。
+    expect(await countUserChildRows(victim.id)).toEqual(EVERY_CHILD_ROW_PRESENT);
+    const clientRow = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, ownedClientId))
+      .get();
+    expect(clientRow?.ownerUserId).toBe(victim.id);
   });
 
   it("deleted（purge 済み）な行にも当たる", async () => {
@@ -461,8 +482,8 @@ describe("DrizzleUserRepository.deletePermanently", () => {
     // 本体が消える。
     expect(await db().select().from(users).where(eq(users.id, victim.id)).get()).toBeUndefined();
 
-    // 子テーブルが消えたことを 1 つずつ数える。CASCADE は off にしてある
-    // ので、消えているなら手で消した証拠になる。「消えたはず」で済ませない。
+    // 子テーブルが消えたことを 1 つずつ数える。「消えたはず」で済ませない
+    // （ただし上に書いたとおり、ここでは CASCADE と区別できない）。
     expect(
       await db().select().from(sessions).where(eq(sessions.userId, victim.id)).all(),
     ).toHaveLength(0);
@@ -526,186 +547,57 @@ describe("DrizzleUserRepository.deletePermanently", () => {
    * 上のテストだけでは不十分だった——実測したところ、この環境では
    * `pragma foreign_keys = off` を実行しても `pragma foreign_keys` の
    * 読み戻しが `1`（有効）のままで、**明示的に無効化する手段が無い**
-   * （b6 / 3b への報告事項）。つまり CASCADE は常に効いており、
+   * （b6 / 3b への報告事項。`.run()` / `.exec()` / batch の中、どの形で
+   * 流しても同じだった）。つまり CASCADE は常に効いており、
    * `deletePermanently` から子テーブルの DELETE 文を 1 つ消しても、
-   * CASCADE が黙って肩代わりしてこのテストファイルの他のテストは
-   * 緑のまま通ってしまう（実際に確認した）。「検査は空でも緑になる」の
-   * 一段深い形——検査の土台そのものが、見たいもの以外の経路でも
-   * 同じ結果を作ってしまう。
+   * CASCADE が黙って肩代わりして上のテストは緑のまま通ってしまう。
    *
-   * ここでは **`users` の行を消さずに**、`deletePermanently` が子テーブルを
-   * 消せることだけを確かめる。親の行が存在し続ける以上、CASCADE が
-   * 発火する余地は無い——消えたなら、それは `deletePermanently` 自身の
-   * 明示的な DELETE 文によるものだと言い切れる。
+   * そこで **`users` の行が消えないようにしたうえで、本物の
+   * `deletePermanently` を呼ぶ。** `users` に `before delete` のトリガーを
+   * 張り、`raise(ignore)` で `users` の行の削除だけを黙って読み飛ばさせる
+   * ——batch はエラーにならずに最後まで流れ、子テーブルの DELETE も
+   * owner の null 化もそのまま実行される。親の行が存在し続ける以上、
+   * CASCADE が発火する余地は無い——子テーブルが消えたなら、それは
+   * `deletePermanently` 自身の明示的な DELETE 文によるものだと言い切れる。
    *
-   * `deletePermanently` を丸ごと呼ぶとどうしても `users` も一緒に消えて
-   * しまうので、ここだけは本体の実装と同じ 8 文を直接組み立てる
-   * （drizzle-user.repository.ts の `deletePermanently` と意図的に
-   * 重複させている——対象のテーブルが増減したら、この一覧も合わせて
-   * 直すこと。ずれたままになる心配があるなら、本体側を「子テーブルの
-   * 一覧」として外へ出す設計に変えること）。
+   * 以前はここで本体と同じ 8 文を写して流していたが、それでは本体から
+   * 1 文消しても写しの方は緑のままで、本体を何も見ていなかった。
+   * 本物を呼ぶので、一覧を二重に持つ必要も無くなった。
    *
-   * **`targetIsDeletable`（`active` を除外する条件）はここに写していない。**
-   * この一覧は「cascade に頼らず手で消しているか」だけを見るためのもので、
-   * `active` ガードは別のテスト（「active な行には当たらない」）が見る
-   * ——2 つの関心を 1 つのテストに混ぜない。victim の `status` は
-   * `aUser` の既定（`active`）のままで構わない。
+   * victim は `suspended` にする——`active` だと `targetIsDeletable` が
+   * 全部の文を止めてしまい、「消えない」理由が CASCADE の有無と区別
+   * できなくなる。
    */
   it("子テーブルの DELETE は、親の users 行が残っていても効く（CASCADE では説明できない）", async () => {
-    const victim = aUser({ username: "attribution_check" });
+    const victim = aUser({ username: "attribution_check", status: "suspended" });
     await insertUser(victim);
+    const { ownedClientId } = await seedUserChildRows(victim.id, victim.email, "attr");
+    expect(await countUserChildRows(victim.id)).toEqual(EVERY_CHILD_ROW_PRESENT);
 
-    await db()
-      .insert(sessions)
-      .values({
-        id: "ses_attr",
-        userId: victim.id,
-        tokenHash: "hash-attr",
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-        authMethod: "email_otp",
-        lastSeenAt: new Date(),
-      })
-      .run();
-    await db()
-      .insert(passkeys)
-      .values({
-        id: "pk_attr",
-        userId: victim.id,
-        credentialId: "cred-attr",
-        publicKey: "pub-attr",
-      })
-      .run();
-    await db()
-      .insert(webauthnChallenges)
-      .values({
-        id: "wch_attr",
-        userId: victim.id,
-        challenge: "challenge-attr",
-        purpose: "registration",
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      })
-      .run();
-    await db()
-      .insert(emailChallenges)
-      .values({
-        id: "ech_attr",
-        userId: victim.id,
-        email: victim.email,
-        codeHash: "hash-otp-attr",
-        purpose: "login",
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      })
-      .run();
-    const client = "cli_attr";
-    await db()
-      .insert(oauthClients)
-      .values({
-        id: client,
-        clientId: "attr-client",
-        name: "attribution check",
-        clientType: "public",
-        allowedScopes: "openid",
-        isFirstParty: false,
-      })
-      .run();
-    await db()
-      .insert(oauthGrants)
-      .values({
-        id: "grt_attr",
-        userId: victim.id,
-        clientId: client,
-        grantedScopes: "openid",
-        grantedAt: new Date(),
-      })
-      .run();
-    await db()
-      .insert(oauthAuthorizationCodes)
-      .values({
-        id: "code_attr",
-        codeHash: "hash-code-attr",
-        clientId: client,
-        userId: victim.id,
-        redirectUri: "https://app.example/cb",
-        scope: "openid",
-        codeChallenge: "challenge",
-        codeChallengeMethod: "S256",
-        authTime: new Date(),
-        expiresAt: new Date(Date.now() + 60 * 1000),
-      })
-      .run();
-    await db()
-      .insert(oauthTokens)
-      .values({
-        id: "tok_attr",
-        tokenHash: "hash-token-attr",
-        grantId: "grt_attr",
-        clientId: client,
-        userId: victim.id,
-        scope: "openid",
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      })
-      .run();
-    await db()
-      .insert(userEmails)
-      .values({
-        id: "uem_attr",
-        userId: victim.id,
-        email: victim.email,
-        verifiedAt: new Date(),
-        isPrimary: true,
-      })
-      .run();
-
-    // **本体の `deletePermanently` と同じ 8 文を、`users` の DELETE だけ
-    // 外して流す。** 親の行は意図的に残す。
-    await db().batch([
-      db().delete(sessions).where(eq(sessions.userId, victim.id)),
-      db().delete(passkeys).where(eq(passkeys.userId, victim.id)),
-      db().delete(webauthnChallenges).where(eq(webauthnChallenges.userId, victim.id)),
-      db().delete(emailChallenges).where(eq(emailChallenges.userId, victim.id)),
-      db().delete(oauthTokens).where(eq(oauthTokens.userId, victim.id)),
-      db().delete(oauthGrants).where(eq(oauthGrants.userId, victim.id)),
-      db().delete(oauthAuthorizationCodes).where(eq(oauthAuthorizationCodes.userId, victim.id)),
-      db().delete(userEmails).where(eq(userEmails.userId, victim.id)),
-    ]);
+    await env.IDENTITY_DB.exec(
+      "create trigger test_keep_users_row before delete on users begin select raise(ignore); end",
+    );
+    try {
+      // `users` の行は消えないので `returning` は空——戻り値は false になる。
+      // 見たいのは戻り値ではなく、子テーブルの行がどうなったか。
+      expect(await repo.deletePermanently(victim.id)).toBe(false);
+    } finally {
+      await env.IDENTITY_DB.exec("drop trigger test_keep_users_row");
+    }
 
     // 親の行は手付かずで残っている——CASCADE が発火する前提（親の削除）
     // がそもそも起きていない。
     expect(await db().select().from(users).where(eq(users.id, victim.id)).get()).toBeDefined();
 
-    // それでも子テーブルは全部消えている。CASCADE では説明できない。
-    expect(
-      await db().select().from(sessions).where(eq(sessions.userId, victim.id)).all(),
-    ).toHaveLength(0);
-    expect(
-      await db().select().from(passkeys).where(eq(passkeys.userId, victim.id)).all(),
-    ).toHaveLength(0);
-    expect(
-      await db()
-        .select()
-        .from(webauthnChallenges)
-        .where(eq(webauthnChallenges.userId, victim.id))
-        .all(),
-    ).toHaveLength(0);
-    expect(
-      await db().select().from(emailChallenges).where(eq(emailChallenges.userId, victim.id)).all(),
-    ).toHaveLength(0);
-    expect(
-      await db()
-        .select()
-        .from(oauthAuthorizationCodes)
-        .where(eq(oauthAuthorizationCodes.userId, victim.id))
-        .all(),
-    ).toHaveLength(0);
-    expect(
-      await db().select().from(oauthGrants).where(eq(oauthGrants.userId, victim.id)).all(),
-    ).toHaveLength(0);
-    expect(
-      await db().select().from(oauthTokens).where(eq(oauthTokens.userId, victim.id)).all(),
-    ).toHaveLength(0);
-    expect(
-      await db().select().from(userEmails).where(eq(userEmails.userId, victim.id)).all(),
-    ).toHaveLength(0);
+    // それでも子テーブルは全部消え、owner も外れている。CASCADE では説明できない。
+    expect(await countUserChildRows(victim.id)).toEqual(NO_CHILD_ROW_LEFT);
+    const clientRow = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, ownedClientId))
+      .get();
+    expect(clientRow).toBeDefined();
+    expect(clientRow?.ownerUserId).toBeNull();
   });
 
   it("owner_user_id を先に外さないと FK 違反で落ちる（2 文に分けている理由そのもの）", async () => {

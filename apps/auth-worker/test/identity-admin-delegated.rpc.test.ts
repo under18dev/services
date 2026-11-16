@@ -4,7 +4,12 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { IdentityAdminDelegatedRPC } from "../src/presentation/rpc/identity-admin-delegated.entrypoint";
 import { purgeUserSql } from "../src/infrastructure/persistence/purge-user.sql";
-import { resetDatabase } from "./helpers";
+import {
+  countUserChildRows,
+  EVERY_CHILD_ROW_PRESENT,
+  resetDatabase,
+  seedUserChildRows,
+} from "./helpers";
 import { appEnv, db, seedClient, seedLoggedInUser, type SeededUser } from "./helpers.oauth";
 
 /**
@@ -483,6 +488,13 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
   it("active な利用者は削除できない。先に凍結が要る（conflict）", async () => {
     const admin: SeededUser = await seedLoggedInUser();
     const target: SeededUser = await seedLoggedInUser(); // 既定は active。
+    // `seedLoggedInUser` が張るセッションとは別に、残りの子テーブルにも
+    // 1 行ずつ入れる。tag が衝突しないよう、セッション id から作る。
+    const { ownedClientId } = await seedUserChildRows(
+      target.userId,
+      target.email,
+      `rpc_active_${target.sessionId}`,
+    );
 
     const result = await rpc.deleteUser({ actorUserId: admin.userId, userId: target.userId });
 
@@ -490,6 +502,19 @@ describe("deleteUser（物理削除、運用者判断 2026-11-08）", () => {
     // 行は消えずに残る——子テーブルも含めて何も変わっていないこと。
     const row = await db().select().from(users).where(eq(users.id, target.userId)).get();
     expect(row).toBeDefined();
+    // **本体だけでなく子テーブルも数える。** 「`users` は残るがセッション・
+    // Passkey・トークンは消える」中途半端な破壊は、`users` を見るだけでは
+    // 見逃す。セッションは `seedLoggedInUser` の分と合わせて 2 行。
+    expect(await countUserChildRows(target.userId)).toEqual({
+      ...EVERY_CHILD_ROW_PRESENT,
+      sessions: 2,
+    });
+    const clientRow = await db()
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, ownedClientId))
+      .get();
+    expect(clientRow?.ownerUserId).toBe(target.userId);
 
     // **失敗も記録する**（`disable`/`enable` と同じ形、3b の指摘）。
     const rows = await db()

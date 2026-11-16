@@ -1,4 +1,17 @@
 import { env } from "cloudflare:test";
+import {
+  createIdentityDatabase,
+  emailChallenges,
+  oauthAuthorizationCodes,
+  oauthClients,
+  oauthGrants,
+  oauthTokens,
+  passkeys,
+  sessions,
+  userEmails,
+  webauthnChallenges,
+} from "@u18/db";
+import { eq } from "drizzle-orm";
 import { expect } from "vitest";
 
 /**
@@ -116,3 +129,193 @@ export async function startOfRateLimitWindow(
   if (remaining >= marginMs) return;
   await new Promise((resolve) => setTimeout(resolve, remaining + 50));
 }
+
+/**
+ * `deletePermanently` が手で消す 8 つの子テーブルに 1 行ずつ、加えて
+ * `owner_user_id` で持ち主を指す `oauth_clients` を 1 行入れる。
+ *
+ * **対象のテーブルが増減したら、ここと `countUserChildRows` も合わせて
+ * 直すこと。** 「子テーブルが残る/消える」を確かめるテストはどれも
+ * この 2 つを通すので、一覧が 1 箇所にまとまっている。
+ *
+ * `tag` は id や一意な列の衝突を避けるための接尾辞。
+ */
+export async function seedUserChildRows(
+  userId: string,
+  email: string,
+  tag: string,
+): Promise<{ readonly ownedClientId: string }> {
+  const db = createIdentityDatabase(env.IDENTITY_DB);
+  const inAnHour = () => new Date(Date.now() + 60 * 60 * 1000);
+  const ownedClientId = `cli_owned_${tag}`;
+
+  await db
+    .insert(oauthClients)
+    .values({
+      id: ownedClientId,
+      clientId: `owned-client-${tag}`,
+      name: `持ち主が ${tag} のクライアント`,
+      clientType: "public",
+      allowedScopes: "openid",
+      isFirstParty: false,
+      ownerUserId: userId,
+    })
+    .run();
+  await db
+    .insert(sessions)
+    .values({
+      id: `ses_${tag}`,
+      userId,
+      tokenHash: `hash-session-${tag}`,
+      expiresAt: inAnHour(),
+      authMethod: "email_otp",
+      lastSeenAt: new Date(),
+    })
+    .run();
+  await db
+    .insert(passkeys)
+    .values({
+      id: `pk_${tag}`,
+      userId,
+      credentialId: `cred-${tag}`,
+      publicKey: `pub-${tag}`,
+    })
+    .run();
+  await db
+    .insert(webauthnChallenges)
+    .values({
+      id: `wch_${tag}`,
+      userId,
+      challenge: `challenge-${tag}`,
+      purpose: "registration",
+      expiresAt: inAnHour(),
+    })
+    .run();
+  await db
+    .insert(emailChallenges)
+    .values({
+      id: `ech_${tag}`,
+      userId,
+      email,
+      codeHash: `hash-otp-${tag}`,
+      purpose: "login",
+      expiresAt: inAnHour(),
+    })
+    .run();
+  await db
+    .insert(oauthGrants)
+    .values({
+      id: `grt_${tag}`,
+      userId,
+      clientId: ownedClientId,
+      grantedScopes: "openid",
+      grantedAt: new Date(),
+    })
+    .run();
+  await db
+    .insert(oauthAuthorizationCodes)
+    .values({
+      id: `code_${tag}`,
+      codeHash: `hash-code-${tag}`,
+      clientId: ownedClientId,
+      userId,
+      redirectUri: "https://app.example/cb",
+      scope: "openid",
+      codeChallenge: "challenge",
+      codeChallengeMethod: "S256",
+      authTime: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 1000),
+    })
+    .run();
+  await db
+    .insert(oauthTokens)
+    .values({
+      id: `tok_${tag}`,
+      tokenHash: `hash-token-${tag}`,
+      grantId: `grt_${tag}`,
+      clientId: ownedClientId,
+      userId,
+      scope: "openid",
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    })
+    .run();
+  await db
+    .insert(userEmails)
+    .values({
+      id: `uem_${tag}`,
+      userId,
+      email,
+      verifiedAt: new Date(),
+      isPrimary: true,
+    })
+    .run();
+
+  return { ownedClientId };
+}
+
+/**
+ * `userId` を指す子テーブルの行数と、持ち主として `userId` を指す
+ * `oauth_clients` の行数を、テーブルごとに数える。
+ *
+ * まとめて 1 つの数にしない——どのテーブルが残った/消えたのかが、
+ * 落ちたときの差分にそのまま出るようにする。
+ */
+export async function countUserChildRows(userId: string): Promise<Record<string, number>> {
+  const db = createIdentityDatabase(env.IDENTITY_DB);
+  const count = async (rows: Promise<unknown[]>): Promise<number> => (await rows).length;
+  return {
+    sessions: await count(db.select().from(sessions).where(eq(sessions.userId, userId)).all()),
+    passkeys: await count(db.select().from(passkeys).where(eq(passkeys.userId, userId)).all()),
+    webauthn_challenges: await count(
+      db.select().from(webauthnChallenges).where(eq(webauthnChallenges.userId, userId)).all(),
+    ),
+    email_challenges: await count(
+      db.select().from(emailChallenges).where(eq(emailChallenges.userId, userId)).all(),
+    ),
+    oauth_tokens: await count(
+      db.select().from(oauthTokens).where(eq(oauthTokens.userId, userId)).all(),
+    ),
+    oauth_grants: await count(
+      db.select().from(oauthGrants).where(eq(oauthGrants.userId, userId)).all(),
+    ),
+    oauth_authorization_codes: await count(
+      db
+        .select()
+        .from(oauthAuthorizationCodes)
+        .where(eq(oauthAuthorizationCodes.userId, userId))
+        .all(),
+    ),
+    user_emails: await count(
+      db.select().from(userEmails).where(eq(userEmails.userId, userId)).all(),
+    ),
+    oauth_clients_owned: await count(
+      db.select().from(oauthClients).where(eq(oauthClients.ownerUserId, userId)).all(),
+    ),
+  };
+}
+
+/** `seedUserChildRows` が入れた行が、1 つも欠けずに残っているときの数え方。 */
+export const EVERY_CHILD_ROW_PRESENT = {
+  sessions: 1,
+  passkeys: 1,
+  webauthn_challenges: 1,
+  email_challenges: 1,
+  oauth_tokens: 1,
+  oauth_grants: 1,
+  oauth_authorization_codes: 1,
+  user_emails: 1,
+  oauth_clients_owned: 1,
+} as const;
+
+/** 子テーブルが全部消え、`oauth_clients` の持ち主も外れたときの数え方。 */
+export const NO_CHILD_ROW_LEFT = {
+  sessions: 0,
+  passkeys: 0,
+  webauthn_challenges: 0,
+  email_challenges: 0,
+  oauth_tokens: 0,
+  oauth_grants: 0,
+  oauth_authorization_codes: 0,
+  user_emails: 0,
+  oauth_clients_owned: 0,
+} as const;
