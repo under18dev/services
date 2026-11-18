@@ -37,16 +37,49 @@ export class Sha256TokenHasher implements TokenHasher {
 }
 
 /**
+ * 直近に import した HMAC 鍵。
+ *
+ * コンテナはリクエストごとに作り直す（composition/container.ts）ので、
+ * インスタンスに持たせても毎リクエスト `importKey` が走る。isolate 内で
+ * 使う pepper は実質 1 つなので、**最後の 1 組だけ**をモジュールスコープに
+ * 置く。pepper の値そのものを比較キーにしているため、別の pepper の鍵を
+ * 取り違えることはない（テストのように複数の pepper が混ざっても、
+ * 入れ替わるたびに import し直すだけ）。
+ */
+let cachedHmacKey: { readonly pepper: string; readonly key: Promise<CryptoKey> } | null = null;
+
+function hmacKeyFor(pepper: string): Promise<CryptoKey> {
+  if (cachedHmacKey?.pepper === pepper) return cachedHmacKey.key;
+  const key = crypto.subtle.importKey(
+    "raw",
+    encoder.encode(pepper),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  cachedHmacKey = { pepper, key };
+  return key;
+}
+
+/**
  * IP アドレスのハッシュ化。
  *
  * IPv4 の空間は総当たり可能なので、pepper なしの SHA-256 では匿名化にならない。
- * 環境ごとに異なる pepper を混ぜる（仕様書 9 Privacy）。
+ * 環境ごとに異なる pepper を鍵にする（仕様書 9 Privacy）。
+ *
+ * 構成は `HMAC-SHA256(key = pepper, message = ip)` の 16 進小文字 64 文字。
+ * 以前は `SHA-256("${pepper}:${ip}")` だった。鍵付きハッシュとして素直な
+ * 構成に揃えるために切り替えた。出力の形は同じなので、`ip_hash` の列や
+ * レート制限の鍵の形は変わらない。**値は変わる** —— 切り替えより前の
+ * `ip_hash` とは照合できない（ランブック 2.4.2）。
  */
 export class PepperedIpHasher implements IpHasher {
   constructor(private readonly pepper: string) {}
 
-  hash(ip: string): Promise<string> {
-    return sha256Hex(`${this.pepper}:${ip}`);
+  async hash(ip: string): Promise<string> {
+    const key = await hmacKeyFor(this.pepper);
+    const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(ip));
+    return toHex(mac);
   }
 }
 
