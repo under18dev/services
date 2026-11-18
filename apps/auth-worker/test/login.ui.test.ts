@@ -91,6 +91,22 @@ async function openLoginPage(cookie = ""): Promise<Session> {
 }
 
 /**
+ * ログイン済みの Cookie でログアウト画面を開き、CSRF トークンを得る。
+ *
+ * ログイン済みで `/login` を開くとアカウント画面へ送られるので、
+ * ログアウトの form はこちらから取る。
+ */
+async function openLogoutPage(cookie: string): Promise<Session> {
+  const response = await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } });
+  const html = await response.text();
+  return {
+    cookie: cookieHeader([cookie, ...cookiePairs(response)]),
+    csrf: csrfTokenOf(html),
+    html,
+  };
+}
+
+/**
  * 要求ごとに違う IP を名乗る。
  *
  * **このファイルは `/login/verify` を何度も叩く。** IP を共有していると
@@ -491,22 +507,51 @@ describe("ログイン済みの状態で GET /login", () => {
     await seedRegisteredUser();
   });
 
-  it("ログイン済みであることを示し、ログイン form を出さない", async () => {
+  it("戻り先が無ければアカウント画面へ送る", async () => {
+    // ログイン済みの人に入力欄も「ログイン済みです」も見せても、次に
+    // やることが無い。ログイン直後の着地点（ui/landing.ts）と同じ場所へ送る。
     const cookie = await login();
-    const response = await SELF.fetch(`${BASE}/login`, { headers: { Cookie: cookie } });
+    const response = await SELF.fetch(`${BASE}/login`, {
+      headers: { Cookie: cookie },
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/account");
+  });
+
+  it("戻り先がアカウント画面ならそこへ送る", async () => {
+    const cookie = await login();
+    const response = await SELF.fetch(
+      `${BASE}/login?return_to=${encodeURIComponent("/account/sessions")}`,
+      { headers: { Cookie: cookie }, redirect: "manual" },
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/account/sessions");
+  });
+
+  it("認可の途中なら飛ばさず、どのアカウントで進むかを見せる", async () => {
+    // **ここだけは自動で進めない。** 黙って同意画面へ飛ばすと、
+    // どのアカウントで認可しようとしているかが利用者に見えない。
+    const cookie = await login();
+    const returnTo = "/oauth/authorize?client_id=x";
+    const response = await SELF.fetch(`${BASE}/login?return_to=${encodeURIComponent(returnTo)}`, {
+      headers: { Cookie: cookie },
+      redirect: "manual",
+    });
 
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("ログイン済み");
     expect(html).toContain(user.displayName);
+    expect(html).toContain('action="/login/logout"');
     expect(html).not.toContain('action="/login/start"');
-    // ログイン済み画面に JS は要らない。読み込ませない。
-    expect(html).not.toContain(LOGIN_ISLAND_PATH);
   });
 
   it("ログアウトすると Cookie が落ち、ログイン画面へ戻る", async () => {
     const cookie = await login();
-    const page = await openLoginPage(cookie);
+    const page = await openLogoutPage(cookie);
 
     const response = await submit(
       "/login/logout",
@@ -526,6 +571,66 @@ describe("ログイン済みの状態で GET /login", () => {
       headers: { Cookie: cookieHeader(cookiePairs(response)) },
     });
     expect(me.status).toBe(401);
+  });
+});
+
+/**
+ * ログアウト画面（`GET /logout`）。
+ *
+ * ログイン済みで `/login` を開くとアカウント画面へ送るようになったので、
+ * 「この端末をログアウト」「すべての端末からログアウト」のボタンは
+ * ここに置く。アカウント画面のサイドバーの「ログアウト」もここへ来る。
+ *
+ * **GET では何も切らない。** 押すのは CSRF トークン付きの form で、
+ * リンクを踏ませるだけでログアウトさせられる形にしない。
+ */
+describe("GET /logout", () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedRegisteredUser();
+  });
+
+  it("ログイン済みならログアウトのボタンを出す", async () => {
+    const cookie = await login();
+    const response = await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } });
+
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain(user.displayName);
+    expect(html).toContain('action="/login/logout"');
+    expect(html).toContain('name="all"');
+    expect(html).not.toContain('action="/login/start"');
+    // この画面に JS は要らない。読み込ませない。
+    expect(html).not.toContain(LOGIN_ISLAND_PATH);
+  });
+
+  it("ログアウトの画面として読める", async () => {
+    // サイドバーの「ログアウト」から来た人に「ログイン済みです」
+    // 「別のアカウントでログイン」と見せると、何の画面か分からない。
+    const cookie = await login();
+    const html = await (await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } })).text();
+
+    expect(html).toContain("<title>ログアウト");
+    expect(html).toContain("この端末からログアウト");
+    expect(html).not.toContain("ログイン済みです");
+    expect(html).not.toContain("別のアカウントでログイン");
+    // やめて戻る道を出す。押さずに帰れないと、ログアウトするしかなくなる。
+    expect(html).toContain('href="/account"');
+  });
+
+  it("開いただけではセッションを切らない", async () => {
+    const cookie = await login();
+    await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } });
+
+    const me = await SELF.fetch(`${BASE}/api/me`, { headers: { Cookie: cookie } });
+    expect(me.status).toBe(200);
+  });
+
+  it("ログインしていなければログイン画面へ送る", async () => {
+    const response = await SELF.fetch(`${BASE}/logout`, { redirect: "manual" });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/login");
   });
 });
 
@@ -570,7 +675,7 @@ describe("すべての端末からログアウトする（JS 無し）", () => {
     // 「元から切れていた」を見ているだけになる。
     expect(await stillValid(other), "もう 1 台のセッションが作れていない").toBe(true);
 
-    const page = await openLoginPage(here);
+    const page = await openLogoutPage(here);
     const response = await submit(
       "/login/logout",
       { csrf_token: page.csrf, all: "true" },
@@ -588,7 +693,7 @@ describe("すべての端末からログアウトする（JS 無し）", () => {
     const other = await login();
     const here = await login();
 
-    const page = await openLoginPage(here);
+    const page = await openLogoutPage(here);
     await submit("/login/logout", { csrf_token: page.csrf }, { cookie: page.cookie });
 
     expect(await stillValid(other)).toBe(true);
@@ -600,7 +705,7 @@ describe("すべての端末からログアウトする（JS 無し）", () => {
     const other = await login();
     const here = await login();
 
-    const page = await openLoginPage(here);
+    const page = await openLogoutPage(here);
     await submit("/login/logout", { csrf_token: page.csrf, all: "1" }, { cookie: page.cookie });
 
     expect(await stillValid(other)).toBe(true);
@@ -612,17 +717,17 @@ describe("すべての端末からログアウトする（JS 無し）", () => {
     const other = await login();
     const here = await login();
 
-    const page = await openLoginPage(here);
+    const page = await openLogoutPage(here);
     const response = await submit("/login/logout", { all: "true" }, { cookie: page.cookie });
 
     expect(response.status).toBe(403);
     expect(await stillValid(other), "拒否したのに切れている").toBe(true);
   });
 
-  it("ログイン済み画面にボタンがある", async () => {
+  it("ログアウト画面にボタンがある", async () => {
     // 経路が動いていても、押す手段が描かれていなければ届かない。
     const cookie = await login();
-    const html = await (await SELF.fetch(`${BASE}/login`, { headers: { Cookie: cookie } })).text();
+    const html = await (await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } })).text();
 
     expect(html).toContain('name="all"');
     expect(html).toContain("すべての端末からログアウト");
@@ -634,7 +739,7 @@ describe("すべての端末からログアウトする（JS 無し）", () => {
     // **他の端末の話なので、この画面には何も変化が現れない。** 知らせが
     // 無いと、JS 無しの利用者は効いたか分からず何度も押す。
     const cookie = await login();
-    const page = await openLoginPage(cookie);
+    const page = await openLogoutPage(cookie);
     const response = await submit(
       "/login/logout",
       { csrf_token: page.csrf, all: "true" },

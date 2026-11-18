@@ -472,15 +472,16 @@ nfc-worker の侵害が `sessions` の露出になるため
 フロントエンドに出すと Cookie 境界と CSRF 境界が増えるため。
 実体は `apps/auth-worker/src/presentation/http/ui/`。
 
-| パス                             | 内容                                                            |
-| -------------------------------- | --------------------------------------------------------------- |
-| `GET /login`                     | ログイン画面。ログイン済みならその旨とログアウト導線を出す      |
-| `POST /login/start`              | メール OTP の送信（form POST）                                  |
-| `POST /login/verify`             | OTP の検証とセッション発行（form POST）                         |
-| `POST /login/logout`             | UI 用のログアウト。303 でログイン画面へ戻す                     |
-| `GET /ui/u18.<hash>.css`         | スタイルシート。**URL に内容ハッシュが入る**（#211）            |
-| `GET /ui/login-island.<hash>.js` | Passkey のクライアントアイランド。同上                          |
-| `POST /oauth/consent`            | 同意画面の送信先（form POST）。画面は `/oauth/authorize` が返す |
+| パス                             | 内容                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /login`                     | ログイン画面。ログイン済みならアカウント画面へ送る（認可の途中だけはその旨と切り替え導線を出す） |
+| `GET /logout`                    | ログアウト画面。この端末／すべての端末からのログアウトの form を出す（GET では切らない）         |
+| `POST /login/start`              | メール OTP の送信（form POST）                                                                   |
+| `POST /login/verify`             | OTP の検証とセッション発行（form POST）                                                          |
+| `POST /login/logout`             | UI 用のログアウト。303 でログイン画面へ戻す                                                      |
+| `GET /ui/u18.<hash>.css`         | スタイルシート。**URL に内容ハッシュが入る**（#211）                                             |
+| `GET /ui/login-island.<hash>.js` | Passkey のクライアントアイランド。同上                                                           |
+| `POST /oauth/consent`            | 同意画面の送信先（form POST）。画面は `/oauth/authorize` が返す                                  |
 
 同意画面（`ui/consent-page.tsx`）はログイン画面と `ui/layout.tsx`・
 スタイルシート・CSP（`ui/page-headers.ts`）・CSRF（`ui/csrf.ts`）を共有する。

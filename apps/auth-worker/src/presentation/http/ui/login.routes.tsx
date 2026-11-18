@@ -166,30 +166,49 @@ async function enforceFormRateLimit(
 const LOGGED_OUT_PARAM = "logout";
 const LOGGED_OUT_ALL = "all";
 
+/**
+ * セッション Cookie が指す、いま使える利用者。無ければ null。
+ *
+ * Cookie があっても、期限切れ・失効済み・行が消えた利用者なら null に
+ * 落とす（ログインしていないのと同じに扱う）。
+ */
+async function findSignedInUser(c: Context<AppBindings>) {
+  const token = readSessionCookie(c);
+  if (token === null) return null;
+  const container = c.get("container");
+  const result = await container.useCases.getSession.execute({ sessionToken: token });
+  if (!result.ok || result.value === null) return null;
+  return container.repositories.users.findById(result.value.userId);
+}
+
+/** 認可の途中（戻り先が `/oauth/authorize`）かどうか。 */
+function isAuthorizeReturn(returnTo: string | null): boolean {
+  return returnTo !== null && returnTo.startsWith("/oauth/authorize");
+}
+
 uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
   const returnTo = readReturnTo(c);
-  const token = readSessionCookie(c);
-  if (token !== null) {
-    const container = c.get("container");
-    const result = await container.useCases.getSession.execute({ sessionToken: token });
-    if (result.ok && result.value !== null) {
-      const user = await container.repositories.users.findById(result.value.userId);
-      if (user !== null) {
-        const props = user.snapshot();
-        // ログイン済みでも自動で戻り先へ飛ばさない。黙って飛ばすと、
-        // 「どのアカウントで認可しようとしているか」が利用者に見えないまま
-        // 同意画面へ進む。切り替える手段を出したうえで本人に選ばせる。
-        return renderLogin(
-          c,
-          {
-            kind: "signed_in",
-            displayName: props.displayName,
-            username: props.username,
-          },
-          returnTo,
-        );
-      }
-    }
+  const user = await findSignedInUser(c);
+  if (user !== null) {
+    // **認可の途中だけは自動で戻り先へ飛ばさない。** 黙って飛ばすと、
+    // 「どのアカウントで認可しようとしているか」が利用者に見えないまま
+    // 同意画面へ進む。切り替える手段を出したうえで本人に選ばせる。
+    //
+    // それ以外（戻り先が無い・アカウント画面）は、ログイン直後と同じ
+    // 場所へ送る。ログイン済みの人にこの画面を見せても次にやることが
+    // 無い（ui/landing.ts）。ログアウトのボタンは `/logout` にある。
+    if (!isAuthorizeReturn(returnTo)) return c.redirect(returnTo ?? DEFAULT_LANDING_PATH);
+    const props = user.snapshot();
+    return renderLogin(
+      c,
+      {
+        kind: "signed_in",
+        purpose: "switch",
+        displayName: props.displayName,
+        username: props.username,
+      },
+      returnTo,
+    );
   }
 
   // 全端末ログアウトの直後だけ、終わったことを伝える。
@@ -469,7 +488,35 @@ uiRoutes.post("/signup/verify", pageSecurityHeaders, async (c) => {
 });
 
 /**
- * ログイン済み画面からのログアウト。
+ * ログアウト画面。
+ *
+ * ログイン済みで `/login` を開くとアカウント画面へ送るようになったので、
+ * 「この端末をログアウト」「すべての端末からログアウト」のボタンはここに
+ * 置く。アカウント画面のサイドバーの「ログアウト」もここへ来る。
+ *
+ * **GET では何も切らない。** dashboard-worker は auth-worker の CSRF
+ * トークンを持てないので、サイドバーからは直接 POST できない。ここで
+ * CSRF トークン付きの form を出し、押すのは `POST /login/logout` にする。
+ * リンクを踏ませるだけでログアウトさせられる形にしないため。
+ */
+uiRoutes.get("/logout", pageSecurityHeaders, async (c) => {
+  const user = await findSignedInUser(c);
+  if (user === null) return c.redirect("/login");
+  const props = user.snapshot();
+  return renderLogin(
+    c,
+    {
+      kind: "signed_in",
+      purpose: "logout",
+      displayName: props.displayName,
+      username: props.username,
+    },
+    null,
+  );
+});
+
+/**
+ * ログアウト画面・ログイン済み画面からのログアウト。
  *
  * `/api/auth/logout` は 204 を返す JSON API なので、form 送信で使うと
  * ブラウザがその場に留まり画面が更新されない。UI 用にリダイレクトする

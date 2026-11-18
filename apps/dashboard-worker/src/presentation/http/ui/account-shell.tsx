@@ -1,8 +1,8 @@
-import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, ACCOUNT_LOGOUT_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
 import type { AccountNavCurrent } from "@u18/contracts";
 import { KiwaShell } from "@u18/web-ui/kiwa";
 import type { Child, FC } from "hono/jsx";
-import { KIWA_STYLESHEET_PATH, LOGIN_PATH } from "./asset-paths";
+import { KIWA_STYLESHEET_PATH } from "./asset-paths";
 
 /**
  * この Worker の画面の外枠（#332）。
@@ -17,8 +17,8 @@ import { KIWA_STYLESHEET_PATH, LOGIN_PATH } from "./asset-paths";
  *    同じものを渡す**ので、片方にだけ項目を足した状態が作れない。
  *    **出し分けは無い**（#433）—— 並びは全員に同じで、
  *    運営向けの項目は `admin.under18.dev` へ移した
- *  - `loginHref` —— **auth-worker が配信している。** 接頭辞を付けると
- *    この Worker へ戻ってきて 404 になる
+ *  - `logoutHref` —— **auth-worker が配信している。** 接頭辞を付けると
+ *    この Worker へ戻ってきて 404 になる。nfc-worker も同じものを渡す
  *
  * **外枠そのものを持たないこと。** 2 つの Worker が同じサイドバーを
  * 出す以上、形はあちら 1 つにある。
@@ -48,7 +48,7 @@ export const AccountShell: FC<AccountShellProps> = ({
     nav={ACCOUNT_NAV_GROUPS}
     brandHref={ACCOUNT_HOME_PATH}
     stylesheet={KIWA_STYLESHEET_PATH}
-    loginHref={LOGIN_PATH}
+    logoutHref={ACCOUNT_LOGOUT_PATH}
     {...(current === undefined ? {} : { current })}
     heading={heading}
     {...(lead === undefined ? {} : { lead })}
