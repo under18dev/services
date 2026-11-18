@@ -185,6 +185,23 @@ if (adminForeign.length > 0) {
   );
 }
 
+/**
+ * そのホストの route だけに絞る。
+ *
+ * **サイドバーは開いているオリジンが決まっている**（アカウントは
+ * auth.under18.dev、運営は admin.under18.dev）。`resolveOwner` はホストを
+ * 見ずに最長一致を取るので、絞らずに渡すと `/logout` のように両方の
+ * Worker が持つパスで、**文字列が長いだけの別ホストの Worker が勝つ**
+ * （`admin.under18.dev/*` は `auth.under18.dev/*` より 1 文字長い）。
+ * その Worker が同じパスを登録していれば、本来の持ち主に登録が無くても
+ * 緑になる。
+ *
+ * @param {string} host
+ */
+function routesOn(host) {
+  return routes.filter((r) => r.pattern.startsWith(`${host}/`));
+}
+
 let failed = false;
 
 for (const { path: p, reason } of unreachablePaths(paths, routes, inventoryOf)) {
@@ -196,7 +213,11 @@ for (const { path: p, reason } of unreachablePaths(paths, routes, inventoryOf)) 
   );
 }
 
-for (const { path: p, reason } of unreachablePaths(navHrefs, routes, inventoryOf)) {
+for (const { path: p, reason } of unreachablePaths(
+  navHrefs,
+  routesOn("auth.under18.dev"),
+  inventoryOf,
+)) {
   failed = true;
   console.error(
     `::error::the account sidebar (packages/contracts/src/account-nav.ts) lists "${p}", ` +
@@ -206,7 +227,11 @@ for (const { path: p, reason } of unreachablePaths(navHrefs, routes, inventoryOf
   );
 }
 
-for (const { path: p, reason } of unreachablePaths(adminNavHrefs, routes, inventoryOf)) {
+for (const { path: p, reason } of unreachablePaths(
+  adminNavHrefs,
+  routesOn("admin.under18.dev"),
+  inventoryOf,
+)) {
   failed = true;
   console.error(
     `::error::the admin sidebar (apps/admin-worker/src/presentation/http/ui/nav.ts) lists ` +
