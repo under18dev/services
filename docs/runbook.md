@@ -117,12 +117,12 @@ npx wrangler tail u18-nfc-production  --format json --search "nfc.retention.swee
 
 雛形は `apps/auth-worker/.dev.vars.example` にある。`.dev.vars` は `.gitignore` 済み。
 
-| Secret              | Worker | 用途                                                    | 漏洩時の影響範囲（blast radius）                                                                                                                                                                                                                           |
-| ------------------- | ------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SIGNING_KEY_JWK`   | auth   | ID Token 署名用 ES256 秘密鍵（JWK JSON）                | **最大**。任意の `sub` / `aud` を名乗る ID Token を偽造でき、u18 の全 RP に任意ユーザーとしてログインできる。RP 側は署名が通るので検出できない。§5.1 の緊急ローテーション対象                                                                              |
-| `SIGNING_KEY_KID`   | auth   | 上記鍵の kid                                            | 単体では機密でない（JWKS で公開される値）。ただし `SIGNING_KEY_JWK` と不一致になると全 ID Token が RP 側で検証不能になる                                                                                                                                   |
-| `IP_HASH_PEPPER`    | auth   | `sessions.ip_hash` / `audit_logs.ip_hash` を作る pepper | **中**。DB ダンプと併せて漏れると、IPv4 空間（約 43 億）は総当たり可能なので全ユーザーの接続元 IP が復元される。未成年ユーザーの位置情報に相当する（仕様書 9 Privacy）                                                                                     |
-| ~~`EMAIL_API_KEY`~~ | auth   | （廃止）                                                | **不要になった。** #35 でメール送信は Cloudflare Email Sending の `send_email` バインディング経由と決まり、API キーを持たない設計になった（仕様書 §14.1 決定 3）。この Secret は設定しないこと —— 存在するだけで「どこかが読んでいるはず」という誤解を生む |
+| Secret              | Worker | 用途                                                               | 漏洩時の影響範囲（blast radius）                                                                                                                                                                                                                           |
+| ------------------- | ------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SIGNING_KEY_JWK`   | auth   | ID Token 署名用 ES256 秘密鍵（JWK JSON）                           | **最大**。任意の `sub` / `aud` を名乗る ID Token を偽造でき、u18 の全 RP に任意ユーザーとしてログインできる。RP 側は署名が通るので検出できない。§5.1 の緊急ローテーション対象                                                                              |
+| `SIGNING_KEY_KID`   | auth   | 上記鍵の kid                                                       | 単体では機密でない（JWKS で公開される値）。ただし `SIGNING_KEY_JWK` と不一致になると全 ID Token が RP 側で検証不能になる                                                                                                                                   |
+| `IP_HASH_PEPPER`    | auth   | `sessions.ip_hash` / `audit_logs.ip_hash` を作る HMAC 鍵（pepper） | **中**。DB ダンプと併せて漏れると、IPv4 空間（約 43 億）は総当たり可能なので全ユーザーの接続元 IP が復元される。未成年ユーザーの位置情報に相当する（仕様書 9 Privacy）                                                                                     |
+| ~~`EMAIL_API_KEY`~~ | auth   | （廃止）                                                           | **不要になった。** #35 でメール送信は Cloudflare Email Sending の `send_email` バインディング経由と決まり、API キーを持たない設計になった（仕様書 §14.1 決定 3）。この Secret は設定しないこと —— 存在するだけで「どこかが読んでいるはず」という誤解を生む |
 
 ### 1.5 `ENVIRONMENT` が支配する分岐 — 本番デプロイ前に必ず読む
 
@@ -281,6 +281,20 @@ node scripts/signing-key.mjs verify --remote --secret-file ./new-secret.json
 
 環境ごとに別の値を使う（`apps/auth-worker/src/infrastructure/crypto/web-crypto.ts` の `PepperedIpHasher` のコメント参照）。
 
+**構成は `HMAC-SHA256(key = IP_HASH_PEPPER, message = ip)` を 16 進小文字 64 文字で出したものである。** 同じ値が `sessions.ip_hash`・`audit_logs.ip_hash`・レート制限の鍵（`<client_id>:<ipHash>` など）に使われる。HMAC 鍵は isolate ごとに 1 度だけ import して使い回す。値が空文字列だと HMAC 鍵として import できないため、未設定と同じく**ハッシュ化しようとした時点で**失敗する。
+
+> **2026-11-18 に構成を切り替えた。** それまでは `SHA-256("${pepper}:${ip}")` だった。鍵付きハッシュとして標準的な構成（HMAC）に揃えるための変更で、pepper の値も出力の形（16 進 64 文字）も変えていない。列の型やレート制限の鍵の形はそのまま使える。**境目は日付ではなく、この変更を各環境へデプロイした時刻である。** デプロイしたら時刻を記録しておくこと。
+>
+> **値は変わる。境目の前後で、同じ IP の `ip_hash` は一致しない。** 影響:
+>
+> - **`audit_logs.ip_hash`** —— 境目をまたいで「同じ接続元か」を `ip_hash` の一致で調べることはできない。旧値の行は書き換えず、そのまま保持期限（§7.0。通常 180 日、高リスクイベントは 2 年）で消えていく（R2 へ退避した行は旧値のまま残る）。それまでは旧値と新値が混在するので、調査で `ip_hash` を比べるときは**行の `created_at` が境目より前か後か**をまず確かめる。特定の IP が分かっていて旧値の行を探したいときは、pepper を使って手元で旧構成の値を出せばよい（`printf '%s' "$PEPPER:$IP" | openssl dgst -sha256`。新構成は `printf '%s' "$IP" | openssl dgst -sha256 -hmac "$PEPPER"`）
+> - **`sessions.ip_hash`** —— 既存セッションは旧値を持ったまま期限で消える。本人向けのセッション一覧は `ipHash` を返さない（RR-13）ので、利用者から見える変化は無い
+> - **レート制限** —— 鍵が変わるので、デプロイの瞬間に IP 単位のカウンタが一度だけ空に戻る。Workers Rate Limiting の窓はいずれも 60 秒（`wrangler.jsonc` の `ratelimits`）なので、緩むのは最大でも 1 窓ぶんである。IP の鍵でカウンタを D1 などに持ち越している箇所は無い
+>
+> **互換の経路は置いていない。** `ip_hash` を突き合わせるコードは無く（一致を見るのは運用者が調査で手で行うときだけ）、旧値は上記のとおり pepper があれば手元で再現できる。両方の構成で計算して保存するような経路を足すと、保持期限いっぱい（最長 2 年）その分岐を抱えることになり、得るものに見合わない。逆に旧値の行を新しい構成で書き直す移行も、生 IP を持っていないのでそもそもできない。
+
+> **残っていること**: pepper の世代管理（ローテーション）は入れていない。HMAC への切り替えはこの問題を解かない —— §7.3 / §8.5 項目 5。
+
 ```bash
 openssl rand -base64 32
 ```
@@ -298,7 +312,7 @@ npx wrangler secret put IP_HASH_PEPPER
 
 **未設定時の挙動**: `container.ts` は `ENVIRONMENT=development` のときだけ既知の固定値 `"dev-pepper"` へフォールバックし、それ以外では `IP_HASH_PEPPER is not set outside development` を投げてコンテナ生成を失敗させる（= 全リクエストが 500）。したがって本番で設定を忘れると、IP 匿名化が静かに壊れるのではなく、サービスが明確に落ちる。安全側の挙動だが、**初回デプロイ前に必ず設定しておくこと。** §1.5 のとおり `ENVIRONMENT` が `development` のままだとこのチェックも働かない。
 
-**pepper を変更すると、既存の `ip_hash` は新しい hash と照合できなくなる。** 現在の実装には pepper の世代管理がないため、ローテーションは「過去の ip_hash を事実上無効化する」操作になる。§7.3 の未決事項を参照。
+**pepper を変更すると、既存の `ip_hash` は新しい hash と照合できなくなる。** 構成を HMAC に切り替えたときと同じことが起きる（上記）。現在の実装には pepper の世代管理がないため、ローテーションは「過去の ip_hash を事実上無効化する」操作になる。§7.3 の未決事項を参照。
 
 #### 2.4.3 `EMAIL_API_KEY`（廃止）
 
@@ -2141,7 +2155,7 @@ union all select 'oauth_tokens',              count(*) from oauth_tokens        
 - `sessions.ip_hash` — セッション一覧 UI で「どこからログインしているか」を示すため
 - `audit_logs.ip_hash` — 不正アクセス調査のため
 
-生 IP は保存していない（仕様書 9 Privacy）。`PepperedIpHasher` が `IP_HASH_PEPPER` を混ぜて SHA-256 を取る。pepper がなければ IPv4 空間は総当たり可能なので、pepper の秘匿が匿名化の前提である。
+生 IP は保存していない（仕様書 9 Privacy）。`PepperedIpHasher` が `IP_HASH_PEPPER` を鍵にして HMAC-SHA256 を取る（2026-11-18 までは `SHA-256("${pepper}:${ip}")`。切り替えの前後で値が一致しない点は §2.4.2）。pepper がなければ IPv4 空間は総当たり可能なので、pepper の秘匿が匿名化の前提である。
 
 **未決**: `ip_hash` を何日保持するか。
 
@@ -2268,7 +2282,7 @@ union all select 'oauth_tokens',              count(*) from oauth_tokens        
 2. ~~**`audit_logs` およびセッション行の保持期間**~~ — 決定済み（§7.0、#43）。「高リスクイベントだけ 2 年残す」区分（#22）、削除前のアーカイブ（#43）、`oauth_tokens` の対象追加（#273）はいずれも実装済み。**期限列を持つテーブルはこれで全部が対象に入った**（`retention.test.ts` の「保持期限の網羅」がスキーマ側から数えて固定している）。
 3. **`ip_hash` の保持期間**（§7.3）。
 4. **削除済みメールアドレスの再利用可否**（§7.1 手順 7）。`lower()` 式の UNIQUE インデックスにより、現状では再登録できない。
-5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。
+5. **`IP_HASH_PEPPER` のローテーション方式**（§2.4.2 / §7.3）。未設定の検知は `container.ts` のハードフェイルで解決済みだが、pepper を世代管理する仕組みがないため、変更すると過去の `ip_hash` がすべて照合不能になる。構成は 2026-11-18 に HMAC-SHA256 へ切り替えた（§2.4.2）が、これは世代管理とは別の話で、ローテーションの方式はまだ決まっていない。
 6. ~~**`signing_key_metadata` と `SIGNING_KEY_JWK` の整合を検証する手段**~~ — 対処済み。`/health` の `checks.signingKey` が、現役の kid が Secret にあり JWKS にも出ているかを返す（§3.3.1 / §4.4）。デプロイ後のスモークテストもこの値を見る。**残るのは「投入前に止める」経路**で、そちらは CI へ `SIGNING_KEY_JWK` を複製する判断が要る（§4.4）。なお、かつてここに書いてあった「現役 kid と `SIGNING_KEY_KID` の一致を見る」案は採れない —— `SIGNING_KEY_KID` は #23 で単一 JWK 形式の後方互換にしか使われなくなっており、JWK Set 形式では**どの鍵で署名するかを決めるのは `signing_key_metadata` の `active_from` / `active_until`** である。
 7. ~~**`/health` を公開したままにするか**~~ — 決着（脅威モデル RR-18）。**公開は維持し、返す内容を削った。** 認証を要求すると「デプロイ直後に外から確認できる」という価値を失い、スモークテスト（§4.4）も作り直しになる。代わりに `environment` と `issuer` を外した —— `issuer` は Discovery が公開を必須にしているので重複、`environment` は外に見せる理由が無い。`--env production` の付け忘れの検知は Discovery の `issuer` へ移してある。
 8. ~~**`compatibility_date` を仕様書の 2026-10-24 へ揃える時期**~~ — 解決済み（#108）。`@cloudflare/vitest-plugin` への移行でテストと deploy の workerd が 1 本に揃い、据え置く理由が消えた。3 つの Worker とも `2026-10-24`。
