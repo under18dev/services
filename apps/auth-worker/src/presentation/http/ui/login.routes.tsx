@@ -201,7 +201,12 @@ uiRoutes.get("/login", pageSecurityHeaders, async (c) => {
     const props = user.snapshot();
     return renderLogin(
       c,
-      { kind: "signed_in", displayName: props.displayName, username: props.username },
+      {
+        kind: "signed_in",
+        purpose: "switch",
+        displayName: props.displayName,
+        username: props.username,
+      },
       returnTo,
     );
   }
@@ -500,7 +505,12 @@ uiRoutes.get("/logout", pageSecurityHeaders, async (c) => {
   const props = user.snapshot();
   return renderLogin(
     c,
-    { kind: "signed_in", displayName: props.displayName, username: props.username },
+    {
+      kind: "signed_in",
+      purpose: "logout",
+      displayName: props.displayName,
+      username: props.username,
+    },
     null,
   );
 });

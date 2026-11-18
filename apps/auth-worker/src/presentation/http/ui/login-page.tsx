@@ -59,9 +59,16 @@ export type LoginView =
     }
   /** 2 段目: 届いたコードの入力。 */
   | { readonly kind: "code"; readonly email: string; readonly error: string | null }
-  /** 既にログインしている場合。 */
+  /**
+   * 既にログインしている場合。
+   *
+   * `purpose` で見出しと文言だけが変わる。`switch` は認可の途中で
+   * `/login` を開いたとき（別のアカウントへ切り替える手段を見せる）、
+   * `logout` はログアウト画面（`GET /logout`）。form は同じものを使う。
+   */
   | {
       readonly kind: "signed_in";
+      readonly purpose: "switch" | "logout";
       readonly displayName: string;
       readonly username: string;
     };
@@ -283,7 +290,7 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
   returnTo,
 }) => (
   <>
-    <h2 class="text-xl">ログイン済みです</h2>
+    <h2 class="text-xl">{view.purpose === "logout" ? "ログアウト" : "ログイン済みです"}</h2>
     <p class="flex flex-col gap-0.5 rounded-lg border border-border bg-background-subtle px-3 py-2.5">
       <strong class="text-sm font-medium">{view.displayName}</strong>
       <span class="text-sm text-foreground-muted">@{view.username}</span>
@@ -294,9 +301,11 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
       「既にセッションがある」ことが利用者に見えなくなるので、明示して
       切り替え手段を出す（`login.routes.tsx` の `GET /login`）。
     */}
-    <p class={ITEM_META_CLASS}>
-      別のアカウントでログインする場合は、いったんログアウトしてください。
-    </p>
+    {view.purpose === "switch" && (
+      <p class={ITEM_META_CLASS}>
+        別のアカウントでログインする場合は、いったんログアウトしてください。
+      </p>
+    )}
     {/*
       2 つのボタンを**同じ form**に置く。別の form に分けると CSRF トークンと
       戻り先を 2 組持つことになり、片方だけ直される余地ができる。送る値が
@@ -306,7 +315,9 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
       <CsrfField token={csrfToken} />
       <ReturnToField returnTo={returnTo} />
       <button type="submit" class={getButtonClasses("secondary")}>
-        ログアウトして別のアカウントでログイン
+        {view.purpose === "logout"
+          ? "この端末からログアウト"
+          : "ログアウトして別のアカウントでログイン"}
       </button>
       {/*
         **全端末のログアウトを JS 無しで届かせるのはここだけである**（#208）。
@@ -333,12 +344,27 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
         この端末も含めて、いますぐ使えなくなります。
       </p>
     </form>
+    {/*
+      **やめて戻る道を出す。** サイドバーから来た人が押さずに帰れないと、
+      ログアウトするしかない画面になる。
+    */}
+    {view.purpose === "logout" && (
+      <p class={LINK_TEXT_CLASS}>
+        <a href={DEFAULT_LANDING_PATH}>アカウント画面へ戻る</a>
+      </p>
+    )}
   </>
 );
 
 export const LoginPage: FC<LoginPageProps> = (props) => (
   <KiwaCardShell
-    title={props.mode === "signup" ? "新規登録" : "ログイン"}
+    title={
+      props.view.kind === "signed_in" && props.view.purpose === "logout"
+        ? "ログアウト"
+        : props.mode === "signup"
+          ? "新規登録"
+          : "ログイン"
+    }
     // Passkey のアイランドだけが JS を必要とする。ログイン済み画面と
     // コード入力画面には読み込ませない（不要な攻撃面を増やさない）。
     stylesheet={KIWA_STYLESHEET_PATH}

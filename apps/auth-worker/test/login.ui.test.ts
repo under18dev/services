@@ -604,6 +604,20 @@ describe("GET /logout", () => {
     expect(html).not.toContain(LOGIN_ISLAND_PATH);
   });
 
+  it("ログアウトの画面として読める", async () => {
+    // サイドバーの「ログアウト」から来た人に「ログイン済みです」
+    // 「別のアカウントでログイン」と見せると、何の画面か分からない。
+    const cookie = await login();
+    const html = await (await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } })).text();
+
+    expect(html).toContain("<title>ログアウト");
+    expect(html).toContain("この端末からログアウト");
+    expect(html).not.toContain("ログイン済みです");
+    expect(html).not.toContain("別のアカウントでログイン");
+    // やめて戻る道を出す。押さずに帰れないと、ログアウトするしかなくなる。
+    expect(html).toContain('href="/account"');
+  });
+
   it("開いただけではセッションを切らない", async () => {
     const cookie = await login();
     await SELF.fetch(`${BASE}/logout`, { headers: { Cookie: cookie } });
