@@ -48,6 +48,8 @@ export const PUBLIC_ROUTES: readonly Route[] = [
   // 画面。未ログインで開ける。
   { method: "GET", path: "/login" },
   { method: "GET", path: "/signup" },
+  // ログアウト画面。未ログインなら /login へ送る。
+  { method: "GET", path: "/logout" },
 
   // 静的アセット。**URL に内容ハッシュが入る**（#211）ので、照合側で
   // `<hash>` に正規化している。

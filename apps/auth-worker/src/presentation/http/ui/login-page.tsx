@@ -289,10 +289,10 @@ const SignedIn: FC<LoginPageProps & { view: Extract<LoginView, { kind: "signed_i
       <span class="text-sm text-foreground-muted">@{view.username}</span>
     </p>
     {/*
-      ここで自動的にどこかへリダイレクトしない。戻り先を決めるのは
-      `/oauth/authorize` の同意画面（#15）の責務で、今はまだ戻り先が無い。
-      黙って飛ばすと「既にセッションがある」ことが利用者に見えなくなるので、
-      明示して切り替え手段を出す。
+      この画面が出るのは、ログアウト画面（`GET /logout`）と、認可の途中で
+      `/login` を開いたときだけ。後者で自動的に同意画面へ飛ばすと
+      「既にセッションがある」ことが利用者に見えなくなるので、明示して
+      切り替え手段を出す（`login.routes.tsx` の `GET /login`）。
     */}
     <p class={ITEM_META_CLASS}>
       別のアカウントでログインする場合は、いったんログアウトしてください。
