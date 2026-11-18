@@ -148,6 +148,22 @@ if (navHrefs === null) {
   );
 }
 
+/**
+ * サイドバーの「ログアウト」（`ACCOUNT_LOGOUT_PATH`）。
+ *
+ * **並びと同じ検査に通す。** 並びの外に置いた 1 行だが、全部の画面に
+ * 出るリンクであることは変わらない。答えるのは auth-worker。
+ */
+const logoutPath = readStringConstants(navText).ACCOUNT_LOGOUT_PATH;
+if (logoutPath === undefined) {
+  fail(
+    `ACCOUNT_LOGOUT_PATH could not be read out of ${path.relative(ROOT, ACCOUNT_NAV)}. ` +
+      `The check reads the TypeScript as text; keep it as ` +
+      `"export const ACCOUNT_LOGOUT_PATH = \"...\";" or update this check.`,
+  );
+}
+navHrefs.push(logoutPath);
+
 // **並びは全部が同一オリジンである。** カタログと違い外部リンクを
 // 置く場所ではないので、`/` 始まりでないものが現れたら読み違えている。
 const foreign = navHrefs.filter((href) => !href.startsWith("/"));

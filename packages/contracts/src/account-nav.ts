@@ -132,3 +132,19 @@ export const ACCOUNT_HOME_PATH = "/account";
  * 利用者がどこに居るのか画面から読めない。
  */
 export type AccountNavCurrent = AccountNavKey | "home";
+
+/**
+ * サイドバーの「ログアウト」の行き先。**auth-worker が配信している**
+ * （`GET /logout`）。
+ *
+ * 並び（`ACCOUNT_NAV_GROUPS`）には入れない。画面の切り替えではなく、
+ * 現在地として光ることも無いので、`AccountNavKey` を増やす理由が無い。
+ *
+ * **押しても切れない。** dashboard-worker / nfc-worker は auth-worker の
+ * CSRF トークンを持てないので、ここはログアウトの画面へ送るだけで、
+ * 実際に切るのはその画面の form（`POST /login/logout`）である。
+ *
+ * 行き先が本番で auth-worker に届くかは
+ * `scripts/check-app-catalog-routes.mjs` が並びと一緒に見ている。
+ */
+export const ACCOUNT_LOGOUT_PATH = "/logout";

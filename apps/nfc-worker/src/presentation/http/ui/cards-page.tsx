@@ -1,4 +1,4 @@
-import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, ACCOUNT_LOGOUT_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
 import {
   Badge,
   Card,
@@ -302,6 +302,7 @@ export const CardsPage: FC<CardsPageProps> = ({ cards }) => (
     title="NFC カード"
     nav={ACCOUNT_NAV_GROUPS}
     brandHref={ACCOUNT_HOME_PATH}
+    logoutHref={ACCOUNT_LOGOUT_PATH}
     // **Worker ごとに違う。** この Worker が自分で配信している CSS
     // （借りない理由は `asset-paths.ts` の #211 の節）。
     stylesheet={KIWA_STYLESHEET_PATH}

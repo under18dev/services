@@ -1,4 +1,4 @@
-import { DEV_SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
+import { ACCOUNT_LOGOUT_PATH, DEV_SESSION_COOKIE_NAME, rpcErr, rpcOk } from "@u18/contracts";
 import { scopeLabel } from "@u18/web-ui";
 import type { GrantListItem, PasskeySummary, SessionListItem, UserProfile } from "@u18/contracts";
 import { Hono } from "hono";
@@ -86,13 +86,15 @@ describe("画面が HTML を返す", () => {
    * ここへ投げても 404 が返る。**それが正しい** —— 利用者から見れば
    * 同じオリジンの 1 つの画面だが、答える Worker は別である。
    *
-   * **この 1 行は、ここでは確かめられない。** 本番 route で勝つ Worker を
+   * ログアウト（`/logout`）も同じ。答えるのは auth-worker である。
+   *
+   * **この 2 行は、ここでは確かめられない。** 本番 route で勝つ Worker を
    * 決め、その Worker の `route-inventory.ts` に登録があるかまで見るのは
    * `scripts/check-app-catalog-routes.mjs` の仕事である（#327 / #338）。
    * **ここで `toBe(404)` を見るだけにすると、nfc が route を動かしても
    * 緑のまま**になるので、何を誰が見ているかを書いておく。
    */
-  const FOREIGN_NAV_HREFS: readonly string[] = [NFC_CARDS_PATH];
+  const FOREIGN_NAV_HREFS: readonly string[] = [NFC_CARDS_PATH, ACCOUNT_LOGOUT_PATH];
 
   it("サイドバーの行き先が、自分の画面と他 Worker の分に分かれる", async () => {
     // サイドバーに書いたパスと、実際に登録したルートがずれると 404 を踏む。
@@ -116,6 +118,18 @@ describe("画面が HTML を返す", () => {
       const expected = FOREIGN_NAV_HREFS.includes(href) ? 404 : 200;
       expect(response.status, `ナビの ${href}`).toBe(expected);
     }
+  });
+
+  it("サイドバーにログアウトがある", async () => {
+    // **ログアウトの画面へ送るだけで、ここでは切らない。** この Worker は
+    // auth-worker の CSRF トークンを持てないので、POST の form は置けない。
+    const html = await (await withCookie(OVERVIEW_PATH, FULL_IDENTITY)).text();
+    const nav = /<nav [^>]*aria-label="ダッシュボード"[^>]*>(.*?)<\/nav>/s.exec(html)?.[1] ?? "";
+
+    expect(nav).toMatch(
+      new RegExp(`<a [^>]*href="${ACCOUNT_LOGOUT_PATH}"[^>]*>\\s*ログアウト\\s*</a>`),
+    );
+    expect(nav).not.toContain("<form");
   });
 
   /**

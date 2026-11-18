@@ -308,3 +308,18 @@ describe("サイドバーに運営向けの節は無い", () => {
     expect(await response.text()).toContain("NFC カード");
   });
 });
+
+/**
+ * サイドバーのログアウト。
+ *
+ * **dashboard-worker と同じサイドバーを出す**ので、こちらにだけ無いと
+ * NFC カードの画面からはログアウトへ辿れない。
+ */
+describe("サイドバーにログアウトがある", () => {
+  it("ログアウトの画面へのリンクが出る", async () => {
+    const html = await (await open(cookieFor(TARO))).text();
+    const nav = /<nav [^>]*aria-label="ダッシュボード"[^>]*>(.*?)<\/nav>/s.exec(html)?.[1] ?? "";
+
+    expect(nav).toMatch(/<a [^>]*href="\/logout"[^>]*>\s*ログアウト\s*<\/a>/);
+  });
+});

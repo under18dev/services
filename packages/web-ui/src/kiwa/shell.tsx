@@ -139,12 +139,18 @@ export type KiwaShellProps = {
    * 取り消しの操作がある画面かどうか。`true` なら `<noscript>` で
    * 「JS が無いとできないこと」を伝える。
    *
-   * **`loginHref` も要る。** 行き先を外枠が決め打つと、`/login` を
+   * **`logoutHref` も要る。** 行き先を外枠が決め打つと、`/logout` を
    * 配信しているのが別 Worker（auth-worker）であることが見えなくなる。
    */
   readonly hasRevokeActions?: boolean;
-  /** 全端末からのログアウトができるログイン画面。`hasRevokeActions` のときに使う。 */
-  readonly loginHref?: string;
+  /**
+   * ログアウトの画面。渡すとサイドバーの最後に「ログアウト」を出し、
+   * `hasRevokeActions` のときは全端末ログアウトの案内にも使う。
+   *
+   * **画面へのリンクであって、押しても切れない。** 外枠は CSRF トークンを
+   * 持たないので、POST の form は置けない。
+   */
+  readonly logoutHref?: string;
   readonly children?: Child;
 };
 
@@ -152,12 +158,13 @@ type SidebarProps = {
   readonly nav: readonly ShellNavGroup[];
   readonly current: ShellNavCurrent;
   readonly brandHref: string;
+  readonly logoutHref?: string;
 };
 
 /** モバイルの折りたたみ用チェックボックスの id。`<label for>` と対にする。 */
 const NAV_TOGGLE_ID = "kiwa-nav-toggle";
 
-const Sidebar: FC<SidebarProps> = ({ nav, current, brandHref }) => (
+const Sidebar: FC<SidebarProps> = ({ nav, current, brandHref, logoutHref }) => (
   <nav class="flex flex-col px-3 py-5 md:py-8" aria-label="ダッシュボード">
     {/*
       **ホームに居るときはここが現在地である。** ホームは並びの項目では
@@ -199,6 +206,16 @@ const Sidebar: FC<SidebarProps> = ({ nav, current, brandHref }) => (
         </ul>
       </div>
     ))}
+    {/*
+      **並びの外に置く。** 画面の切り替えではないので、どの節にも属さず、
+      現在地として光ることも無い。線で区切って最後に置き、項目と
+      取り違えないようにする。
+    */}
+    {logoutHref !== undefined && (
+      <div class="border-t border-border pt-4">
+        <SidebarItem href={logoutHref}>ログアウト</SidebarItem>
+      </div>
+    )}
   </nav>
 );
 
@@ -212,7 +229,7 @@ export const KiwaShell: FC<KiwaShellProps> = ({
   lead,
   scripts = [],
   hasRevokeActions = false,
-  loginHref,
+  logoutHref,
   children,
 }) => (
   <Layout title={title} stylesheet={stylesheet} scripts={scripts}>
@@ -253,7 +270,12 @@ export const KiwaShell: FC<KiwaShellProps> = ({
           key="nav-wrapper"
           class="hidden flex-col border-b border-border peer-checked:flex md:flex md:w-64 md:border-r md:border-b-0"
         >
-          <Sidebar nav={nav} current={current} brandHref={brandHref} />
+          <Sidebar
+            nav={nav}
+            current={current}
+            brandHref={brandHref}
+            {...(logoutHref === undefined ? {} : { logoutHref })}
+          />
         </div>,
       ]}
       <main class="min-w-0 flex-1 px-5 py-8 md:px-10 md:py-12">
@@ -270,11 +292,11 @@ export const KiwaShell: FC<KiwaShellProps> = ({
                   この画面での取り消し操作（ログアウト・削除・連携の解除）には JavaScript
                   が必要です。一覧の表示は JavaScript 無しでも行えます。
                 </p>
-                {loginHref !== undefined && (
+                {logoutHref !== undefined && (
                   <p class="text-sm/relaxed text-foreground-muted">
                     身に覚えのない端末がある場合は、
-                    <a href={loginHref} class="text-foreground underline underline-offset-4">
-                      ログイン画面
+                    <a href={logoutHref} class="text-foreground underline underline-offset-4">
+                      ログアウト画面
                     </a>
                     から「すべての端末からログアウト」を行えます。こちらは JavaScript
                     無しでも使えます。

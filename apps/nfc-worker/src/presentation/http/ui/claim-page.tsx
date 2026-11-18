@@ -1,4 +1,4 @@
-import { ACCOUNT_HOME_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
+import { ACCOUNT_HOME_PATH, ACCOUNT_LOGOUT_PATH, ACCOUNT_NAV_GROUPS } from "@u18/contracts";
 import {
   Card,
   CardContent,
@@ -52,6 +52,7 @@ export const ClaimPage: FC<ClaimPageProps> = ({ cardId, csrfToken }) => (
     title="カードの登録"
     nav={ACCOUNT_NAV_GROUPS}
     brandHref={ACCOUNT_HOME_PATH}
+    logoutHref={ACCOUNT_LOGOUT_PATH}
     stylesheet={KIWA_STYLESHEET_PATH}
     current="nfc"
     heading="カードの登録"
