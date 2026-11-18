@@ -443,3 +443,67 @@ describe("ログイン画面と行き来できる", () => {
     expect(html).not.toContain("/ui/login-island.js");
   });
 });
+
+/**
+ * 利用規約・プライバシーポリシーへの同意文。
+ *
+ * **URL はここに書き写す。** `login-page.tsx` の定数を import して
+ * 突き合わせると、定数の綴りを間違えたときにこの検査も一緒に動いて
+ * 緑のままになる（着地点の検査と同じ理由）。
+ */
+const TERMS_URL = "https://under18.dev/terms/";
+const PRIVACY_URL = "https://under18.dev/privacy/";
+const CONSENT_TEXT = "登録すると、利用規約とプライバシーポリシーに同意したものとみなします。";
+const MINOR_TEXT = "未成年の方は、保護者の同意を得てから登録してください。";
+
+/** タグを落として、読み上げられる文だけにする（リンクで文が途切れるため）。 */
+function textOf(html: string): string {
+  return html.replace(/<[^>]*>/g, "");
+}
+
+/** `action` が一致する form の中身。無ければテストを落とす。 */
+function formBody(html: string, action: string): string {
+  const match = new RegExp(`<form[^>]*action="${action}"[^>]*>([\\s\\S]*?)</form>`).exec(html);
+  if (match?.[1] === undefined) throw new Error(`action="${action}" の form が無い`);
+  return match[1];
+}
+
+describe("利用規約とプライバシーポリシーへの同意", () => {
+  beforeEach(resetDatabase);
+
+  it("アドレス入力の段で、送信ボタンと同じ form に同意文と 2 本のリンクを出す", async () => {
+    const { html } = await openSignupPage();
+    // 押す前に読めること。同意文は送信ボタンと同じ form の中に置く。
+    const form = formBody(html, "/signup/start");
+
+    expect(textOf(form)).toContain("確認コードを送る");
+    expect(textOf(form)).toContain(CONSENT_TEXT);
+    expect(textOf(form)).toContain(MINOR_TEXT);
+    expect(form).toContain(`<a href="${TERMS_URL}">利用規約</a>`);
+    expect(form).toContain(`<a href="${PRIVACY_URL}">プライバシーポリシー</a>`);
+  });
+
+  it("アカウントを作るコード入力の段にも同意文を出す", async () => {
+    // **アカウントが作られるのは `/signup/verify` である。** 最初の段で
+    // 読んだきりにしないよう、作る操作の直前にも同じ文を置く。
+    const page = await openSignupPage();
+    const started = await submit(
+      "/signup/start",
+      { email: NEW_ADDRESS, csrf_token: page.csrf },
+      { cookie: page.cookie },
+    );
+    const form = formBody(await started.text(), "/signup/verify");
+
+    expect(textOf(form)).toContain(CONSENT_TEXT);
+    expect(textOf(form)).toContain(MINOR_TEXT);
+    expect(form).toContain(`<a href="${TERMS_URL}">利用規約</a>`);
+    expect(form).toContain(`<a href="${PRIVACY_URL}">プライバシーポリシー</a>`);
+  });
+
+  it("外部サイトへのリンクを新しいタブで開かない", async () => {
+    // 新しいタブで開くと、登録の途中で別のタブに迷い込む。戻るボタンで
+    // 帰れるほうが分かりやすい。
+    const { html } = await openSignupPage();
+    expect(html).not.toContain('target="_blank"');
+  });
+});

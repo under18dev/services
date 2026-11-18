@@ -863,3 +863,41 @@ describe("アカウントの存在を漏らさない", () => {
     expect(html).toContain("メールアドレスの形式");
   });
 });
+
+/**
+ * 利用規約・プライバシーポリシーへのリンク。
+ *
+ * **ログインは同意を取る場面ではない**（同意は登録のときに取っている。
+ * signup.ui.test.ts）。ここでは「どこで読めるか」だけを示し、
+ * 「同意したものとみなします」の文は出さない。
+ */
+describe("利用規約とプライバシーポリシー", () => {
+  // URL は書き写す（定数を import すると綴りの誤りに気づけない）。
+  const TERMS_LINK = '<a href="https://under18.dev/terms/">利用規約</a>';
+  const PRIVACY_LINK = '<a href="https://under18.dev/privacy/">プライバシーポリシー</a>';
+
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedRegisteredUser();
+  });
+
+  it("ログイン画面の下に 2 本のリンクを出す", async () => {
+    const { html } = await openLoginPage();
+    expect(html).toContain(TERMS_LINK);
+    expect(html).toContain(PRIVACY_LINK);
+  });
+
+  it("ログイン画面には同意の文を出さない", async () => {
+    const session = await openLoginPage();
+    const codeStep = await submit(
+      "/login/start",
+      { csrf_token: session.csrf, email: REGISTERED },
+      { cookie: session.cookie },
+    );
+
+    for (const html of [session.html, await codeStep.text()]) {
+      expect(html).not.toContain("同意したものとみなします");
+      expect(html).not.toContain("保護者の同意");
+    }
+  });
+});
