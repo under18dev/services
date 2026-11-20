@@ -99,6 +99,54 @@ export type LoginPageProps = {
   readonly returnTo: string | null;
 };
 
+/**
+ * 利用規約とプライバシーポリシーの URL（under18.dev 側で公開している）。
+ *
+ * u18 Identity の扱いは、利用規約は「6. u18 Identity（アカウント）」、
+ * プライバシーポリシーは「4. u18 Identity（アカウント）について」に書かれている。
+ * **URL はここにしか書かない。** 同意文とログイン画面の下のリンクの
+ * 2 箇所から使うので、片方だけ直される余地を作らない。
+ *
+ * ## `target` も `rel` も付けない
+ *
+ * 新しいタブで開かないので `rel="noopener"` は要らない（他の画面も同じ
+ * 開き方をしている）。参照元は `app.ts` の `Referrer-Policy: same-origin`
+ * で別オリジンへは送られないので、`rel="noreferrer"` も要らない ——
+ * **`return_to` を載せた `/login?...` の URL が under18.dev へ渡ることはない。**
+ * CSP は遷移先を縛らない（`navigate-to` は無い）ので、リンクのために
+ * 緩めるものも無い。
+ */
+export const LEGAL_URLS = {
+  terms: "https://under18.dev/terms/",
+  privacy: "https://under18.dev/privacy/",
+} as const;
+
+const TermsLink: FC = () => <a href={LEGAL_URLS.terms}>利用規約</a>;
+const PrivacyLink: FC = () => <a href={LEGAL_URLS.privacy}>プライバシーポリシー</a>;
+
+/**
+ * 新規登録の同意文。
+ *
+ * **アカウントを作る操作の直前に読めること。** アカウントが作られるのは
+ * `/signup/start` ではなく `/signup/verify` なので、アドレス入力の段と
+ * コード入力の段の**両方の form の中**に置く。最初の段で流し読みした
+ * ことを同意の根拠にしない。
+ *
+ * **出すかどうかは `mode` だけで決まる。** 入力されたアドレスで変えると
+ * 「登録済みのアドレスには同意文が出ない」という差になり、列挙の材料になる
+ * （このファイルの冒頭）。
+ */
+const SignupConsent: FC = () => (
+  <div class={`${LINK_TEXT_CLASS} flex flex-col gap-1`}>
+    <p>
+      登録すると、
+      <TermsLink />と<PrivacyLink />
+      に同意したものとみなします。
+    </p>
+    <p>未成年の方は、保護者の同意を得てから登録してください。</p>
+  </div>
+);
+
 const CsrfField: FC<{ token: string }> = ({ token }) => (
   <input type="hidden" name={CSRF_FIELD_NAME} value={token} />
 );
@@ -157,6 +205,7 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
         確認コードを送る
       </button>
       <p class={ITEM_META_CLASS}>確認コードをメールでお送りします。</p>
+      {mode === "signup" ? <SignupConsent /> : null}
     </form>
 
     {/*
@@ -208,6 +257,15 @@ const EmailStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "email" 
         </div>
         <p class={LINK_TEXT_CLASS}>
           <a href={signupUrlWithReturnTo(returnTo)}>アカウントをお持ちでない方</a>
+        </p>
+        {/*
+          ログインでは同意を取らない（取るのは登録のとき）。どこで読めるかを
+          示すだけなので、同意文ではなくリンクだけを画面の下に置く。
+        */}
+        <p class={LINK_TEXT_CLASS}>
+          <TermsLink />
+          {" / "}
+          <PrivacyLink />
         </p>
       </>
     )}
@@ -265,6 +323,8 @@ const CodeStep: FC<LoginPageProps & { view: Extract<LoginView, { kind: "code" }>
       <button type="submit" class={getButtonClasses()}>
         ログイン
       </button>
+      {/* アカウントが作られるのはこの送信なので、ここにも同じ文を置く。 */}
+      {mode === "signup" ? <SignupConsent /> : null}
     </form>
 
     <div class={`${LINK_TEXT_CLASS} flex flex-wrap items-center gap-1`}>
