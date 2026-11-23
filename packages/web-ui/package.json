@@ -28,7 +28,7 @@
     "@types/subset-font": "2.3.0",
     "esbuild": "0.28.2",
     "fontkit": "3.0.0",
-    "prettier": "3.9.10",
+    "prettier": "3.10.1",
     "subset-font": "2.9.0",
     "typescript": "5.9.3",
     "vitest": "4.1.12"
