@@ -34,7 +34,7 @@
     "@u18/testing": "workspace:*",
     "esbuild": "0.28.2",
     "happy-dom": "^21.0.4",
-    "postcss": "8.5.32",
+    "postcss": "8.5.33",
     "tailwindcss": "4.3.5",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
